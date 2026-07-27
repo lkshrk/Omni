@@ -1,0 +1,21 @@
+# A failed native package does not block later packages. The command reports
+# the per-package error and exits non-zero after installing the valid package.
+env HOME=$WORK/home
+env XDG_DATA_HOME=$WORK/data
+
+! exec omni --config settings.json agents skills sync
+stdout '^1 installed, 1 failed$'
+stdout '! ./missing: local skill source "./missing" is not an accessible directory'
+stderr 'agent operation\(s\) failed'
+exists $WORK/home/.codex/skills/one/SKILL.md
+
+-- settings.json --
+{"version":20,"settings":{"agents_use":["codex"]},"agents":{"packages":[{"source":"./missing"},{"source":"./source-one"}]}}
+
+-- source-one/skills/one/SKILL.md --
+---
+name: one
+description: Native partial success.
+---
+
+one

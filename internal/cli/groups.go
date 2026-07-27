@@ -76,7 +76,6 @@ func newGroupsRenameCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
-	// first arg is the old group name; second arg (new name) is freeform
 	cmd.ValidArgsFunction = func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) == 0 {
 			return completeGroupNames(state)(c, args, toComplete)
@@ -172,6 +171,7 @@ func newGroupsSetToolCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set-tool <tool> <group>...",
 		Short: "Set a logical tool's full group membership",
+		Long:  "Replaces a logical tool's group membership with the groups given.",
 		Args:  cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tool := args[0]
@@ -239,8 +239,11 @@ func newGroupsUnignoreToolCmd(state *rootState) *cobra.Command {
 func newGroupsRemoveToolCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remove-tool <group> <tool>",
-		Short: "Remove a logical tool membership from a group",
-		Args:  cobra.ExactArgs(2),
+		Short: "Undeclare a logical tool's membership in one group",
+		Long: "Drop one group's claim on a logical tool. The tool spec and any other memberships " +
+			"survive, and nothing installed is touched — see `tools remove` to undeclare the tool " +
+			"itself, or `tools remove --purge` to uninstall it too.",
+		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := state.app.RemoveToolFromGroup(args[1], args[0]); err != nil {
 				return err

@@ -6,8 +6,7 @@ import (
 	"github.com/lkshrk/omni/internal/agent"
 )
 
-// AgentInfo remains the app-facing name while target identity and detection
-// live in the agent module.
+// AgentInfo — App-facing alias; target identity and detection live in the agent module.
 type AgentInfo = agent.Target
 
 func mustAgentRegistry(registry *agent.Registry, err error) *agent.Registry {
@@ -28,17 +27,12 @@ func (a *App) agentRegistry() *agent.Registry {
 	return a.agentTargets
 }
 
-// InstalledAgents returns detected targets in canonical catalog order.
 func InstalledAgents(home string) []AgentInfo {
 	return newAgentRegistry().Installed(home)
 }
 
 func (a *App) installedAgents(home string) []AgentInfo {
 	return a.agentRegistry().Installed(home)
-}
-
-func (a *App) agentInfoByID(home, id string) (AgentInfo, bool) {
-	return a.agentRegistry().InstalledByID(home, id)
 }
 
 // lookPath remains an app seam for agent CLI adapters and doctor checks.

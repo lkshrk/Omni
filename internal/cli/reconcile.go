@@ -19,7 +19,7 @@ func newReconcileCmd(state *rootState) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "reconcile",
-		Short: "Sync, upgrade, repair dotfiles, and commit dotfile changes",
+		Short: "Sync, upgrade, sync agent resources, repair dotfiles, and commit dotfile changes",
 		Long:  actions.MustLongDescription(actions.Reconcile),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -66,6 +66,9 @@ func printReconcileSummary(cmd *cobra.Command, result *app.ReconcileResult) {
 		return
 	}
 	out := cmdOut(cmd)
+	if result.Agents != nil {
+		printAgentsSyncAllResult(out, *result.Agents, false)
+	}
 	fmt.Fprintf(out, "%s.\n", app.ReconcileSummaryText(result, "Reconcile complete"))
 	printReconcileIssues(cmd, result)
 }

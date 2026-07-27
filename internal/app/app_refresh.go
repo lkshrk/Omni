@@ -16,16 +16,12 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// ─── Auto-refresh with staleness check ───────────────────────────────────────
-
 const (
 	stateKeyRefreshInstalled = "last_refresh_installed"
 	stateKeyRefreshOutdated  = "last_refresh_outdated"
 	refreshStaleness         = 2 * time.Minute
 )
 
-// refreshInstalledIfStale runs RefreshInstalled when the last successful run
-// was more than refreshStaleness ago (or never recorded).
 func (a *App) refreshInstalledIfStale(ctx context.Context, progress func(string)) error {
 	if a.refreshRecent(ctx, stateKeyRefreshInstalled) {
 		return nil
@@ -36,8 +32,6 @@ func (a *App) refreshInstalledIfStale(ctx context.Context, progress func(string)
 	return a.markRefreshed(ctx, stateKeyRefreshInstalled)
 }
 
-// refreshOutdatedIfStale runs RefreshOutdated when the last successful run
-// was more than refreshStaleness ago (or never recorded).
 func (a *App) refreshOutdatedIfStale(ctx context.Context, progress func(string)) error {
 	if a.refreshRecent(ctx, stateKeyRefreshOutdated) {
 		return nil
@@ -48,9 +42,7 @@ func (a *App) refreshOutdatedIfStale(ctx context.Context, progress func(string))
 	return a.markRefreshed(ctx, stateKeyRefreshOutdated)
 }
 
-// refreshRecent returns true when the given state key was marked within the
-// staleness window. DB or parse errors are treated as "stale" (fail-open) so
-// a transient DB issue triggers a fresh refresh rather than silently skipping.
+// DB or parse errors count as stale (fail-open) so a transient issue triggers a refresh rather than a skip.
 func (a *App) refreshRecent(ctx context.Context, key string) bool {
 	val, err := a.readDB().GetState(ctx, key)
 	if err != nil {
@@ -66,8 +58,6 @@ func (a *App) refreshRecent(ctx context.Context, key string) bool {
 func (a *App) markRefreshed(ctx context.Context, key string) error {
 	return a.readDB().SetState(ctx, key, time.Now().UTC().Format(time.RFC3339))
 }
-
-// ─── Outdated / Descriptions ──────────────────────────────────────────────────
 
 const descriptionFallbackConcurrency = 4
 
@@ -94,10 +84,7 @@ type githubReleaseLookupFlight struct {
 	result githubReleaseLookupResult
 }
 
-// RefreshOutdated queries each provider's OutdatedMap and writes results to the DB.
-// When refreshMetadata is true (user-initiated refresh), providers with a stale
-// local index are refreshed first; passive background scans pass false to avoid
-// the network latency.
+// RefreshOutdated — refreshMetadata refreshes stale provider indexes first; passive scans pass false to avoid the latency.
 func (a *App) RefreshOutdated(ctx context.Context, refreshMetadata bool, progress func(string)) error {
 	defer profile.Start("app.refresh.outdated.total")()
 
@@ -141,10 +128,11 @@ func (a *App) RefreshOutdated(ctx context.Context, refreshMetadata bool, progres
 			}
 			progress(fmt.Sprintf("Checking updates %d/%d: %s/%s…", i+1, len(tools), labelProvider, t.Name))
 		}
-		if update, handled := a.toolOutdatedUpdate(ctx, t, resolvedTools); handled {
-			if update != nil {
-				updates = append(updates, *update)
-			}
+		update, handled := a.toolOutdatedUpdate(ctx, t, resolvedTools)
+		if update != nil {
+			updates = append(updates, *update)
+		}
+		if handled {
 			continue
 		}
 		m, ok := outdatedByProv[outdatedProvider]
@@ -236,10 +224,16 @@ func (a *App) toolOutdatedUpdate(ctx context.Context, cached *database.ToolCache
 	}
 	latestVersion, outdated, supported, err := checker.CheckOutdated(ctx, a.operationTool(resolved.entry, providerName), currentVersion)
 	if !supported {
-		return nil, false
+		return unknownOutdatedUpdate(cached), false
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: omni: refresh outdated for %s/%s: %v\n", providerName, cached.Name, err)
+		if errors.Is(err, provider.ErrInstalledVersionUnknown) {
+			// Permanent: no verdict will ever be reached, and writing nothing would leave the tool less
+			// upgradable than one that never configured a check at all. Unknown still offers the upgrade.
+			return unknownOutdatedUpdate(cached), false
+		}
+		// Transient: the last known verdict is better than downgrading it to unknown on one bad run.
 		return nil, true
 	}
 	latestVersion, outdated = a.suppressSelfUnupgradeable(ctx, cached, latestVersion, outdated)
@@ -253,6 +247,19 @@ func (a *App) toolOutdatedUpdate(ctx context.Context, cached *database.ToolCache
 		Outdated:      outdated,
 		LatestVersion: latestVersion,
 	}, true
+}
+
+// A source-based leg later in the same batch overwrites this row, so unknown only survives when nothing else can answer.
+func unknownOutdatedUpdate(cached *database.ToolCache) *database.OutdatedUpdate {
+	if cached == nil || !cached.Installed {
+		return nil
+	}
+	return &database.OutdatedUpdate{
+		Name:            cached.Name,
+		Provider:        cached.Provider,
+		Package:         cached.Package,
+		OutdatedUnknown: true,
+	}
 }
 
 func (a *App) outdatedMapsForProvidersBestEffort(ctx context.Context, providerNames map[string]struct{}) (map[string]map[string]string, map[string]map[string]map[string]string, []database.UpdateMetadata) {
@@ -294,10 +301,7 @@ func (a *App) outdatedMapsForProvidersBestEffort(ctx context.Context, providerNa
 	return outdatedByProv, outdatedByManager, updateMetadata
 }
 
-// refreshProviderMetadataBestEffort refreshes the locally-cached package index
-// for providers that support it (e.g. `brew update`), so OutdatedMap can see
-// newly published versions. Failures are logged and ignored: a stale index is
-// better than a failed scan, and the refresh is purely an accuracy improvement.
+// Failures are ignored: a stale index is better than a failed scan.
 func (a *App) refreshProviderMetadataBestEffort(ctx context.Context, providerNames map[string]struct{}) {
 	for name := range providerNames {
 		p, ok := a.registry.Get(name)
@@ -317,8 +321,6 @@ func (a *App) refreshProviderMetadataBestEffort(ctx context.Context, providerNam
 	}
 }
 
-// RefreshProviderOutdated queries outdated status for a single named provider and
-// writes results to the DB.
 func (a *App) RefreshProviderOutdated(ctx context.Context, provName string, refreshMetadata bool) error {
 	defer profile.Start("app.refresh.outdated.provider." + provName)()
 
@@ -398,10 +400,11 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string, refr
 	}
 	updates := make([]database.OutdatedUpdate, 0, len(targetTools))
 	for _, t := range targetTools {
-		if update, handled := a.toolOutdatedUpdate(ctx, t, resolvedTools); handled {
-			if update != nil {
-				updates = append(updates, *update)
-			}
+		update, handled := a.toolOutdatedUpdate(ctx, t, resolvedTools)
+		if update != nil {
+			updates = append(updates, *update)
+		}
+		if handled {
 			continue
 		}
 		lookupProvider := a.outdatedLookupProvider(t)
@@ -544,9 +547,7 @@ func (a *App) githubFallbackOutdatedUpdatesBestEffort(ctx context.Context, tools
 			updates = append(updates, clearOutdatedUpdate(t))
 			continue
 		}
-		// Prefer version-string comparison when an installed version is recorded;
-		// fall back to published_at when no stored version is available (e.g.
-		// tools installed before HCL-36, or recipes without a TagName).
+		// Falls back to published_at when no installed version was recorded.
 		isOutdated := fallbackTagOutdated(tagName, fallback.Recipe.InstalledVersion, latestPublishedAt, fallback.Recipe.PublishedAt)
 		if !isOutdated {
 			updates = append(updates, clearOutdatedUpdate(t))
@@ -685,11 +686,7 @@ func githubPublishedAtAfter(latest, saved string) bool {
 	return latestTime.After(savedTime)
 }
 
-// fallbackTagOutdated reports whether a GitHub fallback tool is outdated.
-// When installedVersion is non-empty, version comparison is the primary
-// signal: the tool is outdated when latestTag normalizes to a strictly newer
-// version. When installedVersion is empty (tools installed before version
-// tracking was added), published_at timestamps serve as the fallback signal.
+// Version comparison is primary; published_at is the fallback for tools installed before version tracking.
 func fallbackTagOutdated(latestTag, installedVersion, latestPublishedAt, savedPublishedAt string) bool {
 	if installedVersion != "" {
 		newer, ok := fallbackVersionNewer(latestTag, installedVersion)
@@ -800,11 +797,7 @@ func updateMetadataForInfo(providerName string, infoByPackage map[string]provide
 	return updates
 }
 
-// suppressSelfUnupgradeable clears the outdated/latest signal for a package that
-// represents its own manager when that manager cannot upgrade itself in the
-// current environment (e.g. pip under PEP 668 externally managed Python). Such a
-// package must not be presented as upgradeable since the upgrade is always
-// refused. Returns the (possibly cleared) latest version and outdated flag.
+// Such a package must not be presented as upgradeable, since the upgrade is always refused.
 func (a *App) suppressSelfUnupgradeable(ctx context.Context, t *database.ToolCache, latestVer string, isOutdated bool) (string, bool) {
 	if !isOutdated {
 		return latestVer, isOutdated
@@ -839,9 +832,7 @@ func outdatedForTool(t *database.ToolCache, flat map[string]string, byManager ma
 	return provider.LookupString(flat, keys)
 }
 
-// RefreshDescriptions fetches and caches descriptions for configured and
-// discovered tools that don't already have one. Bulk provider metadata is used
-// first; individual provider lookups are a bounded-concurrent fallback.
+// RefreshDescriptions — Bulk provider metadata first; individual lookups are a bounded-concurrent fallback.
 func (a *App) RefreshDescriptions(ctx context.Context, _ time.Duration) error {
 	return a.RefreshDescriptionsWithProgress(ctx, 0, nil)
 }
@@ -879,8 +870,7 @@ func (a *App) RefreshDescriptionsWithProgress(ctx context.Context, _ time.Durati
 		return err
 	}
 
-	// List the cache once and build a lookup map so the configured-tools loop
-	// below can avoid N point-lookups (one per resolved tool).
+	// Listed once into a lookup map so the configured-tools loop avoids N point-lookups.
 	stop = profile.Start("app.refresh.descriptions.list_tools")
 	cachedTools, err := a.readDB().List(ctx)
 	stop()
@@ -1179,15 +1169,9 @@ func descriptionLookupKeys(name, pkg string) []string {
 	return keys
 }
 
-// ─── Init helpers ─────────────────────────────────────────────────────────────
-
-// InitTestMode wires the App with the given providers instead of the built-in
-// brew/node/pip suite. Intended for use in tests only.
+// InitTestMode — Test-only wiring: replaces the built-in provider suite.
 func (a *App) InitTestMode(ctx context.Context, providers ...provider.Provider) error {
 	a.testMode = true
-	if _, err := config.NormalizeFile(a.ConfigPath); err != nil {
-		return fmt.Errorf("normalizing config file: %w", err)
-	}
 	if err := a.repairCurrentHostEntry(); err != nil {
 		return fmt.Errorf("repairing current host entry: %w", err)
 	}
@@ -1196,7 +1180,7 @@ func (a *App) InitTestMode(ctx context.Context, providers ...provider.Provider) 
 		dbDir = a.configDir()
 	}
 	a.DBPath = filepath.Join(dbDir, "omni.db")
-	db, err := database.Open(a.DBPath)
+	db, err := database.OpenContext(ctx, a.DBPath)
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)
 	}

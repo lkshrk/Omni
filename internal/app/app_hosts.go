@@ -12,8 +12,7 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// ActiveHostInfo returns the current host group and reusable group assignments.
-// The physical host group is included first when the host is configured.
+// ActiveHostInfo — The physical host group is included first when the host is configured.
 func (a *App) ActiveHostInfo() (hostname string, groups []string, ok bool) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -147,9 +146,7 @@ func (a *App) repairCurrentHostEntry() error {
 		return nil
 	}
 	return a.withConfig(func(cfg *config.RootConfig) error {
-		// Migrate any legacy mixed-case host group/assignment for this machine to
-		// the lower-cased canonical hostname so old configs keep resolving now
-		// that the live hostname is always lower-cased.
+		// Legacy mixed-case host entries migrate to the canonical lower-cased hostname.
 		migrateCurrentHostCase(cfg, hostname)
 		if _, ok := cfg.Hosts[hostname]; ok {
 			return nil
@@ -172,9 +169,7 @@ func (a *App) repairCurrentHostEntry() error {
 	})
 }
 
-// migrateCurrentHostCase renames a host-special group and host_settings/Hosts
-// assignment whose name matches hostname only by case to the canonical
-// lower-cased hostname. Reusable (non-host) groups keep their original case.
+// Reusable (non-host) groups keep their original case.
 func migrateCurrentHostCase(cfg *config.RootConfig, hostname string) {
 	if hostname == "" {
 		return
@@ -208,8 +203,7 @@ func migrateStringMapKeyCase(m *map[string][]string, key string) {
 	}
 }
 
-// EnsureHost creates the physical special hostname group and a host assignment
-// entry. Reusable groups remain opt-in and are not added implicitly.
+// EnsureHost — Reusable groups remain opt-in and are not added implicitly.
 func (a *App) EnsureHost(hostname string) error {
 	hostname = strings.TrimSpace(machineGroupName(hostname))
 	if hostname == "" {
@@ -273,9 +267,7 @@ func (a *App) RenameHostWithState(ctx context.Context, oldName, newName string) 
 	})
 }
 
-// CopyHostConfig copies reusable group assignments and host-scoped settings
-// from sourceName to targetName. The target's protected host group is ensured
-// but source host-local tool/dot memberships are not duplicated.
+// CopyHostConfig — Source host-local tool and dot memberships are not duplicated.
 func (a *App) CopyHostConfig(sourceName, targetName string) error {
 	sourceName = strings.TrimSpace(machineGroupName(sourceName))
 	targetName = strings.TrimSpace(machineGroupName(targetName))
@@ -593,8 +585,6 @@ func (a *App) RequireActiveHost() error {
 	return nil
 }
 
-// syncOrphansToMachineGroup discovers locally installed tools that are not
-// covered by any of activeGroups and appends them to the special host group.
 func (a *App) syncOrphansToMachineGroup(ctx context.Context, activeGroups []*config.GroupConfig) error {
 	resolvedEcosystems := a.ResolvedEcosystemProviders(ctx)
 	revEcosystem := make(map[string]string)
@@ -612,9 +602,7 @@ func (a *App) syncOrphansToMachineGroup(ctx context.Context, activeGroups []*con
 
 	machineGroup := currentMachineGroupName()
 
-	// scanErrs captures per-provider ListInstalled failures. Declared outside
-	// the withConfig closure so they can be joined with the save result and
-	// returned to the caller, which surfaces them as warnings.
+	// Declared outside the withConfig closure so they can be joined with the save result.
 	var scanErrs []error
 
 	saveErr := a.withConfig(func(cfg *config.RootConfig) error {
@@ -622,8 +610,7 @@ func (a *App) syncOrphansToMachineGroup(ctx context.Context, activeGroups []*con
 		if err != nil {
 			return err
 		}
-		// Validation allows a tool in only one group globally, so membership in
-		// any group — active or not — disqualifies it as an orphan.
+		// Validation allows a tool in only one group globally, so any membership disqualifies it as an orphan.
 		for _, g := range cfg.Groups {
 			if g == nil {
 				continue
@@ -634,8 +621,7 @@ func (a *App) syncOrphansToMachineGroup(ctx context.Context, activeGroups []*con
 		}
 
 		var orphans []config.ToolEntry
-		// Scan each available provider independently so one bad provider does
-		// not block orphan discovery from the rest.
+		// Scan providers independently so one bad provider does not block orphan discovery.
 		_ = a.forEachAvailable(ctx, func(p provider.Provider) error {
 			if a.registry.ImportSkipsProvider(p.Name()) {
 				return nil
@@ -655,9 +641,7 @@ func (a *App) syncOrphansToMachineGroup(ctx context.Context, activeGroups []*con
 			}
 			for _, t := range installed {
 				if systemBaseline != nil && systemBaseline[t.Name] {
-					// Package predates the host's recorded baseline (image-build
-					// package or already observed): not something the user just
-					// installed, so it stays out of the orphan claim.
+					// Predates the host's recorded baseline, so not something the user just installed.
 					continue
 				}
 				configProvider := a.searchResultConfigProvider(p.Name())
@@ -693,8 +677,6 @@ func (a *App) syncOrphansToMachineGroup(ctx context.Context, activeGroups []*con
 	return errors.Join(saveErr, errors.Join(scanErrs...))
 }
 
-// CheckSatisfiedGroups returns reusable group names that are not active for the
-// host and whose every tool is recorded as installed.
 func (a *App) CheckSatisfiedGroups(ctx context.Context, activeGroupNames []string) ([]string, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -977,8 +959,6 @@ func (a *App) toolGroupMutationState(ctx context.Context) (*ToolGroupMutationSta
 	return &ToolGroupMutationState{Tools: tools, State: state}, nil
 }
 
-// ClaimFromMachineGroup assigns groupName to the current host and removes from
-// the host group any tools that are now covered by that reusable group.
 func (a *App) ClaimFromMachineGroup(groupName string) error {
 	hostname := currentMachineGroupName()
 	return a.withConfig(func(cfg *config.RootConfig) error {

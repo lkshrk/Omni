@@ -140,6 +140,35 @@ func TestAgentsFooter_ShowsSeparateFilterHints(t *testing.T) {
 	}
 }
 
+// Every surface naming the row and bulk verbs has its own builder, so a rename reaching only one leaves the footer, help overlay and legend disagreeing.
+func TestAgentsVocabulary_FooterHelpAndLegendSayUpgrade(t *testing.T) {
+	t.Parallel()
+	m := agentsKeysBaseModel()
+	m.width = 120
+	m.height = 40
+
+	var footer []string
+	for _, b := range tabShortHelpBindings(&m) {
+		h := b.Help()
+		footer = append(footer, h.Key+" "+h.Desc)
+	}
+
+	for name, text := range map[string]string{
+		"footer":       strings.Join(footer, " · "),
+		"help overlay": stripANSIEscapeSequences(renderHelpPopupWithWidth(m, helpPopupContentWidth(m))),
+		"legend":       stripANSIEscapeSequences(strings.Join(helpLegendItems(m), " ")),
+	} {
+		if !strings.Contains(text, "upgrade") {
+			t.Errorf("agents %s never says %q, got:\n%s", name, "upgrade", text)
+		}
+		for _, stale := range []string{"update", "restore"} {
+			if strings.Contains(text, stale) {
+				t.Errorf("agents %s still uses the pre-rename verb %q, got:\n%s", name, stale, text)
+			}
+		}
+	}
+}
+
 func TestAgentsFooter_RenderedStatusBarContainsFilterHint(t *testing.T) {
 	t.Parallel()
 	m := agentsKeysBaseModel()

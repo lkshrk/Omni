@@ -10,7 +10,6 @@ import (
 	"github.com/lkshrk/omni/internal/sync"
 )
 
-// tapBrewStub is a full brew stub that also implements the brewTapManager interface.
 type tapBrewStub struct {
 	existingTaps  []string
 	tapsCalled    []string
@@ -69,10 +68,7 @@ func TestSync_AddsMissingTaps(t *testing.T) {
 }
 
 func TestSync_TrustsAlreadyTappedRepo(t *testing.T) {
-	t.Parallel(
-	// A tap that is already present must still be trusted (it may predate
-	// tap-trust enforcement).
-	)
+	t.Parallel()
 
 	stub := &tapBrewStub{existingTaps: []string{"hashicorp/tap"}}
 	a, cfgPath := newImportApp(t, stub)
@@ -97,11 +93,7 @@ func TestSync_TrustsAlreadyTappedRepo(t *testing.T) {
 }
 
 func TestSync_TrustsUntrackedInstalledTap(t *testing.T) {
-	t.Parallel(
-	// A tap present on the machine but absent from config must still be trusted,
-	// otherwise Homebrew 5.2+ hides its installed formulae from the scan and omni
-	// wrongly treats those tools as missing.
-	)
+	t.Parallel()
 
 	stub := &tapBrewStub{existingTaps: []string{"quarkdown-labs/quarkdown"}}
 	a, cfgPath := newImportApp(t, stub)
@@ -124,9 +116,7 @@ func TestSync_TrustsUntrackedInstalledTap(t *testing.T) {
 }
 
 func TestSync_SkipsAlreadyTrustedTap(t *testing.T) {
-	t.Parallel(
-	// A tap recorded as trusted in the DB must not be re-trusted (no brew call).
-	)
+	t.Parallel()
 
 	stub := &tapBrewStub{existingTaps: []string{"hashicorp/tap"}}
 	a, cfgPath := newImportApp(t, stub)

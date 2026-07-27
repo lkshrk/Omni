@@ -1,4 +1,3 @@
-// Package pip implements the pip (Python) provider.
 package pip
 
 import (
@@ -30,7 +29,6 @@ func New(exec executor.Executor) *Provider {
 	}
 }
 
-// newWithPyPI creates a Provider with a custom PyPI base URL and HTTP client.
 // Intended for use in tests only.
 func newWithPyPI(exec executor.Executor, pypiURL string, client *http.Client) *Provider {
 	return &Provider{exec: exec, bin: "pip3", httpClient: client, pypiURL: pypiURL}
@@ -89,20 +87,13 @@ func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 	return nil
 }
 
-// SelfPackageName implements provider.SelfPackageUpgradeChecker. The pip
-// package represents the manager itself.
+// SelfPackageName — The "pip" package represents the manager itself.
 func (p *Provider) SelfPackageName() string { return "pip" }
 
-// externallyManagedProbe asks the Python interpreter whether the environment is
-// PEP 668 externally managed (the same `<stdlib>/EXTERNALLY-MANAGED` marker pip
-// itself checks before refusing to mutate the environment).
+// Checks the same <stdlib>/EXTERNALLY-MANAGED marker pip consults before refusing to mutate the env.
 const externallyManagedProbe = `import sysconfig,os;print('1' if os.path.exists(os.path.join(sysconfig.get_path('stdlib'),'EXTERNALLY-MANAGED')) else '0')`
 
-// SelfPackageUpgradeable implements provider.SelfPackageUpgradeChecker. It
-// reports whether pip can upgrade its own package: false under PEP 668
-// externally-managed Python (where `pip install --upgrade pip` is refused),
-// true otherwise. When no interpreter can be probed it assumes upgradeable so
-// the tool is not silently hidden on systems we cannot classify.
+// SelfPackageUpgradeable — False under PEP 668 externally-managed Python; assumes true when no interpreter can be probed, so the tool is not silently hidden.
 func (p *Provider) SelfPackageUpgradeable(ctx context.Context) bool {
 	for _, py := range []string{"python3", "python"} {
 		stdout, _, err := p.exec.Run(ctx, py, "-c", externallyManagedProbe)
@@ -139,11 +130,7 @@ type pipListEntry struct {
 	Version string `json:"version"`
 }
 
-// cliToolSetScript returns a JSON object mapping lowercase package name → true
-// for every pip package that installs a console_scripts or scripts entry point.
-// Used by CLIToolSet to decide which imported packages need auto-ignore.
-// Distributions with broken/partial dist-info metadata (seen on some Ubuntu
-// apt-managed installs) are skipped individually instead of aborting the scan.
+// Lowercase name to true for packages with an entry point; broken dist-info is skipped, not fatal.
 const cliToolSetScript = `import importlib.metadata,json
 seen={}
 def has_cli(d):
@@ -162,9 +149,7 @@ for d in importlib.metadata.distributions():
 		seen[name.lower()]=1
 print(json.dumps(seen))`
 
-// pipOwnedPackageSetScript returns distributions whose INSTALLER metadata says
-// pip. Distro packages are visible to `pip list` too, but pip does not own them
-// and Omni must not import or offer to upgrade them.
+// Distro packages are visible to `pip list` but pip does not own them, so omni must not import or upgrade them.
 const pipOwnedPackageSetScript = `import importlib.metadata,json
 owned={}
 for d in importlib.metadata.distributions():
@@ -193,9 +178,7 @@ func (p *Provider) pipOwnedPackageSet(ctx context.Context) (map[string]bool, err
 	return owned, nil
 }
 
-// CLIToolSet returns the set of lowercase pip package names that install at
-// least one CLI entry point.  Used by Import to mark library packages as
-// auto-ignored.
+// CLIToolSet — Lowercase names with at least one CLI entry point; Import marks the rest auto-ignored.
 func (p *Provider) CLIToolSet(ctx context.Context) (map[string]bool, error) {
 	stdout, _, err := p.exec.Run(ctx, "python3", "-c", cliToolSetScript)
 	if err != nil {
@@ -212,8 +195,7 @@ func (p *Provider) CLIToolSet(ctx context.Context) (map[string]bool, error) {
 	return out, nil
 }
 
-// ListInstalled returns top-level (non-transitive), pip-owned packages,
-// including pure libraries. Distro-owned packages exposed by pip are excluded.
+// ListInstalled — Top-level pip-owned packages including pure libraries; distro-owned ones are excluded.
 func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool, error) {
 	stdout, _, err := p.exec.Run(ctx, p.bin, "list", "--not-required", "--format=json")
 	if err != nil {
@@ -302,8 +284,7 @@ func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	return m, nil
 }
 
-// OutdatedInfoMap returns outdated package versions plus PyPI upload timestamps
-// for the latest version when PyPI exposes them.
+// OutdatedInfoMap — Adds PyPI upload timestamps for the latest version when PyPI exposes them.
 func (p *Provider) OutdatedInfoMap(ctx context.Context) (map[string]provider.OutdatedInfo, error) {
 	outdated, err := p.OutdatedMap(ctx)
 	if err != nil {
@@ -325,7 +306,6 @@ func (p *Provider) OutdatedInfoMap(ctx context.Context) (map[string]provider.Out
 }
 
 // BulkDescribe fetches descriptions for multiple tools via a single `pip show` call.
-// Implements provider.BulkDescriber.
 func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map[string]string, error) {
 	if len(tools) == 0 {
 		return nil, nil
@@ -342,7 +322,6 @@ func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map
 	return parsePipShowDescriptions(stdout), nil
 }
 
-// parsePipShowDescriptions extracts name→summary from multi-package `pip show` output.
 // Stanzas are separated by "---" lines; each stanza has "Name:" and "Summary:" fields.
 func parsePipShowDescriptions(output string) map[string]string {
 	m := make(map[string]string)
@@ -386,7 +365,6 @@ func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, er
 	return payload.Info.Summary, nil
 }
 
-// parsePipShowVersion extracts the version from `pip show` output.
 // Input: "Name: black\nVersion: 23.12.1\n..." → "23.12.1"
 func parsePipShowVersion(output string) string {
 	for _, line := range strings.Split(output, "\n") {
@@ -465,10 +443,7 @@ func parsePyPIUploadTime(raw string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// Search looks up an exact package name on PyPI.
-// Returns one result on a match, nil on 404.
-// PyPI's full-text search API was removed in 2021; exact lookup is the only
-// option that doesn't involve scraping HTML.
+// Search — Exact lookup only: PyPI removed its full-text search API in 2021 and the alternative is scraping HTML.
 func (p *Provider) Search(ctx context.Context, query string) ([]provider.SearchResult, error) {
 	var payload pypiInfoResponse
 	status, err := provider.FetchJSON(ctx, p.httpClient, p.pypiURL+"/pypi/"+url.PathEscape(query)+"/json", &payload)
@@ -493,9 +468,7 @@ func (p *Provider) Search(ctx context.Context, query string) ([]provider.SearchR
 	}}, nil
 }
 
-// pypiSourceCandidates returns project URLs likely to point at the upstream
-// source repo, repository/source-labelled keys first, then any remaining URLs,
-// then the home page.
+// Repository/source-labelled keys first, then remaining URLs, then the home page.
 func pypiSourceCandidates(projectURLs map[string]string, homePage string) []string {
 	candidates := make([]string, 0, len(projectURLs)+1)
 	preferred := make([]string, 0, len(projectURLs))

@@ -1,4 +1,3 @@
-// Package profile provides opt-in phase timing for local performance work.
 package profile
 
 import (
@@ -17,12 +16,10 @@ var (
 	testWriter io.Writer
 )
 
-// Enabled reports whether profile timing output is enabled.
 func Enabled() bool {
 	return enabledValue(os.Getenv(EnvName))
 }
 
-// Start starts a named timer and returns a function that logs the elapsed time.
 func Start(name string) func() {
 	if !Enabled() {
 		return func() {}
@@ -33,7 +30,6 @@ func Start(name string) func() {
 	}
 }
 
-// Log writes one phase timing line when profiling is enabled.
 func Log(name string, elapsed time.Duration) {
 	if !Enabled() {
 		return

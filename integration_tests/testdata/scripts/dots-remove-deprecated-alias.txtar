@@ -1,0 +1,22 @@
+# The deprecated `dots delete` spelling still runs `dots remove`, keeps its
+# --keep-local flag, and names the canonical spelling once on stderr.
+# @requires: stow
+env HOME=$WORK/home
+mkdir $WORK/home
+mkdir $WORK/home/.config
+exec git init $WORK/home/dotfiles
+exec git -C $WORK/home/dotfiles config user.email t@t.com
+exec git -C $WORK/home/dotfiles config user.name T
+exec git -C $WORK/home/dotfiles commit --allow-empty -m init
+exec omni --config settings.json dots sync
+exec omni -y --config settings.json dots delete nvim --keep-local=false
+stdout 'deleted dots entry "nvim"'
+stderr '^note: "dots delete" renamed to "dots remove"$'
+! exists home/.config/nvim
+! exists home/dotfiles/dotfiles/nvim
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"nvim","path":"~/.config/nvim"}]}]}
+
+-- home/dotfiles/dotfiles/nvim/.config/nvim/init.lua --
+vim.opt.number = true

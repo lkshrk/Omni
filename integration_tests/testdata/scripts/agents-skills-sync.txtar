@@ -1,0 +1,33 @@
+# Native restore installs local packages into shared canonical storage and
+# links each selected skill into the configured Agent Target.
+env HOME=$WORK/home
+env XDG_DATA_HOME=$WORK/data
+
+exec omni --config settings.json agents skills sync
+stdout '^2 installed, 0 failed$'
+exists $WORK/home/.codex/skills/one/SKILL.md
+exists $WORK/home/.codex/skills/two/SKILL.md
+! exists $WORK/state/skills/.skill-lock.json
+
+# Reconcile reuses valid canonical content and target links.
+exec omni --config settings.json agents skills sync
+stdout '^2 installed, 0 failed$'
+
+-- settings.json --
+{"version":20,"settings":{"agents_use":["codex"]},"agents":{"packages":[{"source":"./source-one"},{"source":"./source-two"}]}}
+
+-- source-one/skills/one/SKILL.md --
+---
+name: one
+description: First native test skill.
+---
+
+one
+
+-- source-two/skills/two/SKILL.md --
+---
+name: two
+description: Second native test skill.
+---
+
+two

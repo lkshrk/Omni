@@ -24,7 +24,7 @@ func TestUpsertBatch_InsertsAllAndPersists(t *testing.T) {
 	batch := []*database.ToolCache{
 		{Name: "ripgrep", Provider: "brew", Package: "ripgrep"},
 		{Name: "fd", Provider: "brew", Package: "fd"},
-		{Name: "bat", Provider: "brew"}, // Package empty → defaults to Name
+		{Name: "bat", Provider: "brew"},
 	}
 	if err := db.UpsertBatch(ctx, batch); err != nil {
 		t.Fatalf("UpsertBatch: %v", err)
@@ -180,7 +180,7 @@ func TestUpdateOutdatedBatch_RejectsInvalidEntry(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 	updates := []database.OutdatedUpdate{
-		{Name: "ripgrep", Provider: "brew", Package: ""}, // empty Package fails requirePackage
+		{Name: "ripgrep", Provider: "brew", Package: ""},
 	}
 	if err := db.UpdateOutdatedBatch(ctx, updates); err == nil {
 		t.Error("expected error for empty Package in batch entry")
@@ -235,7 +235,7 @@ func TestUpdateDescriptionBatch_RejectsInvalidEntry(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 	if err := db.UpdateDescriptionBatch(ctx, []database.DescriptionUpdate{
-		{Name: "ripgrep", Provider: "brew", Package: "", Description: "d"}, // empty Package fails requirePackage
+		{Name: "ripgrep", Provider: "brew", Package: "", Description: "d"},
 	}); err == nil {
 		t.Error("expected error for empty Package in batch entry")
 	}
@@ -334,7 +334,6 @@ func TestUpsertDiscoveredBatch_DoesNotOverwriteTrackedRows(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 
-	// Seed a tracked (config-managed) row.
 	if err := db.Upsert(ctx, &database.ToolCache{
 		Name: "ripgrep", Provider: "brew", Package: "ripgrep", Installed: false,
 	}); err != nil {

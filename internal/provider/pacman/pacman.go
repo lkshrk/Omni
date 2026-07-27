@@ -1,4 +1,3 @@
-// Package pacman implements the pacman (Arch Linux) provider.
 package pacman
 
 import (
@@ -10,12 +9,10 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// Provider implements the pacman package manager.
 type Provider struct {
 	exec executor.Executor
 }
 
-// New creates a pacman Provider.
 func New(exec executor.Executor) *Provider {
 	return &Provider{exec: exec}
 }
@@ -103,7 +100,6 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 }
 
 // InstalledMap returns explicitly installed pacman packages as lowercase-name→version.
-// Implements provider.BulkChecker.
 func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) {
 	explicit, err := p.explicitPackages(ctx)
 	if err != nil {
@@ -143,7 +139,6 @@ func (p *Provider) explicitPackages(ctx context.Context) (map[string]bool, error
 }
 
 // BulkDescribe fetches descriptions for multiple tools via a single `pacman -Si` call.
-// Implements provider.BulkDescriber.
 func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map[string]string, error) {
 	if len(tools) == 0 {
 		return nil, nil
@@ -211,7 +206,6 @@ func parsePacmanDescription(output string) string {
 	return ""
 }
 
-// parsePacmanQLine parses one `pacman -Q` output row.
 // Expected format: "ripgrep 15.1.0-2" → ("ripgrep", "15.1.0-2")
 func parsePacmanQLine(line string) (name, version string) {
 	fields := strings.Fields(line)

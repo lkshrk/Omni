@@ -10,16 +10,12 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// ─── Provider priority & ecosystem membership ───────────────────────────────
-
 type SettingsProviderSummary struct {
 	Enabled int
 	Total   int
 }
 
-// AvailableConcreteProviderSet reports which concrete providers are available on
-// this host, for rendering the provider-priority editor (unavailable entries are
-// shown greyed but remain orderable).
+// AvailableConcreteProviderSet — Unavailable entries are shown greyed but remain orderable.
 func (a *App) AvailableConcreteProviderSet(ctx context.Context) map[string]bool {
 	out := make(map[string]bool)
 	if a.registry == nil {
@@ -54,8 +50,7 @@ func removeString(values []string, value string) []string {
 	return out
 }
 
-// DefaultConcreteProviderPriorityDraft returns the provider-priority editor draft
-// using the builtin concrete provider set, for callers without a registry.
+// DefaultConcreteProviderPriorityDraft — Uses the builtin concrete provider set, for callers without a registry.
 func DefaultConcreteProviderPriorityDraft(priority []string) []string {
 	return systemProviderPriorityDraft(priority, provider.BuiltinConcreteProviderPriorityNames())
 }
@@ -76,15 +71,12 @@ func systemProviderPriorityDraft(priority, options []string) []string {
 	return draft
 }
 
-// ConcreteProviderPriorityOptions returns the concrete providers eligible for
-// the host priority list, ordered by catalog DisplayOrder, plus any registered
-// concretes not already covered.
+// ConcreteProviderPriorityOptions — Ordered by catalog DisplayOrder, plus any registered concretes not already covered.
 func (a *App) ConcreteProviderPriorityOptions() []string {
 	opts := provider.BuiltinConcreteProviderPriorityNames()
 	for _, eco := range []string{provider.EcosystemSystem, provider.EcosystemNode, provider.EcosystemPython} {
 		for _, name := range a.ConcreteProviderNamesForEcosystem(eco) {
-			// Skip aliases (e.g. pip3 → pip): they would duplicate their canonical
-			// provider, which is already in the builtin list.
+			// Aliases would duplicate their canonical provider, which is already in the builtin list.
 			if config.NormalizeConcreteProvider(name) != name {
 				continue
 			}
@@ -96,9 +88,7 @@ func (a *App) ConcreteProviderPriorityOptions() []string {
 	return opts
 }
 
-// ConcreteProviderPriorityDraft returns the editable draft: the saved priority
-// order with any missing known concrete providers appended so all are
-// reorderable in the UI.
+// ConcreteProviderPriorityDraft — Missing known concretes are appended so all are reorderable in the UI.
 func (a *App) ConcreteProviderPriorityDraft(priority []string) []string {
 	return systemProviderPriorityDraft(priority, a.ConcreteProviderPriorityOptions())
 }
@@ -107,11 +97,7 @@ func (a *App) filterConcreteProviderPriority(priority []string) []string {
 	return filterSystemProviderPriority(priority, a.ConcreteProviderPriorityOptions())
 }
 
-// EffectiveEcosystemManager returns the settings manager value (e.g. "bun",
-// "pip3") for the top-ranked, non-disabled concrete provider of eco in the host
-// provider-priority order, falling back to the first non-disabled builtin member.
-// Returns "" when the ecosystem has no usable concrete. The manager is derived
-// from provider_priority — the single source of truth — never stored.
+// EffectiveEcosystemManager — Derived from provider_priority, the single source of truth, never stored.
 func EffectiveEcosystemManager(settings config.Settings, eco string) string {
 	concrete := chosenEcosystemConcrete(settings, eco)
 	if concrete == "" {
@@ -139,8 +125,7 @@ func chosenEcosystemConcrete(settings config.Settings, eco string) string {
 		}
 		return name
 	}
-	// Fall back to the builtin default priority order (e.g. bun before npm, uv
-	// before pip) rather than the alphabetical member list.
+	// Builtin default order (bun before npm, uv before pip) rather than the alphabetical member list.
 	for _, name := range provider.BuiltinConcreteProviderPriorityNames() {
 		if _, ok := memberSet[name]; !ok {
 			continue
@@ -153,9 +138,7 @@ func chosenEcosystemConcrete(settings config.Settings, eco string) string {
 	return ""
 }
 
-// SystemInstallPriority returns the system providers from provider_priority in
-// order, with any missing builtin system providers appended — the order used to
-// resolve which system package manager installs an unscoped tool.
+// SystemInstallPriority — The order used to resolve which system package manager installs an unscoped tool.
 func SystemInstallPriority(settings config.Settings) []string {
 	defaults := provider.BuiltinSystemProviderPriorityNames()
 	out := filterSystemProviderPriority(settings.ProviderPriority, defaults)
@@ -167,10 +150,7 @@ func SystemInstallPriority(settings config.Settings) []string {
 	return out
 }
 
-// migrateLegacyEcosystemManager folds the legacy ecosystems block — per-ecosystem
-// node/python managers and the system priority list — into provider_priority
-// (the single source of truth), then drops the block. Keeps pre-existing configs
-// working after the ecosystems settings were removed.
+// Keeps pre-existing configs working after the ecosystems settings were removed.
 func migrateLegacyEcosystemManager(s *config.Settings) {
 	if s == nil || len(s.Ecosystems) == 0 {
 		return
@@ -195,10 +175,7 @@ func migrateLegacyEcosystemManager(s *config.Settings) {
 	s.Ecosystems = nil
 }
 
-// promoteEcosystemConcrete returns provider_priority with concrete moved to the
-// front so it becomes the effective manager for its ecosystem. concrete must be
-// a canonical concrete provider name (config.NormalizeConcreteProvider). A blank
-// concrete is a no-op.
+// concrete must be a canonical concrete provider name; a blank one is a no-op.
 func promoteEcosystemConcrete(priority []string, concrete string) []string {
 	if concrete == "" {
 		return priority
@@ -240,8 +217,7 @@ func filterSystemProviderPriority(priority, options []string) []string {
 	return out
 }
 
-// filterDisablableProviders keeps only valid (concrete or family) provider
-// names, de-duplicated, preserving order.
+// De-duplicated, preserving order.
 func (a *App) filterDisablableProviders(names []string) []string {
 	out := make([]string, 0, len(names))
 	seen := make(map[string]struct{}, len(names))
@@ -258,9 +234,7 @@ func (a *App) filterDisablableProviders(names []string) []string {
 	return out
 }
 
-// validateDisablableProvider accepts the names that may appear in
-// disabled_providers: any concrete provider (the priority-model toggle target)
-// or, for backward compatibility, an ecosystem family name.
+// Any concrete provider, or an ecosystem family name for backward compatibility.
 func (a *App) validateDisablableProvider(name string) error {
 	if a.IsEcosystemProvider(name) {
 		return nil
@@ -276,9 +250,7 @@ func (a *App) validateDisablableProvider(name string) error {
 	return fmt.Errorf("%q is not a known provider", name)
 }
 
-// expandToConcreteProviders converts any ecosystem family name to its concrete
-// members, passing concrete names through unchanged (de-duplicated, order
-// preserved).
+// Concrete names pass through unchanged, de-duplicated and order-preserving.
 func expandToConcreteProviders(names []string) []string {
 	out := make([]string, 0, len(names))
 	seen := make(map[string]struct{}, len(names))

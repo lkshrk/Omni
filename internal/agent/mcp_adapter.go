@@ -11,7 +11,6 @@ import (
 
 var lookPath = exec.LookPath
 
-// McpAdapter manages MCP servers in one target agent.
 type McpAdapter interface {
 	ID() string
 	Available() bool
@@ -34,7 +33,6 @@ func headerFlags(headers map[string]string) []string {
 	return args
 }
 
-// InstalledMcpServer is one MCP server as reported by an agent's list output.
 type InstalledMcpServer struct {
 	Name       string
 	Transport  string
@@ -43,14 +41,15 @@ type InstalledMcpServer struct {
 	Version    string
 	Headers    map[string]string
 	EnvLiteral map[string]string
-	// HeadersKnown distinguishes an agent that reported no headers from one
-	// whose list output cannot report headers at all.
+	// Distinguishes an agent that reported no headers from one that cannot report them at all.
 	HeadersKnown bool
+	// Set when the report omitted the transport and the parser had to infer one from the entry's shape.
+	// Polarity is inverted from HeadersKnown deliberately: the zero value keeps the strict comparison,
+	// so a parser that forgets this flag over-reports drift rather than silently hiding a real one.
+	TransportInferred bool
 }
 
-// resolveEnvFlags builds flag pairs for env var names (resolved) and env_literal (inline).
-// flagName is "-e" for claude-code or "--env" for codex.
-// Returns an error (without calling exec) if any named var is unset.
+// Errors before any exec when a named variable is unset.
 func resolveEnvFlags(s config.McpServer, lookupEnv func(string) (string, bool), flagName string) ([]string, error) {
 	var args []string
 	for _, name := range s.Env {

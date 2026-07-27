@@ -1,7 +1,4 @@
-// Package system implements the "system" ecosystem provider.
-// It delegates to the first available system package manager in the configured
-// priority order: apt → dnf → pacman → brew (native Linux PMs take precedence
-// over brew so that distro-native packages are preferred).
+// Package system delegates to apt, dnf, pacman, then brew, so distro-native packages win over brew.
 package system
 
 import (
@@ -14,20 +11,16 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// errNoPMAvailable is returned by resolve when no delegate package manager is
-// found. It is distinguished from delegate probe errors so Available can return
-// false without surfacing a misleading error.
+// Distinct from a delegate probe error so Available can return false without a misleading error.
 var errNoPMAvailable = errors.New("system: no package manager available")
 
-// Provider is an ecosystem provider that delegates to the first available PM.
 type Provider struct {
 	delegates []provider.Provider
 	mu        sync.Mutex
 	resolved  provider.Provider // cached after first successful resolution
 }
 
-// New creates a system Provider with the given delegate chain.
-// Delegates are tried in order; the first one reporting Available=true is used.
+// New — Delegates are tried in order; the first one reporting Available=true is used.
 func New(delegates ...provider.Provider) *Provider {
 	return &Provider{delegates: delegates}
 }
@@ -88,10 +81,7 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 	return d.ListInstalled(ctx)
 }
 
-// InstalledMap implements provider.BulkChecker by delegating to the concrete
-// system PM's InstalledMap when available. All current system delegates
-// (apt, dnf, pacman, brew, apk, zypper) implement BulkChecker, so this
-// eliminates the per-tool IsInstalled slow path for system-configured tools.
+// InstalledMap — Every system delegate implements BulkChecker, so this avoids the per-tool IsInstalled slow path.
 func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) {
 	d, err := p.resolve(ctx)
 	if err != nil {
@@ -104,7 +94,6 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 	return bc.InstalledMap(ctx)
 }
 
-// Describe delegates description lookup to the first available PM that supports it.
 func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, error) {
 	d, err := p.resolve(ctx)
 	if err != nil {
@@ -117,7 +106,6 @@ func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, er
 	return desc.Describe(ctx, toolFor(tool, d.Name()))
 }
 
-// ResolvedName implements provider.ConcreteResolver.
 func (p *Provider) ResolvedName(ctx context.Context) (string, error) {
 	d, err := p.resolve(ctx)
 	if err != nil {
@@ -138,9 +126,7 @@ func (p *Provider) PrivilegePlan(ctx context.Context, action provider.PrivilegeA
 	return provider.PrivilegePlan{}, nil
 }
 
-// resolve returns the first available delegate or an error if none are available.
-// The result is cached after the first successful resolution to avoid re-probing
-// on every call within the same sync cycle.
+// Cached after the first success to avoid re-probing on every call in a sync cycle.
 func (p *Provider) resolve(ctx context.Context) (provider.Provider, error) {
 	p.mu.Lock()
 	cached := p.resolved
@@ -172,7 +158,6 @@ func (p *Provider) delegateNames() string {
 	return strings.Join(names, ", ")
 }
 
-// toolFor returns a copy of t with Provider set to the delegate's name.
 func toolFor(t provider.Tool, providerName string) provider.Tool {
 	t.Provider = providerName
 	return t

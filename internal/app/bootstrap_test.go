@@ -173,7 +173,6 @@ func TestSetupImportSavesDisabledProvidersAndReturnsHostInfo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	// The node family disable is stored as its concrete members.
 	if got := cfg.HostSettings["setupbox"].DisabledProviders; !slices.Equal(got, []string{"bun", "pnpm", "npm"}) {
 		t.Fatalf("disabled providers = %v, want [bun pnpm npm]", got)
 	}
@@ -506,8 +505,6 @@ func TestDotsSyncConfiguredRequiresRepoAndEnabled(t *testing.T) {
 }
 
 func TestBootstrapStateKeyUsesWideHash(t *testing.T) {
-	// Verify the state key uses at least 128-bit hash (32 hex chars)
-	// to avoid birthday collisions across config paths.
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -519,7 +516,6 @@ func TestBootstrapStateKeyUsesWideHash(t *testing.T) {
 	if err := a.MarkHostBootstrapCompleted(context.Background(), "testhost"); err != nil {
 		t.Fatalf("MarkHostBootstrapCompleted: %v", err)
 	}
-	// After marking, verify the marker persists (round-trip).
 	completed, err := a.HostBootstrapCompleted(context.Background(), "testhost")
 	if err != nil {
 		t.Fatalf("HostBootstrapCompleted: %v", err)
@@ -527,7 +523,6 @@ func TestBootstrapStateKeyUsesWideHash(t *testing.T) {
 	if !completed {
 		t.Fatal("HostBootstrapCompleted = false after marking, want true")
 	}
-	// A different config path must NOT match.
 	a2 := app.New(filepath.Join(t.TempDir(), "other-settings.json"))
 	if err := saveAppConfig(t, a2.ConfigPath, &config.RootConfig{
 		Hosts:  map[string][]string{"testhost": {}},
@@ -535,7 +530,7 @@ func TestBootstrapStateKeyUsesWideHash(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("config.Save a2: %v", err)
 	}
-	a2.CacheDir = a.CacheDir // share same cache DB
+	a2.CacheDir = a.CacheDir
 	if err := a2.InitTestMode(context.Background()); err != nil {
 		t.Fatalf("InitTestMode a2: %v", err)
 	}

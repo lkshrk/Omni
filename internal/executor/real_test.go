@@ -5,11 +5,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
-
-// ─── resolveNvmAlias ─────────────────────────────────────────────────────────
 
 func TestResolveNvmAlias_ConcreteVersion(t *testing.T) {
 	nvmDir := t.TempDir()
@@ -28,7 +28,6 @@ func TestResolveNvmAlias_ConcreteVersion(t *testing.T) {
 }
 
 func TestResolveNvmAlias_FollowsChain(t *testing.T) {
-	// default → lts/* → lts/iron → v20.10.0
 	nvmDir := t.TempDir()
 	aliasDir := filepath.Join(nvmDir, "alias")
 	ltsDir := filepath.Join(aliasDir, "lts")
@@ -62,8 +61,7 @@ func TestResolveNvmAlias_MissingFile(t *testing.T) {
 func TestResolveNvmAlias_HopsExceeded(t *testing.T) {
 	nvmDir := t.TempDir()
 	aliasDir := filepath.Join(nvmDir, "alias")
-	os.MkdirAll(aliasDir, 0o755) //nolint:errcheck
-	// Write a circular non-version alias that never resolves.
+	os.MkdirAll(aliasDir, 0o755)                                            //nolint:errcheck
 	os.WriteFile(filepath.Join(aliasDir, "default"), []byte("loop"), 0o644) //nolint:errcheck
 	os.WriteFile(filepath.Join(aliasDir, "loop"), []byte("default"), 0o644) //nolint:errcheck
 
@@ -72,8 +70,6 @@ func TestResolveNvmAlias_HopsExceeded(t *testing.T) {
 		t.Errorf("circular alias: got %q, want empty", got)
 	}
 }
-
-// ─── nvmNewestBinDir ─────────────────────────────────────────────────────────
 
 func TestNvmNewestBinDir_PicksHighestSemver(t *testing.T) {
 	versionsDir := t.TempDir()
@@ -91,7 +87,6 @@ func TestNvmNewestBinDir_PicksHighestSemver(t *testing.T) {
 
 func TestNvmNewestBinDir_IgnoresNonVPrefixDirs(t *testing.T) {
 	versionsDir := t.TempDir()
-	// Noise dirs without "v" prefix must be skipped; only v16.0.0 is valid.
 	os.MkdirAll(filepath.Join(versionsDir, "v16.0.0", "bin"), 0o755) //nolint:errcheck
 	os.MkdirAll(filepath.Join(versionsDir, "system"), 0o755)         //nolint:errcheck // no "v" prefix
 	os.MkdirAll(filepath.Join(versionsDir, "lts"), 0o755)            //nolint:errcheck // no "v" prefix
@@ -111,10 +106,6 @@ func TestNvmNewestBinDir_EmptyDir(t *testing.T) {
 	}
 }
 
-// ─── RealExecutor.Run ────────────────────────────────────────────────────────
-
-// TestRealExecutor_Run constructs a RealExecutor directly (bypassing New() to
-// avoid mutating the global PATH via augmentOnce) and runs a simple command.
 func TestRealExecutor_Run(t *testing.T) {
 	r := &RealExecutor{}
 	stdout, _, err := r.Run(context.Background(), "echo", "hello")
@@ -166,15 +157,9 @@ func TestOutputWriterFramesSplitOutputBeforeSanitizing(t *testing.T) {
 	}
 }
 
-// ─── discoverNodeManagerPaths ────────────────────────────────────────────────
-
-// TestDiscoverNodeManagerPaths_NoHome verifies that discoverNodeManagerPaths
-// returns nil/empty when HOME points to a directory that does not exist (so
-// neither volta nor nvm directories can be found).
 func TestDiscoverNodeManagerPaths_NoHome(t *testing.T) {
 	t.Setenv("HOME", "/nonexistent-path-xyz-abc")
-	// isolate from the invoking shell's real nvm env: NVM_BIN is consulted
-	// directly by discoverNodeManagerPaths, NVM_DIR by nvmDefaultBinDir.
+	// isolate from the invoking shell's real nvm env
 	t.Setenv("NVM_DIR", "")
 	t.Setenv("NVM_BIN", "")
 	got := discoverNodeManagerPaths()
@@ -265,8 +250,6 @@ func TestResolveCommand_UsesActiveNVMBinBeforeDefaultAlias(t *testing.T) {
 	}
 }
 
-// ─── New ─────────────────────────────────────────────────────────────────────
-
 func TestNew_ReturnsNonNil(t *testing.T) {
 	r := New()
 	if r == nil {
@@ -274,10 +257,6 @@ func TestNew_ReturnsNonNil(t *testing.T) {
 	}
 }
 
-// ─── nvmDefaultBinDir ────────────────────────────────────────────────────────
-
-// makeNvmHome sets up a minimal fake HOME with a .nvm directory.
-// Returns the home path and the versionsDir path.
 func makeNvmHome(t *testing.T) (home, versionsDir string) {
 	t.Helper()
 	t.Setenv("NVM_DIR", "") // isolate from the invoking shell's real NVM_DIR
@@ -296,7 +275,6 @@ func makeNvmHome(t *testing.T) (home, versionsDir string) {
 func writeAlias(t *testing.T, nvmDir, name, content string) {
 	t.Helper()
 	aliasDir := filepath.Join(nvmDir, "alias")
-	// handle lts/* by creating the lts subdir
 	if strings.Contains(name, "/") {
 		if err := os.MkdirAll(filepath.Join(aliasDir, filepath.Dir(name)), 0o755); err != nil {
 			t.Fatal(err)
@@ -308,19 +286,16 @@ func writeAlias(t *testing.T, nvmDir, name, content string) {
 }
 
 func TestNvmDefaultBinDir_NvmDirAbsent(t *testing.T) {
-	home := t.TempDir()     // no .nvm subdir
+	home := t.TempDir()
 	t.Setenv("NVM_DIR", "") // isolate from the invoking shell's real NVM_DIR
 	if got := nvmDefaultBinDir(home); got != "" {
 		t.Errorf("expected empty without .nvm, got %q", got)
 	}
 }
 
-// TestNvmDefaultBinDir_HonoursNVMDirEnv verifies that a custom $NVM_DIR
-// (e.g. homebrew nvm installs, or dotfiles that relocate it) is used instead
-// of the hardcoded ~/.nvm, since nvm.sh itself honours NVM_DIR as the source
-// of truth and only falls back to ~/.nvm when it is unset.
+// nvm.sh treats NVM_DIR as the source of truth, so relocated installs must win over ~/.nvm.
 func TestNvmDefaultBinDir_HonoursNVMDirEnv(t *testing.T) {
-	home := t.TempDir() // no .nvm under home at all
+	home := t.TempDir()
 	customDir := t.TempDir()
 	versionsDir := filepath.Join(customDir, "versions", "node")
 	binDir := filepath.Join(versionsDir, "v22.16.0", "bin")
@@ -354,12 +329,8 @@ func TestNvmDefaultBinDir_AliasResolvesToVersionWithBin(t *testing.T) {
 }
 
 func TestNvmDefaultBinDir_AliasResolvesButBinAbsent_FallsBackToNewest(t *testing.T) {
-	// default alias → v22.16.0, but v22.16.0/bin doesn't exist.
-	// Raw default "v22.16.0" → nvmMajorVersionBinDir fails (not a bare integer).
-	// Falls back to nvmNewestBinDir → finds v20.1.0.
 	home, versionsDir := makeNvmHome(t)
 	writeAlias(t, filepath.Join(home, ".nvm"), "default", "v22.16.0\n")
-	// Create a different version with a bin dir.
 	fallback := filepath.Join(versionsDir, "v20.1.0", "bin")
 	if err := os.MkdirAll(fallback, 0o755); err != nil {
 		t.Fatal(err)
@@ -372,8 +343,6 @@ func TestNvmDefaultBinDir_AliasResolvesButBinAbsent_FallsBackToNewest(t *testing
 }
 
 func TestNvmDefaultBinDir_BareMajorAlias_ReturvesMajorVersionBin(t *testing.T) {
-	// default alias → "22" (bare integer, not resolvable by resolveNvmAlias).
-	// Falls through to raw read → "22" → nvmMajorVersionBinDir picks v22.1.0.
 	home, versionsDir := makeNvmHome(t)
 	writeAlias(t, filepath.Join(home, ".nvm"), "default", "22\n")
 	binDir := filepath.Join(versionsDir, "v22.1.0", "bin")
@@ -388,8 +357,6 @@ func TestNvmDefaultBinDir_BareMajorAlias_ReturvesMajorVersionBin(t *testing.T) {
 }
 
 func TestNvmDefaultBinDir_NoAliasFile_FallsBackToNewest(t *testing.T) {
-	// No alias/default file at all → resolveNvmAlias returns "".
-	// ReadFile of default also fails → falls back to nvmNewestBinDir.
 	home, versionsDir := makeNvmHome(t)
 	binDir := filepath.Join(versionsDir, "v18.20.0", "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
@@ -402,8 +369,6 @@ func TestNvmDefaultBinDir_NoAliasFile_FallsBackToNewest(t *testing.T) {
 	}
 }
 
-// ─── nvmMajorVersionBinDir ───────────────────────────────────────────────────
-
 func TestNvmMajorVersionBinDir_InvalidMajor(t *testing.T) {
 	dir := t.TempDir()
 	for _, bad := range []string{"", "abc", "0", "-1"} {
@@ -415,7 +380,6 @@ func TestNvmMajorVersionBinDir_InvalidMajor(t *testing.T) {
 
 func TestNvmMajorVersionBinDir_NoMatchingVersion(t *testing.T) {
 	versionsDir := t.TempDir()
-	// Only v18 installed, asking for 22.
 	os.MkdirAll(filepath.Join(versionsDir, "v18.20.0", "bin"), 0o755) //nolint:errcheck
 	if got := nvmMajorVersionBinDir(versionsDir, "22"); got != "" {
 		t.Errorf("expected empty for unmatched major, got %q", got)
@@ -424,7 +388,6 @@ func TestNvmMajorVersionBinDir_NoMatchingVersion(t *testing.T) {
 
 func TestNvmMajorVersionBinDir_MatchPresent_BinDirAbsent(t *testing.T) {
 	versionsDir := t.TempDir()
-	// v22.1.0 dir exists but without a bin subdir.
 	os.MkdirAll(filepath.Join(versionsDir, "v22.1.0"), 0o755) //nolint:errcheck
 	if got := nvmMajorVersionBinDir(versionsDir, "22"); got != "" {
 		t.Errorf("expected empty when bin dir absent, got %q", got)
@@ -443,28 +406,18 @@ func TestNvmMajorVersionBinDir_PicksNewestOfMatchingMajor(t *testing.T) {
 	}
 }
 
-// ─── nvmNewestBinDir (additional) ────────────────────────────────────────────
-
 func TestNvmNewestBinDir_VersionDirWithoutBinSubdir(t *testing.T) {
 	versionsDir := t.TempDir()
-	// v20.1.0 dir exists but has no bin subdir.
 	os.MkdirAll(filepath.Join(versionsDir, "v20.1.0"), 0o755) //nolint:errcheck
 	if got := nvmNewestBinDir(versionsDir); got != "" {
 		t.Errorf("expected empty when bin subdir absent, got %q", got)
 	}
 }
 
-// ─── discoverNodeManagerPaths (additional) ───────────────────────────────────
-
-// ─── resolveNvmAlias (additional) ────────────────────────────────────────────
-
 func TestResolveNvmAlias_PathTraversalRejected(t *testing.T) {
-	// An alias value that contains "/" but doesn't start with "lts/" should be
-	// rejected as a path-traversal attempt and return "".
 	nvmDir := t.TempDir()
 	aliasDir := filepath.Join(nvmDir, "alias")
-	os.MkdirAll(aliasDir, 0o755) //nolint:errcheck
-	// "../../evil" contains "/" and doesn't start with "lts/"
+	os.MkdirAll(aliasDir, 0o755)                                                    //nolint:errcheck
 	os.WriteFile(filepath.Join(aliasDir, "default"), []byte("../../evil\n"), 0o644) //nolint:errcheck
 
 	got := resolveNvmAlias(nvmDir, "default", 8)
@@ -473,12 +426,8 @@ func TestResolveNvmAlias_PathTraversalRejected(t *testing.T) {
 	}
 }
 
-// ─── nvmMajorVersionBinDir (additional) ──────────────────────────────────────
-
 func TestNvmMajorVersionBinDir_NonThreePartVersionSkipped(t *testing.T) {
 	versionsDir := t.TempDir()
-	// "v22" and "v22.1" are not three-part and must be ignored.
-	// Only v22.2.0 is valid and has a bin dir.
 	os.MkdirAll(filepath.Join(versionsDir, "v22"), 0o755)   //nolint:errcheck
 	os.MkdirAll(filepath.Join(versionsDir, "v22.1"), 0o755) //nolint:errcheck
 	binDir := filepath.Join(versionsDir, "v22.2.0", "bin")
@@ -490,11 +439,8 @@ func TestNvmMajorVersionBinDir_NonThreePartVersionSkipped(t *testing.T) {
 	}
 }
 
-// ─── nvmNewestBinDir (additional) ────────────────────────────────────────────
-
 func TestNvmNewestBinDir_NonThreePartVersionsSkipped(t *testing.T) {
 	versionsDir := t.TempDir()
-	// Malformed dirs must be ignored; only v18.1.0 is valid.
 	os.MkdirAll(filepath.Join(versionsDir, "v18"), 0o755)   //nolint:errcheck
 	os.MkdirAll(filepath.Join(versionsDir, "v18.0"), 0o755) //nolint:errcheck
 	binDir := filepath.Join(versionsDir, "v18.1.0", "bin")
@@ -508,8 +454,6 @@ func TestNvmNewestBinDir_NonThreePartVersionsSkipped(t *testing.T) {
 
 func TestNvmNewestBinDir_NonNumericComponentSkipped(t *testing.T) {
 	versionsDir := t.TempDir()
-	// "v18.abc.0" has a non-numeric minor → parse error → skipped.
-	// "v16.0.0" is the only valid entry.
 	os.MkdirAll(filepath.Join(versionsDir, "v18.abc.0"), 0o755) //nolint:errcheck
 	binDir := filepath.Join(versionsDir, "v16.0.0", "bin")
 	os.MkdirAll(binDir, 0o755) //nolint:errcheck
@@ -522,8 +466,6 @@ func TestNvmNewestBinDir_NonNumericComponentSkipped(t *testing.T) {
 
 func TestNvmMajorVersionBinDir_NonNumericComponentSkipped(t *testing.T) {
 	versionsDir := t.TempDir()
-	// "v22.abc.0" has a non-numeric minor → parse error → skipped.
-	// "v22.1.0" is the only valid match.
 	os.MkdirAll(filepath.Join(versionsDir, "v22.abc.0"), 0o755) //nolint:errcheck
 	binDir := filepath.Join(versionsDir, "v22.1.0", "bin")
 	os.MkdirAll(binDir, 0o755) //nolint:errcheck
@@ -533,8 +475,6 @@ func TestNvmMajorVersionBinDir_NonNumericComponentSkipped(t *testing.T) {
 		t.Errorf("got %q, want %q", got, binDir)
 	}
 }
-
-// ─── discoverNodeManagerPaths (additional) ───────────────────────────────────
 
 func TestDiscoverNodeManagerPaths_WithVoltaAndBun(t *testing.T) {
 	home := t.TempDir()
@@ -560,5 +500,32 @@ func TestDiscoverNodeManagerPaths_WithVoltaAndBun(t *testing.T) {
 	}
 	if !hasBun {
 		t.Errorf("bun bin dir %q not in paths %v", bunBin, paths)
+	}
+}
+
+func TestRealExecutor_RunReturnsWhenAGrandchildHoldsTheOutputPipes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell job control")
+	}
+	original := waitDelay
+	waitDelay = 100 * time.Millisecond
+	t.Cleanup(func() { waitDelay = original })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := (&RealExecutor{}).Run(ctx, "sh", "-c", "sleep 30 & sleep 30")
+		done <- err
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run never returned: a backgrounded grandchild kept the output pipes open")
 	}
 }

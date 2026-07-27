@@ -86,9 +86,7 @@ func (m *Model) handleDotsPreparedMsg(msg dotsPreparedMsg) []tea.Cmd {
 		return cmds
 	}
 	m.dotsPreparing = false
-	// An initial launch snapshot may still hydrate an empty list while another
-	// operation is active. Once a tree is loaded, however, an older snapshot
-	// must not replace newer mutations or lazily loaded branches.
+	// Once a tree is loaded, an older snapshot must not replace newer mutations or lazily loaded branches.
 	if msg.opGen != m.dotsOpGen && m.dotsLoaded {
 		return cmds
 	}
@@ -109,8 +107,7 @@ func (m *Model) handleDotsSyncedMsg(msg dotsSyncedMsg) []tea.Cmd {
 		return cmds
 	}
 	m.dotsLoaded = true
-	// Always update entries when available — health must reflect conflict state
-	// even when stow partially failed.
+	// Health must reflect conflict state even when stow partially failed.
 	if msg.entries != nil {
 		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
 	}
@@ -406,7 +403,6 @@ func (m *Model) prepareDotsSnapshotOnLaunch(cmds *[]tea.Cmd) {
 	*cmds = append(*cmds, m.doPrepareDotsSnapshot(m.dotsPrepareGen, m.dotsOpGen))
 }
 
-// doLoadDots fetches dots status (entries + git status) for the Dots tab.
 func (m *Model) doLoadDots() tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
@@ -452,7 +448,7 @@ func (m *Model) doPrepareDotsSnapshot(gen, opGen int) tea.Cmd {
 	}
 }
 
-// doDotsSyncOnly repairs symlinks for all dots entries without a git pull.
+// Repairs symlinks for all dots entries without a git pull.
 func (m *Model) doDotsSyncOnly() tea.Cmd {
 	return m.doDotsSyncOnlyWithProgress(nil, nil)
 }
@@ -517,8 +513,7 @@ func (m *Model) doDotsSyncDiscovered(status app.DotStatus) tea.Cmd {
 	}
 }
 
-// doDotsRefresh re-scans dot entries, refreshes git status, and discovers
-// untracked candidates without mutating config, the repo, or local files.
+// Non-mutating: touches neither config, the repo, nor local files.
 func (m *Model) doDotsRefresh() tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
@@ -601,7 +596,6 @@ func (m *Model) handleDotsHistoryLoadedMsg(msg dotsHistoryLoadedMsg) {
 	m.dotsHistoryErr = ""
 }
 
-// doDotsPull runs git pull + resync and refreshes dots status.
 func (m *Model) doDotsPull() tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
@@ -612,7 +606,6 @@ func (m *Model) doDotsPull() tea.Cmd {
 	}
 }
 
-// doDotsPush commits all changes with an auto-generated message and pushes.
 func (m *Model) doDotsPush() tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
@@ -623,7 +616,6 @@ func (m *Model) doDotsPush() tea.Cmd {
 	}
 }
 
-// doDotsCommit commits all changes with an auto-generated message.
 func (m *Model) doDotsCommit() tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
@@ -692,7 +684,6 @@ func (m *Model) doDotsResolveDiscovered(status app.DotStatus, strategy app.DotsR
 	}
 }
 
-// doDotsAdd adopts the file/dir at absPath into the dots repo and refreshes status.
 // rawPath is the tilde-form path used for display (e.g. "~/.config/myapp").
 func (m *Model) doDotsAdd(absPath, rawPath, group string) tea.Cmd {
 	a := m.app
@@ -704,7 +695,6 @@ func (m *Model) doDotsAdd(absPath, rawPath, group string) tea.Cmd {
 	}
 }
 
-// doDotsIgnore toggles a per-entry ignore glob for the named dots entry in config.
 func (m *Model) doDotsIgnore(name, pattern string, ignored bool) tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
@@ -776,8 +766,6 @@ func (m *Model) doDotsVariantChange(req dotsVariantRequest) tea.Cmd {
 	}
 }
 
-// doDotsDeleteLocal removes the local path behind a discovered local-only
-// candidate and refreshes status.
 func (m *Model) doDotsDeleteLocal(status app.DotStatus) tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
@@ -788,7 +776,6 @@ func (m *Model) doDotsDeleteLocal(status app.DotStatus) tea.Cmd {
 	}
 }
 
-// doDotsDelete removes the named dots entry and refreshes status.
 func (m *Model) doDotsDelete(name string, keepLocal bool) tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()

@@ -7,6 +7,9 @@ Omni is a Go CLI/TUI application.
 - Release archives do not require Go.
 - `go install` requires the Go version declared in `go.mod`.
 - Package managers that Omni should use must be available on `PATH`.
+- Skill packages backed by Git require system `git` on `PATH`. HTTP
+  well-known catalogs and local directory sources do not require Git.
+- Node, `npx`, and `bunx` are not prerequisites for agent skills.
 - Dotfile sync requires GNU Stow. Homebrew and Linux packages install the
   `stow` package as a dependency; release archives and `go install` users need
   `stow` on `PATH`.

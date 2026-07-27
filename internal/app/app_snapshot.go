@@ -8,8 +8,7 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// StartupSnapshot groups the read-heavy app state the TUI needs for its first
-// render. Config-derived fields are built from one settings.json load.
+// StartupSnapshot — Config-derived fields are built from one settings.json load.
 type StartupSnapshot struct {
 	Tools                  []*ToolView
 	Discovered             []*ToolView
@@ -53,9 +52,7 @@ type StartupSnapshot struct {
 	EcosystemProviderNames []string
 	NvmManaged             map[string]bool
 	EnabledAgents          []string
-	// AgentsIgnore is the raw manifest struct rather than three separate sorted
-	// []string fields: the TUI derives lookup sets itself via AgentsIgnoreSet,
-	// so duplicating the shape here would just be another place to keep in sync.
+	// The raw manifest struct: the TUI derives lookup sets itself via AgentsIgnoreSet.
 	AgentsIgnore config.AgentsIgnore
 }
 
@@ -162,9 +159,7 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 	discovered, _ := a.listDiscoveredFromConfig(ctx, cfg, ecosystemProviders)
 	stop()
 
-	// The agents dashboard summary is deliberately NOT part of the snapshot:
-	// it shells out to every agent CLI (installedPluginNames), which held the
-	// whole first render hostage. The TUI loads it async (doLoadAgentsSummary).
+	// Deliberately not in the snapshot: it shells out to every agent CLI and held the first render hostage.
 	stop = profile.Start("app.startup.agents_rows_cache")
 	agentsRows, err := a.CachedAgentsRows(ctx)
 	stop()

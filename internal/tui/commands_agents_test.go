@@ -41,21 +41,18 @@ func TestAgentsCmds_SuccessMsgs(t *testing.T) {
 	if msg, ok := m.doSaveAgentsUse([]string{"claude"})().(agentsUseSavedMsg); !ok || msg.err != nil {
 		t.Errorf("doSaveAgentsUse msg = %#v, want agentsUseSavedMsg with nil err", msg)
 	}
-	// Adopt is a manifest upsert plus a lockfile read — no skills CLI run —
-	// so an arbitrary source succeeds; group "" skips the group step.
+	// Adopt is a manifest upsert plus a legacy lockfile read — no acquisition — so an arbitrary source succeeds; group "" skips the group step.
 	if msg, ok := m.doAdoptSkillPackageWithGroup("owner/adopted-pkg", "", nil, "")().(skillAddedMsg); !ok || msg.err != nil {
 		t.Errorf("doAdoptSkillPackageWithGroup msg = %#v, want skillAddedMsg with nil err", msg)
 	}
-	// Restore/import are no-op-ish on an empty manifest; only the msg type is
-	// pinned so the closure result path is exercised deterministically.
+	// Restore/import are no-ops on an empty manifest; only the msg type is pinned so the closure result path runs deterministically.
 	if _, ok := m.doRestoreSkills()().(skillsRestoredMsg); !ok {
 		t.Error("doRestoreSkills should yield a skillsRestoredMsg")
 	}
 	if _, ok := m.doImportSkills()().(skillsImportedMsg); !ok {
 		t.Error("doImportSkills should yield a skillsImportedMsg")
 	}
-	// Toggles persist to the config, so they run last: doToggleSkillsFeature
-	// disables skills for every later skill-guarded call on this app.
+	// Toggles persist to the config, so they run last: doToggleSkillsFeature disables skills for every later skill-guarded call on this app.
 	if msg, ok := m.doToggleSkillsFeature()().(skillsFeatureToggledMsg); !ok || msg.err != nil || msg.enabled {
 		t.Errorf("doToggleSkillsFeature msg = %#v, want toggle to disabled with nil err", msg)
 	}
@@ -84,9 +81,7 @@ func TestAgentsCmds_RemoveSkillPackage(t *testing.T) {
 	}
 }
 
-// TestAgentsCmds_SkillsDisabledErrorPaths runs the skill-CLI-backed commands
-// against an app with SkillsDisabled, so the app-layer guard errors before
-// any CLI or network work and the error branch of each closure is exercised.
+// Runs against an app with SkillsDisabled so the app-layer guard errors before any CLI or network work.
 func TestAgentsCmds_SkillsDisabledErrorPaths(t *testing.T) {
 	t.Parallel()
 	m := agentsAllProgressModel(t, &config.RootConfig{

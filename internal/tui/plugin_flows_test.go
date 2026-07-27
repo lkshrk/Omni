@@ -296,17 +296,9 @@ func TestPluginFlow_RestoreKeySetsRunningFlag(t *testing.T) {
 	}
 }
 
-// Gap 1 (http-transport-without-URL) and gap 2 (transport cycling) do not
-// apply to the plugin add form: view_plugin_form.go and handlePluginFormKeyMsg
-// have only 3 fields (name/marketplace/agents), no transport concept and no
-// left/right handling at all (only handleMcpFormKeyMsg branches on
-// m.mcpFormField == 1 for left/right). buildPluginFromForm (update_plugin.go)
-// has no URL-vs-command branch either.
+// The plugin add form has only name/marketplace/agents: no transport concept, no left/right handling, and no URL-vs-command branch.
 
-// TestPluginFlow_ShiftTabNavigatesBackwardThroughUpdate closes gap 3: drives a
-// real tea.KeyPressMsg with Mod: tea.ModShift through Model.Update (not a
-// helper shortcut) to prove shift+tab actually reverses field focus rather
-// than behaving like a second plain tab.
+// Drives a real tea.KeyPressMsg with Mod: tea.ModShift through Model.Update, not a helper shortcut, to prove shift+tab actually reverses field focus.
 func TestPluginFlow_ShiftTabNavigatesBackwardThroughUpdate(t *testing.T) {
 	t.Parallel()
 	m := pluginChipFixture(nil)
@@ -331,10 +323,7 @@ func TestPluginFlow_ShiftTabNavigatesBackwardThroughUpdate(t *testing.T) {
 	}
 }
 
-// TestPluginFlow_AddDoneMsgSuccessClosesFormAndReloads closes gap 4 (success
-// path): feeding pluginAddDoneMsg{err:nil} back through Update while the form
-// is open must close the form, clear any form error, and queue a reload
-// command (doLoadPluginRows), per the pluginAddDoneMsg case in update.go.
+// pluginAddDoneMsg with a nil err while the form is open must close the form, clear any form error, and queue doLoadPluginRows.
 func TestPluginFlow_AddDoneMsgSuccessClosesFormAndReloads(t *testing.T) {
 	t.Parallel()
 	m := pluginChipFixture(nil)
@@ -368,10 +357,7 @@ func TestPluginFlow_AddDoneMsgSuccessClosesFormAndReloads(t *testing.T) {
 	}
 }
 
-// TestPluginFlow_AddDoneMsgErrorKeepsFormOpenWithError closes gap 4 (error
-// path): feeding pluginAddDoneMsg with a non-nil err while the form is open
-// must keep the form open and set pluginFormErr (not the global statusMsg),
-// per the "if m.pluginFormOpen" branch in update.go's pluginAddDoneMsg case.
+// A non-nil err while the form is open must keep the form open and set pluginFormErr, not the global statusMsg.
 func TestPluginFlow_AddDoneMsgErrorKeepsFormOpenWithError(t *testing.T) {
 	t.Parallel()
 	m := pluginChipFixture(nil)
@@ -403,11 +389,7 @@ func TestPluginFlow_AddDoneMsgErrorKeepsFormOpenWithError(t *testing.T) {
 	}
 }
 
-// TestPluginFlow_ClaimKeyOnUnmanagedRowQueuesAdoptCommand closes gap 5: 'c'
-// on an unmanaged (not-yet-adopted) plugin row must set pluginRunning and
-// yield a batched command (spinner tick + doImportPlugin) rather than a
-// no-op. Mirrors the mcp import test's rationale for asserting on the queued
-// batch instead of executing doImportPlugin against a nil app.
+// Asserts on the queued batch rather than executing doImportPlugin against a nil app, mirroring the mcp import test.
 func TestPluginFlow_ClaimKeyOnUnmanagedRowQueuesAdoptCommand(t *testing.T) {
 	t.Parallel()
 	m := pluginChipFixture(nil)
@@ -431,10 +413,7 @@ func TestPluginFlow_ClaimKeyOnUnmanagedRowQueuesAdoptCommand(t *testing.T) {
 	}
 }
 
-// TestPluginFlow_ImportAdoptErrorClearsOpKeyAndSurfacesStatus is the plugin
-// twin of the mcp stuck-spinner regression test: pluginImportAdoptDoneMsg's
-// handler used to never clear agentsOpKey, leaving the claimed row's spinner
-// stuck whenever AddPlugin/SetPluginGroups failed.
+// pluginImportAdoptDoneMsg's handler used to never clear agentsOpKey, leaving the claimed row's spinner stuck whenever AddPlugin/SetPluginGroups failed.
 func TestPluginFlow_ImportAdoptErrorClearsOpKeyAndSurfacesStatus(t *testing.T) {
 	t.Parallel()
 	m := pluginChipFixture(nil)
@@ -474,11 +453,7 @@ func TestPluginFlow_ImportKeyOnUnmanagedRowIsInert(t *testing.T) {
 	}
 }
 
-// TestPluginFlow_GroupsStatusMessagePersistsUntilReplaced closes gap 6:
-// setStatus writes m.statusMsg synchronously (see commands.go), and neither
-// opening the add-plugin form nor moving the cursor clears it — it persists
-// untouched until a new status/clearStatusMsg replaces it, unlike
-// pluginFormErr which is reset on form open.
+// setStatus writes statusMsg synchronously and neither opening the add form nor moving the cursor clears it, unlike pluginFormErr which resets on form open.
 func TestPluginFlow_GroupsStatusMessagePersistsUntilReplaced(t *testing.T) {
 	t.Parallel()
 	rows := []app.PluginRow{{Name: "groups-status-plugin", Groups: []string{"work"}}}
@@ -494,14 +469,12 @@ func TestPluginFlow_GroupsStatusMessagePersistsUntilReplaced(t *testing.T) {
 		t.Fatalf("statusMsg = %q, want %q", m.statusMsg, wantSubstr)
 	}
 
-	// Opening the add form does not touch statusMsg.
 	m = drive(m, pressRune('n'))
 	if m.statusMsg != wantSubstr {
 		t.Errorf("statusMsg changed after opening add form: got %q, want unchanged %q", m.statusMsg, wantSubstr)
 	}
 	m = drive(m, pressEsc())
 
-	// Neither does plain cursor movement.
 	m = drive(m, pressRune('j'))
 	if m.statusMsg != wantSubstr {
 		t.Errorf("statusMsg changed after cursor move: got %q, want unchanged %q", m.statusMsg, wantSubstr)

@@ -8,9 +8,7 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// Capability method carriers, mixed into fakeProvider to exercise the priority
-// ladder in ProbeBulkInstalled. Optional capabilities are detected by method
-// presence, so each combination needs a distinct type.
+// Optional capabilities are detected by method presence, so each combination needs its own type.
 
 type byManagerCap struct{ err error }
 
@@ -88,8 +86,7 @@ func TestProbeBulkInstalled_ReturnsMatchedKindWithError(t *testing.T) {
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("err = %v, want %v", err, wantErr)
 	}
-	// The matched Kind is reported even on failure, so callers can tell "no
-	// capability" from "capability ran and failed".
+	// Kind is reported even on failure, so callers can tell "no capability" from "ran and failed".
 	if scan.Kind != provider.BulkInstalledByManager {
 		t.Fatalf("Kind = %v, want BulkInstalledByManager", scan.Kind)
 	}

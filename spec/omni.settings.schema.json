@@ -122,12 +122,12 @@
     },
     "version": {
       "description": "settings.json format version. Missing means legacy unversioned config; omni migrates it to the current version on write.",
-      "default": 19,
+      "default": 20,
       "examples": [
-        19
+        20
       ],
       "type": "integer",
-      "const": 19
+      "const": 20
     }
   },
   "required": [
@@ -157,7 +157,7 @@
           }
         },
         "packages": {
-          "description": "Skill package sources restored via the upstream skills CLI.",
+          "description": "Skill package sources restored by Omni.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/SkillPackage"
@@ -168,6 +168,13 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/Plugin"
+          }
+        },
+        "skills": {
+          "description": "Legacy per-skill manifest. Accepted for one-time migration into packages and never written back.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ManifestSkill"
           }
         }
       },
@@ -281,6 +288,17 @@
           ],
           "type": "string",
           "minLength": 1
+        },
+        "on_conflict": {
+          "description": "How sync resolves a conflict between the repo copy and local content. Omit for manual resolution (sync errors on conflict).",
+          "examples": [
+            "use_repo"
+          ],
+          "type": "string",
+          "enum": [
+            "use_repo",
+            "use_local"
+          ]
         },
         "package": {
           "description": "Default stow package directory. Defaults to the logical dotfile name.",
@@ -410,6 +428,18 @@
       "description": "Structured fallback recipe metadata.",
       "type": "object",
       "properties": {
+        "asset_download_url": {
+          "description": "Resolved release asset download URL recorded at install time.",
+          "type": "string"
+        },
+        "asset_id": {
+          "description": "Resolved release asset identifier recorded at install time.",
+          "type": "string"
+        },
+        "asset_name": {
+          "description": "Resolved release asset filename recorded at install time.",
+          "type": "string"
+        },
         "asset_pattern": {
           "description": "Release asset match pattern using fallback template variables.",
           "examples": [
@@ -426,6 +456,22 @@
         },
         "checksum": {
           "description": "Checksum to verify the matched release asset when confidently known.",
+          "type": "string"
+        },
+        "checksum_asset_id": {
+          "description": "Release asset the recorded checksum was taken from. A rotated asset re-verifies from the release checksums file.",
+          "type": "string"
+        },
+        "installed_version": {
+          "description": "Normalized version recorded at install time. Upgrade detection uses it rather than published_at alone.",
+          "type": "string"
+        },
+        "published_at": {
+          "description": "Publication timestamp of the resolved release, recorded at install time.",
+          "type": "string"
+        },
+        "release_id": {
+          "description": "Resolved GitHub release identifier recorded at install time.",
           "type": "string"
         },
         "tag_name": {
@@ -676,6 +722,25 @@
           "description": "Master switch: whether the agent skills/mcp/plugins features are disabled on this host.",
           "type": "boolean"
         },
+        "agents_use": {
+          "description": "Agent identifiers managed on this host. Omit to inherit the global list; an explicit empty list disables all agents here.",
+          "examples": [
+            [
+              "claude-code",
+              "codex"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "auto_import": {
+          "description": "Ignored per host: auto-import is resolved from the global settings scope only.",
+          "default": false,
+          "type": "boolean"
+        },
         "disabled_providers": {
           "description": "Provider family names disabled on this host.",
           "examples": [
@@ -694,6 +759,9 @@
         "dots_disabled": {
           "description": "Whether dotfile sync is disabled on this host.",
           "type": "boolean"
+        },
+        "dots_git": {
+          "$ref": "#/$defs/DotsGitConfig"
         },
         "dots_repo": {
           "description": "Host-specific path to the dotfiles git repository.",
@@ -721,6 +789,13 @@
             "$ref": "#/$defs/EcosystemSettings"
           }
         },
+        "fallback_bin_dir": {
+          "description": "Host-specific directory for fallback-installed binaries.",
+          "examples": [
+            "~/.local/share/omni/fallback/bin"
+          ],
+          "type": "string"
+        },
         "mcp_disabled": {
           "description": "Whether the agent mcp feature is disabled on this host.",
           "type": "boolean"
@@ -729,11 +804,94 @@
           "description": "Whether the agent plugins feature is disabled on this host.",
           "type": "boolean"
         },
+        "provider_priority": {
+          "description": "Host-specific ordered concrete provider/manager priority.",
+          "examples": [
+            [
+              "apt",
+              "apk",
+              "dnf",
+              "zypper",
+              "pacman",
+              "brew"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "provider_update_quarantine": {
+          "description": "Per-provider update_quarantine overrides keyed by provider or manager name. Concrete names win over provider families.",
+          "examples": [
+            {
+              "brew": "7d",
+              "npm": "0"
+            }
+          ],
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "providers": {
+          "description": "Bootstrap providers installed before the rest of a sync, in list order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProviderEntry"
+          }
+        },
         "skills_disabled": {
           "description": "Whether the agent skills feature is disabled on this host.",
           "type": "boolean"
+        },
+        "update_quarantine": {
+          "description": "Defer updates until the reported availability timestamp is older than this duration.",
+          "examples": [
+            "2d",
+            "12h"
+          ],
+          "type": "string"
         }
       },
+      "additionalProperties": false
+    },
+    "ManifestSkill": {
+      "description": "Legacy single-skill manifest entry, migrated into agents.packages on load.",
+      "type": "object",
+      "properties": {
+        "agents": {
+          "description": "Target agent IDs for this skill. Empty means all configured agents.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "name": {
+          "description": "Skill name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "ref": {
+          "description": "Git ref (branch, tag, or commit) to install from.",
+          "type": "string"
+        },
+        "skill_path": {
+          "description": "Path to the skill directory inside the source.",
+          "type": "string"
+        },
+        "source": {
+          "description": "Git repository, well-known HTTP catalog, or local directory locator.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "name",
+        "source"
+      ],
       "additionalProperties": false
     },
     "Marketplace": {
@@ -897,6 +1055,98 @@
       ],
       "additionalProperties": false
     },
+    "ProviderEntry": {
+      "description": "A provider installed during bootstrap, before the rest of a sync.",
+      "type": "object",
+      "properties": {
+        "hosts": {
+          "description": "Strict hostname-specific install overrides keyed by full or short hostname.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ToolInstallSpec"
+          }
+        },
+        "install_with": {
+          "description": "Legacy concrete provider or manager pin accepted for migration.",
+          "examples": [
+            "brew"
+          ],
+          "type": "string",
+          "enum": [
+            "brew",
+            "apt_repo",
+            "apt",
+            "apk",
+            "dnf",
+            "pacman",
+            "zypper",
+            "bun",
+            "pnpm",
+            "npm",
+            "uv",
+            "pip3",
+            "pip",
+            "cargo"
+          ]
+        },
+        "name": {
+          "description": "Provider or manager being bootstrapped.",
+          "examples": [
+            "brew"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
+        "options": {
+          "description": "Provider-specific install options (key-value pairs).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "package": {
+          "description": "Package identifier passed to the provider. Defaults to the entry name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "description": "Concrete provider or manager used to install it.",
+          "examples": [
+            "script"
+          ],
+          "type": "string",
+          "enum": [
+            "brew",
+            "apt_repo",
+            "apt",
+            "apk",
+            "dnf",
+            "pacman",
+            "zypper",
+            "bun",
+            "pnpm",
+            "npm",
+            "uv",
+            "pip3",
+            "pip",
+            "cargo",
+            "script"
+          ]
+        },
+        "variants": {
+          "description": "Alternate install candidates tried in config order when the default provider is unavailable.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolInstallSpec"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "provider"
+      ],
+      "additionalProperties": false
+    },
     "Settings": {
       "description": "User-configurable options stored in settings.json.",
       "type": "object",
@@ -905,10 +1155,39 @@
           "description": "Master switch: disable the agent skills/mcp/plugins features for this settings scope.",
           "type": "boolean"
         },
+        "agents_use": {
+          "description": "Agent identifiers omni manages. Omit to manage every detected agent.",
+          "examples": [
+            [
+              "claude-code",
+              "codex"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "auto_import": {
           "description": "Add newly discovered installed tools to the config on every sync.",
           "default": false,
           "type": "boolean"
+        },
+        "disabled_providers": {
+          "description": "Provider family names disabled for this settings scope.",
+          "examples": [
+            [
+              "system",
+              "node",
+              "python"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "dots_disabled": {
           "description": "Disable dotfile sync for this settings scope.",
@@ -978,15 +1257,61 @@
           "description": "Disable the agent plugins feature for this settings scope.",
           "type": "boolean"
         },
+        "provider_priority": {
+          "description": "Ordered concrete provider/manager priority applied when a tool does not pin one.",
+          "examples": [
+            [
+              "apt",
+              "apk",
+              "dnf",
+              "zypper",
+              "pacman",
+              "brew"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "provider_update_quarantine": {
+          "description": "Per-provider update_quarantine overrides keyed by provider or manager name. Concrete names win over provider families.",
+          "examples": [
+            {
+              "brew": "7d",
+              "npm": "0"
+            }
+          ],
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "providers": {
+          "description": "Bootstrap providers installed before the rest of a sync, in list order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProviderEntry"
+          }
+        },
         "skills_disabled": {
           "description": "Disable the agent skills feature for this settings scope.",
           "type": "boolean"
+        },
+        "update_quarantine": {
+          "description": "Defer updates until the reported availability timestamp is older than this duration.",
+          "examples": [
+            "2d",
+            "12h"
+          ],
+          "type": "string"
         }
       },
       "additionalProperties": false
     },
     "SkillPackage": {
-      "description": "A source repo of agent skills, tracked as one unit.",
+      "description": "A source of one or more agent skills.",
       "type": "object",
       "properties": {
         "agents": {
@@ -1007,8 +1332,22 @@
           "description": "Git ref (branch, tag, or commit) to install from. Defaults to the package's default branch.",
           "type": "string"
         },
+        "skills": {
+          "description": "Skill names selected from this source. Omitted means every discovered skill.",
+          "examples": [
+            [
+              "review",
+              "test"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "source": {
-          "description": "Skill package repository source (owner/repo or URL).",
+          "description": "Git repository, well-known HTTP catalog, or local directory locator.",
           "examples": [
             "vercel-labs/agent-skills"
           ],
@@ -1025,6 +1364,14 @@
       "description": "One install candidate for a logical tool.",
       "type": "object",
       "properties": {
+        "bin": {
+          "description": "Executable name this candidate installs, when it differs from the logical tool name.",
+          "examples": [
+            "rg"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
         "bin_dir": {
           "description": "Optional binary directory override for recipe-backed script installs.",
           "type": "string"
@@ -1225,6 +1572,14 @@
           "items": {
             "$ref": "#/$defs/ToolInstallSpec"
           }
+        },
+        "quarantine": {
+          "description": "Per-tool update_quarantine override. Defers updates until the reported availability timestamp is older than this duration.",
+          "examples": [
+            "2d",
+            "12h"
+          ],
+          "type": "string"
         },
         "taps": {
           "description": "Homebrew taps required before installing this tool.",

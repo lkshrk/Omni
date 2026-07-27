@@ -43,7 +43,6 @@ func TestToolViewRoundTripLossless(t *testing.T) {
 
 	got := toolCacheFromView(toolViewFromCache(orig))
 
-	// BaseModel is zero-value on both; compare the data fields.
 	if !reflect.DeepEqual(orig, got) {
 		t.Fatalf("round-trip changed the row:\n orig = %+v\n got  = %+v", orig, got)
 	}

@@ -12,7 +12,6 @@ func TestShouldIgnore_DefaultPatterns(t *testing.T) {
 		name string
 		want bool
 	}{
-		// VCS / OS
 		{".git", true},
 		{".DS_Store", true},
 		{".Spotlight-V100", true},
@@ -21,7 +20,6 @@ func TestShouldIgnore_DefaultPatterns(t *testing.T) {
 		{"Thumbs.db", true},
 		{"desktop.ini", true},
 
-		// Editor artifacts
 		{"init.lua.swp", true},
 		{"foo.swo", true},
 		{"zshrc~", true},
@@ -30,17 +28,14 @@ func TestShouldIgnore_DefaultPatterns(t *testing.T) {
 		{"settings.json.bak", true},
 		{"foo.bak", true},
 
-		// Python
 		{"__pycache__", true},
 		{"module.pyc", true},
 
-		// Cache dirs
 		{".cache", true},
 		{"cache", true},
 		{"caches", true},
 		{"node_modules", true},
 
-		// Runtime sockets
 		{"agent.sock", true},
 
 		// SSH private keys — blocked by exact name
@@ -57,7 +52,6 @@ func TestShouldIgnore_DefaultPatterns(t *testing.T) {
 		{"id_ecdsa.pub", false},
 		{"id_dsa.pub", false},
 
-		// Certificates and encryption formats
 		{"cert.pem", true},
 		{"server.key", true},
 		{"file.secret", true},
@@ -68,12 +62,10 @@ func TestShouldIgnore_DefaultPatterns(t *testing.T) {
 		{"bundle.pfx", true},
 		{"github.token", true},
 
-		// Credential filenames
 		{"credentials", true},
 		{"credentials.json", true},
 		{"auth.json", true},
 
-		// Safe files — should NOT be ignored
 		{".skill-lock.json", false},
 		{"init.lua", false},
 		{"config.toml", false},
@@ -243,7 +235,6 @@ func TestShouldIgnoreChecked_ValidPattern_NoError(t *testing.T) {
 }
 
 func TestShouldIgnoreChecked_BadPatternSkipsGoodPatterns(t *testing.T) {
-	// A bad pattern early in the list stops evaluation and returns an error.
 	matched, err := dots.ShouldIgnoreChecked("foo", []string{"[bad", "foo"})
 	if err == nil {
 		t.Error("expected error for bad pattern [bad")

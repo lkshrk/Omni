@@ -122,7 +122,7 @@ func (m *Model) handleFallbackEditorKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		name := m.fallbackTarget.Name
 		cmd := m.doSaveFallbackEditor(name)
 		m.closeFallbackEditor()
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		startOp(m, "Saving fallback for "+name+"…")
 		return []tea.Cmd{m.spinner.Tick, cmd}
 	}

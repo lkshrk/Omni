@@ -211,8 +211,27 @@ func TestProviderIsInstalledViaDpkgQueryAllPackagesPresent(t *testing.T) {
 	if !installed {
 		t.Fatal("expected installed when dpkg-query reports all packages present")
 	}
-	if version != "" {
-		t.Fatalf("version = %q, want empty (apt_repo does not report a version)", version)
+	if version != "5:24.0.0-1" {
+		t.Fatalf("version = %q, want the first package's apt version", version)
+	}
+}
+
+func TestProviderIsInstalledCheckOptionReportsPackageVersion(t *testing.T) {
+	exec := &recordingExec{stdoutFor: map[string]string{
+		"dpkg-query --showformat=${Version} --show docker-ce": "5:24.0.0-1",
+	}}
+	p := aptrepo.New(exec)
+	installed, version, err := p.IsInstalled(context.Background(), provider.Tool{
+		Options: map[string]string{"check": "command -v docker", "packages": "docker-ce"},
+	})
+	if err != nil {
+		t.Fatalf("IsInstalled: %v", err)
+	}
+	if !installed {
+		t.Fatal("expected installed via check option")
+	}
+	if version != "5:24.0.0-1" {
+		t.Fatalf("version = %q, want the apt version behind the check option", version)
 	}
 }
 

@@ -58,7 +58,7 @@ func (m *Model) acceptFilePickerPath(path string) []tea.Cmd {
 	m.showFilePicker = false
 	if m.filePickerForConfig {
 		m.filePickerForConfig = false
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		startOp(m, "Importing settings…")
 		cmds = append(cmds, m.spinner.Tick, m.doImportConfigFile(path))
 	} else if m.filePickerForDotAdd {
@@ -69,7 +69,7 @@ func (m *Model) acceptFilePickerPath(path string) []tea.Cmd {
 			m.stowInstallPath = path
 			return cmds
 		}
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		startOp(m, "Saving…")
 		cmds = append(cmds, m.spinner.Tick, m.doSetupDotsRepo(path))
 	} else {

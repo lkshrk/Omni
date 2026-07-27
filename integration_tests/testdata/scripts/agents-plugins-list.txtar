@@ -1,13 +1,4 @@
-# agents plugins list: shows manifest ("managed") plugins with per-agent
-# install status parsed from the fake claude CLI's `plugins list --json
-# --available` output ({installed: [{id: "name@marketplace", version, scope,
-# enabled}], available: [{name, marketplaceName, version, latestVersion}]}),
-# plus an "unmanaged" section for a plugin the fake CLI reports that the
-# manifest doesn't know about. --agents claude-code on the manifest entry
-# keeps status deterministic regardless of what real agent CLIs (if any) are
-# on the host PATH. caveman has a newer version available, so its managed row
-# shows "<version> -> <latest>"; hand-added has a version but no update
-# available, so its unmanaged row shows the plain version with no arrow.
+# Targeting claude-code keeps status independent of other agent CLIs on the host PATH.
 chmod 0755 $WORK/bin/claude
 env PATH=$WORK/bin:$PATH
 

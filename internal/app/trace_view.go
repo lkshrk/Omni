@@ -6,11 +6,7 @@ import (
 	"github.com/lkshrk/omni/internal/database"
 )
 
-// CommandTraceView is the app→TUI contract for one recorded command trace. Like
-// ToolView, it is a plain value type — no bun.BaseModel, no column tags, and the
-// nullable ExitCode flattened to *int64 (nil = no exit code recorded) — so the
-// trace-log view depends on internal/app instead of the persistence row
-// database.CommandTrace.
+// CommandTraceView — A plain value type so the trace-log view depends on internal/app, not database.CommandTrace.
 type CommandTraceView struct {
 	ID         int64
 	StartedAt  time.Time

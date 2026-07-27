@@ -130,8 +130,6 @@ func TestProviderAllowsConcurrentReads(t *testing.T) {
 	}
 }
 
-// --- Available ---
-
 func TestAvailable_True(t *testing.T) {
 	p, _ := newBrew(executor.MockCall{Stdout: "Homebrew 4.0.0"})
 	ok, err := p.Available(context.Background())
@@ -147,8 +145,6 @@ func TestAvailable_False(t *testing.T) {
 		t.Errorf("Available() = (%v, %v), want (false, nil)", ok, err)
 	}
 }
-
-// --- IsInstalled ---
 
 func TestIsInstalled_Found(t *testing.T) {
 	p, _ := newBrew(executor.MockCall{Stdout: "ripgrep 14.1.1\n"})
@@ -173,8 +169,6 @@ func TestIsInstalled_EmptyOutput(t *testing.T) {
 		t.Errorf("expected not installed for empty output, got (%v, _, %v)", ok, err)
 	}
 }
-
-// --- Install ---
 
 func TestInstall_Success(t *testing.T) {
 	p, m := newBrew(executor.MockCall{Stdout: "==> Installed"})
@@ -221,8 +215,6 @@ func TestInstall_Error(t *testing.T) {
 	}
 }
 
-// --- Uninstall ---
-
 func TestUninstall_Success(t *testing.T) {
 	p, m := newBrew(executor.MockCall{})
 	if err := p.Uninstall(context.Background(), tool("ripgrep")); err != nil {
@@ -233,8 +225,6 @@ func TestUninstall_Success(t *testing.T) {
 	}
 }
 
-// --- IsInstalled (tap packages) ---
-
 func TestIsInstalled_TapPackage(t *testing.T) {
 	// Tap-qualified package: IsInstalled should probe just the formula name.
 	p, m := newBrew(executor.MockCall{Stdout: "terraform 1.7.5\n"})
@@ -243,7 +233,6 @@ func TestIsInstalled_TapPackage(t *testing.T) {
 	if err != nil || !ok || ver != "1.7.5" {
 		t.Errorf("IsInstalled() = (%v, %q, %v), want (true, 1.7.5, nil)", ok, ver, err)
 	}
-	// Verify brew was called with short name, not the tap-qualified path.
 	if len(m.Calls) == 0 || m.Calls[0].Args[len(m.Calls[0].Args)-1] != "terraform" {
 		t.Errorf("expected brew called with 'terraform', got %v", m.Calls)
 	}
@@ -344,8 +333,6 @@ func TestUpgrade_SelfHealsUntrustedTap(t *testing.T) {
 		t.Fatalf("call[3] = %q, want trust quarkdown-labs/quarkdown", got)
 	}
 }
-
-// --- ListInstalled ---
 
 func TestListInstalled_CasksCarryBrewKind(t *testing.T) {
 	p, _ := newBrew(
@@ -531,8 +518,6 @@ func TestInstalledMetadataMap_SelfUpdatingCask(t *testing.T) {
 	}
 }
 
-// --- Tap / Untap / ListTaps / IsTapped ---
-
 func TestTap_Success(t *testing.T) {
 	p, m := newBrew(executor.MockCall{})
 	if err := p.Tap(context.Background(), "hashicorp/tap"); err != nil {
@@ -610,8 +595,6 @@ func TestIsTapped_False(t *testing.T) {
 		t.Errorf("IsTapped() = (%v, %v), want (false, nil)", ok, err)
 	}
 }
-
-// --- Search ---
 
 func TestSearch_ReturnsFormulaeAndCasks(t *testing.T) {
 	info := `{
@@ -711,8 +694,6 @@ func TestSearch_NoResultsReturnsEmpty(t *testing.T) {
 	}
 }
 
-// --- Name / Description ---
-
 func TestName(t *testing.T) {
 	p, _ := newBrew()
 	if got := p.Name(); got != "brew" {
@@ -726,8 +707,6 @@ func TestDescription_NonEmpty(t *testing.T) {
 		t.Error("Description() is empty")
 	}
 }
-
-// --- Upgrade ---
 
 func TestUpgrade_Success(t *testing.T) {
 	p, m := newBrew(
@@ -796,8 +775,6 @@ func TestUpgrade_Error(t *testing.T) {
 	}
 }
 
-// --- InstalledMap ---
-
 func TestInstalledMap_ReturnsFormulae(t *testing.T) {
 	installedInfo := `{"formulae":[` +
 		`{"name":"git","full_name":"git","installed":[{"version":"2.43.0","installed_on_request":true}]},` +
@@ -844,10 +821,7 @@ func TestInstalledMetadataMap_IncludesFormulaSource(t *testing.T) {
 }
 
 func TestInstalledMetadataMap_UntrustedTapFormulaHiddenFromInfo(t *testing.T) {
-	// Homebrew tap-trust hides untrusted-tap formulae from `brew info`, so flux
-	// (installed from fluxcd/tap) is absent from the JSON even though it is
-	// installed. `brew list --versions --formula` still reports it. ripgrep is a
-	// trusted-tap/core formula present in both.
+	// tap-trust hides flux from `brew info` though it is installed; only `brew list` reports it. ripgrep is in both.
 	installedInfo := `{"formulae":[` +
 		`{"name":"ripgrep","full_name":"ripgrep","installed":[{"version":"14.1.1","installed_on_request":true}]}` +
 		`],"casks":[]}`
@@ -923,9 +897,7 @@ func TestInstalledMetadataMap_RejectsMalformedFormulaName(t *testing.T) {
 }
 
 func TestInstalledMetadataMap_ExcludesTransitiveDepKnownToInfo(t *testing.T) {
-	// dep is a transitive dependency: present in brew info as not-on-request AND
-	// present in brew list. It must stay excluded — the union only adds formulae
-	// brew info hides entirely, not ones it deliberately reports as dependencies.
+	// dep is a transitive dependency brew info reports, so the union must not add it back.
 	installedInfo := `{"formulae":[` +
 		`{"name":"git","full_name":"git","installed":[{"version":"2.43.0","installed_on_request":true}]},` +
 		`{"name":"dep","full_name":"dep","installed":[{"version":"1.0.0","installed_on_request":false}]}` +
@@ -972,11 +944,7 @@ func TestInstalledMap_Error(t *testing.T) {
 	}
 }
 
-// TestInstalledMetadataMap_ExactCallCount asserts that a single
-// InstalledMetadataMap call issues exactly 3 brew subprocesses:
-// (1) info --json=v2 --installed, (2) list --cask, (3) list --versions --formula.
-// This guards against regressions that re-introduce duplicate brew list --cask
-// invocations within one metadata scan.
+// Exactly 3 subprocesses: info --installed, list --cask, list --versions --formula. Guards against a duplicated list --cask.
 func TestInstalledMetadataMap_ExactCallCount(t *testing.T) {
 	installedInfo := `{"formulae":[{"name":"git","full_name":"git","installed":[{"version":"2.43.0","installed_on_request":true}]}],"casks":[]}`
 	m := executor.NewMatchMock(
@@ -1021,8 +989,6 @@ func TestListInstalled_ReturnsFormulaeAndBrewCasks(t *testing.T) {
 		t.Fatalf("iterm2 = %+v, want brew-installed cask and version", byName["iterm2"])
 	}
 }
-
-// --- OutdatedMap ---
 
 func TestRefreshMetadata_RunsBrewUpdate(t *testing.T) {
 	p, m := newBrew(executor.MockCall{})
@@ -1101,8 +1067,6 @@ func TestOutdatedMap_NullReturnsError(t *testing.T) {
 	}
 }
 
-// --- Describe ---
-
 func TestDescribe_ReturnsDesc(t *testing.T) {
 	out := `{"formulae":[{"name":"ripgrep","desc":"Search tool that recursively searches directories"}],"casks":[]}`
 	p, _ := newBrew(executor.MockCall{Stdout: out})
@@ -1140,8 +1104,6 @@ func TestDescribe_NullInfoReturnsError(t *testing.T) {
 		t.Fatal("expected top-level null brew info to be rejected")
 	}
 }
-
-// --- BulkDescribe ---
 
 func TestBulkDescribe_FormulaeAndCasks(t *testing.T) {
 	out := `{"formulae":[{"name":"ripgrep","desc":"Search tool"},{"name":"wget","desc":"Internet file retriever"}],"casks":[{"token":"iterm2","desc":"Terminal emulator"}]}`

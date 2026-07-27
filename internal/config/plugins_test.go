@@ -82,8 +82,6 @@ func TestValidateRoot_GroupPluginRef_UnknownIsWarnOnly(t *testing.T) {
 	}
 }
 
-// TestValidateRoot_GroupMarketplaceRef_UnknownIsWarnOnly is the marketplace
-// twin of TestValidateRoot_GroupPluginRef_UnknownIsWarnOnly.
 func TestValidateRoot_GroupMarketplaceRef_UnknownIsWarnOnly(t *testing.T) {
 	cfg := &config.RootConfig{
 		Groups: []*config.GroupConfig{{Name: "work", Marketplaces: []string{"ghost"}}},
@@ -103,9 +101,6 @@ func TestValidateRoot_GroupMarketplaceRef_UnknownIsWarnOnly(t *testing.T) {
 	}
 }
 
-// TestValidateRoot_GroupMarketplaceRef_DeclaredNoError verifies a group
-// marketplace ref that matches a declared agents.marketplaces entry produces
-// no error at all, mirroring TestValidateRoot_PluginWithDeclaredMarketplace_NoError.
 func TestValidateRoot_GroupMarketplaceRef_DeclaredNoError(t *testing.T) {
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{

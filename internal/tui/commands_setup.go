@@ -7,9 +7,7 @@ import (
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
 
-// doSetupAgentsDiff computes diff-only unmanaged skill/mcp/plugin counts for
-// the agents onboarding step. No writes: skills uses ImportSkills' DryRun
-// path, mcp/plugins are already diff-only.
+// No writes: skills uses ImportSkills' DryRun path, mcp/plugins are already diff-only.
 func (m *Model) doSetupAgentsDiff() tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -41,9 +39,7 @@ func (m *Model) doSetupAgentsDiff() tea.Cmd {
 	}
 }
 
-// doSetupAgentsImportAll adopts all unmanaged skills/mcp servers/plugins into
-// the manifest. This is manifest adoption only — it never installs anything
-// into an agent CLI.
+// Skills additionally take over legacy CLI-managed directories, replacing them with links into Omni's store, which is why this runs only on explicit consent.
 func (m *Model) doSetupAgentsImportAll() tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -55,19 +51,33 @@ func (m *Model) doSetupAgentsImportAll() tea.Cmd {
 		if err != nil {
 			return setupAgentsImportDoneMsg{err: err}
 		}
-		pluginsAdopted, _, err := a.AdoptUnmanagedPlugins(ctx)
+		pluginsAdopted, err := a.AdoptUnmanagedPlugins(ctx)
 		if err != nil {
 			return setupAgentsImportDoneMsg{err: err}
 		}
 		return setupAgentsImportDoneMsg{
-			skills:  len(skillsDiff.Added),
-			mcp:     mcpAdopted,
-			plugins: pluginsAdopted,
+			skills:     len(skillsDiff.Added),
+			mcp:        mcpAdopted.Adopted,
+			plugins:    pluginsAdopted.Adopted,
+			advisories: setupImportAdvisories(skillsDiff, mcpAdopted, pluginsAdopted),
 		}
 	}
 }
 
-// doCreateConfig creates an empty settings.json and reloads.
+// The CLI's import output is the reference for what the user must be told; the wizard runs the same
+// adoption and may not drop any of it. Ordered by severity rather than by channel: mcp adopt warnings
+// are the ones raised for a credential that was written, and any surface that truncates the list must
+// truncate the harmless entries first.
+func setupImportAdvisories(skills app.ImportDiff, mcp app.McpAdoptResult, plugins app.PluginAdoptResult) []string {
+	var out []string
+	out = append(out, mcp.Warnings...)
+	out = append(out, mcp.Skipped...)
+	out = append(out, mcp.Conflicts...)
+	out = append(out, plugins.Skipped...)
+	out = append(out, skills.Warnings...)
+	return out
+}
+
 func (m *Model) doCreateConfig() tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -103,7 +113,6 @@ func (m *Model) doSetupImport(disabled []string) tea.Cmd {
 	}
 }
 
-// doSetupHost creates a host entry for the current machine.
 func (m *Model) doSetupHost(name string) tea.Cmd {
 	a := m.app
 	return func() tea.Msg {
@@ -182,8 +191,6 @@ func (m *Model) doSetupDotsRepo(path string) tea.Cmd {
 	}
 }
 
-// doSaveDisabledProviders persists the list of disabled ecosystem providers to
-// host_settings for this machine. Used by setup wizard step 2.
 func (m *Model) doSaveDisabledProviders(disabled []string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {

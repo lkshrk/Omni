@@ -3,13 +3,22 @@ package tui
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
 )
+
+// Bounds how long the post-onboarding overlay may block the UI while background scans are still pending.
+const setupReloadTimeout = 25 * time.Second
+
+type setupReloadTimeoutMsg struct {
+	gen int
+}
 
 type setupActivationOption struct {
 	label  string
@@ -22,7 +31,11 @@ var setupActivationOptions = []setupActivationOption{
 	{label: "Sync dotfiles", detail: "Apply configured dotfile links for this host."},
 }
 
-const setupStepCreateConfig = 11
+const (
+	setupStepCreateConfig     = 11
+	setupStepImportAdvisories = 12
+	setupStepMax              = setupStepImportAdvisories
+)
 
 func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	var cmds []tea.Cmd
@@ -49,7 +62,6 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.startupLoadErr = true
 		return nil
 	}
-	// Config was just created in setup — advance to provider/import step.
 	if m.mode == viewSetup && m.setupStep == setupStepCreateConfig {
 		m.setupStep = 1
 		m.setupProviders = msg.setupProviders
@@ -58,9 +70,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	}
 
 	if msg.noHost && !m.setupComplete {
-		// Config exists but no host entry matches this machine. Keep the
-		// background list as the pre-onboarding snapshot; fresh scans/reloads run
-		// only after onboarding exits.
+		// Keep the background list as the pre-onboarding snapshot; fresh scans and reloads run only after onboarding exits.
 		m.setSettings(msg.settings)
 		m.agentsEnabled = msg.agentsEnabled
 		m.skillsEnabled = msg.skillsEnabled
@@ -211,9 +221,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	}
 	cmds = append(cmds, m.doLoadNvmManaged())
 	cmds = append(cmds, m.startPostLoadBackgroundTasks()...)
-	// Only suppress the dashboard body during the post-bootstrap reload so
-	// the user sees a complete first render after onboarding. On a normal
-	// launch the dashboard renders immediately with per-row loading indicators.
+	// Only suppress the dashboard body during the post-bootstrap reload; a normal launch renders immediately with per-row loading indicators.
 	if wasSetupReloading {
 		m.beginLaunchBatchIfPending()
 	}
@@ -273,7 +281,7 @@ func (m *Model) handleSetupConfigImportDoneMsg(msg setupConfigImportDoneMsg) []t
 		return cmds
 	}
 	cmds = append(cmds, setStatus(m, "✓ imported settings", false))
-	m.loading = true
+	m.beginLoading(loadingOwnerLocalOp)
 	cmds = append(cmds, m.spinner.Tick, loadTools(m.app, m.ctx))
 	return cmds
 }
@@ -390,8 +398,19 @@ func (m *Model) handleSetupAgentsImportDoneMsg(msg setupAgentsImportDoneMsg) []t
 	} else {
 		cmds = append(cmds, setStatus(m, "✓ nothing to import", false))
 	}
+	if len(msg.advisories) > 0 {
+		m.startSetupImportAdvisories(msg.advisories)
+		return cmds
+	}
 	m.startSetupGroupSelection(&cmds)
 	return cmds
+}
+
+// Keep credential-adoption disclosure on a dedicated step because status truncation and reloads can hide it.
+func (m *Model) startSetupImportAdvisories(advisories []string) {
+	m.loading = false
+	m.setupImportNotices = advisories
+	m.setupStep = setupStepImportAdvisories
 }
 
 func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
@@ -401,9 +420,7 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return tea.Batch(cmds...), false
 	}
 
-	// Provider-priority editor (step 3) reuses the settings editor's key handling.
-	// When it closes (saved via enter or cancelled via esc) the wizard continues
-	// to host creation.
+	// When the priority editor closes, saved or cancelled, the wizard continues to host creation.
 	if m.editingPriority {
 		pcmds := m.handleSettingsPriorityKeyMsg(msg)
 		if !m.editingPriority {
@@ -420,7 +437,7 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			cmds = append(cmds, m.openFilePicker("Import settings.json", "", true))
 		case strings.EqualFold(msg.String(), "n"):
 			m.setupStep = setupStepCreateConfig
-			m.loading = true
+			m.beginLoading(loadingOwnerLocalOp)
 			startOp(m, "Creating settings.json…")
 			cmds = append(cmds, m.spinner.Tick, m.doCreateConfig())
 		case key.Matches(msg, m.keys.Back):
@@ -444,14 +461,13 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		case key.Matches(msg, m.keys.Confirm):
 			m.confirmSetupProviders(&cmds)
 		}
-	// Step 3 (provider priority) is handled by the editingPriority guard above.
 	case 4: // Agents onboarding.
 		if m.setupAgentsDiffLoading {
 			break
 		}
 		switch {
 		case strings.EqualFold(msg.String(), "i"):
-			m.loading = true
+			m.beginLoading(loadingOwnerLocalOp)
 			startOp(m, "Importing agents state…")
 			cmds = append(cmds, m.spinner.Tick, m.doSetupAgentsImportAll())
 		case strings.EqualFold(msg.String(), "s") || key.Matches(msg, m.keys.Back):
@@ -464,7 +480,7 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			m.setupStep = 6
 			cmds = append(cmds, m.openFilePicker("Dots repo path", "", false))
 		case strings.EqualFold(msg.String(), "n") || key.Matches(msg, m.keys.Back):
-			m.loading = true
+			m.beginLoading(loadingOwnerLocalOp)
 			startOp(m, "Disabling dots…")
 			cmds = append(cmds, m.spinner.Tick, m.doDisableDots(true, false))
 		}
@@ -481,7 +497,7 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 				break
 			}
 			if len(names) == 1 {
-				m.loading = true
+				m.beginLoading(loadingOwnerLocalOp)
 				startOp(m, "Copying host config…")
 				cmds = append(cmds, m.spinner.Tick, m.doSetupCopyHostConfigFrom(names[0]))
 				break
@@ -508,7 +524,7 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 				break
 			}
 			source := names[clampRange(m.setupCopyHostIdx, 0, len(names)-1)]
-			m.loading = true
+			m.beginLoading(loadingOwnerLocalOp)
 			startOp(m, "Copying host config…")
 			cmds = append(cmds, m.spinner.Tick, m.doSetupCopyHostConfigFrom(source))
 		case key.Matches(msg, m.keys.Back):
@@ -533,11 +549,11 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 				m.setupGroupDraft[group] = !m.setupGroupDraft[group]
 			}
 		case key.Matches(msg, m.keys.Confirm):
-			m.loading = true
+			m.beginLoading(loadingOwnerLocalOp)
 			startOp(m, "Saving groups…")
 			cmds = append(cmds, m.spinner.Tick, m.doSetupHostGroups(m.setupSelectedGroups()))
 		case key.Matches(msg, m.keys.Back):
-			m.loading = true
+			m.beginLoading(loadingOwnerLocalOp)
 			startOp(m, "Saving groups…")
 			cmds = append(cmds, m.spinner.Tick, m.doSetupHostGroups(nil))
 		}
@@ -557,7 +573,7 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 				cmds = append(cmds, setStatus(m, "✓ bootstrap reviewed", false))
 				m.finishSetupWithReload(&cmds)
 			case 1:
-				m.loading = true
+				m.beginLoading(loadingOwnerLocalOp)
 				startOp(m, "Syncing tools…")
 				cmds = append(cmds, m.spinner.Tick, m.doSetupBootstrapTools())
 			case 2:
@@ -568,13 +584,18 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 				if m.promptForStowInstall(stowInstallLaunchSync) {
 					break
 				}
-				m.loading = true
+				m.beginLoading(loadingOwnerLocalOp)
 				startOp(m, "Syncing dotfiles…")
 				cmds = append(cmds, m.spinner.Tick, m.doSetupBootstrapDots())
 			}
 		case key.Matches(msg, m.keys.Back):
 			cmds = append(cmds, setStatus(m, "✓ bootstrap skipped", false))
 			m.finishSetupWithReload(&cmds)
+		}
+	case setupStepImportAdvisories:
+		if key.Matches(msg, m.keys.Confirm) || key.Matches(msg, m.keys.Back) {
+			m.setupImportNotices = nil
+			m.startSetupGroupSelection(&cmds)
 		}
 	}
 
@@ -584,13 +605,13 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 func (m *Model) confirmSetupProviders(cmds *[]tea.Cmd) {
 	disabled := app.SetupDisabledProviders(m.setupProviders)
 	if m.setupStep == 1 {
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		startOp(m, "Importing tools…")
 		*cmds = append(*cmds, m.spinner.Tick, m.doSetupImport(disabled))
 		return
 	}
 	if len(disabled) > 0 {
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		startOp(m, "Saving providers…")
 		*cmds = append(*cmds, m.spinner.Tick, m.doSaveDisabledProviders(disabled))
 		return
@@ -617,12 +638,19 @@ func (m *Model) startCurrentProviderScans() []tea.Cmd {
 		return nil
 	}
 	setActivityStatus(m, m.toolRefreshStatus(m.refreshToolDone, m.refreshToolTotal))
-	ch, progressGen := m.beginProgressStream()
-	m.scanProgressCh = ch
 	m.scanGen++
 	gen := m.scanGen
-	var cmds []tea.Cmd
-	cmds = append(cmds, m.spinner.Tick, waitForProgress(ch, progressGen))
+	cmds := []tea.Cmd{m.spinner.Tick}
+	// Take over the shared stream only when no other operation owns it. Beginning a stream here would
+	// bump progressGen and strand the active operation: an agents run's gen-guarded done message is
+	// dropped on mismatch, leaving its section spinners running for the rest of the session.
+	var ch chan progressUpdate
+	var progressGen int
+	if m.progressCh == nil {
+		ch, progressGen = m.beginProgressStream()
+		m.scanProgressCh = ch
+		cmds = append(cmds, waitForProgress(ch, progressGen))
+	}
 	for _, prov := range plan.ProviderNames() {
 		cmds = append(cmds, m.doScanProvider(prov, gen, ch, progressGen))
 	}
@@ -648,6 +676,28 @@ func (m *Model) setupReloadPending() bool {
 		m.descRefreshing
 }
 
+// Names the work the overlay is waiting on, for the status line shown when it is dismissed before that work finishes.
+func (m *Model) setupReloadPendingLabels() []string {
+	var pending []string
+	if m.loading {
+		pending = append(pending, "tools")
+	}
+	if m.dotsLoading || m.dotsPreparing {
+		pending = append(pending, "dots")
+	}
+	if names := app.RefreshProviderScanLabels(m.scanningProviders, m.providerScanLabels); len(names) > 0 {
+		slices.Sort(names)
+		pending = append(pending, names...)
+	}
+	if m.providerSnapshotRefreshing || m.discoveryRefreshing {
+		pending = append(pending, "local tools")
+	}
+	if m.descRefreshing {
+		pending = append(pending, "descriptions")
+	}
+	return pending
+}
+
 func (m *Model) finishSetupReloadIfIdle() {
 	if m.setupReloading && !m.setupReloadPending() {
 		m.finishSetupReload()
@@ -656,13 +706,41 @@ func (m *Model) finishSetupReloadIfIdle() {
 
 func (m *Model) finishSetupReload() {
 	m.setupReloading = false
+	m.setupReloadGen++
 	m.progressText = ""
 }
 
+// A provider scan on an offline or unreachable host never completes, so without this timeout the overlay blocks the UI forever; the scans keep running and still apply their results.
+func (m *Model) beginSetupReload() tea.Cmd {
+	m.setupReloading = true
+	m.setupReloadGen++
+	gen := m.setupReloadGen
+	return func() tea.Msg {
+		time.Sleep(setupReloadTimeout)
+		return setupReloadTimeoutMsg{gen: gen}
+	}
+}
+
+func (m *Model) handleSetupReloadTimeoutMsg(msg setupReloadTimeoutMsg) []tea.Cmd {
+	if msg.gen != m.setupReloadGen || !m.setupReloading {
+		return nil
+	}
+	return m.dismissSetupReload()
+}
+
+// Names whatever is still running so the footer explains why the UI came back before the scans did.
+func (m *Model) dismissSetupReload() []tea.Cmd {
+	pending := m.setupReloadPendingLabels()
+	m.finishSetupReload()
+	if len(pending) == 0 {
+		return nil
+	}
+	text := "background scans still running: " + strings.Join(pending, ", ") + " — results will land when ready"
+	return []tea.Cmd{setStatusFor(m, text, false, statusDurationErr)}
+}
+
 func (m *Model) advanceSetupPastProviders(cmds *[]tea.Cmd) {
-	// Provider-priority step: order + enable/disable concrete providers. Saving
-	// derives the node/python effective managers, so this replaces the old
-	// node-manager-only step.
+	// Saving derives the node/python effective managers.
 	m.setupStep = 3
 	m.startSettingsPriorityEdit()
 }
@@ -679,7 +757,7 @@ func (m *Model) startSetupHostCreation(cmds *[]tea.Cmd) {
 		m.hostRequired = false
 		return
 	}
-	m.loading = true
+	m.beginLoading(loadingOwnerLocalOp)
 	startOp(m, "Preparing this machine…")
 	*cmds = append(*cmds, m.spinner.Tick, m.doSetupHost(name))
 }
@@ -703,9 +781,7 @@ func (m *Model) startSetupGroupSelection(cmds *[]tea.Cmd) {
 	m.initSetupGroupDraft()
 }
 
-// startSetupAgentsStep enters the post-dots agents onboarding step, or skips
-// straight to group selection when agents are disabled for this host or no
-// supported agent CLI is detected.
+// Skips straight to group selection when agents are disabled for this host or no supported agent CLI is detected.
 func (m *Model) startSetupAgentsStep(cmds *[]tea.Cmd) {
 	if !m.agentsEnabled {
 		m.startSetupGroupSelection(cmds)
@@ -746,16 +822,17 @@ func (m *Model) finishSetupWithReload(cmds *[]tea.Cmd) {
 	m.mode = targetMode
 	m.setupBackgroundMode = targetMode
 	m.setupStep = 0
+	m.setupImportNotices = nil
 	m.setupCopyHostIdx = 0
 	m.setupGroupIdx = 0
 	m.setupGroupDraft = nil
 	m.setupActivationIdx = 0
 	m.hostRequired = false
 	m.setupComplete = true
-	m.setupReloading = true
+	reloadTimeout := m.beginSetupReload()
 	m.progressText = "Loading tools…"
-	m.loading = true
-	*cmds = append(*cmds, m.spinner.Tick, loadTools(m.app, m.ctx))
+	m.beginLoading(loadingOwnerLocalOp)
+	*cmds = append(*cmds, reloadTimeout, m.spinner.Tick, loadTools(m.app, m.ctx))
 }
 
 func (m *Model) markBootstrapComplete(cmds *[]tea.Cmd) {

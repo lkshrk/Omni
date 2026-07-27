@@ -2,175 +2,36 @@ package app
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/lkshrk/omni/internal/agent"
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
-// SkillInstaller materializes one skill package onto the host for the given
-// agents. The npx/bunx wrapper is the only implementation today; a Go-native
-// installer can replace it behind this interface later.
 type SkillInstaller interface {
-	Install(ctx context.Context, pkg config.SkillPackage, agents []string) error
+	Sync(ctx context.Context, pkg config.SkillPackage, agents []string) ([]string, error)
 }
 
-func skillRunner(nodeManager string) string {
-	if nodeManager == "bun" {
-		return "bunx"
-	}
-	return "npx"
-}
-
-func skillPackageSource(pkg config.SkillPackage) string {
-	if pkg.Ref != "" {
-		return pkg.Source + "#" + pkg.Ref
-	}
-	return pkg.Source
-}
-
-// skillPackageAddArgs builds `skills add <source>[#ref] -g [-a agent...] -y`.
-// Repeating the flag keeps each target explicit and mirrors the upstream
-// documented multi-agent invocation shape.
-func skillPackageAddArgs(pkg config.SkillPackage, agents []string) []string {
-	args := []string{"skills", "add", skillPackageSource(pkg), "-g"}
-	for _, agent := range agents {
-		args = append(args, "-a", agent)
-	}
-	return append(args, "-y")
-}
-
-// npxInstaller runs the upstream skills CLI via npx/bunx.
-type npxInstaller struct {
-	runner string
-	exec   func(ctx context.Context, name string, args ...string) (string, string, error)
-}
-
-func (n npxInstaller) Install(ctx context.Context, pkg config.SkillPackage, agents []string) error {
-	args := skillPackageAddArgs(pkg, agents)
-	stdout, stderr, err := n.exec(ctx, n.runner, args...)
-	if err != nil {
-		return fmt.Errorf("skills add %s: %w: %s", pkg.Source, err, stderr)
-	}
-	if err := skillsCLIFailure("skills add "+pkg.Source, stdout, stderr); err != nil {
-		return err
-	}
-	return verifySkillInstalled(pkg.Source)
-}
-
-// skillsCLIFailureMarkers are substrings the skills CLI prints when an
-// operation fails despite a zero exit. Verified against vercel-labs/skills
-// (main, 2026-07): per-skill add failures print "Failed to install ${N}" plus
-// "✗ skill → agent: err" lines (src/add.ts), remove prints "Failed to remove
-// ${N} skill(s)" (src/remove.ts), update prints "✗ Failed to update ${name}"
-// (src/update.ts) — and none of these set process.exitCode, so the process
-// exits 0 (src/cli.ts: `process.exit(process.exitCode ?? 0)`). Only a
-// top-level clone/parse error exits 1. picocolors drops ANSI codes on
-// non-TTY output, so plain substring matching holds through the executor.
-// Marker checking catches the case verifySkillInstalled cannot: a failed
-// REinstall whose stale lock entries from an earlier install still satisfy
-// the effect check, plus update/remove operations that have no effect check
-// at all. "✘" is kept defensively for glyph drift.
-var skillsCLIFailureMarkers = []string{"Failed to", "✗", "✘"}
-
-func skillsCLIFailure(op, stdout, stderr string) error {
-	for _, m := range skillsCLIFailureMarkers {
-		if strings.Contains(stdout, m) || strings.Contains(stderr, m) {
-			if detail := skillsFailureDetail(stdout, stderr); detail != "" {
-				return fmt.Errorf("%s exited 0 but reported failure: %s", op, detail)
-			}
-			return fmt.Errorf("%s exited 0 but reported failure (%q); treating as failed", op, m)
-		}
-	}
-	return nil
-}
-
-// skillsFailureDetail extracts the CLI's own failure lines so the surfaced
-// error explains why the operation failed, not just that a marker matched.
-func skillsFailureDetail(stdout, stderr string) string {
-	var lines []string
-	for _, line := range strings.Split(stdout+"\n"+stderr, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		for _, m := range skillsCLIFailureMarkers {
-			if strings.Contains(trimmed, m) {
-				lines = append(lines, trimmed)
-				break
-			}
-		}
-	}
-	const maxLines = 4
-	if len(lines) > maxLines {
-		lines = append(lines[:maxLines], "…")
-	}
-	return strings.Join(lines, "; ")
-}
-
-// SkillsCLIOutputIndicatesFailure reports whether output from the skills CLI
-// contains a known failure marker. Exported for the real-CLI canary
-// integration test, which guards the markers against upstream wording drift
-// (the CLI is invoked via npx unpinned, so releases change under us).
-func SkillsCLIOutputIndicatesFailure(stdout, stderr string) bool {
-	return skillsCLIFailure("skills", stdout, stderr) != nil
-}
-
-// verifySkillInstalled guards against the skills CLI exiting 0 on a failed
-// install — the same upstream-CLI contract already hit with `claude plugin`
-// (see plugin_claude_adapter.go's failure markers). Rather than guessing at
-// output markers for a CLI whose failure text is unverified, check the
-// effect: a successful `skills add` writes the package's entries to the
-// global lockfile, so their absence after a zero exit means the install did
-// not happen. Entries left by an earlier install satisfy this check, so a
-// failed exit-0 REinstall printing a failure marker is caught by
-// skillsAddFailure instead; a marker-less silent one would need version/hash
-// comparison against the resolved ref to detect.
-func verifySkillInstalled(source string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("resolving home dir: %w", err)
-	}
-	lock, err := config.LoadSkillLock(config.SkillLockPath(home))
-	if err != nil {
-		return err
-	}
-	if len(packageSkills(lock, source)) == 0 {
-		return fmt.Errorf("skills add %s exited 0 but wrote no lockfile entries; treating as failed install", source)
-	}
-	return nil
-}
-
-// SkillFailure records one skill that failed to install.
 type SkillFailure struct {
 	Name    string
 	Message string
 }
 
-// RestoreSkillsResult summarises a restore run.
 type RestoreSkillsResult struct {
 	Installed []string
 	Failed    []SkillFailure
 	Drift     []string
 	Warnings  []string
-	// ShadowedByPlugin lists package sources skipped because an installed
-	// plugin's name matches the package's repo-segment name on one of its
-	// target agents — a user-scope duplicate of a plugin-provided skill is
-	// harm, not repair (see SkillPackageRow.ShadowedByPlugin).
+	// A user-scope duplicate of a plugin-provided skill is harm, not repair.
 	ShadowedByPlugin []string
 }
 
-// filterShadowedSkillPackages splits pkgs into those to install and those
-// skipped because an installed plugin already provides them on a target
-// agent (see skillPackageRepoName/installedPluginNames). use is the host's
-// enabled-agents fallback, mirroring effectiveSkillAgents' resolution so the
-// shadow check considers the same agent set restore would actually install
-// to.
+// use mirrors effectiveSkillAgents so the shadow check sees the agent set restore would install to.
 func filterShadowedSkillPackages(pkgs []resolvedPackage, use []string, pluginNames map[string]map[string]bool) (keep []resolvedPackage, shadowed []string) {
 	for _, p := range pkgs {
 		repoName := skillPackageRepoName(p.Source)
@@ -191,10 +52,7 @@ func filterShadowedSkillPackages(pkgs []resolvedPackage, use []string, pluginNam
 	return keep, shadowed
 }
 
-// resolveRestoreTargets writes an explicit agent set onto every package before
-// invoking the skills CLI. Package-level targets remain authoritative when the
-// host has no agents_use setting; only unrestricted packages fall back to the
-// detected installed agents.
+// Package-level targets stay authoritative; only unrestricted packages fall back to detected agents.
 func resolveRestoreTargets(pkgs []resolvedPackage, use, detected []string) []resolvedPackage {
 	out := make([]resolvedPackage, len(pkgs))
 	copy(out, pkgs)
@@ -218,7 +76,9 @@ func restoreSkills(ctx context.Context, pkgs []resolvedPackage, use []string, in
 		if len(agents) == 0 {
 			continue
 		}
-		if err := inst.Install(ctx, p.SkillPackage, agents); err != nil {
+		warnings, err := inst.Sync(ctx, p.SkillPackage, agents)
+		res.Warnings = append(res.Warnings, warnings...)
+		if err != nil {
 			res.Failed = append(res.Failed, SkillFailure{Name: p.Source, Message: err.Error()})
 			continue
 		}
@@ -227,11 +87,7 @@ func restoreSkills(ctx context.Context, pkgs []resolvedPackage, use []string, in
 	return res
 }
 
-// effectiveSkillAgents resolves which agents a package installs to: the host's
-// enabled agents (use), narrowed to the package's own agents when it declares
-// any. Restore resolves a nil host setting to detected installed agents before
-// calling this helper.
-// A non-nil empty use list means "no agents enabled" — the intersection is empty and the package installs to nothing.
+// A non-nil empty use list means no agents enabled, so the package installs to nothing.
 func effectiveSkillAgents(use []string, pkg config.SkillPackage) []string {
 	if len(pkg.Agents) == 0 {
 		return use
@@ -252,32 +108,50 @@ func effectiveSkillAgents(use []string, pkg config.SkillPackage) []string {
 	return out
 }
 
-// RestoreSkillsOptions controls a restore run.
 type RestoreSkillsOptions struct {
 	DryRun bool
 }
 
-func dryRunLines(runner string, pkgs []resolvedPackage, use []string) []string {
+// Sync leaves a drifted target untouched, so a preview that promised an install there would be the opposite of what applying it does.
+func dryRunLines(ctx context.Context, pkgs []resolvedPackage, use []string, inventories skillInventoryReader) []string {
 	lines := make([]string, 0, len(pkgs))
 	for _, p := range pkgs {
 		agents := effectiveSkillAgents(use, p.SkillPackage)
 		if len(agents) == 0 {
 			continue
 		}
-		args := skillPackageAddArgs(p.SkillPackage, agents)
-		lines = append(lines, runner+" "+strings.Join(args, " "))
+		drifted := driftedSkillTargets(ctx, inventories, p.Source, agents)
+		installable := make([]string, 0, len(agents))
+		for _, id := range agents {
+			if !slices.Contains(drifted, id) {
+				installable = append(installable, id)
+			}
+		}
+		for _, id := range drifted {
+			lines = append(lines, fmt.Sprintf(
+				"skip %s on %s (drifted; another tool owns the skill entry); resolve with %s",
+				p.Source, id, skillDriftRemedy))
+		}
+		if len(installable) == 0 {
+			continue
+		}
+		agents = installable
+		line := "install " + p.Source
+		if p.Ref != "" {
+			line += " at ref " + p.Ref
+		}
+		if len(p.Skills) > 0 {
+			line += " skills " + strings.Join(p.Skills, ",")
+		} else {
+			line += " all discovered skills"
+		}
+		line += " for targets " + strings.Join(agents, ",")
+		lines = append(lines, line)
 	}
 	return lines
 }
 
-func nodeManager(cfg *config.RootConfig) string {
-	return cfg.Settings.Ecosystems[provider.EcosystemNode].Manager
-}
-
-// unconfiguredHostSkillsWarning reports when group-assigned skill packages are
-// silently excluded from a restore because the current host is not registered
-// in cfg.Hosts (doctorHost surfaces the same state) — without it, "no active
-// groups" and "host never bootstrapped" are indistinguishable to the user.
+// Without it, no-active-groups and host-never-bootstrapped are indistinguishable.
 func unconfiguredHostSkillsWarning(cfg *config.RootConfig) string {
 	if _, ok := activeHostGroupNames(cfg, currentMachineGroupName()); ok {
 		return ""
@@ -290,7 +164,6 @@ func unconfiguredHostSkillsWarning(cfg *config.RootConfig) string {
 	return ""
 }
 
-// RestoreSkills restores the resolved package set onto this host.
 func (a *App) RestoreSkills(ctx context.Context, opts RestoreSkillsOptions) (RestoreSkillsResult, []string, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -300,10 +173,9 @@ func (a *App) RestoreSkills(ctx context.Context, opts RestoreSkillsOptions) (Res
 		return RestoreSkillsResult{}, nil, err
 	}
 	if config.BoolVal(a.effectiveSettings(cfg).SkillsDisabled) {
-		return RestoreSkillsResult{Warnings: []string{"skills are disabled for this host, skipping restore"}}, nil, nil
+		return RestoreSkillsResult{Warnings: []string{"skills are disabled for this host, skipping sync"}}, nil, nil
 	}
-	runner := skillRunner(nodeManager(cfg))
-	pkgs := resolveSkillPackages(cfg, currentMachineGroupName())
+	pkgs := a.resolveSkillPackages(cfg, currentMachineGroupName())
 	use := a.effectiveSettings(cfg).AgentsUse
 	var detected []string
 	if use == nil {
@@ -315,69 +187,99 @@ func (a *App) RestoreSkills(ctx context.Context, opts RestoreSkillsOptions) (Res
 		warnings = append(warnings, w)
 	}
 	pkgs, shadowedSources := filterShadowedSkillPackages(pkgs, nil, pluginNames)
-	if opts.DryRun {
-		return RestoreSkillsResult{ShadowedByPlugin: shadowedSources, Warnings: warnings}, dryRunLines(runner, pkgs, nil), nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return RestoreSkillsResult{}, nil, fmt.Errorf("resolving home dir: %w", err)
-	}
-	before, err := lockHashes(home)
+	service, err := a.skillService()
 	if err != nil {
 		return RestoreSkillsResult{}, nil, err
 	}
-	exec := a.fallbackExecutor().Run
-	inst := npxInstaller{runner: runner, exec: exec}
-	res := restoreSkills(ctx, pkgs, nil, inst)
+	if opts.DryRun {
+		return RestoreSkillsResult{ShadowedByPlugin: shadowedSources, Warnings: warnings},
+			dryRunLines(ctx, pkgs, nil, service), nil
+	}
+	res := restoreSkills(ctx, pkgs, nil, service)
 	res.ShadowedByPlugin = shadowedSources
 	res.Warnings = append(res.Warnings, warnings...)
-	if len(res.Installed) > 0 {
-		lock, err := config.LoadSkillLock(config.SkillLockPath(home))
-		if err != nil {
-			return res, nil, err
-		}
-		listed, err := listGlobalSkills(ctx, runner, exec)
-		if err != nil {
-			res = failRestoredSkillVerification(res, err)
-		} else {
-			res = verifyRestoredSkillTargets(a.agentRegistry(), pkgs, lock, listed, res)
-		}
-	}
-	after, err := lockHashes(home)
-	if err != nil {
-		return RestoreSkillsResult{}, nil, err
-	}
-	res.Drift = skillDrift(before, after)
+	res.Drift = skillDriftLines(ctx, pkgs, service)
+	a.refreshSkillOutdatedBestEffort(ctx)
 	return res, nil, nil
 }
 
-// ImportDiff reports what an import changed.
+type skillInventoryReader interface {
+	Inventory(ctx context.Context, source string, targetIDs []string) (agent.SkillInventory, error)
+}
+
+// Carried by every drift report so the fix travels with the finding.
+const skillDriftRemedy = `"omni agents skills resolve" (--use-managed / --use-local)`
+
+// An unreadable inventory yields no drifted targets: a preview or report must not invent one.
+func driftedSkillTargets(ctx context.Context, inventories skillInventoryReader, source string, agents []string) []string {
+	inventory, err := inventories.Inventory(ctx, source, agents)
+	if err != nil {
+		return nil
+	}
+	var drifted []string
+	for _, id := range agents {
+		if inventory.PerTargetDrifted[id] {
+			drifted = append(drifted, id)
+		}
+	}
+	sort.Strings(drifted)
+	return drifted
+}
+
+// Converge already adopted the byte-identical copies, so whatever is still drifted needs a human.
+func skillDriftLines(ctx context.Context, pkgs []resolvedPackage, inventories skillInventoryReader) []string {
+	var lines []string
+	for _, p := range pkgs {
+		agents := effectiveSkillAgents(nil, p.SkillPackage)
+		if len(agents) == 0 {
+			continue
+		}
+		for _, id := range driftedSkillTargets(ctx, inventories, p.Source, agents) {
+			lines = append(lines, fmt.Sprintf(
+				"%s: drifted on %s (another tool owns the skill entry; left untouched); resolve with %s",
+				p.Source, id, skillDriftRemedy))
+		}
+	}
+	return lines
+}
+
 type ImportDiff struct {
 	Added     []string
 	Updated   []string
 	Unchanged []string
+	Warnings  []string
 }
 
-// importPackages folds lockfile entries into the flat package manifest, deduped
-// by source. New sources are appended ungrouped; existing sources update Ref
-// when the lockfile differs.
+// New sources are appended ungrouped; an already managed source only takes the lockfile's Ref, because
+// re-adding its skills would silently undo a selector the user narrowed with "skills resolve --use-local".
 func importPackages(existing []config.SkillPackage, lock *config.SkillLockFile) ([]config.SkillPackage, ImportDiff) {
 	bySource := make(map[string]config.SkillPackage, len(existing))
 	order := make([]string, 0, len(existing))
+	var normalized []config.SkillPackage
 	for _, p := range existing {
+		p = normalizeConfiguredSkillPackage(p)
+		normalized, _ = upsertPackage(normalized, p)
+	}
+	for _, p := range normalized {
 		bySource[p.Source] = p
 		order = append(order, p.Source)
 	}
 
 	lockBySource := make(map[string]string)
+	skillsBySource := make(map[string][]string)
 	sources := make([]string, 0)
-	for _, e := range lock.Skills {
+	for name, e := range lock.Skills {
 		if e.Source == "" {
 			continue
 		}
-		if _, ok := lockBySource[e.Source]; !ok {
-			lockBySource[e.Source] = e.Ref
-			sources = append(sources, e.Source)
+		entry := normalizeConfiguredSkillPackage(config.SkillPackage{
+			Source: e.Source,
+			Ref:    e.Ref,
+		})
+		skillsBySource[entry.Source] = append(skillsBySource[entry.Source], name)
+		if _, ok := lockBySource[entry.Source]; !ok {
+			lockBySource[entry.Source] = entry.Ref
+			sources = append(sources, entry.Source)
 		}
 	}
 	sort.Strings(sources)
@@ -385,10 +287,12 @@ func importPackages(existing []config.SkillPackage, lock *config.SkillLockFile) 
 	var diff ImportDiff
 	for _, src := range sources {
 		ref := lockBySource[src]
+		skills := skillsBySource[src]
+		sort.Strings(skills)
 		prev, ok := bySource[src]
 		switch {
 		case !ok:
-			bySource[src] = config.SkillPackage{Source: src, Ref: ref}
+			bySource[src] = config.SkillPackage{Source: src, Ref: ref, Skills: skills}
 			order = append(order, src)
 			diff.Added = append(diff.Added, src)
 		case prev.Ref != ref:
@@ -407,13 +311,12 @@ func importPackages(existing []config.SkillPackage, lock *config.SkillLockFile) 
 	return merged, diff
 }
 
-// ImportSkillsOptions controls an import run.
+// ImportSkillsOptions — An empty Source claims every eligible package; naming one turns skip reasons into errors.
 type ImportSkillsOptions struct {
 	DryRun bool
+	Source string
 }
 
-// ImportSkills ingests CLI/UI-added skills from the live lockfile into the
-// manifest. With DryRun it computes the diff but does not write.
 func (a *App) ImportSkills(ctx context.Context, opts ImportSkillsOptions) (ImportDiff, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -426,231 +329,140 @@ func (a *App) ImportSkills(ctx context.Context, opts ImportSkillsOptions) (Impor
 	if err != nil {
 		return ImportDiff{}, fmt.Errorf("resolving home dir: %w", err)
 	}
-	lock, err := config.LoadSkillLock(config.SkillLockPath(home))
+	full, err := config.LoadSkillLock(config.SkillLockPath(home))
 	if err != nil {
 		return ImportDiff{}, err
+	}
+	lock, warnings := a.filterPluginShadowedLock(ctx, cfg, home, full)
+	if source := strings.TrimSpace(opts.Source); source != "" {
+		lock, err = a.selectImportSource(cfg, full, lock, source)
+		if err != nil {
+			return ImportDiff{}, err
+		}
+		// Warnings about deliberately untouched packages are noise once the user named one package.
+		warnings = nil
 	}
 
 	var diff ImportDiff
 	if opts.DryRun {
 		_, diff = importPackages(cfg.Agents.Packages, lock)
+		diff.Warnings = append(diff.Warnings, warnings...)
 		return diff, nil
 	}
 
+	var imported []config.SkillPackage
 	err = a.withConfig(func(cfg *config.RootConfig) error {
 		merged, d := importPackages(cfg.Agents.Packages, lock)
 		cfg.Agents.Packages = merged
 		diff = d
+		imported = lockfilePackages(merged, lock)
 		return nil
 	})
-	return diff, err
-}
-
-// skillDrift returns the names whose folder hash changed (or newly appeared)
-// between two lockfile snapshots. Names absent from `after` are ignored.
-func skillDrift(before, after map[string]string) []string {
-	var changed []string
-	for name, h := range after {
-		prev, ok := before[name]
-		if ok && prev != "" && prev != h {
-			changed = append(changed, name)
-		}
+	if err != nil {
+		diff.Warnings = append(diff.Warnings, warnings...)
+		return diff, err
 	}
-	sort.Strings(changed)
-	return changed
+	diff.Warnings = append(warnings, a.adoptLegacySkills(ctx, cfg, imported)...)
+	return diff, nil
 }
 
-func lockHashes(home string) (map[string]string, error) {
-	lock, err := config.LoadSkillLock(config.SkillLockPath(home))
+// Names the specific reason: nothing-happened is otherwise indistinguishable from a typo.
+func (a *App) selectImportSource(
+	cfg *config.RootConfig,
+	full, filtered *config.SkillLockFile,
+	source string,
+) (*config.SkillLockFile, error) {
+	parsed, err := a.parseSkillPackage(source)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]string, len(lock.Skills))
-	for name, e := range lock.Skills {
-		out[name] = e.SkillFolderHash
-	}
-	return out, nil
-}
-
-// skillUpdateArgs builds `skills update -g -y [names...]`. With names it targets
-// exactly those skills; with none it updates all global skills.
-func skillUpdateArgs(names []string) []string {
-	args := []string{"skills", "update", "-g", "-y"}
-	return append(args, names...)
-}
-
-// skillsCLIListEntry is the stable machine-readable subset emitted by
-// `skills list -g --json`. Agent values are upstream display names, not the
-// IDs accepted by `skills add -a`.
-type skillsCLIListEntry struct {
-	Name   string   `json:"name"`
-	Scope  string   `json:"scope"`
-	Agents []string `json:"agents"`
-}
-
-func skillListArgs() []string {
-	return []string{"skills", "list", "-g", "--json"}
-}
-
-func parseSkillsCLIList(stdout string) ([]skillsCLIListEntry, error) {
-	var entries []skillsCLIListEntry
-	if err := json.Unmarshal([]byte(stdout), &entries); err != nil {
-		return nil, fmt.Errorf("parsing skills list JSON: %w", err)
-	}
-	if entries == nil {
-		return nil, fmt.Errorf("parsing skills list JSON: expected an array")
-	}
-	return entries, nil
-}
-
-func listGlobalSkills(ctx context.Context, runner string, exec func(context.Context, string, ...string) (string, string, error)) ([]skillsCLIListEntry, error) {
-	stdout, stderr, err := exec(ctx, runner, skillListArgs()...)
-	if err != nil {
-		return nil, fmt.Errorf("skills list: %w: %s", err, stderr)
-	}
-	if err := skillsCLIFailure("skills list", stdout, stderr); err != nil {
-		return nil, err
-	}
-	return parseSkillsCLIList(stdout)
-}
-
-func skillAgentDisplay(registry *agent.Registry, id string) string {
-	if target, ok := registry.ByID(id); ok {
-		return target.Display
-	}
-	return id
-}
-
-// verifyRestoredSkillTargets turns a nominal package success into a failure
-// when the upstream filesystem-backed list cannot see any current lockfile
-// skill or its per-agent links. Lockfiles may retain removed package skills,
-// so names absent from the authoritative list are ignored when siblings exist.
-func verifyRestoredSkillTargets(registry *agent.Registry, pkgs []resolvedPackage, lock *config.SkillLockFile, entries []skillsCLIListEntry, res RestoreSkillsResult) RestoreSkillsResult {
-	listed := make(map[string]map[string]bool, len(entries))
-	for _, entry := range entries {
-		if entry.Scope != "global" {
-			continue
-		}
-		agents := listed[entry.Name]
-		if agents == nil {
-			agents = make(map[string]bool, len(entry.Agents))
-			listed[entry.Name] = agents
-		}
-		for _, display := range entry.Agents {
-			agents[display] = true
+	identity := a.skillSourceIdentity(parsed.Source)
+	inLock := false
+	for _, entry := range full.Skills {
+		if entry.Source != "" && a.skillSourceIdentity(entry.Source) == identity {
+			inLock = true
+			break
 		}
 	}
-
-	packages := make(map[string]resolvedPackage, len(pkgs))
-	for _, pkg := range pkgs {
-		packages[pkg.Source] = pkg
+	if !inLock {
+		return nil, fmt.Errorf(
+			"skill package %q is not in the legacy lockfile; \"omni agents skills import\" only claims packages a CLI already installed",
+			parsed.Source)
 	}
+	for _, p := range cfg.Agents.Packages {
+		if a.skillSourceIdentity(p.Source) == identity {
+			return nil, fmt.Errorf("skill package %q is already in the manifest", parsed.Source)
+		}
+	}
+	narrowed := *filtered
+	narrowed.Skills = make(map[string]config.SkillLockEntry)
+	for name, entry := range filtered.Skills {
+		if entry.Source != "" && a.skillSourceIdentity(entry.Source) == identity {
+			narrowed.Skills[name] = entry
+		}
+	}
+	if len(narrowed.Skills) == 0 {
+		return nil, fmt.Errorf(
+			"skill package %q is provided by an installed plugin of the same name; importing it would duplicate plugin-managed content",
+			parsed.Source)
+	}
+	return &narrowed, nil
+}
 
-	verified := make([]string, 0, len(res.Installed))
-	for _, source := range res.Installed {
-		pkg, ok := packages[source]
+// Adopting a plugin-managed directory would hand omni content the plugin keeps rewriting.
+func (a *App) filterPluginShadowedLock(ctx context.Context, cfg *config.RootConfig, home string, lock *config.SkillLockFile) (*config.SkillLockFile, []string) {
+	candidates := a.unmanagedLockSources(cfg, lock)
+	if len(candidates) == 0 {
+		return lock, nil
+	}
+	pluginNames, warnings := installedPluginNames(ctx, a)
+	installedAgents := a.installedAgents(home)
+	shadowed := make(map[string]bool)
+	for _, src := range candidates {
+		agentID, ok := pluginProvidingLockPackage(home, src, a.packageSkills(lock, src), installedAgents, pluginNames)
 		if !ok {
-			verified = append(verified, source)
 			continue
 		}
-		names := packageSkills(lock, source)
-		var missing []string
-		if len(names) == 0 {
-			missing = append(missing, "lockfile skill entries")
-		}
-		listedAny := false
-		for _, name := range names {
-			agents, ok := listed[name]
-			if !ok {
-				continue
-			}
-			listedAny = true
-			for _, agentID := range effectiveSkillAgents(nil, pkg.SkillPackage) {
-				if !agents[skillAgentDisplay(registry, agentID)] {
-					missing = append(missing, name+" → "+agentID)
-				}
-			}
-		}
-		if len(names) > 0 && !listedAny {
-			missing = append(missing, "global skill entries")
-		}
-		if len(missing) > 0 {
-			res.Failed = append(res.Failed, SkillFailure{
-				Name:    source,
-				Message: "skills list verification missing " + strings.Join(missing, ", "),
-			})
+		shadowed[src] = true
+		warnings = append(warnings, fmt.Sprintf("skipped %s: plugin %q on %s already provides it", src, skillPackageRepoName(src), agentID))
+	}
+	if len(shadowed) == 0 {
+		return lock, warnings
+	}
+	filtered := *lock
+	filtered.Skills = make(map[string]config.SkillLockEntry, len(lock.Skills))
+	for name, entry := range lock.Skills {
+		if entry.Source != "" && shadowed[a.skillSourceIdentity(entry.Source)] {
 			continue
 		}
-		verified = append(verified, source)
+		filtered.Skills[name] = entry
 	}
-	res.Installed = verified
-	return res
+	return &filtered, warnings
 }
 
-func failRestoredSkillVerification(res RestoreSkillsResult, err error) RestoreSkillsResult {
-	for _, source := range res.Installed {
-		res.Failed = append(res.Failed, SkillFailure{
-			Name:    source,
-			Message: "skills list verification failed: " + err.Error(),
-		})
+func lockfilePackages(merged []config.SkillPackage, lock *config.SkillLockFile) []config.SkillPackage {
+	sources := make(map[string]bool, len(lock.Skills))
+	for _, entry := range lock.Skills {
+		if entry.Source == "" {
+			continue
+		}
+		sources[normalizeConfiguredSkillPackage(config.SkillPackage{Source: entry.Source}).Source] = true
 	}
-	res.Installed = nil
-	return res
-}
-
-// skillPackageRemoveArgs builds `skills remove -g [-a agents...] -y <names...>`.
-// Mirrors skillPackageAddArgs' global scope and agent targeting.
-func skillPackageRemoveArgs(skillNames, agents []string) []string {
-	args := []string{"skills", "remove", "-g"}
-	if len(agents) > 0 {
-		args = append(args, "-a")
-		args = append(args, agents...)
-	}
-	args = append(args, "-y")
-	return append(args, skillNames...)
-}
-
-// agentsWithPackageSkills returns sorted agent IDs where any of the package's
-// lockfile skill names are present in that agent's skills dirs.
-func (a *App) agentsWithPackageSkills(home string, lock *config.SkillLockFile, source string) []string {
-	names := packageSkills(lock, source)
-	if len(names) == 0 {
-		return nil
-	}
-	var agents []string
-	for _, ag := range a.installedAgents(home) {
-		if agentHasAnySkill(home, ag, names) {
-			agents = append(agents, ag.ID)
+	out := make([]config.SkillPackage, 0, len(sources))
+	for _, pkg := range merged {
+		if sources[pkg.Source] {
+			out = append(out, pkg)
 		}
 	}
-	sort.Strings(agents)
-	return agents
+	return out
 }
 
-// packageSkillNames returns the lockfile skill names whose source matches one of
-// the resolved packages, sorted and unique.
-func packageSkillNames(lock *config.SkillLockFile, pkgs []resolvedPackage) []string {
-	want := make(map[string]struct{}, len(pkgs))
-	for _, p := range pkgs {
-		want[p.Source] = struct{}{}
-	}
-	var names []string
-	for name, e := range lock.Skills {
-		if _, ok := want[e.Source]; ok {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	return names
-}
-
-// UpdateSkillsOptions controls an update run.
+// UpdateSkillsOptions — DryRun prints what an update would do; Check probes each source for what is actually behind.
 type UpdateSkillsOptions struct {
 	DryRun bool
+	Check  bool
 }
 
-// UpdateSkills refreshes the resolved package skills to their latest upstream
-// versions via the skills CLI. DryRun returns the command that would run.
 func (a *App) UpdateSkills(ctx context.Context, opts UpdateSkillsOptions) (output string, dryRun string, err error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -659,26 +471,101 @@ func (a *App) UpdateSkills(ctx context.Context, opts UpdateSkillsOptions) (outpu
 	if err := a.requireSkillsEnabled(cfg); err != nil {
 		return "", "", err
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", "", fmt.Errorf("resolving home dir: %w", err)
+	if opts.Check {
+		out, err := a.checkSkillsOutdated(ctx)
+		return out, "", err
 	}
-	lock, err := config.LoadSkillLock(config.SkillLockPath(home))
+	pkgs := a.resolveSkillPackages(cfg, currentMachineGroupName())
+	use := a.effectiveSettings(cfg).AgentsUse
+	if use == nil {
+		pkgs = resolveRestoreTargets(pkgs, nil, a.EnabledAgentIDs(cfg))
+	} else {
+		pkgs = resolveRestoreTargets(pkgs, use, nil)
+	}
+	pluginNames, warnings := installedPluginNames(ctx, a)
+	pkgs, shadowed := filterShadowedSkillPackages(pkgs, nil, pluginNames)
+	prelude := make([]string, 0, len(warnings)+len(shadowed))
+	for _, w := range warnings {
+		prelude = append(prelude, "warning: "+w)
+	}
+	for _, source := range shadowed {
+		prelude = append(prelude, "skipped "+source+" (provided by plugin)")
+	}
+	service, err := a.skillService()
 	if err != nil {
 		return "", "", err
 	}
-	pkgs := resolveSkillPackages(cfg, currentMachineGroupName())
-	runner := skillRunner(nodeManager(cfg))
-	args := skillUpdateArgs(packageSkillNames(lock, pkgs))
 	if opts.DryRun {
-		return "", runner + " " + strings.Join(args, " "), nil
+		return "", strings.Join(append(prelude, dryRunLines(ctx, pkgs, nil, service)...), "\n"), nil
 	}
-	stdout, stderr, err := a.fallbackExecutor().Run(ctx, runner, args...)
+	output, err = updateSkills(ctx, pkgs, prelude, service)
+	// An upgrade converges declared intent, so a contested entry is skipped rather than fatal.
+	lines := make([]string, 0, 1)
+	if output != "" {
+		lines = append(lines, output)
+	}
+	for _, line := range skillDriftLines(ctx, pkgs, service) {
+		lines = append(lines, "drift: "+line)
+	}
+	return strings.Join(lines, "\n"), "", err
+}
+
+// Forces a probe so an explicit check never answers from a stale recorded verdict.
+func (a *App) checkSkillsOutdated(ctx context.Context) (string, error) {
+	checks, err := a.RefreshSkillOutdated(ctx, true)
 	if err != nil {
-		return stdout, "", fmt.Errorf("skills update: %w: %s", err, stderr)
+		return "", err
 	}
-	if err := skillsCLIFailure("skills update", stdout, stderr); err != nil {
-		return stdout, "", err
+	lines := make([]string, 0, len(checks))
+	for _, c := range checks {
+		switch c.Outdated {
+		case SkillOutdatedBehind:
+			lines = append(lines, "outdated "+c.Source+" (\"omni agents skills upgrade\" refreshes it)")
+		case SkillOutdatedCurrent:
+			lines = append(lines, "up to date "+c.Source)
+		default:
+			lines = append(lines, "unknown "+c.Source+" (source has no comparable version)")
+		}
 	}
-	return stdout, "", nil
+	return strings.Join(lines, "\n"), nil
+}
+
+type skillUpdater interface {
+	Upgrade(ctx context.Context, pkg config.SkillPackage, agents []string) ([]string, error)
+	PackageStore(source string) (string, string, error)
+}
+
+// Derived from the content the refresh landed, not from a second network probe.
+func updateSkillReason(before, after string, err error) string {
+	if err != nil || before == "" || after == "" {
+		return ""
+	}
+	if before != after {
+		return " (outdated: source content changed)"
+	}
+	return " (forced: already up to date)"
+}
+
+func updateSkills(ctx context.Context, pkgs []resolvedPackage, prelude []string, inst skillUpdater) (string, error) {
+	lines := make([]string, 0, len(prelude)+len(pkgs))
+	lines = append(lines, prelude...)
+	var failures []error
+	for _, pkg := range pkgs {
+		agents := effectiveSkillAgents(nil, pkg.SkillPackage)
+		if len(agents) == 0 {
+			continue
+		}
+		_, before, beforeErr := inst.PackageStore(pkg.Source)
+		warnings, err := inst.Upgrade(ctx, pkg.SkillPackage, agents)
+		for _, w := range warnings {
+			lines = append(lines, "warning: "+w)
+		}
+		if err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", pkg.Source, err))
+			continue
+		}
+		_, after, afterErr := inst.PackageStore(pkg.Source)
+		lines = append(lines, "updated "+pkg.Source+updateSkillReason(before, after, errors.Join(beforeErr, afterErr)))
+	}
+	return strings.Join(lines, "\n"), errors.Join(failures...)
 }

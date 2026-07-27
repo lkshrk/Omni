@@ -33,8 +33,6 @@ func assertLinesFitWidth(t *testing.T, out string, width int) {
 	}
 }
 
-// ── view_theme.go ─────────────────────────────────────────────────────────────
-
 func TestBuildPaletteFor_Dark(t *testing.T) {
 	t.Parallel(
 	// Check that colour tokens differ between dark and light.
@@ -50,7 +48,6 @@ func TestBuildPaletteFor_Dark(t *testing.T) {
 func TestBuildPaletteFor_Light(t *testing.T) {
 	t.Parallel()
 	p := buildPaletteFor(false)
-	// Verify the light palette is non-zero (colInstalled should differ from zero).
 	if p.colInstalled == nil {
 		t.Error("expected colInstalled to be set in light palette")
 	}
@@ -60,7 +57,6 @@ func TestDefaultPalette_IsDark(t *testing.T) {
 	t.Parallel()
 	p := defaultPalette()
 	darkP := buildPaletteFor(true)
-	// Default palette must match the dark variant (same colour tokens).
 	if p.colInstalled != darkP.colInstalled {
 		t.Error("defaultPalette should return dark variant")
 	}
@@ -86,8 +82,6 @@ func TestApplyTheme_Light(t *testing.T) {
 	}
 }
 
-// ── view_scroll.go ────────────────────────────────────────────────────────────
-
 func TestApplyScrollWindow_BasicWindow(t *testing.T) {
 	t.Parallel()
 	content := "line0\nline1\nline2\nline3\nline4\n"
@@ -104,7 +98,6 @@ func TestApplyScrollWindow_BasicWindow(t *testing.T) {
 func TestApplyScrollWindow_CursorAtBottom(t *testing.T) {
 	t.Parallel()
 	content := "a\nb\nc\nd\ne\n"
-	// cursor at line 4, avail=3 → should show c,d,e
 	got := applyScrollWindow(content, 4, 3)
 	if !strings.Contains(got, "e") {
 		t.Errorf("expected last line 'e' in output, got: %q", got)
@@ -155,7 +148,6 @@ func TestApplyScrollWindow_TrailingNewline(t *testing.T) {
 
 	content := "a\nb\nc\n"
 	got := applyScrollWindow(content, 0, 10)
-	// all three lines should be visible
 	if !strings.Contains(got, "a") || !strings.Contains(got, "b") || !strings.Contains(got, "c") {
 		t.Errorf("expected all lines, got: %q", got)
 	}
@@ -206,8 +198,6 @@ func TestApplyScrollWindow_TableDriven(t *testing.T) {
 		})
 	}
 }
-
-// ── view_header.go ────────────────────────────────────────────────────────────
 
 func TestRenderSetup_Step0(t *testing.T) {
 	t.Parallel()
@@ -325,7 +315,6 @@ func TestRenderSetup_Step1(t *testing.T) {
 	if strings.Contains(out, "settings.json created") {
 		t.Fatalf("step 1 should not render stale config-created status copy:\n%s", out)
 	}
-	// Step 1 renders the provider picker — check for provider labels
 	if !strings.Contains(out, "system") {
 		t.Errorf("expected provider label in step 1, got:\n%s", out)
 	}
@@ -367,8 +356,7 @@ func TestRenderSetup_Step3(t *testing.T) {
 	if out == "" {
 		t.Error("expected non-empty output for setupStep=3")
 	}
-	// Step 3 is now the provider-priority editor. The background panel shows
-	// the "Set provider priority." lead text; the actual editor is an overlay.
+	// Step 3's background panel shows the lead text; the actual editor is an overlay.
 	if !strings.Contains(out, "priority") {
 		t.Errorf("expected 'priority' in step 3 output, got:\n%s", out)
 	}
@@ -461,9 +449,7 @@ func TestRenderSetup_AllActionFootersUsePopupAlignment(t *testing.T) {
 	}{
 		{name: "import settings", model: setupRenderModel(0), left: "quit", right: "import existing"},
 		{name: "provider picker", model: setupRenderModel(1), rightOnly: "save & continue"},
-		// Step 3 (provider priority) has no inline footer — its actions live inside
-		// the editingPriority popup overlay. It is excluded from this footer-alignment
-		// suite; the priority editor's own hints are covered by Settings tests.
+		// Step 3's actions live inside the editingPriority popup, so it has no inline footer and is excluded from this suite.
 		{name: "dotfiles decision", model: setupRenderModel(5), left: "skip for now", right: "set up dotfile sync"},
 		{name: "dotfiles picker fallback", model: setupRenderModel(6), left: "skip"},
 		{name: "copy host", model: setupRenderModel(7), left: "start fresh", right: "copy host"},
@@ -676,7 +662,6 @@ func TestRenderHeaderInfo_UsesUniformRegularWeight(t *testing.T) {
 		}
 	}
 
-	// Settings/dashboard top-right carry only the version segment now.
 	settings := baseModel(nil)
 	settings.mode = viewSettings
 	settings.setSettings(config.Settings{DotsRepo: "~/dotfiles"})
@@ -755,9 +740,7 @@ func TestRenderHeader_GroupsModeUsesGroupInfo(t *testing.T) {
 	}
 }
 
-// The settings header no longer carries the provider/dots summary — the
-// top-right shows only the version (renderHeaderVersion); the summaries live
-// in the settings tab body.
+// The settings top-right shows only the version; the provider and dots summaries live in the settings tab body.
 func TestRenderHeader_SettingsModeShowsNoSummary(t *testing.T) {
 	t.Parallel()
 	m := baseModel(threeTools())
@@ -790,7 +773,6 @@ func TestRenderSettings_ShowsProviderPriorityRow(t *testing.T) {
 			t.Fatalf("settings view missing %q:\n%s", want, out)
 		}
 	}
-	// Removed rows must not appear.
 	for _, gone := range []string{"System Provider Order", "Track System", "Track Node", "Track Python", "Node Manager", "Python Manager"} {
 		if strings.Contains(out, gone) {
 			t.Fatalf("settings view should not contain removed row %q:\n%s", gone, out)
@@ -798,12 +780,7 @@ func TestRenderSettings_ShowsProviderPriorityRow(t *testing.T) {
 	}
 }
 
-// TestRenderSettings_AllRowsRendered is a regression for settingsRowTraceLog
-// ("Command Log") being present in the const iota and settingsRows meta slice
-// but accidentally omitted from the keyed render slice in renderSettings, which
-// made the row selectable but invisible. The test iterates settingsRows so any
-// future row added to the const/meta but dropped from the render slice will
-// also fail.
+// Iterates settingsRows so any future row added to the const/meta but dropped from the keyed render slice fails here too.
 func TestRenderSettings_AllRowsRendered(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -819,8 +796,7 @@ func TestRenderSettings_AllRowsRendered(t *testing.T) {
 		}
 	}
 
-	// Explicit regression: Command Log (settingsRowTraceLog) was the specific
-	// row that was dropped from the render slice before this fix.
+	// Command Log was the specific row dropped from the render slice.
 	if !strings.Contains(out, "Command Log") {
 		t.Errorf("settings view missing %q (regression: settingsRowTraceLog omitted from render slice)", "Command Log")
 	}
@@ -1238,8 +1214,6 @@ func TestRenderProviderPickerStep_CheckboxStates(t *testing.T) {
 	}
 }
 
-// ── view_settings.go ─────────────────────────────────────────────────────────
-
 func TestRenderSettings_Basic(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -1358,7 +1332,6 @@ func TestRenderSettings_OnlySelectedRowShowsDetail(t *testing.T) {
 	if strings.Contains(out, "Add newly installed tools") {
 		t.Fatalf("unselected import help should not render when priority row is selected:\n%s", out)
 	}
-	// The priority row is selected; its value bracket should appear.
 	if !strings.Contains(out, "Provider Priority") {
 		t.Fatalf("selected Provider Priority row should render:\n%s", out)
 	}
@@ -1370,7 +1343,6 @@ func TestRenderSettings_DisabledProvider(t *testing.T) {
 	m.mode = viewSettings
 	m.settings.DisabledProviders = []string{"node"}
 	out := renderSettings(m)
-	// node provider should show [OFF]
 	if !strings.Contains(out, "OFF") {
 		t.Errorf("expected 'OFF' for disabled node provider, got:\n%s", out)
 	}
@@ -1511,7 +1483,6 @@ func TestRenderSettings_CursorHighlight(t *testing.T) {
 	m.mode = viewSettings
 	m.settingsCursor = 0
 	out := renderSettings(m)
-	// cursor row uses the list cursor marker.
 	if !strings.Contains(out, selectedRowMarker) {
 		t.Errorf("expected cursor marker %q in settings output, got:\n%s", selectedRowMarker, out)
 	}
@@ -1540,13 +1511,10 @@ func TestRenderSettings_EditingPriority(t *testing.T) {
 	m.priorityDraft = []string{"brew", "apt"}
 	m.width = 120
 	m.height = 50
-	// The editor is now a popup; use the full composited view.
 	out := m.viewString()
-	// Popup title must be present.
 	if !strings.Contains(out, "Provider Priority") {
 		t.Errorf("expected 'Provider Priority' popup title in priority editing state, got:\n%s", out)
 	}
-	// Draft providers must appear in the popup body.
 	if !strings.Contains(out, "brew") || !strings.Contains(out, "apt") {
 		t.Errorf("expected draft providers 'brew' and 'apt' in popup, got:\n%s", out)
 	}
@@ -1570,7 +1538,6 @@ func TestRenderSettings_ProviderPriority(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
-	// Set a custom provider priority order; the collapsed row should reflect it.
 	m.settings.ProviderPriority = []string{"uv", "brew", "apt"}
 	out := renderSettings(m)
 	if !strings.Contains(out, "uv") || !strings.Contains(out, "brew") {
@@ -1584,7 +1551,6 @@ func TestRenderSettings_AutoPushImpliesAutoCommit(t *testing.T) {
 	m.mode = viewSettings
 	m.settings.DotsGit.AutoPush = true
 	out := renderSettings(m)
-	// AutoCommit row should display "──" when AutoPush is on
 	if !strings.Contains(out, "──") {
 		t.Errorf("expected '──' (disabled indicator) when AutoPush=true, got:\n%s", out)
 	}
@@ -2467,7 +2433,6 @@ func TestRenderGroupPicker_NoToolSelected(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroupPicker
-	// cursor=-1 → no tool selected
 	m.cursor = -1
 	out := renderGroupPicker(m)
 	if !strings.Contains(out, "no tool") {
@@ -2524,7 +2489,6 @@ func TestRenderGroupMembershipPicker_SeparatesActiveAndInactiveGroups(t *testing
 		},
 	}
 	out := renderGroupMembershipPicker(m)
-	// Multi-select picker: space toggles, enter confirms, esc cancels.
 	for _, want := range []string{"current host", "inactive groups", "base", "work", "personal", "space", "toggle", "enter", "confirm", "esc", "cancel"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("group membership picker missing %q:\n%s", want, out)
@@ -2554,7 +2518,6 @@ func TestRenderGroupPicker_CreatingGroup(t *testing.T) {
 	m.pickerCursor = 1
 	m.pickerCreatingGroup = true
 	out := renderGroupPicker(m)
-	// When creating, settingsInput view is shown instead of sentinel
 	if out == "" {
 		t.Error("expected non-empty output when creating group")
 	}
@@ -2798,8 +2761,7 @@ func TestRenderSettings_EditModeShowsCancelHint(t *testing.T) {
 	m.priorityDraft = []string{"brew", "apt"}
 	m.width = 120
 	m.height = 50
-	// The editor is now a popup; hints appear in the composited full view.
-	// The footer renders across two lines: one for cancel, one for enter save.
+	// The editor is a popup, so hints appear in the composited full view across two footer lines.
 	out := stripANSIEscapeSequences(m.viewString())
 	if renderedLineContaining(out, "cancel") == "" {
 		t.Fatalf("priority edit cancel hint missing from output:\n%s", out)
@@ -2807,7 +2769,6 @@ func TestRenderSettings_EditModeShowsCancelHint(t *testing.T) {
 	if renderedLineContaining(out, "save") == "" {
 		t.Fatalf("priority edit save hint missing from output:\n%s", out)
 	}
-	// "enter" key label must appear somewhere in the popup footer.
 	if !strings.Contains(out, "enter") {
 		t.Fatalf("priority edit should show enter key hint, got:\n%s", out)
 	}
@@ -2882,7 +2843,6 @@ func TestMainTabs_FirstSectionStartsAtSharedRow(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			want := 1
-			// Dots with search control has an extra line for the search bar.
 			if tc.name == "dots controls" {
 				want = 2
 			}
@@ -2953,8 +2913,6 @@ func settingsLabelLineIndex(out, label string, header bool) int {
 	}
 	return -1
 }
-
-// ── view_statusbar.go ─────────────────────────────────────────────────────────
 
 func TestRenderStatusBar_Idle(t *testing.T) {
 	t.Parallel()
@@ -3293,7 +3251,7 @@ func TestActivityLabel_Scanning(t *testing.T) {
 	m.scanningProviders = map[string]bool{"brew": true, "npm": true}
 	m.refreshToolTotal = 4
 	got := activityLabel(m)
-	if got != "Refreshing tools… 0/4: brew, npm" {
+	if got != "Refreshing tools… 0/4: brew +1" {
 		t.Errorf("activity label = %q, want sorted provider refresh status", got)
 	}
 }
@@ -3812,8 +3770,6 @@ func bindingHelpDescs(bindings []key.Binding) []string {
 	}
 	return descs
 }
-
-// ── view_list.go ──────────────────────────────────────────────────────────────
 
 func TestProviderLabelForToolWithPinMarksExplicitOverride(t *testing.T) {
 	t.Parallel()
@@ -4815,9 +4771,7 @@ func TestRenderList_MultiGroupBadgeAndFullDetail(t *testing.T) {
 	}
 }
 
-// TestRenderList_TwoGroupsShowTwoPills is the Task 6 wiring regression guard:
-// a tool in two reusable groups (no active host filtering to collapse them)
-// must render both as separate pills, not a single compact badge.
+// A tool in two reusable groups (no active host filtering to collapse them) must render both as separate pills, not a single compact badge.
 func TestRenderList_TwoGroupsShowTwoPills(t *testing.T) {
 	t.Parallel()
 	m := baseModel([]*app.ToolView{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
@@ -4832,10 +4786,7 @@ func TestRenderList_TwoGroupsShowTwoPills(t *testing.T) {
 	}
 }
 
-// TestRenderList_ThreeGroupsNarrowWidthCollapsesToHostPlusCount verifies that
-// when a tool belongs to a host group plus two reusable groups and the group
-// column is too narrow to fit all three pills, the row collapses to the host
-// pill plus a "+N" count instead of dropping or truncating groups silently.
+// When the group column cannot fit all three pills the row collapses to the host pill plus a "+N" count instead of dropping or truncating groups silently.
 func TestRenderList_ThreeGroupsNarrowWidthCollapsesToHostPlusCount(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "laptop")
 	m := baseModel([]*app.ToolView{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
@@ -5622,8 +5573,7 @@ func TestRenderDots_NoExtraBlankLineAtTop(t *testing.T) {
 		{Name: "nvim", TargetPath: "~/.config/nvim", State: dots.StateSynced},
 		{Name: "zsh", TargetPath: "~/.zshrc", State: dots.StateSynced},
 	}
-	// dotsSearchActive is false by default — the removed else-branch would have
-	// emitted a blank line here; verify the first line is not empty.
+	// dotsSearchActive is false by default; verify the first line is not the blank one the removed else-branch would have emitted.
 	out := stripANSIEscapeSequences(renderDots(m))
 	lines := strings.Split(out, "\n")
 	if len(lines) == 0 {
@@ -5651,7 +5601,6 @@ func TestRenderDots_SearchActiveHasControlLine(t *testing.T) {
 	if len(lines) == 0 {
 		t.Fatal("renderDots returned empty output")
 	}
-	// The search control line contains "/" as the search prompt prefix.
 	if !strings.Contains(lines[0], "/") {
 		t.Fatalf("renderDots first line should contain search control when dotsSearchActive=true; first line = %q\nfull output:\n%s", lines[0], out)
 	}
@@ -5736,7 +5685,6 @@ func TestRenderProviderCol_NoConcreteProvider(t *testing.T) {
 func TestRenderProviderCol_WithConcrete(t *testing.T) {
 	t.Parallel()
 	p := defaultPalette()
-	// system meta with brew concrete — label is just the concrete name
 	out := renderProviderColWithExplicit(p, "system", "brew", "", "", "", "", "brew", 14, false, false)
 	if !strings.Contains(out, "brew") {
 		t.Errorf("expected 'brew' in provider col, got: %q", out)
@@ -5789,8 +5737,6 @@ func TestNewColWidths_ProviderPinReservesAlignedMarkerWidth(t *testing.T) {
 		t.Fatalf("row = %q, want provider pin prefix with single-space gap", out)
 	}
 }
-
-// ── view_helpers.go ───────────────────────────────────────────────────────────
 
 func TestRenderHRule_NonEmpty(t *testing.T) {
 	t.Parallel()
@@ -5862,9 +5808,7 @@ func TestAlignLR_Basic(t *testing.T) {
 }
 
 func TestAlignLR_MinGap(t *testing.T) {
-	t.Parallel(
-	// When totalWidth is smaller than content, minGap should be used.
-	)
+	t.Parallel()
 
 	out := alignLR("left", "right", 1, 2)
 	if !strings.Contains(out, "left") || !strings.Contains(out, "right") {
@@ -6172,7 +6116,6 @@ func TestScrollBuf_WriteMark(t *testing.T) {
 	buf.write("line2\n")
 	buf.markCursor()
 	buf.write("line3\n")
-	// cursor should be at line 2 (0-indexed after 2 newlines)
 	if buf.cursorLine != 2 {
 		t.Errorf("expected cursorLine=2, got %d", buf.cursorLine)
 	}
@@ -6190,8 +6133,6 @@ func TestScrollBuf_Render(t *testing.T) {
 		t.Error("expected non-empty render output")
 	}
 }
-
-// ── view.go remaining functions ───────────────────────────────────────────────
 
 func TestWindowTitle_AllModes(t *testing.T) {
 	t.Parallel()
@@ -6226,7 +6167,6 @@ func TestListAvailableHeight_Default(t *testing.T) {
 	if h < 1 {
 		t.Errorf("expected positive listAvailableHeight, got %d", h)
 	}
-	// default mode: height - 2 (header) - 2 (footer) = 36
 	if h != 36 {
 		t.Errorf("expected listAvailableHeight=36, got %d", h)
 	}
@@ -6238,7 +6178,6 @@ func TestListAvailableHeight_SearchMode(t *testing.T) {
 	m.height = 40
 	m.mode = viewSearch
 	h := listAvailableHeight(m)
-	// search mode adds 2 more fixed lines
 	if h != 34 {
 		t.Errorf("expected listAvailableHeight=34 in search mode, got %d", h)
 	}
@@ -6312,7 +6251,6 @@ func TestViewString_SetupDefaultBackgroundIsDashboard(t *testing.T) {
 	t.Parallel()
 	t.Run("zero-value setupBackgroundMode resolves to Dashboard", func(t *testing.T) {
 		var m Model
-		// Zero-value viewMode should be viewStatus (Dashboard), not viewList.
 		if m.setupBackgroundMode != viewStatus {
 			t.Fatalf("zero-value setupBackgroundMode = %v, want viewStatus", m.setupBackgroundMode)
 		}
@@ -6345,7 +6283,6 @@ func TestViewString_SetupDefaultBackgroundIsDashboard(t *testing.T) {
 		m.setupBackgroundMode = viewSetup // triggers the fallback branch
 
 		out := stripANSIEscapeSequences(m.viewString())
-		// Health Check is a Dashboard-only section header.
 		if !strings.Contains(out, "Health Check") {
 			t.Errorf("fallback background should be Dashboard (expected 'Health Check'), got:\n%s", out)
 		}
@@ -7560,9 +7497,7 @@ func TestStatusToolCountsIncludesDiscoveredTools(t *testing.T) {
 }
 
 func TestStatusToolsOverviewValue_UpdateCountUsesOutdatedStyle(t *testing.T) {
-	t.Parallel(
-	// Case 1: outdated tool → value contains "update", not "tracked"
-	)
+	t.Parallel()
 
 	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
@@ -7576,7 +7511,6 @@ func TestStatusToolsOverviewValue_UpdateCountUsesOutdatedStyle(t *testing.T) {
 		t.Errorf("outdated: value = %q, must not contain \"tracked\"", value)
 	}
 
-	// Case 2: no outdated tools → value contains "tracked", not "update"
 	m2 := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: false, Tracked: true},
 	})
@@ -7853,8 +7787,6 @@ func TestRenderFilePickerPopup_BoundedBrowsingMode(t *testing.T) {
 	}
 }
 
-// ── helper ────────────────────────────────────────────────────────────────────
-
 func hintKeys(hints []hintItem) []string {
 	keys := make([]string, len(hints))
 	for i, h := range hints {
@@ -7863,7 +7795,6 @@ func hintKeys(hints []hintItem) []string {
 	return keys
 }
 
-// errForTest is a simple error type used in viewString error tests.
 type errForTest string
 
 func (e errForTest) Error() string { return string(e) }
@@ -7917,7 +7848,6 @@ func TestTruncatedGitStatus(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			lines, overflow := truncatedGitStatus(tt.status, tt.maxLines)
 			if len(lines) == 0 && len(tt.wantLines) == 0 {
-				// both nil/empty — ok
 			} else if len(lines) != len(tt.wantLines) {
 				t.Fatalf("lines = %v, want %v", lines, tt.wantLines)
 			} else {
@@ -7934,8 +7864,6 @@ func TestTruncatedGitStatus(t *testing.T) {
 	}
 }
 
-// ── renderSetupOptions ────────────────────────────────────────────────────────
-
 func TestRenderSetupOptions_DescriptionAlignment(t *testing.T) {
 	t.Parallel(
 	// Labels of different lengths: descriptions must all start at the same column.
@@ -7950,7 +7878,6 @@ func TestRenderSetupOptions_DescriptionAlignment(t *testing.T) {
 	}
 	out := stripANSIEscapeSequences(renderSetupOptions(m, options))
 
-	// Collect the column position of each detail string.
 	cols := make(map[string]int)
 	for _, line := range strings.Split(out, "\n") {
 		for _, detail := range []string{"detail A", "detail B", "detail C"} {
@@ -7971,9 +7898,7 @@ func TestRenderSetupOptions_DescriptionAlignment(t *testing.T) {
 }
 
 func TestRenderSetupOptions_DescriptionColumnMatchesFormula(t *testing.T) {
-	t.Parallel(
-	// Verify that the desc column equals prefixW + maxLabelW + detailGap (2).
-	)
+	t.Parallel()
 
 	m := baseModel(nil)
 	m.width = 80
@@ -7983,8 +7908,7 @@ func TestRenderSetupOptions_DescriptionColumnMatchesFormula(t *testing.T) {
 	}
 	out := stripANSIEscapeSequences(renderSetupOptions(m, options))
 
-	// prefixW=2 (cursor), maxLabelW=8, detailGap=2 → descCol=12
-	wantDescCol := 2 + 8 + 2 // 12
+	wantDescCol := 2 + 8 + 2
 	for _, line := range strings.Split(out, "\n") {
 		for _, detail := range []string{"x", "y"} {
 			if strings.Contains(line, detail) {
@@ -7998,8 +7922,7 @@ func TestRenderSetupOptions_DescriptionColumnMatchesFormula(t *testing.T) {
 
 func TestRenderSetupOptions_DescriptionColumnWithCheckbox(t *testing.T) {
 	t.Parallel(
-	// When all options have Checked fields, prefix grows by 4 ("[ ] " or "[x] ").
-	// All descriptions must start at the same column.
+	// Checked options add a four-column prefix while descriptions remain aligned.
 	)
 
 	m := baseModel(nil)
@@ -8012,8 +7935,7 @@ func TestRenderSetupOptions_DescriptionColumnWithCheckbox(t *testing.T) {
 	}
 	out := stripANSIEscapeSequences(renderSetupOptions(m, options))
 
-	// prefixW=2+4=6, maxLabelW=4 ("brew"/"node"), detailGap=2 → descCol=12
-	wantDescCol := 6 + 4 + 2 // 12
+	wantDescCol := 6 + 4 + 2
 	colA, colB := -1, -1
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, "system packages") {
@@ -8040,8 +7962,7 @@ func TestRenderSetupOptions_LineWrapping(t *testing.T) {
 	)
 
 	m := baseModel(nil)
-	// prefixW=2, maxLabelW=4 ("opt1"), detailGap=2 → descCol=8; availW=m.width-8
-	m.width = 30 // availW = 30-8 = 22
+	m.width = 30
 	longDetail := "this is a fairly long detail text that must wrap"
 	options := []setupOption{
 		{Label: "opt1", Detail: longDetail, Selected: false},
@@ -8162,8 +8083,7 @@ func TestRenderSetupOptions_WrapIndentMatchesDescCol(t *testing.T) {
 	)
 
 	m := baseModel(nil)
-	// prefixW=2, labels "go"(2)/"rust"(4) → maxLabelW=4, detailGap=2 → descCol=8
-	m.width = 20 // availW = 20-8 = 12
+	m.width = 20
 	longDetail := "some fairly long text here for wrapping test"
 	options := []setupOption{
 		{Label: "go", Detail: longDetail, Selected: false},
@@ -8201,8 +8121,7 @@ func TestRenderSetupOptions_WrapIndentMatchesDescCol(t *testing.T) {
 	}
 }
 
-// TestRenderSettings_SectionHeadersPresent catches rows added to the settingsRows
-// iota that are never emitted by renderSettings() (section present in data but absent in render).
+// Catches rows added to the settingsRows iota that renderSettings never emits.
 func TestRenderSettings_SectionHeadersPresent(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -8224,15 +8143,13 @@ func TestRenderSettings_SectionHeadersPresent(t *testing.T) {
 	}
 }
 
-// TestRenderDotsPeek_PopupVisibleInDots is the render-gate guard: popup added to
-// the model but missing from the View() switch will fail here.
+// A popup added to the model but missing from the View() switch fails here.
 func TestRenderDotsPeek_PopupVisibleInDots(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.width = 120
 	m.height = 60
-	// dotsPeekLoading triggers the loading state without needing a real DotsPeekResult.
 	m.dotsPeekLoading = true
 
 	view := m.View().Content
@@ -8241,8 +8158,7 @@ func TestRenderDotsPeek_PopupVisibleInDots(t *testing.T) {
 	}
 }
 
-// TestRenderDotsPeek_PopupAbsentOutsideDots catches a missing render gate that
-// would let the popup bleed into unrelated views.
+// Catches a missing render gate that would let the popup bleed into unrelated views.
 func TestRenderDotsPeek_PopupAbsentOutsideDots(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -8252,16 +8168,13 @@ func TestRenderDotsPeek_PopupAbsentOutsideDots(t *testing.T) {
 	m.dotsPeekLoading = true
 
 	view := m.View().Content
-	// "Peek" as a popup title must not appear outside its owning mode.
-	// We look for the popup frame decoration to distinguish a header from a tool name.
+	// Look for the popup frame decoration to distinguish a header from a tool name.
 	if strings.Contains(view, "── Peek") || strings.Contains(view, "Peek ──") {
 		t.Errorf("dotsPeek popup should NOT appear when mode != viewDots\nview:\n%s", view)
 	}
 }
 
-// TestRenderList_SectionHeadersPresent verifies brew tool classification into render sections.
-// Brew tools use only ToolCache fields (no provider pins); baseModel sets an empty
-// ToolClassificationContext which is correct for brew.
+// Brew tools use only ToolCache fields, so baseModel's empty ToolClassificationContext is correct here.
 func TestRenderList_SectionHeadersPresent(t *testing.T) {
 	t.Parallel()
 	t.Run("installed brew tool renders Installed section header", func(t *testing.T) {
@@ -8350,8 +8263,7 @@ func TestRenderList_SectionHeadersPresent(t *testing.T) {
 	})
 }
 
-// TestRenderList_UpdatesSectionHeader guards sectionLabel(): removing the sectionUpdates
-// case silently reverts the header to "Available" — this test catches that.
+// Removing the sectionUpdates case from sectionLabel() silently reverts the header to "Available".
 func TestRenderList_UpdatesSectionHeader(t *testing.T) {
 	t.Parallel()
 	outdated := &app.ToolView{
@@ -8372,8 +8284,7 @@ func TestRenderList_UpdatesSectionHeader(t *testing.T) {
 	}
 }
 
-// TestRenderDots_SectionHeadersPresent ensures renderDots() calls sections.Header();
-// a bypass in the render loop would drop entries without failing otherwise.
+// A bypass of sections.Header() in the render loop would drop entries without failing otherwise.
 func TestRenderDots_SectionHeadersPresent(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -8382,7 +8293,6 @@ func TestRenderDots_SectionHeadersPresent(t *testing.T) {
 	m.height = 60
 	// DotsRepo must be set so renderDots() doesn't bail to the "not configured" early-return.
 	m.setSettings(config.Settings{DotsRepo: "/home/user/dotfiles"})
-	// Two entries with different states so DotStatusSections returns multiple groups.
 	m.dotsEntries = []app.DotStatus{
 		{Name: "nvim", State: dots.StateSynced, Health: app.HealthOK},
 		{Name: "zsh", State: dots.StateIgnored},
@@ -8403,8 +8313,7 @@ func TestRenderDots_SectionHeadersPresent(t *testing.T) {
 	}
 }
 
-// TestRenderStatus_SectionHeadersPresent catches renames or sectionOrder changes
-// that drop statusSectionOverview/"Data" from the rendered surface.
+// Catches renames or sectionOrder changes that drop statusSectionOverview/"Data" from the rendered surface.
 func TestRenderStatus_SectionHeadersPresent(t *testing.T) {
 	t.Parallel()
 	installed := &app.ToolView{
@@ -8539,9 +8448,14 @@ func TestDashboardOverviewBreakdownFormats(t *testing.T) {
 			mcpServers:    3,
 			plugins:       5,
 		}
-		got := statusAgentsOverviewSummary(view)
+		got := statusAgentsOverviewSummary(view, agentsDashCounts{})
 		if got != "7 skills · 3 mcp · 5 plugins" {
 			t.Fatalf("agents overview summary = %q, want %q", got, "7 skills · 3 mcp · 5 plugins")
+		}
+
+		got = statusAgentsOverviewSummary(view, agentsDashCounts{SkillsOutdated: 1})
+		if got != "7 skills · 3 mcp · 5 plugins · 1 upgrade available" {
+			t.Fatalf("agents overview summary with an outdated package = %q, want the upgrade segment", got)
 		}
 	})
 
@@ -8840,11 +8754,7 @@ func TestDashboardAgentsAttentionRow(t *testing.T) {
 	})
 }
 
-// TestDashboardAgentsOverviewIconAndAttentionAgree pins that both the
-// overview icon and the attention row's presence derive out-of-sync state
-// from statusAgentsCounts (live mcp/plugin rows), not from agentsSummary
-// ints — so a live mcp-missing row that agentsSummary knows nothing about
-// still trips the warning icon and produces an attention row.
+// Both the overview icon and the attention row must derive out-of-sync state from statusAgentsCounts (live rows), not agentsSummary ints, so a live mcp-missing row still trips the warning.
 func TestDashboardAgentsOverviewIconAndAttentionAgree(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -8874,10 +8784,8 @@ func TestDashboardAgentsOverviewIconAndAttentionAgree(t *testing.T) {
 	}
 }
 
-// TestStatusAgentsCounts_CountsPerAgentRows pins dashboard counts match the
-// Agents tab Out of Sync section: one issue per flattened row, not per manifest
-// item with any adapter missing.
-func TestStatusAgentsCounts_CountsPerAgentRows(t *testing.T) {
+// An item present on several agents is one dashboard issue, not one per flattened row.
+func TestStatusAgentsCounts_CountsPerItemNotPerAgentRow(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
 	m.mcpLoaded = true
@@ -8893,11 +8801,11 @@ func TestStatusAgentsCounts_CountsPerAgentRows(t *testing.T) {
 	}
 
 	counts := statusAgentsCounts(m)
-	if counts.McpUnmanaged != 2 {
-		t.Fatalf("McpUnmanaged = %d, want 2 (one row per agent)", counts.McpUnmanaged)
+	if counts.McpUnmanaged != 1 {
+		t.Fatalf("McpUnmanaged = %d, want 1 (one issue per item)", counts.McpUnmanaged)
 	}
-	if counts.PluginsUnmanaged != 2 {
-		t.Fatalf("PluginsUnmanaged = %d, want 2 (one row per agent)", counts.PluginsUnmanaged)
+	if counts.PluginsUnmanaged != 1 {
+		t.Fatalf("PluginsUnmanaged = %d, want 1 (one issue per item)", counts.PluginsUnmanaged)
 	}
 }
 
@@ -8921,10 +8829,7 @@ func TestStatusAgentsCounts_IgnoresNonTargetedAgentMissing(t *testing.T) {
 	}
 }
 
-// TestStatusAgentsCounts_IgnoredItemsExcludedAcrossAllThreeFeatures pins that
-// statusAgentsCounts filters ignored names out of skills-missing/unmanaged
-// (via agentsSummary name lists) and out of mcp/plugin missing-or-unmanaged
-// (via live rows), for all three features simultaneously.
+// Ignored names must be filtered out of skills-missing/unmanaged and of mcp/plugin missing-or-unmanaged, for all three features simultaneously.
 func TestStatusAgentsCounts_IgnoredItemsExcludedAcrossAllThreeFeatures(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -8991,8 +8896,7 @@ func TestDashboardAgentsSummaryLoadedMsgHandler(t *testing.T) {
 		seeded := app.DashboardAgentsSummary{SkillPackages: 41, AgentsEnabled: true}
 		m.agentsSummary = seeded
 		got := drive(m, agentsSummaryLoadedMsg{err: errors.New("boom")})
-		// Pins the err-guard in update.go: msg.summary is a zero value on error
-		// and must not overwrite the previously loaded summary.
+		// msg.summary is a zero value on error and must not overwrite the previously loaded summary.
 		if !reflect.DeepEqual(got.agentsSummary, seeded) {
 			t.Fatalf("agentsSummary = %#v, want unchanged %#v", got.agentsSummary, seeded)
 		}

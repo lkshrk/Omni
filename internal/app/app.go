@@ -1,5 +1,4 @@
-// Package app wires all dependencies and exposes high-level operations
-// that CLI commands and the TUI delegate to.
+// Package app wires dependencies and exposes the operations the CLI and TUI delegate to.
 package app
 
 import (
@@ -45,37 +44,34 @@ type App struct {
 	CacheDir   string // where omni.db lives; derived from XDG_CACHE_HOME when empty
 	DBPath     string
 
-	db                 *database.DB
-	registry           *provider.Registry
-	fallbackExec       executor.Executor
-	githubAPI          string
-	githubClient       *http.Client
+	db           *database.DB
+	registry     *provider.Registry
+	fallbackExec executor.Executor
+	githubAPI    string
+	// Shared by every outbound HTTP caller here; tests inject one client for all of them.
+	httpClient         *http.Client
 	testMode           bool
 	agentTargetOptions []agentTargetOption
 	agentTargets       *agent.Registry
+	// Ambient environment reads; injected so tests can prove an env passthrough without mutating the real process environment.
+	envLookup func(string) string
 
-	// configMu serialises all read-modify-write cycles on settings.json. Held
-	// for the duration of withConfig; read-only loadConfig calls do not need it.
+	// InitReadOnly marker: incidental writes like command traces are suppressed.
+	diagnosticMode bool
+
+	// Serialises read-modify-write cycles on settings.json; read-only loadConfig does not need it.
 	configMu sync.Mutex
 
-	// dbMu protects the a.db pointer itself (not the DB's internal operations,
-	// which SQLite handles). Writers (ResetCache) hold an exclusive lock during
-	// the Close → nil → Open → assign cycle. Readers call a.readDB() which holds
-	// a shared lock long enough to copy the pointer; the copy is then used directly
-	// because SQLite's own locking handles concurrent method calls.
+	// Guards the a.db pointer only; SQLite's own locking handles concurrent calls on the handle.
 	dbMu sync.RWMutex
 
-	// historyMu serialises the read-modify-write cycle in prependDotsHistory
-	// so concurrent tea.Cmd goroutines cannot lose history entries.
+	// Serialises prependDotsHistory so concurrent tea.Cmd goroutines cannot lose entries.
 	historyMu sync.Mutex
 
-	// githubReleaseMu coalesces concurrent provider refreshes for the same
-	// repository without retaining results across refresh operations.
 	githubReleaseMu       sync.Mutex
 	githubReleaseInFlight map[githubReleaseRepo]*githubReleaseLookupFlight
 
-	// dotSvc owns the App-layer dots orchestration (see dots_service.go). Built
-	// once in New; holds a back to App only through the narrow dotsHost seam.
+	// Built once in New; holds a back to App only through the narrow dotsHost seam.
 	dotSvc *dotsService
 }
 
@@ -180,9 +176,7 @@ type UpgradeAllResult struct {
 	Upgraded    []string
 	Quarantined []QuarantinedUpdate
 	Failures    []BulkToolError
-	// Skipped lists tools that could not be upgraded but are not treated as
-	// failures (e.g. a package manager that cannot self-upgrade in an externally
-	// managed Python). The run still exits successfully.
+	// Not failures (e.g. a manager that cannot self-upgrade); the run still exits successfully.
 	Skipped []BulkToolError
 }
 
@@ -197,8 +191,21 @@ type UpgradeAllOptions struct {
 	Force          bool
 }
 
-// New creates an App targeting configPath (the full path to settings.json).
-// Call Init or InitTestMode before any other method.
+// WithEnvLookup — Replaces ambient environment reads; tests use it instead of touching the process environment.
+func WithEnvLookup(lookup func(string) string) func(*App) {
+	return func(a *App) {
+		a.envLookup = lookup
+	}
+}
+
+func (a *App) lookupEnv(name string) string {
+	if a.envLookup == nil {
+		return os.Getenv(name)
+	}
+	return a.envLookup(name)
+}
+
+// New — Call Init or InitTestMode before any other method.
 func New(configPath string, opts ...func(*App)) *App {
 	a := &App{ConfigPath: configPath}
 	for _, opt := range opts {
@@ -209,10 +216,7 @@ func New(configPath string, opts ...func(*App)) *App {
 	return a
 }
 
-// readDB acquires a shared lock on dbMu, copies the db pointer, and releases
-// the lock. Callers use the returned pointer directly; SQLite's own locking
-// handles concurrent method calls on the same *database.DB handle.
-// Returns nil if the database has not been initialised or is mid-reset.
+// Callers use the returned pointer directly; nil while uninitialised or mid-reset.
 func (a *App) readDB() *database.DB {
 	a.dbMu.RLock()
 	db := a.db
@@ -220,7 +224,6 @@ func (a *App) readDB() *database.DB {
 	return db
 }
 
-// configDir returns the directory containing ConfigPath.
 func (a *App) configDir() string {
 	if a.ConfigPath == "" {
 		return ""
@@ -238,15 +241,13 @@ func (a *App) Init(ctx context.Context) error {
 	}
 	a.DBPath = filepath.Join(a.CacheDir, "omni.db")
 
-	if _, err := config.NormalizeFile(a.ConfigPath); err != nil {
-		return fmt.Errorf("normalizing config file: %w", err)
-	}
+	// Normalizing here made every read-only command rewrite settings.json before doing nothing.
 	a.backupConfigOnLaunch()
 	if err := a.repairCurrentHostEntry(); err != nil {
 		return fmt.Errorf("repairing current host entry: %w", err)
 	}
 
-	db, err := database.Open(a.DBPath)
+	db, err := database.OpenContext(ctx, a.DBPath)
 	if err != nil {
 		return fmt.Errorf("opening database: %w", err)
 	}
@@ -265,11 +266,8 @@ func (a *App) Init(ctx context.Context) error {
 	return nil
 }
 
-// InitReadOnly prepares config/cache paths and provider metadata without
-// normalizing settings.json, repairing host entries, or migrating the cache DB.
-// It is intended for diagnostic commands that must report broken state without
-// mutating it first.
-func (a *App) InitReadOnly(_ context.Context) error {
+// InitReadOnly — For diagnostic commands that must report broken state without mutating it first.
+func (a *App) InitReadOnly(ctx context.Context) error {
 	if a.CacheDir == "" {
 		cacheDir, err := config.DefaultCacheDir()
 		if err != nil {
@@ -278,6 +276,13 @@ func (a *App) InitReadOnly(_ context.Context) error {
 		a.CacheDir = cacheDir
 	}
 	a.DBPath = filepath.Join(a.CacheDir, "omni.db")
+	a.diagnosticMode = true
+	// A missing DB is left uncreated and an unopenable one degrades rather than blocking diagnostics.
+	if _, err := os.Stat(a.DBPath); err == nil {
+		if db, err := database.OpenContext(ctx, a.DBPath); err == nil {
+			a.db = db
+		}
+	}
 
 	var settings config.Settings
 	if cfg, err := config.Load(a.ConfigPath); err == nil {
@@ -292,23 +297,17 @@ func (a *App) initProviderRegistry(settings config.Settings) {
 	a.fallbackExec = exec
 	a.registry = provider.NewRegistry()
 
-	// Concrete providers self-register a factory from their package init()
-	// (linked via the blank import of internal/provider/all) and are built here
-	// regardless of disabled_providers. Adding a concrete provider needs no
-	// change to this file — see provider.RegisterConcrete.
+	// Concrete providers self-register via provider.RegisterConcrete; adding one needs no change here.
 	concreteProviders := provider.BuildConcreteProviders(exec)
 	for name, p := range concreteProviders {
 		a.registry.RegisterWithMetadata(p, provider.BuiltinMetadata(name))
 	}
 
-	// Named ecosystem managers and the settings-gated ecosystem families below
-	// take a manager hint or a delegate set, so they stay wired explicitly.
 	a.registry.RegisterWithMetadata(provider.Named("bun", node.New(exec, "bun")), provider.BuiltinMetadata("bun"))
 	a.registry.RegisterWithMetadata(provider.Named("pnpm", node.New(exec, "pnpm")), provider.BuiltinMetadata("pnpm"))
 	a.registry.RegisterWithMetadata(provider.Named("npm", node.New(exec, "npm")), provider.BuiltinMetadata("npm"))
 	a.registry.RegisterWithMetadata(provider.Named("uv", python.New(exec, "uv")), provider.BuiltinMetadata("uv"))
 
-	// provider families — skipped when the user has disabled them on this machine.
 	disabledSet := make(map[string]bool, len(settings.DisabledProviders))
 	for _, p := range settings.DisabledProviders {
 		disabledSet[p] = true
@@ -319,7 +318,6 @@ func (a *App) initProviderRegistry(settings config.Settings) {
 	if !disabledSet[provider.EcosystemPython] {
 		a.registry.RegisterWithMetadata(python.New(exec, EffectiveEcosystemManager(settings, provider.EcosystemPython)), provider.BuiltinMetadata(provider.EcosystemPython))
 	}
-	// system resolves to the first available concrete package manager on the host.
 	// Native Linux PMs ordered before brew so distro-native packages win on Linux.
 	if !disabledSet[provider.EcosystemSystem] {
 		var delegates []provider.Provider
@@ -342,26 +340,17 @@ func (a *App) Close() error {
 	return nil
 }
 
-// ─── Internal config helpers ──────────────────────────────────────────────────
-
-// LoadConfig exposes loadConfig to callers outside internal/app (TUI, CLI)
-// that need the same host-key/ecosystem normalization and validation as the
-// rest of App instead of reading settings.json directly.
 func (a *App) LoadConfig() (*config.RootConfig, error) {
 	return a.loadConfig()
 }
 
-// loadConfig reads settings.json. Returns an empty RootConfig when the file
-// does not exist — callers treat this as "nothing configured yet". Read-only
-// callers do not need configMu; mutating callers must use withConfig.
+// Returns an empty RootConfig when the file does not exist; mutating callers must use withConfig.
 func (a *App) loadConfig() (*config.RootConfig, error) {
 	cfg, err := config.Load(a.ConfigPath)
 	if err != nil {
 		return nil, err
 	}
-	// Present legacy mixed-case entries for this machine as the canonical
-	// lower-cased hostname so every reader sees a consistent key; a later write
-	// persists the normalised form to disk.
+	// Legacy mixed-case entries read as the canonical lower-cased hostname; a later write persists it.
 	migrateCurrentHostCase(cfg, currentMachineGroupName())
 	migrateLegacyEcosystemManager(&cfg.Settings)
 	for host, hs := range cfg.HostSettings {
@@ -376,9 +365,7 @@ func (a *App) loadConfig() (*config.RootConfig, error) {
 	return cfg, nil
 }
 
-// fatalValidationErrors drops fallback-pathed and warn-level validation errors.
-// A fallback only matters when actually used; warn-level errors are advisory.
-// Neither should block loading or saving config. `omni doctor` reports the full set.
+// A fallback only matters when used and warn-level errors are advisory, so neither blocks load or save.
 func fatalValidationErrors(errs []config.ValidationError) []config.ValidationError {
 	fatal := make([]config.ValidationError, 0, len(errs))
 	for _, e := range errs {
@@ -394,9 +381,6 @@ func (a *App) effectiveSettings(cfg *config.RootConfig) config.Settings {
 	return cfg.EffectiveSettings(shortHostname(currentHostname()))
 }
 
-// forEachAvailable iterates registered providers, skipping any whose Available
-// returns an error or false. fn is invoked on each survivor; the first non-nil
-// fn error short-circuits and is returned.
 func (a *App) forEachAvailable(ctx context.Context, fn func(provider.Provider) error) error {
 	for _, p := range a.registry.All() {
 		avail, err := p.Available(ctx)
@@ -410,11 +394,7 @@ func (a *App) forEachAvailable(ctx context.Context, fn func(provider.Provider) e
 	return nil
 }
 
-// availableProviders runs Available concurrently across all registered
-// providers and returns the subset that report available, in registry order.
-// Errors from Available are treated as unavailable (matches forEachAvailable
-// semantics). Use this when the caller needs both the count up front and the
-// providers themselves (e.g. for x/y progress reporting in RefreshInstalled).
+// Errors from Available count as unavailable; use this when the caller needs the count up front too.
 func (a *App) availableProviders(ctx context.Context) []provider.Provider {
 	all := a.registry.All()
 	if len(all) == 0 {
@@ -514,14 +494,10 @@ func (a *App) backupConfigOnLaunch() {
 	}
 }
 
-// errSkipSave aliases config.ErrSkipSave so a withConfig mutation can abort the
-// write cleanly and config.WriteConfig recognizes the same sentinel.
+// Aliased so a withConfig mutation can abort the write with the sentinel config.WriteConfig recognizes.
 var errSkipSave = config.ErrSkipSave
 
-// withConfig acquires the config mutex, then delegates the actual load →
-// mutate → validate → route → write to config.WriteConfig. The lock and the
-// app-specific load (loadConfig, which applies host/legacy migrations) stay
-// here; the include-safe write invariant lives behind the config seam.
+// The lock and the app-specific load stay here; the include-safe write invariant lives behind the config seam.
 func (a *App) withConfig(fn func(*config.RootConfig) error) error {
 	a.configMu.Lock()
 	defer a.configMu.Unlock()
@@ -533,9 +509,7 @@ func (a *App) withConfig(fn func(*config.RootConfig) error) error {
 	return config.WriteConfig(a.ConfigPath, a.loadConfig, providers, fn)
 }
 
-// patchToolConfig edits a tool at the file that owns its effective definition.
-// Root settings may include a tools fragment; writing the merged config back to
-// the root would otherwise be overwritten on the next load.
+// Root settings may include a tools fragment, so writing the merged config back would be overwritten on next load.
 func (a *App) patchToolConfig(name string, mutate func(*config.ToolSpec) error) error {
 	a.configMu.Lock()
 	defer a.configMu.Unlock()
@@ -560,8 +534,6 @@ func (a *App) patchToolConfig(name string, mutate func(*config.ToolSpec) error) 
 	return config.PatchTool(a.ConfigPath, name, mutate)
 }
 
-// findGroupInConfig returns the first group whose BaseName matches name.
-// Returns nil when not found.
 func findGroupInConfig(cfg *config.RootConfig, name string) *config.GroupConfig {
 	for _, g := range cfg.Groups {
 		if g.BaseName() == name {
@@ -571,7 +543,6 @@ func findGroupInConfig(cfg *config.RootConfig, name string) *config.GroupConfig 
 	return nil
 }
 
-// ensureGroupInConfig returns an existing group by name or appends and returns a new one.
 func ensureGroupInConfig(cfg *config.RootConfig, name string) *config.GroupConfig {
 	if g := findGroupInConfig(cfg, name); g != nil {
 		return g
@@ -581,7 +552,6 @@ func ensureGroupInConfig(cfg *config.RootConfig, name string) *config.GroupConfi
 	return g
 }
 
-// collectTaps unions all taps across groups.
 func collectTaps(groups []*config.GroupConfig) []string {
 	seen := make(map[string]struct{})
 	var taps []string
@@ -596,8 +566,6 @@ func collectTaps(groups []*config.GroupConfig) []string {
 	return taps
 }
 
-// findToolInGroups returns the GroupConfig and index of the first tool matching
-// (name, providerName). Returns (nil, -1) if not found.
 func findToolInGroups(groups []*config.GroupConfig, name, providerName string) (*config.GroupConfig, int) {
 	for _, g := range groups {
 		for i, e := range g.Tools {
@@ -612,7 +580,6 @@ func findToolInGroups(groups []*config.GroupConfig, name, providerName string) (
 	return nil, -1
 }
 
-// filterGroups returns only groups whose BaseName matches groupName.
 func filterGroups(groups []*config.GroupConfig, groupName string) []*config.GroupConfig {
 	var out []*config.GroupConfig
 	for _, g := range groups {
@@ -623,7 +590,6 @@ func filterGroups(groups []*config.GroupConfig, groupName string) []*config.Grou
 	return out
 }
 
-// groupBaseNames extracts the BaseName of each group.
 func groupBaseNames(groups []*config.GroupConfig) []string {
 	names := make([]string, len(groups))
 	for i, g := range groups {
@@ -632,9 +598,7 @@ func groupBaseNames(groups []*config.GroupConfig) []string {
 	return names
 }
 
-// machineGroupName returns the config group name reserved for one machine's
-// local inbox. It intentionally shares the short-hostname normalization used by
-// host settings, but call sites use this helper when they mean "group".
+// Shares host settings' short-hostname normalization, but call sites use this when they mean group.
 func machineGroupName(hostname string) string {
 	return shortHostname(hostname)
 }
@@ -643,7 +607,6 @@ func currentMachineGroupName() string {
 	return machineGroupName(currentHostname())
 }
 
-// CurrentMachineGroupName returns the current machine's config group name.
 func CurrentMachineGroupName() string {
 	return currentMachineGroupName()
 }
@@ -722,8 +685,7 @@ func effectiveHostGroups(cfg *config.RootConfig, groups []*config.GroupConfig, h
 	return effective, effective, ok
 }
 
-// HostGroups returns groups active for a host. When hostname is empty, all
-// groups are returned.
+// HostGroups — An empty hostname returns all groups.
 func (a *App) HostGroups(ctx context.Context, hostname string) ([]*config.GroupConfig, error) {
 	groups, err := a.Groups(ctx)
 	if err != nil {
@@ -743,24 +705,14 @@ func (a *App) HostGroups(ctx context.Context, hostname string) ([]*config.GroupC
 	return effective, nil
 }
 
-// ─── Tap management ───────────────────────────────────────────────────────────
-
-// brewTapManager is satisfied by the brew provider; declared here to avoid
-// importing the brew package from the app layer.
+// Declared here to avoid importing the brew package from the app layer.
 type brewTapManager interface {
 	ListTaps(ctx context.Context) ([]string, error)
 	Tap(ctx context.Context, name string) error
 	Trust(ctx context.Context, name string) error
 }
 
-// syncTaps ensures every tap declared across cfg taps is present and trusts
-// every tap the machine is subscribed to. Homebrew 5.2+ hides untrusted-tap
-// formulae from list/leaves/info, so an untrusted tap makes its installed tools
-// look missing — omni would then try a bare `brew install` that is refused or
-// silently resolves to homebrew/core. Trusting all currently-tapped repos
-// before the scan breaks that chicken-and-egg: a tap the user already ran
-// `brew tap` on is one they opted into, the same rationale used for config taps.
-// Already-tapped repos are skipped; dry-run skips mutations.
+// Homebrew 5.2+ hides untrusted-tap formulae, so every already-tapped repo is trusted before the scan.
 func (a *App) syncTaps(ctx context.Context, taps []string, dryRun bool) error {
 	brewProv, ok := a.registry.Get("brew")
 	if !ok {
@@ -770,8 +722,7 @@ func (a *App) syncTaps(ctx context.Context, taps []string, dryRun bool) error {
 	if !ok {
 		return nil
 	}
-	// brew is always registered; skip on machines where it is not installed so
-	// `brew tap` is never invoked there.
+	// brew is always registered; skip where it is not installed so brew tap is never invoked there.
 	if available, err := brewProv.Available(ctx); err != nil || !available {
 		return nil
 	}
@@ -786,9 +737,7 @@ func (a *App) syncTaps(ctx context.Context, taps []string, dryRun bool) error {
 	if dryRun {
 		return nil
 	}
-	// Trust the union of config-declared taps and every tap already present on
-	// the machine. Order config taps first so a tap missing from the machine is
-	// tapped before it is trusted.
+	// Config taps first so a tap missing from the machine is tapped before it is trusted.
 	trustOrder := make([]string, 0, len(taps)+len(current))
 	seen := make(map[string]struct{}, len(taps)+len(current))
 	for _, tap := range append(append([]string(nil), taps...), current...) {
@@ -804,16 +753,14 @@ func (a *App) syncTaps(ctx context.Context, taps []string, dryRun bool) error {
 	if len(trustOrder) == 0 {
 		return nil
 	}
-	// Each `brew trust` spawns a subprocess; once a tap is trusted we record it in
-	// the DB so subsequent syncs skip the call entirely (no brew invocation).
+	// Each brew trust spawns a subprocess, so a trusted tap is recorded to skip the call next sync.
 	trusted := map[string]bool{}
 	if db := a.readDB(); db != nil {
 		if t, err := db.TrustedTaps(ctx); err == nil {
 			trusted = t
 		}
 	}
-	// tapOpTimeout caps each individual brew tap/trust subprocess call so a
-	// single slow network response cannot stall the full sync indefinitely.
+	// Caps each brew subprocess so one slow network response cannot stall the full sync.
 	const tapOpTimeout = 60 * time.Second
 
 	for _, tap := range trustOrder {

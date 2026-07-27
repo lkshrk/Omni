@@ -12,7 +12,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// describingProvider extends stubProvider with the Descriptor interface.
 type describingProvider struct {
 	stubProvider
 	calls atomic.Int32
@@ -55,7 +54,6 @@ func TestRefreshDescriptions_SkipsCached(t *testing.T) {
 	prov := &describingProvider{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, prov)
 
-	// Fetch once to populate the cache.
 	cfg := &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{{
@@ -69,7 +67,6 @@ func TestRefreshDescriptions_SkipsCached(t *testing.T) {
 		t.Fatalf("first refresh: %v", err)
 	}
 
-	// Second run must not call Describe again.
 	prov.calls.Store(0)
 	if err := a.RefreshDescriptions(context.Background(), 0); err != nil {
 		t.Fatalf("second refresh: %v", err)
@@ -109,7 +106,6 @@ func TestRefreshDescriptions_RespectsContextCancel(t *testing.T) {
 	}
 }
 
-// bulkDescribingProvider extends stubProvider with BulkDescriber.
 type bulkDescribingProvider struct {
 	stubProvider
 	calls atomic.Int32
@@ -146,7 +142,6 @@ func TestRefreshDescriptions_UsesBulkDescriber(t *testing.T) {
 		t.Fatalf("RefreshDescriptions: %v", err)
 	}
 
-	// BulkDescribe should have been called exactly once (not twice).
 	if got := prov.calls.Load(); got != 1 {
 		t.Errorf("BulkDescribe called %d times, want 1", got)
 	}
@@ -524,7 +519,6 @@ func TestRefreshDescriptions_EmptyConfig(t *testing.T) {
 	t.Parallel()
 	prov := &describingProvider{stubProvider: stubProvider{name: "brew", available: true}}
 	a, _ := newImportApp(t, prov)
-	// No config file at all — should return nil without panic.
 	if err := a.RefreshDescriptions(context.Background(), 0); err != nil {
 		t.Fatalf("RefreshDescriptions on missing config: %v", err)
 	}

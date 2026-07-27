@@ -71,9 +71,7 @@ func (m *Model) doSetDotGroupMemberships(name string, before, after, createdGrou
 	}
 }
 
-// doExtractDotIntoGroups splits sub out of the parent dots entry into a new
-// entry named name, then assigns that entry to the picked groups. Extract drops
-// the new entry in the first group; SetDotGroups then reconciles the full set.
+// Extract drops the new entry in the first group; SetDotGroups then reconciles the full set.
 func (m *Model) doExtractDotIntoGroups(parent, sub, name string, after, createdGroups []string, activeHost string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	_, gen := m.currentDotsOperation()
@@ -231,8 +229,20 @@ func (m *Model) doRunDoctor() tea.Cmd {
 		ctx = context.Background()
 	}
 	return func() tea.Msg {
-		result, err := a.Doctor(ctx)
-		return doctorDoneMsg{result: result, err: err}
+		// Runs from Init with no user gesture behind it, and Doctor probes every provider, so an unreachable one would otherwise pin the spinner on "Running doctor…" for the whole session.
+		results := make(chan *app.DoctorResult, 1)
+		err := runBounded(ctx, doctorTimeout, nil, func(doctorCtx context.Context) error {
+			result, err := a.Doctor(doctorCtx)
+			if err != nil {
+				return err
+			}
+			results <- result
+			return nil
+		})
+		if err != nil {
+			return doctorDoneMsg{err: err}
+		}
+		return doctorDoneMsg{result: <-results}
 	}
 }
 
@@ -265,7 +275,6 @@ func (m *Model) doSaveDotsRepoAndSync(repo string) tea.Cmd {
 	}
 }
 
-// selectedHostName returns the host name at the current host-assignment cursor, or "".
 func (m *Model) selectedHostName() string {
 	hosts := app.PrioritizedHostSummaries(m.hostInfo)
 	if len(hosts) == 0 {
@@ -330,7 +339,6 @@ func (m *Model) doRenameHost(oldName, newName string) tea.Cmd {
 	}
 }
 
-// doRenameGroup renames a group in config and reloads group/host data.
 func (m *Model) doRenameGroup(oldName, newName string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -348,7 +356,6 @@ func (m *Model) doRenameGroup(oldName, newName string) tea.Cmd {
 	}
 }
 
-// doDeleteGroup removes a group, then reloads group/host data.
 func (m *Model) doDeleteGroup(name string, deleteTools bool) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -371,7 +378,6 @@ func (m *Model) doDeleteGroup(name string, deleteTools bool) tea.Cmd {
 	}
 }
 
-// doResetSettings resets settings to defaults then reloads tools.
 func (m *Model) doResetSettings() tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -382,7 +388,6 @@ func (m *Model) doResetSettings() tea.Cmd {
 	}
 }
 
-// doResetCache deletes and reinitialises the tool cache DB, then reloads tools.
 func (m *Model) doResetCache() tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -393,12 +398,7 @@ func (m *Model) doResetCache() tea.Cmd {
 	}
 }
 
-// doDisableDots removes managed symlinks when dots is configured, optionally
-// keeping local materialized copies, then persists dots_disabled=true for this
-// machine. Regular settings flows trigger a full settings reload; setup can
-// suppress that reload while advancing to the next onboarding step. Safe to
-// call when dots is not yet configured — the physical unlink step is skipped in
-// that case.
+// Safe to call when dots is not configured (the unlink step is skipped); setup can suppress the settings reload while advancing to the next onboarding step.
 func (m *Model) doDisableDots(keepLocal bool, setupComplete ...bool) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -416,8 +416,6 @@ func (m *Model) doDisableDots(keepLocal bool, setupComplete ...bool) tea.Cmd {
 	}
 }
 
-// doEnableDots re-enables dotfile sync: clears the disabled flag and runs a
-// sync to restore managed symlinks.
 func (m *Model) doEnableDots() tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
@@ -429,10 +427,9 @@ func (m *Model) doEnableDots() tea.Cmd {
 	}
 }
 
-// doConsolidate switches all tools in ecosystem to manager.
 func (m *Model) doConsolidate(ecosystem, manager string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
-	return func() tea.Msg {
+	return m.stampGate(func() tea.Msg {
 		stateResult, err := a.ConsolidateWithState(ctx, ecosystem, manager, nil)
 		if err != nil {
 			return opCompleteMsg{err: err}
@@ -450,13 +447,10 @@ func (m *Model) doConsolidate(ecosystem, manager string) tea.Cmd {
 			toolMemberships: groupState.ToolMemberships,
 			hostInfo:        groupState.HostInfo,
 		}
-	}
+	})
 }
 
-// doClaim adds an orphan tool (installed but not in config) to the given group.
-// Pass groupName="" to add to the current host group. installedWith is the
-// concrete manager the tool was installed with (e.g. bun), used to pin
-// install_with so a single claim matches the bulk `sync --all` claim.
+// groupName "" adds to the current host group; installedWith pins install_with so a single claim matches the bulk "sync --all" claim.
 func (m *Model) doClaim(name, prov, installedWith, groupName string, activeHost ...string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -529,7 +523,7 @@ func (m *Model) doSaveIgnoreScopes(name string, options []scopeOption) tea.Cmd {
 
 func (m *Model) doInstallAndAddTool(t *app.ToolView, groupAndHost ...string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
-	return func() tea.Msg {
+	return m.stampGate(func() tea.Msg {
 		if t == nil {
 			return opCompleteMsg{err: fmt.Errorf("missing tool")}
 		}
@@ -572,21 +566,18 @@ func (m *Model) doInstallAndAddTool(t *app.ToolView, groupAndHost ...string) tea
 			msg.message = "installed " + name + " and added to config"
 		}
 		return msg
-	}
+	})
 }
 
 func (m *Model) doSetProviderScope(name string, opt scopeOption, t *app.ToolView) tea.Cmd {
 	a, ctx := m.app, m.ctx
-	return func() tea.Msg {
+	return m.stampGate(func() tea.Msg {
 		if t == nil || t.InstalledWith == "" {
 			return opCompleteMsg{err: fmt.Errorf("provider pin: installed provider is unknown")}
 		}
 		providerName := t.Provider
 		installWith := t.InstalledWith
-		// When pinning a tool whose declared provider is a concrete (e.g. "brew")
-		// but it is currently installed via a different concrete provider (e.g. "bun"),
-		// record the InstalledWith as the provider name for the spec so that the
-		// override is properly written and extracted as a pin.
+		// A tool declared with a concrete provider but installed via a different one records InstalledWith as the spec's provider, so the override is written and extracted as a pin.
 		if installWith != "" && installWith != t.Provider && !a.KnownEcosystemProvider(t.Provider) {
 			providerName = installWith
 		}
@@ -600,7 +591,7 @@ func (m *Model) doSetProviderScope(name string, opt scopeOption, t *app.ToolView
 			return opCompleteMsg{err: fmt.Errorf("pin provider: %w", err)}
 		}
 		return opCompleteMsg{message: "pinned " + name + " via " + opt.label, tools: result.Tools, toolProviderPins: result.ScopeDisplay.ToolProviderPins}
-	}
+	})
 }
 
 func (m *Model) doClearProviderOverride(name, configProv, installedWith string) tea.Cmd {
@@ -691,7 +682,7 @@ func (m *Model) doMigrateProvider(name, configProv, installedWith string) tea.Cm
 func (m *Model) doApplyProviderSolution(name, fromProvider string, solution app.ErrorSolution) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	target := solution.TargetProvider
-	return func() tea.Msg {
+	return m.stampGate(func() tea.Msg {
 		key := toolKey(name, fromProvider)
 		result, err := a.ApplyProviderSolutionWithState(ctx, name, fromProvider, solution)
 		var tools []*app.ToolView
@@ -706,15 +697,10 @@ func (m *Model) doApplyProviderSolution(name, fromProvider string, solution app.
 			message += ", cleanup warning"
 		}
 		return opCompleteMsg{key: key, message: message, tools: tools}
-	}
+	})
 }
 
-// openFilePicker configures and opens the file picker popup.
-// title is shown as the popup header.
-// currentPath sets the starting directory: opens at the path itself if it
-// already exists as a directory, otherwise falls back to its parent (or home).
-// allowFiles controls whether plain files are selectable in addition to directories.
-// Returns any command needed to initialize the picker.
+// currentPath opens at the path itself when it is an existing directory, otherwise its parent (or home).
 func (m *Model) openFilePicker(title, currentPath string, allowFiles bool) tea.Cmd {
 	fp, cmd := newPathPicker(currentPath, allowFiles, filePickerContentWidth(*m), filePickerListHeight(*m))
 

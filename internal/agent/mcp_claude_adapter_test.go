@@ -115,9 +115,7 @@ func TestClaudeCodeAdapter_Add_Http_WithEnv(t *testing.T) {
 	if !mcpContainsPair(gotArgs, "-e", "HTTP_KEY=secret") {
 		t.Fatalf("missing -e HTTP_KEY=secret in args: %v", gotArgs)
 	}
-	// live-verified: `claude mcp add ... --transport http -e K=V <url>` fails
-	// with "missing required argument 'commandOrUrl'". Env flags must come
-	// after the url positional.
+	// Env flags must follow the url positional; ahead of it claude fails with "missing required argument 'commandOrUrl'".
 	urlIdx, envIdx := -1, -1
 	for i, a := range gotArgs {
 		if a == "https://mcp.example.com/sse" {
@@ -211,11 +209,7 @@ func TestClaudeCodeAdapter_Remove(t *testing.T) {
 	}
 }
 
-// claudeConfigFixture mirrors the confirmed real-machine shape of
-// ~/.claude.json's top-level mcpServers object: a stdio entry with
-// command/args/env, an http entry, and an sse entry. Plugin-provided servers
-// never appear here -- they live in plugin manifests, not this file -- so
-// the "plugin:" exclusion the old text parser needed is unnecessary now.
+// Plugin-provided servers live in plugin manifests rather than this file, so no "plugin:" exclusion is needed.
 const claudeConfigFixture = `{"mcpServers":{
 	"smoketest": {"command": "npx", "args": ["-y", "@example/mcp"], "env": {"FOO": "bar"}},
 	"smokehttp": {"type": "http", "url": "https://example.com/mcp"},

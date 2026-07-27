@@ -27,14 +27,11 @@ func (a *App) requireStow(ctx context.Context) error {
 	)
 }
 
-// DotsStowInstalled reports whether GNU Stow is currently reachable on PATH.
 func (a *App) DotsStowInstalled(ctx context.Context) bool {
 	return dots.CheckInstalled(ctx, a.newExecutor())
 }
 
-// InstallDotsStow installs GNU Stow through the system provider family.
-// Callers own user consent before invoking this; this method may run the host
-// package manager and can require privileges depending on the concrete manager.
+// InstallDotsStow — Callers own user consent: this may run the host package manager and can require privileges.
 func (a *App) InstallDotsStow(ctx context.Context) error {
 	if a.DotsStowInstalled(ctx) {
 		return nil
@@ -53,10 +50,7 @@ func (a *App) InstallDotsStow(ctx context.Context) error {
 	return nil
 }
 
-// ─── private helpers ──────────────────────────────────────────────────────────
-
-// dotsRepoPath returns the configured dots repo path for the current host,
-// applying host-specific settings overrides via EffectiveSettings.
+// Applies host-specific settings overrides via EffectiveSettings.
 func (a *App) dotsRepoPath() string {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -65,7 +59,6 @@ func (a *App) dotsRepoPath() string {
 	return a.effectiveSettings(cfg).DotsRepo
 }
 
-// newGitForRepo creates a Git instance for repoPath.
 func newGitForRepo(repoPath string, exec executor.Executor) *dots.Git {
 	return dots.NewGit(repoPath, exec)
 }
@@ -98,8 +91,7 @@ func (a *App) buildDotsManager() (*dots.Engine, map[string]string, map[string]bo
 	return mgr, groupMap, variantMap, err
 }
 
-// resolveRepoPath validates that a non-empty repo path is configured, expands
-// ~ and environment variables, and enforces that the result is an absolute path.
+// Expands ~ and env vars and requires the result to be absolute.
 func resolveRepoPath(raw string) (string, error) {
 	if raw == "" {
 		return "", fmt.Errorf("dots_repo is not configured; set it via 'omni ui' (Dots tab) or settings.dots_repo in settings.json")
@@ -157,11 +149,7 @@ func validateDotsContentDir(path string) error {
 	return nil
 }
 
-// stowPackagePath returns where the source file/dir belongs inside the stow
-// package tree. It mirrors the home directory structure:
-//
-//	~/.config/nvim  →  <repo>/dotfiles/nvim/.config/nvim
-//	~/.zshrc        →  <repo>/dotfiles/zsh/.zshrc
+// Mirrors the home directory structure: ~/.config/nvim becomes <repo>/dotfiles/nvim/.config/nvim.
 func stowPackagePath(stowPath, pkgName, absPath string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -249,7 +237,6 @@ func ensureDotVariantSource(stowPath string, entry config.DotEntry, pkgName stri
 	return dotVariantSourceResult{CleanupPath: cleanupPath, Created: true}, nil
 }
 
-// normalisePath converts a path under $HOME to ~/... form for persisted config.
 // Falls back to the cleaned path when it is not under HOME.
 func normalisePath(path string) string {
 	if path == "" {
@@ -371,7 +358,6 @@ func filterActiveDotEntries(entries []config.DotEntry) []config.DotEntry {
 	return filtered
 }
 
-// collectDotsGroupMap returns a map from dots entry name → group base name.
 func collectDotsGroupMap(groups []*config.GroupConfig) map[string]string {
 	groupSets := make(map[string][]string)
 	for _, g := range groups {
@@ -459,7 +445,6 @@ func dotPackageReferencedInConfig(cfg *config.RootConfig, pkgName string) bool {
 	return ok
 }
 
-// expandAndStat expands environment variables and ~, then confirms the path exists.
 func expandAndStat(path string) (string, error) {
 	expanded, err := dots.ExpandPath(path)
 	if err != nil {
@@ -475,13 +460,10 @@ func expandAndStat(path string) (string, error) {
 	return abs, nil
 }
 
-// inferName derives a human-readable entry name from an absolute path.
-// Strips a leading dot for hidden files (e.g. ".zshrc" → "zshrc").
+// Strips a leading dot for hidden files, so ".zshrc" becomes "zshrc".
 func inferName(abs string) string {
 	base := filepath.Base(abs)
 	return strings.TrimPrefix(base, ".")
 }
 
-// entryHealth computes a DotStatus for each ResolvedEntry in the manager
-// by lstat-ing the expected symlink locations. groupMap maps entry name →
-// group base name and is used to populate the Group field; may be nil.
+// groupMap maps entry name to group base name and may be nil.

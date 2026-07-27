@@ -152,7 +152,6 @@ func TestParsePipList(t *testing.T) {
 		if len(got) != 2 {
 			t.Fatalf("len = %d, want 2", len(got))
 		}
-		// names should be lowercased
 		if got[0].Tool.Name != "black" {
 			t.Errorf("got[0].Name = %q, want black", got[0].Tool.Name)
 		}

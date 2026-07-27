@@ -10,8 +10,6 @@ import (
 	"github.com/lkshrk/omni/internal/dots"
 )
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
 func requireDotsConfigured(state *rootState) error {
 	if !state.app.DotsConfigured() {
 		return fmt.Errorf("dots_repo is not configured\n\nSet it via 'omni ui' (Dots tab) or settings.dots_repo in settings.json")

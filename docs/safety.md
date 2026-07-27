@@ -31,11 +31,11 @@ omni reconcile
 omni tools sync
 omni tools sync --all
 omni tools upgrade --all
-omni tools delete <tool>
+omni tools remove <tool> --purge
 omni tools consolidate <ecosystem> <manager>
 omni dots sync
 omni dots add <path>
-omni dots delete <name>
+omni dots remove <name>
 omni dots resolve <name> --use-repo
 omni dots resolve <name> --use-local
 omni dots push
@@ -115,6 +115,13 @@ and the package managers or Git remotes they invoke:
 - provider search, refresh, install, upgrade, and delete commands can contact
   package registries or OS package mirrors
 - `dots pull` and `dots push` contact the configured Git remote
+- native skill add/sync/upgrade can contact configured Git remotes or
+  well-known HTTP endpoints; an HTTP index must declare the supported
+  discovery schema and a SHA-256 digest per artifact, and Omni verifies each
+  digest before staging the content, so there is no unverified HTTP install
+  path
+- `agents find` contacts skills.sh; catalog failure never blocks sync,
+  update, remove, or reconcile
 - release downloads happen only through your chosen install channel
 - the `$schema` URI in `settings.json` is editor metadata; Omni writes it but
   does not fetch it as part of normal config writes

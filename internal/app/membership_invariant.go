@@ -5,19 +5,9 @@ import (
 	"strings"
 )
 
-// A membership set for an item (tool, dot, skill, mcp server, plugin,
-// marketplace) may contain any number of host groups but at most one reusable
-// ("normal") group. Host groups are machine-scoped, so at most one is ever
-// active on a given host; reusable groups span the fleet and are the only ones
-// that can collide, so they are capped at one. Callers supply a `reusable`
-// predicate; every name it rejects (the machine host group and any other host
-// groups already stored for other machines) is treated as a host group and
-// preserved.
+// Host groups are machine-scoped so at most one is ever active; reusable groups span the fleet and are capped at one.
 
-// MembershipInvariantToggle applies a single toggle of group against current,
-// enforcing the invariant. Toggling a group that is already a member removes
-// it. Adding a reusable group evicts any other reusable membership; adding a
-// host group is purely additive. The input slice is not mutated.
+// MembershipInvariantToggle — Toggling an existing member removes it; adding a reusable group evicts the other reusable membership.
 func MembershipInvariantToggle(current []string, group string, reusable func(string) bool) []string {
 	group = strings.TrimSpace(group)
 	if group == "" {
@@ -43,9 +33,7 @@ func MembershipInvariantToggle(current []string, group string, reusable func(str
 	return append(out, group)
 }
 
-// EnforceMembershipInvariant reduces groups so it satisfies the invariant: all
-// host groups are kept in order, and only the first reusable group survives.
-// It is a defensive backstop for write paths that accept an arbitrary set.
+// EnforceMembershipInvariant — A defensive backstop for write paths that accept an arbitrary set.
 func EnforceMembershipInvariant(groups []string, reusable func(string) bool) []string {
 	out := make([]string, 0, len(groups))
 	seenReusable := false
@@ -61,10 +49,7 @@ func EnforceMembershipInvariant(groups []string, reusable func(string) bool) []s
 	return out
 }
 
-// ReusablePredicate builds a `reusable` predicate from the reusable group names
-// known to the caller (e.g. the TUI's ordered reusable list plus any groups
-// created during the current picker session). Names absent from the set are
-// treated as host groups.
+// ReusablePredicate — Names absent from the set are treated as host groups.
 func ReusablePredicate(names ...[]string) func(string) bool {
 	set := make(map[string]bool)
 	for _, list := range names {
@@ -77,15 +62,12 @@ func ReusablePredicate(names ...[]string) func(string) bool {
 	return func(name string) bool { return set[strings.TrimSpace(name)] }
 }
 
-// MembershipCapsReusable reports whether an item kind caps reusable-group
-// membership at one. Only dots cap (their symlinks collide); tools and the
-// agent-kinds (skill/mcp/plugin/marketplace) may join any number of groups.
+// MembershipCapsReusable — Only dots cap, because their symlinks collide; tools and agent kinds may join any number of groups.
 func MembershipCapsReusable(kind string) bool {
 	return kind == "dot"
 }
 
-// MembershipToggle adds group when absent and removes it when present, with no
-// reusable cap. Used by every non-dot kind. The input slice is not mutated.
+// MembershipToggle — No reusable cap; used by every non-dot kind.
 func MembershipToggle(current []string, group string) []string {
 	group = strings.TrimSpace(group)
 	if group == "" {

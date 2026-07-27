@@ -6,8 +6,6 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-// agentsComposedCase describes one reachable (state, feature) row this test
-// asserts always carries at least one detail line and one hint once selected.
 type agentsComposedCase struct {
 	name    string
 	feature agentsSection
@@ -21,7 +19,7 @@ func agentsComposedCases() []agentsComposedCase {
 			feature: agentsSectionSkills,
 			build: func() Model {
 				return agentsAllModel([]app.SkillPackageRow{
-					{Name: "sk-installed", Source: "o/sk-installed", Skills: []string{"a"}, Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+					{Name: "sk-installed", Source: "o/sk-installed", Skills: []string{"a"}, Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
 				}, nil, nil)
 			},
 		},
@@ -59,15 +57,21 @@ func agentsComposedCases() []agentsComposedCase {
 			feature: agentsSectionSkills,
 			build: func() Model {
 				m := agentsAllModel([]app.SkillPackageRow{
-					{Name: "sk-ignored", Source: "o/sk-ignored", Skills: []string{"a"}, Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+					{Name: "sk-ignored", Source: "o/sk-ignored", Skills: []string{"a"}, Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
 				}, nil, nil)
 				m.agentsIgnore.Skills = []string{"sk-ignored"}
 				return m
 			},
 		},
-		// skills/updatesAvailable: unreachable — skillPackageRowStatus
-		// (agents_status.go) only ever returns agentsStatusOutOfSync or
-		// agentsStatusInstalled, never agentsStatusUpdates.
+		{
+			name:    "skills/updatesAvailable",
+			feature: agentsSectionSkills,
+			build: func() Model {
+				return agentsAllModel([]app.SkillPackageRow{
+					{Name: "sk-outdated", Source: "o/sk-outdated", Skills: []string{"a"}, Installed: true, Outdated: app.SkillOutdatedBehind, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
+				}, nil, nil)
+			},
+		},
 		{
 			name:    "mcp/installed",
 			feature: agentsSectionMcp,
@@ -108,9 +112,7 @@ func agentsComposedCases() []agentsComposedCase {
 				return m
 			},
 		},
-		// mcp/updatesAvailable: unreachable — mcpAgentRowStatus (agents_status.go)
-		// only ever returns agentsStatusOutOfSync or agentsStatusInstalled, never
-		// agentsStatusUpdates (mcp has no version/sha drift tracked per-adapter).
+		// mcp/updatesAvailable is unreachable: mcpAgentRowStatus never returns agentsStatusUpdates, since mcp tracks no per-adapter version drift.
 		{
 			name:    "plugin/installed",
 			feature: agentsSectionPlugins,
@@ -163,14 +165,7 @@ func agentsComposedCases() []agentsComposedCase {
 	}
 }
 
-// TestAgentsComposedPath_DetailLinesAndHintsPresentAcrossStateFeatureMatrix
-// is the regression guard for the class of bug that escaped all prior rounds
-// (orphan rows silently rendering zero detail lines and/or zero hints): for
-// every reachable (state, feature) combination, the selected row must
-// surface both at least one detail line and at least one hint. Unreachable
-// combinations (skills/mcp updatesAvailable) are omitted with a comment
-// above, mirroring parity_harness_test.go's documented-divergence style
-// rather than silently skipping them.
+// Every reachable (state, feature) row must surface at least one detail line and one hint; unreachable combinations are listed with a comment rather than silently skipped.
 func TestAgentsComposedPath_DetailLinesAndHintsPresentAcrossStateFeatureMatrix(t *testing.T) {
 	t.Parallel()
 	for _, c := range agentsComposedCases() {

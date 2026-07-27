@@ -118,6 +118,43 @@ func TestIsInstalled_CheckReturnsVersion(t *testing.T) {
 	}
 }
 
+func TestIsInstalled_RecordedVersionWithoutVersionCommand(t *testing.T) {
+	mock := executor.NewMatchMock().WithFallback(executor.MockCall{})
+	p := New(mock)
+	ok, version, err := p.IsInstalled(context.Background(), tool("actionlint", map[string]string{
+		"check":            "test -x /root/.local/bin/actionlint",
+		"recorded_version": "1.7.12",
+	}))
+	if err != nil {
+		t.Fatalf("IsInstalled() error = %v", err)
+	}
+	if !ok || version != "1.7.12" {
+		t.Errorf("IsInstalled() = %v, %q; want true, %q", ok, version, "1.7.12")
+	}
+	if len(mock.Calls) != 1 {
+		t.Errorf("recorded version must not shell out: calls = %v", mock.Calls)
+	}
+}
+
+func TestIsInstalled_VersionCommandOutranksRecordedVersion(t *testing.T) {
+	mock := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "sh -c bun-check", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "sh -c bun --version", Response: executor.MockCall{Stdout: "1.2.3\n"}},
+	).WithFallback(executor.MockCall{})
+	p := New(mock)
+	_, version, err := p.IsInstalled(context.Background(), tool("bun", map[string]string{
+		"check":            "bun-check",
+		"version":          "bun --version",
+		"recorded_version": "1.0.0",
+	}))
+	if err != nil {
+		t.Fatalf("IsInstalled() error = %v", err)
+	}
+	if version != "1.2.3" {
+		t.Errorf("version = %q; want %q", version, "1.2.3")
+	}
+}
+
 func TestIsInstalled_CheckNonZero(t *testing.T) {
 	mock := executor.NewMatchMock(executor.MatchRule{
 		Pattern:  "sh -c test -x /nope",
@@ -155,11 +192,7 @@ func TestIsInstalled_DetectMissing(t *testing.T) {
 }
 
 func TestIsInstalled_DetectInjectionPayloadDoesNotExecute(t *testing.T) {
-	// A malicious "detect" value with shell metacharacters must not be
-	// interpolated into the shell string. The argv approach passes detect as
-	// $1, so the shell never evaluates it as code. The mock verifies that
-	// the exact args we expect were passed (payload as a literal argv token,
-	// not as part of the -c script).
+	// detect must reach the shell as $1, never interpolated into the -c script where it would be evaluated.
 	payload := "x; touch PWNED"
 	mock := executor.NewMatchMock().WithFallback(executor.MockCall{Err: context.DeadlineExceeded})
 	p := New(mock)
@@ -167,8 +200,7 @@ func TestIsInstalled_DetectInjectionPayloadDoesNotExecute(t *testing.T) {
 	if ok {
 		t.Error("IsInstalled() = true; want false for unknown binary")
 	}
-	// The call must carry the payload as a separate argv element, not embedded
-	// in the shell script string.
+	// The payload must be a separate argv element, not part of the script string.
 	calls := mock.CallsMatching(`sh -c command -v "$1" --`)
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 call with argv pattern, got %d", len(calls))

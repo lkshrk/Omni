@@ -1,11 +1,6 @@
 package tui
 
-// cmd_group_test.go — unit tests for group/host do* commands
-// and the error branches of the dots pull/push/overwrite commands.
-//
-// All tests call cmd() directly (the tea.Cmd closure) rather than driving
-// the model through key presses, which lets us verify the async message
-// returned by each command function without the TUI event loop.
+// Tests call cmd() directly rather than driving the model through key presses, so each command's async message is verified without the TUI event loop.
 
 import (
 	"context"
@@ -21,10 +16,7 @@ import (
 	"github.com/lkshrk/omni/internal/dots"
 )
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-// newGroupApp builds an App with a minimal settings.json that has one host
-// ("default") and one named group ("mygroup"), ready for group/host ops.
+// One host ("default") and one named group ("mygroup"), ready for group/host ops.
 func newGroupApp(t *testing.T) *app.App {
 	t.Helper()
 	t.Setenv("OMNI_HOSTNAME", "default")
@@ -48,12 +40,9 @@ func newGroupApp(t *testing.T) *app.App {
 	return a
 }
 
-// modelWithGroupApp wires a Model to a group-ready App.
 func modelWithGroupApp(t *testing.T) Model {
 	return modelForCmds(newGroupApp(t))
 }
-
-// ── doCreateGroup ─────────────────────────────────────────────────────────────
 
 func TestDoCreateGroup_Success(t *testing.T) {
 	m := modelWithGroupApp(t)
@@ -80,8 +69,7 @@ func TestDoCreateGroup_Success(t *testing.T) {
 }
 
 func TestDoCreateGroup_DuplicateIsOK(t *testing.T) {
-	// Creating a group that already exists should not return an error
-	// (idempotent semantics) — or if it does, the error is surfaced in the msg.
+	// Creating an existing group is idempotent; any error is surfaced in the msg instead.
 	m := modelWithGroupApp(t)
 	msg := m.doCreateGroup("mygroup")()
 	_, ok := msg.(createGroupDoneMsg)
@@ -300,8 +288,6 @@ func TestDoSetHostGroupDots_DeselectedEntryExcludedFromSync(t *testing.T) {
 	}
 }
 
-// ── doRemoveHostFromTab ────────────────────────────────────────────────────
-
 func TestDoRemoveHostFromTab_Success(t *testing.T) {
 	m := modelWithGroupApp(t)
 	msg := m.doRemoveHostFromTab("default")()
@@ -512,8 +498,6 @@ func TestDoRenameHost_Success(t *testing.T) {
 	}
 }
 
-// ── doRenameGroup ─────────────────────────────────────────────────────────────
-
 func TestDoRenameGroup_Success(t *testing.T) {
 	m := modelWithGroupApp(t)
 	msg := m.doRenameGroup("mygroup", "renamedgroup")()
@@ -536,12 +520,9 @@ func TestDoRenameGroup_NonexistentGroup(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected groupChangedMsg, got %T", msg)
 	}
-	// App may or may not return an error for renaming a non-existent group;
-	// we assert the message type is correct and there's no panic.
+	// App may or may not error for a non-existent group, so only the message type and the absence of a panic are asserted.
 	_ = got
 }
-
-// ── doDeleteGroup ─────────────────────────────────────────────────────────────
 
 func TestDoDeleteGroup_Success(t *testing.T) {
 	m := modelWithGroupApp(t)
@@ -583,13 +564,8 @@ func TestDoDeleteGroup_NonexistentGroup(t *testing.T) {
 	_ = got
 }
 
-// ── dots error paths ──────────────────────────────────────────────────────────
-// These cover the 50%-covered branches: the DotsStatus error path reached
-// after a successful pull/push/overwrite when the follow-up status reload fails.
-// We trigger the first-step error by using an App with no dots_repo configured,
-// which makes the underlying git operations fail immediately.
+// An App with no dots_repo makes the git operation fail immediately, reaching the DotsStatus error path after a successful pull/push/overwrite.
 
-// newNoDotsModel creates a Model whose App has no DotsRepo configured.
 func newNoDotsModel(t *testing.T) Model {
 	t.Helper()
 	prov := &okProvider{name: "brew"}

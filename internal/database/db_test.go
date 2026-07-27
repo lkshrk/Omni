@@ -27,7 +27,6 @@ func newTestDB(t *testing.T) *database.DB {
 
 func TestMigrate_Idempotent(t *testing.T) {
 	db := newTestDB(t)
-	// Second call must not fail.
 	if err := db.Migrate(context.Background()); err != nil {
 		t.Fatalf("second Migrate: %v", err)
 	}
@@ -376,7 +375,6 @@ func TestUpsert_Updates(t *testing.T) {
 	tool := &database.ToolCache{Name: "ripgrep", Provider: "brew", Package: "ripgrep"}
 	_ = db.Upsert(ctx, tool)
 
-	// Upsert again with the same resolved key.
 	tool.Installed = true
 	if err := db.Upsert(ctx, tool); err != nil {
 		t.Fatalf("second Upsert: %v", err)
@@ -491,7 +489,6 @@ func TestMetadataSelfUpdatesPersistsAndSurvivesSourceUpdate(t *testing.T) {
 		t.Fatalf("upsert tool: %v", err)
 	}
 
-	// Cask metadata marks it self-updating.
 	if err := db.UpsertMetadataBatch(ctx, []database.MetadataUpdate{
 		{Name: "battle-net", Provider: "brew", Package: "battle-net", ArtifactKind: "cask", SelfUpdates: true},
 	}); err != nil {
@@ -516,8 +513,7 @@ func TestMetadataSelfUpdatesPersistsAndSurvivesSourceUpdate(t *testing.T) {
 		t.Fatalf("self_updates after cask metadata = %q, want true", got)
 	}
 
-	// A later source-only update (no artifact_kind) must NOT clear the flag —
-	// otherwise the cask flickers back to an actionable update on refresh.
+	// Clearing the flag here would flicker the cask back to an actionable update on refresh.
 	if err := db.UpsertMetadataBatch(ctx, []database.MetadataUpdate{
 		{Name: "battle-net", Provider: "brew", Package: "battle-net", SourceType: "github", SourceOwner: "blizzard", SourceRepo: "battle-net"},
 	}); err != nil {
@@ -614,8 +610,6 @@ func TestMarkUninstalled_ClearsOutdatedState(t *testing.T) {
 	}
 }
 
-// ─── UpdateOutdated ───────────────────────────────────────────────────────────
-
 func TestUpdateOutdated_SetsFlag(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
@@ -651,19 +645,14 @@ func TestUpdateOutdated_ClearsFlag(t *testing.T) {
 	}
 }
 
-// TestUpsert_PreservesOutdatedFlag is a regression test for the bug where
-// Upsert (called by RefreshInstalled) included "outdated" in its ON CONFLICT
-// SET clause, causing it to race with RefreshOutdated and wipe the ↑ update
-// flags — making tools with available updates vanish from the UI after ~1 min.
+// Upsert must leave "outdated" out of ON CONFLICT SET, or it races RefreshOutdated and wipes update flags.
 func TestUpsert_PreservesOutdatedFlag(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 
 	_ = db.Upsert(ctx, &database.ToolCache{Name: "ripgrep", Provider: "brew", Package: "ripgrep"})
-	// Simulate RefreshOutdated marking the tool as outdated.
 	_ = db.UpdateOutdated(ctx, "ripgrep", "brew", "ripgrep", true, "15.0.0")
 
-	// Simulate RefreshInstalled re-upsetting the same tool (with Outdated unset/false).
 	if err := db.Upsert(ctx, &database.ToolCache{
 		Name:      "ripgrep",
 		Provider:  "brew",
@@ -684,8 +673,6 @@ func TestUpsert_PreservesOutdatedFlag(t *testing.T) {
 		t.Errorf("LatestVersion = %q, want 15.0.0 (Upsert must not clear latest_version)", got.LatestVersion.String)
 	}
 }
-
-// ─── UpdateDescription ────────────────────────────────────────────────────────
 
 func TestUpdateDescription_ExistingRow(t *testing.T) {
 	ctx := context.Background()
@@ -730,16 +717,12 @@ func TestUpdateDescription_OnlyUpdatesMatchingPackage(t *testing.T) {
 	}
 }
 
-// ─── Bun ─────────────────────────────────────────────────────────────────────
-
 func TestBun_ReturnsNonNil(t *testing.T) {
 	db := newTestDB(t)
 	if b := db.Bun(); b == nil {
 		t.Error("Bun() should return non-nil")
 	}
 }
-
-// ─── MarkFailed / ListFailed ──────────────────────────────────────────────────
 
 func TestMarkFailed_CreatesRow(t *testing.T) {
 	ctx := context.Background()
@@ -937,8 +920,6 @@ func TestUpdateDescription_NoExistingRow(t *testing.T) {
 	}
 }
 
-// ─── UpsertDiscovered / MarkTracked / ListDiscovered / PruneDiscovered ────────
-
 func TestUpsertDiscovered_InsertsRow(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
@@ -989,7 +970,6 @@ func TestUpsertDiscovered_DoesNotOverwriteConfigTrackedRow(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 
-	// Insert a config-tracked row via Upsert (tracked=true by default).
 	if err := db.Upsert(ctx, &database.ToolCache{
 		Name:     "ripgrep",
 		Provider: "brew",
@@ -998,12 +978,10 @@ func TestUpsertDiscovered_DoesNotOverwriteConfigTrackedRow(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	// UpsertDiscovered must not overwrite the tracked=true row.
 	if err := db.UpsertDiscovered(ctx, "ripgrep", "brew", "brew", "99.0.0"); err != nil {
 		t.Fatalf("UpsertDiscovered: %v", err)
 	}
 
-	// The row should still be tracked and not appear in ListDiscovered.
 	discovered, err := db.ListDiscovered(ctx)
 	if err != nil {
 		t.Fatalf("ListDiscovered: %v", err)
@@ -1012,7 +990,6 @@ func TestUpsertDiscovered_DoesNotOverwriteConfigTrackedRow(t *testing.T) {
 		t.Errorf("config-tracked row appeared in ListDiscovered: %v", discovered)
 	}
 
-	// The original row should still exist and be tracked.
 	got, err := db.Get(ctx, "ripgrep", "brew", "ripgrep")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
@@ -1030,7 +1007,6 @@ func TestMarkTracked_PromotesDiscoveredRow(t *testing.T) {
 		t.Fatalf("UpsertDiscovered: %v", err)
 	}
 
-	// Before MarkTracked, it should appear in ListDiscovered.
 	before, err := db.ListDiscovered(ctx)
 	if err != nil {
 		t.Fatalf("ListDiscovered before: %v", err)
@@ -1043,7 +1019,6 @@ func TestMarkTracked_PromotesDiscoveredRow(t *testing.T) {
 		t.Fatalf("MarkTracked: %v", err)
 	}
 
-	// After MarkTracked, it should not appear in ListDiscovered.
 	after, err := db.ListDiscovered(ctx)
 	if err != nil {
 		t.Fatalf("ListDiscovered after: %v", err)
@@ -1052,7 +1027,6 @@ func TestMarkTracked_PromotesDiscoveredRow(t *testing.T) {
 		t.Errorf("expected 0 discovered tools after MarkTracked, got %d", len(after))
 	}
 
-	// The row should now be tracked.
 	got, err := db.Get(ctx, "ripgrep", "brew", "ripgrep")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
@@ -1066,11 +1040,9 @@ func TestListDiscovered_ExcludesConfigTrackedRows(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 
-	// Config-tracked row.
 	if err := db.Upsert(ctx, &database.ToolCache{Name: "git", Provider: "brew", Package: "git"}); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	// Discovered (tracked=false) row.
 	if err := db.UpsertDiscovered(ctx, "ripgrep", "brew", "brew", "14.1.0"); err != nil {
 		t.Fatalf("UpsertDiscovered: %v", err)
 	}
@@ -1091,12 +1063,10 @@ func TestPruneDiscovered_RemovesOldRows(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 
-	// Insert a discovered tool.
 	if err := db.UpsertDiscovered(ctx, "ripgrep", "brew", "brew", "14.1.0"); err != nil {
 		t.Fatalf("UpsertDiscovered: %v", err)
 	}
 
-	// Prune with a cutoff in the future — all discovered rows should be removed.
 	cutoff := time.Now().Add(time.Minute)
 	if err := db.PruneDiscovered(ctx, cutoff); err != nil {
 		t.Fatalf("PruneDiscovered: %v", err)
@@ -1115,12 +1085,10 @@ func TestPruneDiscovered_KeepsNewRows(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 
-	// Insert a discovered tool.
 	if err := db.UpsertDiscovered(ctx, "ripgrep", "brew", "brew", "14.1.0"); err != nil {
 		t.Fatalf("UpsertDiscovered: %v", err)
 	}
 
-	// Prune with a cutoff in the past — no rows should be removed.
 	cutoff := time.Now().Add(-time.Minute)
 	if err := db.PruneDiscovered(ctx, cutoff); err != nil {
 		t.Fatalf("PruneDiscovered: %v", err)
@@ -1139,18 +1107,15 @@ func TestPruneDiscovered_DoesNotRemoveConfigTrackedRows(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 
-	// Config-tracked row.
 	if err := db.Upsert(ctx, &database.ToolCache{Name: "git", Provider: "brew", Package: "git"}); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	// Prune with a future cutoff.
 	cutoff := time.Now().Add(time.Minute)
 	if err := db.PruneDiscovered(ctx, cutoff); err != nil {
 		t.Fatalf("PruneDiscovered: %v", err)
 	}
 
-	// Config-tracked row must still exist.
 	got, err := db.Get(ctx, "git", "brew", "git")
 	if err != nil {
 		t.Fatalf("Get after prune: %v", err)
@@ -1160,12 +1125,7 @@ func TestPruneDiscovered_DoesNotRemoveConfigTrackedRows(t *testing.T) {
 	}
 }
 
-// TestPruneDiscovered_SameSecondNotPruned is a regression test for the
-// CURRENT_TIMESTAMP precision race: when upsert and cutoff land in the same
-// wall-clock second, SQLite's CURRENT_TIMESTAMP (no sub-seconds) produced a
-// timestamp that compared as older than the Go time.Time cutoff, causing the
-// row to be pruned immediately. The fix passes time.Now() as a bound parameter
-// so both sides carry identical precision and the row is correctly kept.
+// SQLite's CURRENT_TIMESTAMP has no sub-seconds, so the cutoff must be a bound parameter of equal precision.
 func TestPruneDiscovered_SameSecondNotPruned(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
@@ -1177,8 +1137,6 @@ func TestPruneDiscovered_SameSecondNotPruned(t *testing.T) {
 		t.Fatalf("UpsertDiscovered: %v", err)
 	}
 
-	// Prune with the cutoff captured before the upsert.
-	// last_checked >= cutoff → row must survive.
 	if err := db.PruneDiscovered(ctx, cutoff); err != nil {
 		t.Fatalf("PruneDiscovered: %v", err)
 	}
@@ -1222,14 +1180,10 @@ func TestReconcileTracked_UntracksStalePackageRows(t *testing.T) {
 	}
 }
 
-// TestClearProviderDerivedCache_TransactionRollback verifies that a mid-wipe
-// failure leaves the cache tables intact (no partial delete) and no sentinel
-// written, so a clean retry will succeed on the next startup.
 func TestClearProviderDerivedCache_TransactionRollback(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 
-	// Seed data into every table that the wipe touches.
 	now := time.Now().UTC()
 	if err := db.Upsert(ctx, &database.ToolCache{
 		Name: "jq", Provider: "brew", Package: "jq", Installed: true, LastChecked: now,
@@ -1253,31 +1207,21 @@ func TestClearProviderDerivedCache_TransactionRollback(t *testing.T) {
 		t.Fatalf("seed update_metadata: %v", err)
 	}
 
-	// Remove the sentinel so clearProviderDerivedCacheForProviderList would run.
 	if _, err := db.Bun().ExecContext(ctx,
 		`DELETE FROM local_state WHERE key = 'migration.provider_list_cache_cleared'`); err != nil {
 		t.Fatalf("reset sentinel: %v", err)
 	}
 
-	// Simulate an interrupted wipe by dropping a table mid-transaction so the
-	// whole transaction rolls back.  We achieve this by renaming one of the
-	// target tables out from under the transaction using a separate connection
-	// — SQLite WAL allows readers but not concurrent writers, so instead we
-	// verify the idempotency property directly: run Migrate twice and confirm
-	// the sentinel prevents a second wipe.
-	//
-	// First run: clears everything and sets the sentinel.
+	// WAL forbids a concurrent writer, so assert idempotency instead: a second Migrate must not re-wipe.
 	if err := db.Migrate(ctx); err != nil {
 		t.Fatalf("Migrate (first): %v", err)
 	}
-	// Seed again after the first successful wipe.
 	if err := db.Upsert(ctx, &database.ToolCache{
 		Name: "fd", Provider: "brew", Package: "fd", Installed: true, LastChecked: now,
 	}); err != nil {
 		t.Fatalf("seed after first wipe: %v", err)
 	}
 
-	// Second run: sentinel is set — wipe must NOT run again, data must survive.
 	if err := db.Migrate(ctx); err != nil {
 		t.Fatalf("Migrate (second): %v", err)
 	}
@@ -1290,14 +1234,10 @@ func TestClearProviderDerivedCache_TransactionRollback(t *testing.T) {
 	}
 }
 
-// TestMigrateExistingToolMetadata_Idempotent verifies that the
-// tool-metadata back-fill runs exactly once: the sentinel prevents subsequent
-// startups from repeating the full tool_cache scan.
 func TestMigrateExistingToolMetadata_Idempotent(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 
-	// First Migrate already ran inside newTestDB; the sentinel must be set.
 	sentinel, err := db.GetState(ctx, "migration.tool_metadata_migrated")
 	if err != nil {
 		t.Fatalf("GetState tool_metadata_migrated after first Migrate: %v", err)
@@ -1306,7 +1246,6 @@ func TestMigrateExistingToolMetadata_Idempotent(t *testing.T) {
 		t.Fatalf("sentinel = %q, want 1", sentinel)
 	}
 
-	// Seed a tool with metadata that would normally be promoted.
 	now := time.Now().UTC()
 	if err := db.Upsert(ctx, &database.ToolCache{
 		Name: "bat", Provider: "brew", Package: "bat",
@@ -1316,8 +1255,6 @@ func TestMigrateExistingToolMetadata_Idempotent(t *testing.T) {
 		t.Fatalf("seed tool_cache: %v", err)
 	}
 
-	// Second Migrate must skip the back-fill (sentinel already set), so "bat"
-	// must NOT appear in tool_metadata.
 	if err := db.Migrate(ctx); err != nil {
 		t.Fatalf("Migrate (second): %v", err)
 	}

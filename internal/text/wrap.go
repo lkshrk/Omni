@@ -1,4 +1,3 @@
-// Package text provides shared text-processing utilities.
 package text
 
 import (
@@ -6,9 +5,7 @@ import (
 	"strings"
 )
 
-// WrapText splits s into lines of at most width runes, breaking at word
-// boundaries. Width is measured in runes so multibyte characters count as one
-// visual column. Returns nil for empty or whitespace-only input.
+// WrapText — Width counts runes, not display columns.
 func WrapText(s string, width int) []string {
 	if s == "" || width <= 0 {
 		return nil

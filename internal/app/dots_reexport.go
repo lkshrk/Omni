@@ -2,14 +2,8 @@ package app
 
 import "github.com/lkshrk/omni/internal/dots"
 
-// Re-exports of the internal/dots symbols the TUI needs, so the view layer
-// depends only on internal/app (layering finding model.go:202). Type aliases
-// (identical types), so App's own dots-typed signatures accept them unchanged.
-// The Dot* prefix disambiguates from App's own state types (DotsState,
-// ToolGroupState) — DotState/DotAction are one dot entry's sync classification
-// and its resolution action, not a subsystem snapshot.
+// Type aliases so App's own dots-typed signatures accept them unchanged; the Dot prefix disambiguates from App's state types.
 
-// DotState is one dot entry's sync classification.
 type DotState = dots.State
 
 const (
@@ -29,7 +23,6 @@ const (
 	DotStateAmbiguous         = dots.StateAmbiguous
 )
 
-// DotAction is a resolution action offered for an out-of-sync dot entry.
 type DotAction = dots.Action
 
 const (
@@ -43,12 +36,9 @@ const (
 	DotActionEnable   = dots.ActionEnable
 )
 
-// DotSyncOptions / DotSyncProgressEvent carry a dots sync request and its
-// per-entry progress callbacks.
 type (
 	DotSyncOptions       = dots.SyncOptions
 	DotSyncProgressEvent = dots.SyncProgressEvent
 )
 
-// DotExpandPath expands a leading ~ and env vars in a dot entry path.
 var DotExpandPath = dots.ExpandPath

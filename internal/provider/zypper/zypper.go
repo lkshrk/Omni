@@ -1,4 +1,3 @@
-// Package zypper implements the zypper (openSUSE/SLES) provider.
 package zypper
 
 import (
@@ -11,12 +10,10 @@ import (
 	"github.com/lkshrk/omni/internal/provider/rpm"
 )
 
-// Provider implements the zypper package manager.
 type Provider struct {
 	exec executor.Executor
 }
 
-// New creates a zypper Provider.
 func New(exec executor.Executor) *Provider {
 	return &Provider{exec: exec}
 }
@@ -93,7 +90,6 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 }
 
 // InstalledMap returns user-installed zypper packages as lowercase-name→version.
-// Implements provider.BulkChecker.
 func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) {
 	tools, err := p.ListInstalled(ctx)
 	if err != nil {
@@ -125,7 +121,6 @@ func parseZypperUserInstalledLine(line string) (name, version string, ok bool) {
 }
 
 // BulkDescribe fetches summaries for multiple tools via a single `zypper info` call.
-// Implements provider.BulkDescriber.
 func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map[string]string, error) {
 	if len(tools) == 0 {
 		return nil, nil

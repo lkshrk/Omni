@@ -20,10 +20,6 @@ func TestDiscoveryScopeInstallSpecs_HostOverrideBeatsProviders(t *testing.T) {
 	}
 }
 
-// Node managers (bun/pnpm/npm) share a global store, so each reports the same
-// globally-installed package. Discovery iterates each manager-provider, yielding
-// one upsert per manager. collapseSharedStoreDuplicates must reduce these to a
-// single row attributed to the ecosystem's effective manager.
 func TestCollapseSharedStoreDuplicates_NodeCollapsesToEffective(t *testing.T) {
 	t.Parallel()
 	effective := map[string]string{"node": "pnpm", "python": "uv"}
@@ -43,7 +39,6 @@ func TestCollapseSharedStoreDuplicates_NodeCollapsesToEffective(t *testing.T) {
 	}
 }
 
-// Python managers (uv/pip) also share PyPI's global store.
 func TestCollapseSharedStoreDuplicates_PythonCollapsesToEffective(t *testing.T) {
 	t.Parallel()
 	effective := map[string]string{"python": "uv"}
@@ -62,8 +57,6 @@ func TestCollapseSharedStoreDuplicates_PythonCollapsesToEffective(t *testing.T) 
 	}
 }
 
-// System package managers (brew/apt) do NOT share a store — a package installed
-// under both is two genuinely separate installs and must not be collapsed.
 func TestCollapseSharedStoreDuplicates_SystemNotCollapsed(t *testing.T) {
 	t.Parallel()
 	effective := map[string]string{}
@@ -79,8 +72,6 @@ func TestCollapseSharedStoreDuplicates_SystemNotCollapsed(t *testing.T) {
 	}
 }
 
-// When the effective manager is not among the reported duplicates, the first
-// entry survives rather than dropping the package entirely.
 func TestCollapseSharedStoreDuplicates_FallsBackToFirstWhenNoEffective(t *testing.T) {
 	t.Parallel()
 	effective := map[string]string{"node": "yarn"} // not installed locally
@@ -99,7 +90,6 @@ func TestCollapseSharedStoreDuplicates_FallsBackToFirstWhenNoEffective(t *testin
 	}
 }
 
-// Distinct packages within the same ecosystem are preserved.
 func TestCollapseSharedStoreDuplicates_KeepsDistinctNames(t *testing.T) {
 	t.Parallel()
 	effective := map[string]string{"node": "pnpm"}

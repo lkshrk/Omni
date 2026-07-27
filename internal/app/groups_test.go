@@ -13,8 +13,6 @@ import (
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
 
-// ─── Groups ──────────────────────────────────────────────────────────────────
-
 func TestGroups_EmptyDir(t *testing.T) {
 	t.Parallel()
 	a, _ := newImportApp(t)
@@ -144,8 +142,6 @@ func TestInitTestMode_NormalizesConfigGroupOrderOnDisk(t *testing.T) {
 	}
 }
 
-// ─── Add to group ─────────────────────────────────────────────────────────────
-
 func TestAdd_ToBaseGroup(t *testing.T) {
 	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
@@ -221,11 +217,9 @@ func TestAdd_ToNamedGroup_AppendsIfExists(t *testing.T) {
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
 
-	// Add first tool.
 	if err := a.Add(context.Background(), "system", "slack", "", "work", "brew"); err != nil {
 		t.Fatal(err)
 	}
-	// Add second tool to same group.
 	if err := a.Add(context.Background(), "system", "zoom", "", "work", "brew"); err != nil {
 		t.Fatal(err)
 	}
@@ -437,8 +431,6 @@ func assertHostAssignedToGroup(t *testing.T, info *app.HostInfo, host, group str
 	}
 }
 
-// ─── Sync group filter ────────────────────────────────────────────────────────
-
 func TestSync_GroupFilter_UnknownGroup(t *testing.T) {
 	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
@@ -479,7 +471,6 @@ func TestSync_GroupFilter_OnlySyncsGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Sync only the "work" group — only slack should be installed.
 	_, err := a.Sync(context.Background(), gosync.SyncOptions{Group: "work"})
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
@@ -489,8 +480,6 @@ func TestSync_GroupFilter_OnlySyncsGroup(t *testing.T) {
 		t.Errorf("installCalled = %v, want [slack]", brew.installCalled)
 	}
 }
-
-// ─── Import group ─────────────────────────────────────────────────────────────
 
 func TestImport_ToNamedGroup(t *testing.T) {
 	t.Parallel()
@@ -511,7 +500,6 @@ func TestImport_ToNamedGroup(t *testing.T) {
 		t.Errorf("Added = %v, want [ripgrep]", result.Added)
 	}
 
-	// ripgrep must be in the requested "work" group.
 	updated, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -527,15 +515,11 @@ func TestImport_ToNamedGroup(t *testing.T) {
 	t.Error("work group not found in config")
 }
 
-// ─── Cross-group duplicate membership ────────────────────────────────────────
-
 func TestSync_DuplicateToolAcrossGroups_IsValid(t *testing.T) {
 	t.Parallel()
 	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, brew)
 
-	// Put ripgrep in TWO reusable groups. A tool may belong to any number of
-	// reusable groups, so this is valid and Sync should succeed and install it.
 	host := testShortHostname()
 	rootCfg := &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
@@ -558,8 +542,6 @@ func TestSync_DuplicateToolAcrossGroups_IsValid(t *testing.T) {
 		t.Fatalf("installCalled = %v, want [ripgrep]", brew.installCalled)
 	}
 }
-
-// ─── CreateGroup ──────────────────────────────────────────────────────────────
 
 func TestCreateGroup_Success(t *testing.T) {
 	t.Parallel()

@@ -7,9 +7,7 @@ import (
 )
 
 func TestMembershipInvariantToggle(t *testing.T) {
-	t.Parallel(
-	// reusable groups: "team", "web"; host groups: anything else ("laptop", "server").
-	)
+	t.Parallel()
 
 	reusable := ReusablePredicate([]string{"team", "web"})
 
@@ -80,7 +78,6 @@ func TestMembershipToggle_FreeAddRemove(t *testing.T) {
 	if !slices.Equal(got, []string{"b"}) {
 		t.Fatalf("remove: got %v, want [b]", got)
 	}
-	// No reusable eviction: two reusable groups coexist.
 	got = MembershipToggle([]string{"work"}, "base")
 	if !slices.Equal(got, []string{"work", "base"}) {
 		t.Fatalf("free: got %v, want [work base]", got)

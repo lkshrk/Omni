@@ -1,0 +1,77 @@
+# Claude List reads $HOME/.claude.json directly; Codex List executes the fake CLI against its state file.
+chmod 0755 $WORK/bin/claude
+chmod 0755 $WORK/bin/codex
+env PATH=$WORK/bin:$PATH
+env HOME=$WORK/home
+mkdir $WORK/home
+
+# Plugin-shadow detection still invokes `claude plugins list` when the missing key prevents MCP installation.
+! exec omni --config settings.json agents mcp sync
+stdout 'installed: codex/grafana'
+stdout '! claude-code/linear: .*LINEAR_API_KEY.* not set'
+stderr 'agent operation\(s\) failed'
+exists .omni-cache/claude-calls.log
+! grep 'mcp add' .omni-cache/claude-calls.log
+exists .omni-cache/codex-calls.log
+grep 'mcp add' .omni-cache/codex-calls.log
+
+env LINEAR_API_KEY=test-token
+exec omni --config settings.json agents mcp sync
+stdout 'installed: claude-code/linear'
+stdout 'installed: codex/grafana'
+grep 'LINEAR_API_KEY=test-token' .omni-cache/claude-calls.log
+grep -count=1 'mcp add' .omni-cache/claude-calls.log
+grep -count=2 'mcp add' .omni-cache/codex-calls.log
+
+cp codex-mcp-preinstalled .omni-cache/codex-mcp-preinstalled
+exec omni --config settings.json agents mcp sync
+stdout 'already installed: claude-code/linear'
+stdout 'already installed: codex/grafana'
+grep -count=1 'mcp add' .omni-cache/claude-calls.log
+grep -count=2 'mcp add' .omni-cache/codex-calls.log
+
+-- settings.json --
+{"agents":{"mcp_servers":[
+  {"name":"linear","transport":"stdio","command":"npx -y @linear/mcp","env":["LINEAR_API_KEY"],"agents":["claude-code"]},
+  {"name":"grafana","transport":"http","url":"https://mcp.example.com","agents":["codex"]}
+]}}
+
+-- codex-mcp-preinstalled --
+[{"name":"grafana","transport":{"type":"streamable_http","url":"https://mcp.example.com"}}]
+
+-- bin/claude --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/claude-calls.log"
+if [ "$1" = "plugins" ] && [ "$2" = "list" ]; then
+  printf '{"installed":[],"available":[]}\n'
+  exit 0
+fi
+if [ "$1" = "mcp" ] && [ "$2" = "add" ] && [ "$3" = "-s" ] && [ "$4" = "user" ]; then
+  if [ "$5" = "linear" ]; then
+    printf '{"mcpServers":{"linear":{"command":"npx","args":["-y","@linear/mcp"]}}}' > "$HOME/.claude.json"
+  fi
+  echo "added $5"
+  exit 0
+fi
+exit 1
+
+-- bin/codex --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/codex-calls.log"
+if [ "$1" = "mcp" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
+  if [ -f "${OMNI_CACHE_DIR}/codex-mcp-preinstalled" ]; then
+    cat "${OMNI_CACHE_DIR}/codex-mcp-preinstalled"
+  else
+    printf '[]\n'
+  fi
+  exit 0
+fi
+if [ "$1" = "mcp" ] && [ "$2" = "add" ]; then
+  echo "added $3"
+  exit 0
+fi
+exit 1

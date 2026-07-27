@@ -8,11 +8,7 @@ import (
 	"github.com/lkshrk/omni/internal/executor"
 )
 
-// dotsHost is the narrow set of App infrastructure the dots orchestration
-// depends on: the config store, the dots-enablement/test guards, the repo-path
-// resolver, and the executor factory. It is deliberately small — the dots
-// service reaches only these, never the tools/agents/hosts clusters — so the
-// carve is an honest seam rather than a *App back-pointer. *App satisfies it.
+// Deliberately narrow: the dots service reaches only these, never the tools, agents or hosts clusters.
 type dotsHost interface {
 	loadConfig() (*config.RootConfig, error)
 	requireDotsEnabled(*config.RootConfig) error
@@ -21,12 +17,7 @@ type dotsHost interface {
 	newExecutor() executor.Executor
 }
 
-// dotsService owns the App-layer orchestration that sits on top of the carved
-// internal/dots.Engine: loading config, resolving the active entry set, and
-// building an engine. It exists to collapse the setup dance that every dots
-// mutation repeated inline (load config, check enabled, resolve repo path,
-// guard the test filesystem, build the content dir, resolve entries, construct
-// the engine).
+// Collapses the setup dance every dots mutation repeated inline.
 type dotsService struct {
 	host dotsHost
 }
@@ -35,10 +26,7 @@ func newDotsService(host dotsHost) *dotsService {
 	return &dotsService{host: host}
 }
 
-// dotService returns App's dots orchestration service, lazily building it so
-// tests that construct App as a struct literal (bypassing New) still work. The
-// service is stateless beyond its host, so a benign race here only ever rebuilds
-// an equivalent value.
+// Lazily built so tests constructing App as a struct literal still work; a benign race only rebuilds an equivalent value.
 func (a *App) dotService() *dotsService {
 	if a.dotSvc == nil {
 		a.dotSvc = newDotsService(a)
@@ -46,19 +34,13 @@ func (a *App) dotService() *dotsService {
 	return a.dotSvc
 }
 
-// dotsPreflight is the result of the shared front half of a dots operation: the
-// loaded config and the resolved repo path, computed before the caller installs
-// its history/refresh defer (which needs repoPath) and before the engine is
-// built (so a later engine failure still records history).
+// Computed before the caller installs its history defer and before the engine is built.
 type dotsPreflight struct {
 	rootCfg  *config.RootConfig
 	repoPath string
 }
 
-// preflight loads config and resolves the repo path, running the dots-enabled
-// and test-mutation guards. Callers invoke it first, then install their
-// operation-specific history defer using the returned repoPath, then call
-// engineFor to finish resolving.
+// Callers run it first, install their history defer with repoPath, then call engineFor.
 func (s *dotsService) preflight() (dotsPreflight, error) {
 	rootCfg, err := s.host.loadConfig()
 	if err != nil {
@@ -77,11 +59,7 @@ func (s *dotsService) preflight() (dotsPreflight, error) {
 	return dotsPreflight{rootCfg: rootCfg, repoPath: repoPath}, nil
 }
 
-// engineFor resolves the active entry set for the current host and builds a
-// dots.Engine over it. When dryRun is false the content directory is created;
-// on dry runs it is only referenced. filterActive drops inactive host variants
-// (the set that mutations act on). The test-mutation guard is re-run against
-// the resolved entries before the engine is constructed.
+// filterActive drops inactive host variants; the test-mutation guard re-runs against the resolved entries.
 func (s *dotsService) engineFor(pf dotsPreflight, dryRun, filterActive bool) (*dots.Engine, error) {
 	stowPath := dotsContentPath(pf.repoPath)
 	if !dryRun {
@@ -110,7 +88,6 @@ func (s *dotsService) engineFor(pf dotsPreflight, dryRun, filterActive bool) (*d
 	return engine, nil
 }
 
-// hasEntry reports whether the engine resolved an entry with the given name.
 func engineHasEntry(engine *dots.Engine, name string) bool {
 	for _, entry := range engine.Entries {
 		if entry.Name == name {

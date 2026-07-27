@@ -38,8 +38,7 @@ type PrivilegePlanner interface {
 	PrivilegePlan(ctx context.Context, action PrivilegeAction, tool Tool) (PrivilegePlan, error)
 }
 
-// PrivilegeCommandPlanner returns the raw package-manager command for an
-// interactive privileged action. Callers own sudo policy.
+// PrivilegeCommandPlanner — Returns the raw command for an interactive privileged action; callers own sudo policy.
 type PrivilegeCommandPlanner interface {
 	PrivilegeCommand(action PrivilegeAction, tool Tool) (cmd string, args []string, ok bool)
 }

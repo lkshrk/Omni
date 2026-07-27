@@ -323,7 +323,6 @@ func TestPatchRawRouted_DotChangeWritesToDotsFragmentOnly(t *testing.T) {
 		t.Fatalf("dots fragment received tool data: %s", dotsRaw)
 	}
 
-	// Round trip: effective config reflects the change.
 	cfg, err := config.Load(mainPath)
 	if err != nil {
 		t.Fatalf("Load after patch: %v", err)
@@ -347,8 +346,7 @@ func TestPatchRawRouted_NewGroupGoesToGroupsFragment(t *testing.T) {
 	if err := config.PatchRawRouted(mainPath, patch); err != nil {
 		t.Fatalf("PatchRawRouted: %v", err)
 	}
-	// dots.json listed last in $include, so it is the default home for new
-	// groups; the important invariants are: not in main, present exactly once.
+	// dots.json is listed last in $include, so new groups land there — not in main, and exactly once.
 	if _, ok := rawKeys(t, mainPath)["groups"]; ok {
 		t.Fatal("groups must not land in main")
 	}

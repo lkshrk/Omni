@@ -1,4 +1,3 @@
-// Package brew implements the Homebrew provider.
 package brew
 
 import (
@@ -52,14 +51,11 @@ func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	if err == nil {
 		return nil
 	}
-	// The package is already installed from a tap; brew refuses to install the
-	// same name from a different tap. Treat as installed rather than a failure —
-	// the scan missed it only because its tap was untrusted (now self-healing).
+	// Already installed from another tap: treat as installed, the scan only missed it because that tap was untrusted.
 	if isBrewAlreadyInstalledFromTap(stderr) {
 		return nil
 	}
-	// brew refused because the formula's tap is untrusted. Trust it and retry
-	// once; a tool omni is asked to install is one the user opted into.
+	// Trust the refused tap and retry once: a tool omni was asked to install is one the user opted into.
 	if tap, ok := parseBrewUntrustedTap(stderr); ok {
 		if _, _, terr := p.exec.Run(ctx, "brew", "trust", tap); terr == nil {
 			if _, rstderr, rerr := p.exec.Run(ctx, "brew", args...); rerr == nil {
@@ -69,10 +65,7 @@ func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 			}
 		}
 	}
-	// When the kind is unspecified and brew refuses because the name is both a
-	// formula and a cask, retry explicitly — formula first (the common CLI case),
-	// then cask. Tools added via search/import already carry brew_kind and skip
-	// this path.
+	// Ambiguous name with no kind: retry formula first (the common CLI case), then cask.
 	if tool.Options[brewKindOption] == "" && isBrewAmbiguousFormulaCask(stderr) {
 		for _, kind := range []string{"--formula", "--cask"} {
 			retry := []string{"install", kind, tool.EffectivePackage()}
@@ -86,9 +79,7 @@ func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	return fmt.Errorf("brew %s: %w (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr))
 }
 
-// parseBrewUntrustedTap extracts the tap name from a brew tap-trust refusal,
-// e.g. "Refusing to load formula getsentry/xcodebuildmcp/xcodebuildmcp from
-// untrusted tap getsentry/xcodebuildmcp." → "getsentry/xcodebuildmcp".
+// "Refusing to load formula a/b/c from untrusted tap a/b." yields "a/b".
 func parseBrewUntrustedTap(stderr string) (string, bool) {
 	_, rest, found := strings.Cut(stderr, "from untrusted tap ")
 	if !found {
@@ -104,18 +95,14 @@ func parseBrewUntrustedTap(stderr string) (string, bool) {
 	return field[0], true
 }
 
-// isBrewAlreadyInstalledFromTap reports whether brew refused an install because
-// the same-named formula is already installed from a different tap, e.g.
-// "flux was installed from the fluxcd/tap tap but you are trying to install it
-// from the homebrew/core tap."
+// Matches "X was installed from the A tap but you are trying to install it from the B tap."
 func isBrewAlreadyInstalledFromTap(stderr string) bool {
 	s := strings.ToLower(stderr)
 	return strings.Contains(s, "was installed from the") &&
 		strings.Contains(s, "tap")
 }
 
-// isBrewAmbiguousFormulaCask reports whether brew refused an unqualified install
-// because the name resolves to both a formula and a cask.
+// Matches brew's refusal when a name resolves to both a formula and a cask.
 func isBrewAmbiguousFormulaCask(stderr string) bool {
 	s := strings.ToLower(stderr)
 	return strings.Contains(s, "both a formula and a cask") ||
@@ -170,10 +157,6 @@ func (p *Provider) upgradeArgsWithKind(ctx context.Context, pkg, kind string) []
 	return upgradeArgsForKind(ctx, p, pkg, kind)
 }
 
-// caskUpgradeArgs upgrades a cask with --greedy so casks that auto-update or
-// pin to :latest are actually upgraded; plain `brew upgrade --cask` refuses
-// them. (installer-manual casks remain un-upgradable — brew refuses those
-// regardless.)
 func caskUpgradeArgs(name string) []string {
 	return []string{"upgrade", "--cask", "--greedy", name}
 }
@@ -186,7 +169,6 @@ func upgradeArgsForKind(ctx context.Context, p *Provider, pkg, kind string) []st
 	case brewKindCask:
 		return caskUpgradeArgs(name)
 	}
-	// Fall back to live probing when no persisted kind is available.
 	if p.installedFormula(ctx, name) {
 		return []string{"upgrade", "--formula", pkg}
 	}
@@ -206,12 +188,7 @@ func (p *Provider) installedCask(ctx context.Context, name string) bool {
 	return err == nil && strings.TrimSpace(stdout) != ""
 }
 
-// IsInstalled checks whether a formula or cask is installed.
-// Tap packages like "hashicorp/tap/terraform" must be stripped to "terraform" —
-// brew list --versions does not accept the tap-qualified form.
-// Modern brew auto-detects formula vs cask for install/uninstall/upgrade, but
-// `brew list --versions` only searches formulae by default, so we try the cask
-// flag as a fallback.
+// IsInstalled — Tap-qualified names must be stripped, and `brew list --versions` searches formulae only, hence the cask retry.
 func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, string, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -257,13 +234,11 @@ type brewCaskInfo struct {
 	Desc      string                       `json:"desc"`
 	Homepage  string                       `json:"homepage"`
 	URL       string                       `json:"url"`
-	Installed string                       `json:"installed"` // installed version string
+	Installed string                       `json:"installed"`
 	Artifacts []map[string]json.RawMessage `json:"artifacts"`
 }
 
-// ListInstalled returns Homebrew-managed formulae and casks for import/discovery.
-// Casks come from `brew list --cask`, so ordinary macOS apps that merely exist
-// on disk are not claimed as tools.
+// ListInstalled — Casks come from `brew list --cask`, so plain macOS apps on disk are not claimed as tools.
 func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -399,10 +374,7 @@ func lookupBrewListVersion(versions map[string]string, pkg string) string {
 	return versions[strings.ToLower(formulaName(pkg))]
 }
 
-// InstalledMetadataMap returns explicitly installed formulae and casks with
-// provider metadata learned from Homebrew's JSON. Some casks install via a pkg
-// artifact and uninstall through pkgutil, which may require sudo even though
-// normal brew formula operations do not.
+// InstalledMetadataMap — Some casks install a pkg artifact and uninstall through pkgutil, which may need sudo where formulae do not.
 func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provider.InstalledMetadata, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -416,9 +388,7 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 	}
 
 	metadata := make(map[string]provider.InstalledMetadata, len(out.Formulae)+len(caskTokens))
-	// Every formula brew info reports, whether or not installed-on-request, so the
-	// tap-trust union below can tell a deliberately-excluded transitive dependency
-	// (known to brew info) apart from a formula brew info hides entirely.
+	// Every formula brew info reports, so the union below can tell an excluded dependency from one brew info hides.
 	infoFormulae := make(map[string]struct{}, len(out.Formulae))
 	for _, f := range out.Formulae {
 		name := f.Name
@@ -471,14 +441,7 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 		}
 	}
 
-	// Homebrew tap-trust hides formulae from untrusted taps in `brew info` (and
-	// `brew leaves`), so installed-from-untrusted-tap formulae are absent above
-	// even though they are installed. `brew list --formula` still reports them.
-	// Union those in so configured tools backed by untrusted taps are detected
-	// as installed instead of wrongly reported missing.
-	//
-	// This union is required for a complete installed set. Treat a failed list as
-	// an error so callers do not mistake partial metadata for authoritative state.
+	// tap-trust hides untrusted-tap formulae from `brew info`, so union in `brew list --formula`; a failed list is an error, not partial state.
 	listOut, _, listErr := p.exec.Run(ctx, "brew", "list", "--versions", "--formula")
 	if listErr != nil {
 		return nil, fmt.Errorf("brew list --versions --formula: %w", listErr)
@@ -500,8 +463,7 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 			}
 			continue
 		}
-		// brew info already accounted for this formula (e.g. an intentionally
-		// excluded transitive dependency); only add formulae brew info hid.
+		// Only add formulae brew info hid; it already accounts for excluded transitive dependencies.
 		if _, ok := infoFormulae[name]; ok {
 			continue
 		}
@@ -687,9 +649,6 @@ type brewOutdatedOutput struct {
 func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	// --greedy includes casks that auto-update or pin to :latest; without it
-	// `brew outdated` silently skips them. The cask upgrade command pairs this
-	// with --greedy so those updates actually apply.
 	stdout, _, err := p.exec.Run(ctx, "brew", "outdated", "--json=v2", "--greedy")
 	if err != nil {
 		return nil, fmt.Errorf("brew outdated: %w", err)
@@ -711,10 +670,7 @@ func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	return m, nil
 }
 
-// ResolveTap reports the tap-qualified full name and tap for a formula when it
-// originates from a non-core tap. Used to backfill config entries that were
-// stored with a bare package name (which loses the tap origin and breaks
-// tap-trust). Returns ok=false for core formulae, casks, or unknown names.
+// ResolveTap — Backfills entries stored with a bare name, which loses tap origin and breaks tap-trust; ok=false for core formulae and casks.
 func (p *Provider) ResolveTap(ctx context.Context, name string) (fullName string, tap string, ok bool) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -754,7 +710,6 @@ func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, er
 }
 
 // BulkDescribe fetches descriptions for multiple tools via a single `brew info --json=v2` call.
-// Implements provider.BulkDescriber.
 func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map[string]string, error) {
 	if len(tools) == 0 {
 		return nil, nil
@@ -784,9 +739,7 @@ func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map
 	return m, nil
 }
 
-// RefreshMetadata runs `brew update` to pull the latest formula and tap index
-// so OutdatedMap can detect newly published versions, including those in
-// personal taps that brew does not auto-refresh on `brew outdated`.
+// RefreshMetadata — `brew update` so OutdatedMap sees personal taps that `brew outdated` does not auto-refresh.
 func (p *Provider) RefreshMetadata(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -807,11 +760,7 @@ func (p *Provider) Tap(ctx context.Context, name string) error {
 	return nil
 }
 
-// Trust marks a tap as trusted (Homebrew 5.2+/6.0 tap-trust). A tap declared in
-// config is one the user opted into, so omni trusts it on their behalf — without
-// this, short-name installs/outdated checks from the tap are refused once
-// tap-trust is enforced. On older Homebrew without the `brew trust` subcommand
-// this is a no-op (the trust model does not exist yet).
+// Trust — A tap in config is one the user opted into; without trusting it, short-name installs are refused. No-op on older brew.
 func (p *Provider) Trust(ctx context.Context, name string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -825,8 +774,6 @@ func (p *Provider) Trust(ctx context.Context, name string) error {
 	return nil
 }
 
-// brewSubcommandUnsupported reports whether stderr indicates the brew subcommand
-// does not exist on this Homebrew version.
 func brewSubcommandUnsupported(stderr string) bool {
 	s := strings.ToLower(stderr)
 	return strings.Contains(s, "unknown command") || strings.Contains(s, "unknown subcommand")
@@ -1024,7 +971,6 @@ func githubSourceHint(raw string) provider.SourceMetadata {
 	}
 }
 
-// formulaName returns the bare formula name from a package path.
 // "hashicorp/tap/terraform" → "terraform", "git" → "git"
 func formulaName(pkg string) string {
 	if i := strings.LastIndex(pkg, "/"); i >= 0 {
@@ -1033,9 +979,7 @@ func formulaName(pkg string) string {
 	return pkg
 }
 
-// validBrewFormulaName guards names parsed from `brew list` output before they
-// become metadata map keys, rejecting empty, over-long, or control/garbage
-// names so malformed output can't shadow a real formula or poison the cache.
+// Rejects empty, over-long, or control-character names so malformed output cannot shadow a formula or poison the cache.
 func validBrewFormulaName(name string) bool {
 	if name == "" || len(name) > 256 {
 		return false
@@ -1054,7 +998,6 @@ func validBrewFormulaName(name string) bool {
 	return true
 }
 
-// parseBrewVersion extracts the installed version from `brew list --versions` output.
 // Input: "ripgrep 14.1.1" → "14.1.1"
 func parseBrewVersion(line string) string {
 	parts := strings.Fields(line)

@@ -3,19 +3,31 @@
 # import reads $XDG_STATE_HOME/skills/.skill-lock.json and writes the config.
 env XDG_STATE_HOME=$WORK/state
 
-exec omni --config settings.json agents skills import
+# A source argument claims exactly that one package and leaves the rest alone.
+exec omni --config settings.json agents skills import o/other
 stdout '1 added, 0 updated, 0 unchanged'
+stdout '\+ o/other'
+! stdout 'o/r'
+
+# Naming a source that is not a candidate says which reason applies.
+! exec omni --config settings.json agents skills import o/absent
+stderr 'not in the legacy lockfile'
+! exec omni --config settings.json agents skills import o/other
+stderr 'already in the manifest'
+
+exec omni --config settings.json agents skills import
+stdout '1 added, 0 updated, 1 unchanged'
 stdout '\+ o/r'
 
 # The manifest was written: a restore dry-run now plans the adopted package
 # (ref from the lock entry is preserved), and a second import is a no-op.
-exec omni --config settings.json agents skills restore --dry-run
-stdout 'npx skills add o/r#main -g -a codex -y'
+exec omni --config settings.json agents skills sync --dry-run
+stdout 'install o/r at ref main skills x for targets codex'
 exec omni --config settings.json agents skills import
-stdout '0 added, 0 updated, 1 unchanged'
+stdout '0 added, 0 updated, 2 unchanged'
 
 -- settings.json --
 {"version":1,"settings":{"agents_use":["codex"]}}
 
 -- state/skills/.skill-lock.json --
-{"version":3,"skills":{"x":{"source":"o/r","sourceType":"github","sourceUrl":"https://github.com/o/r","ref":"main","skillFolderHash":"abc","installedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}}}
+{"version":3,"skills":{"x":{"source":"o/r","sourceType":"github","sourceUrl":"https://github.com/o/r","ref":"main","skillFolderHash":"abc","installedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"},"y":{"source":"o/other","sourceType":"github","sourceUrl":"https://github.com/o/other","skillFolderHash":"def","installedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}}}

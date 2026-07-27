@@ -29,8 +29,7 @@ func (namedBaseProvider) Search(context.Context, string) ([]provider.SearchResul
 	return []provider.SearchResult{{Name: "typescript", Provider: "node"}}, nil
 }
 
-// multiBaseProvider is a base provider that implements MultiManagerBulkChecker,
-// like node/python (bun/pnpm/npm and uv/pip backends).
+// Implements MultiManagerBulkChecker the way node/python do.
 type multiBaseProvider struct {
 	namedBaseProvider
 }
@@ -64,9 +63,7 @@ func TestNamed_DoesNotClaimMultiWhenBaseLacksIt(t *testing.T) {
 	}
 }
 
-// managerOutdatedInfoBaseProvider is a base provider that implements
-// ManagerOutdatedInfoChecker, like node/python (bun/pnpm/npm and uv/pip3/pip
-// backends).
+// Implements ManagerOutdatedInfoChecker the way node/python do.
 type managerOutdatedInfoBaseProvider struct {
 	namedBaseProvider
 }

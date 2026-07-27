@@ -1,8 +1,5 @@
 package config_test
 
-// Additional tests to push Load, Patch, DefaultConfigPath, DefaultCacheDir
-// branch coverage above 80%.
-
 import (
 	"os"
 	"path/filepath"
@@ -13,10 +10,6 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// ─── Load error paths ─────────────────────────────────────────────────────────
-
-// TestLoad_UnreadableFile exercises the "reading config file" error branch.
-// We create the file then chmod it to 000 so os.ReadFile fails.
 func TestLoad_UnreadableFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod 000 not meaningful on Windows")
@@ -38,9 +31,6 @@ func TestLoad_UnreadableFile(t *testing.T) {
 	}
 }
 
-// ─── Patch error paths ────────────────────────────────────────────────────────
-
-// TestPatch_InvalidExistingJSON exercises the "parsing existing config" error branch.
 func TestPatch_InvalidExistingJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
@@ -60,8 +50,6 @@ func TestPatch_InvalidExistingJSON(t *testing.T) {
 	}
 }
 
-// TestPatch_UnmarshalablePatch exercises the "encoding patch" error branch.
-// A struct containing a channel cannot be marshalled to JSON.
 func TestPatch_UnmarshalablePatch(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
@@ -78,10 +66,6 @@ func TestPatch_UnmarshalablePatch(t *testing.T) {
 	}
 }
 
-// ─── DefaultConfigPath — missing branch ───────────────────────────────────────
-
-// TestDefaultConfigPath_XDGSubdirContainsOmni verifies the constructed path
-// includes "omni/settings.json" when XDG_CONFIG_HOME is set.
 func TestDefaultConfigPath_XDGContainsOmniSettingsJSON(t *testing.T) {
 	base := t.TempDir()
 	t.Setenv("OMNI_CONFIG", "")
@@ -96,8 +80,6 @@ func TestDefaultConfigPath_XDGContainsOmniSettingsJSON(t *testing.T) {
 	}
 }
 
-// TestDefaultCacheDir_XDGContainsOmni verifies the constructed path includes
-// "omni" as final segment when XDG_CACHE_HOME is set.
 func TestDefaultCacheDir_XDGContainsOmni(t *testing.T) {
 	base := t.TempDir()
 	t.Setenv("OMNI_CACHE_DIR", "")

@@ -10,11 +10,6 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-// When host_settings lives in an included fragment, a per-host settings write
-// must land in that fragment — not force a second copy into the main file that
-// would union-merge back and resurrect stale entries on the next load. This is
-// the bug that using the non-routed Patch verb caused; the write seam routes
-// the changed key to its owner instead.
 func TestSaveDotsDisabled_RoutesToOwningFragment(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	dir := t.TempDir()
@@ -40,7 +35,6 @@ func TestSaveDotsDisabled_RoutesToOwningFragment(t *testing.T) {
 		t.Fatalf("SaveDotsDisabled: %v", err)
 	}
 
-	// The fragment owns host_settings and must carry the new flag.
 	frag := readKeys(t, fragPath)
 	if _, ok := frag["host_settings"]; !ok {
 		t.Fatal("host_settings vanished from the owning fragment")
@@ -56,7 +50,6 @@ func TestSaveDotsDisabled_RoutesToOwningFragment(t *testing.T) {
 		t.Fatal("existing dots_repo dropped from the fragment host entry")
 	}
 
-	// The main file must NOT gain a competing host_settings copy.
 	main := readKeys(t, cfgPath)
 	if raw, ok := main["host_settings"]; ok && string(raw) != "null" {
 		t.Fatalf("host_settings resurrected into the main file: %s", raw)

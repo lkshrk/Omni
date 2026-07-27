@@ -6,12 +6,7 @@ import (
 	"strings"
 )
 
-// isAgentConfigDotPath reports whether path (a DotEntry.Path value, e.g.
-// "~/.claude" or "~/.claude/agents/foo.md") targets a machine-managed agent
-// path from agentDotsManagedPaths, or a location underneath one.
-// ".agents/.skill-lock.json" and other files directly under ".agents" are
-// intentionally not matched here: only ".agents/skills" (the installed-skills
-// store) is machine-managed, the lockfile stays a trackable user dotfile.
+// Only ".agents/skills" is machine-managed under ".agents"; the lockfile beside it stays a trackable user dotfile.
 func isAgentConfigDotPath(path string) bool {
 	trimmed := strings.TrimPrefix(path, "~/")
 	trimmed = strings.TrimPrefix(trimmed, "/")
@@ -26,9 +21,6 @@ func isAgentConfigDotPath(path string) bool {
 	return false
 }
 
-// dropAgentConfigDots removes DotEntry values whose Path targets an agent
-// config dir (or a child path beneath one) from dots, preserving order of the
-// remaining entries.
 func dropAgentConfigDots(dots []DotEntry) []DotEntry {
 	if len(dots) == 0 {
 		return dots
@@ -43,20 +35,7 @@ func dropAgentConfigDots(dots []DotEntry) []DotEntry {
 	return out
 }
 
-// migrateConfigV13ToV14 drops dotfiles entries already tracking an agent
-// config dir (e.g. ".claude", ".codex") or a path beneath one. edaa0e1 stopped
-// dots discovery from surfacing these going forward; this is the one-time
-// cleanup for configs that tracked them before that change. Config-tracking
-// data only — actual files on disk are never touched.
-//
-// ".agents/.skill-lock.json" is exempt from this sweep going forward (see
-// isAgentConfigDotPath); prior runs of this same migration, before that
-// narrowing, may have already stripped a tracked lockfile entry for other
-// users. Migrations run once per config, keyed strictly by cfg.Version
-// advancing through configMigrations (see loader.go) — there is no re-run
-// mechanism once a config is past this version, so those past runs cannot be
-// automatically corrected by this change. No v15 migration is added to
-// "restore" anything: there is no record of what, if anything, was stripped.
+// Drops config-tracked dotfile entries under an agent config dir; files on disk are never touched.
 func migrateConfigV13ToV14(cfg *RootConfig) error {
 	for _, g := range cfg.Groups {
 		if g == nil {

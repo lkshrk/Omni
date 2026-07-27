@@ -10,26 +10,20 @@ import (
 	"github.com/lkshrk/omni/internal/database"
 )
 
-// DriftClass identifies the kind of config-vs-reality mismatch.
 type DriftClass string
 
 const (
-	// DriftProviderUnusable means the configured provider is unavailable/unregistered,
-	// the tool has no usable native or fallback route, and the tool is not present.
+	// Configured provider unavailable or unregistered, no usable route, and the tool is not present.
 	DriftProviderUnusable DriftClass = "provider-unusable"
 
-	// DriftWrongProvider means the tool is installed by a different provider than configured.
 	DriftWrongProvider DriftClass = "wrong-provider"
 
-	// DriftUnavailableButPresent means the configured provider is unavailable yet the tool is present on PATH.
 	DriftUnavailableButPresent DriftClass = "unavailable-but-present"
 
-	// DriftNvmManaged means the tool is configured for a system provider (e.g. brew) but
-	// the active binary resolves under an nvm Node version directory.
+	// Configured for a system provider but the active binary resolves under an nvm Node version dir.
 	DriftNvmManaged DriftClass = "nvm-managed"
 )
 
-// DriftFinding describes a single config-vs-reality mismatch for one tool.
 type DriftFinding struct {
 	Tool       string
 	Provider   string // configured provider
@@ -38,13 +32,11 @@ type DriftFinding struct {
 	Extra      string // optional context (e.g. actual installed-with value)
 }
 
-// driftReport is the raw output of buildDriftReport; kept separate so tests can inspect findings directly.
 type driftReport struct {
 	findings []DriftFinding
 	warnings []string // resolver warnings surfaced as detail lines
 }
 
-// doctorDrift runs drift analysis and appends the result to the doctor report.
 func (a *App) doctorDrift(ctx context.Context, result *DoctorResult, cfg *config.RootConfig) {
 	report, err := a.buildDriftReport(ctx, cfg)
 	if err != nil {
@@ -55,7 +47,6 @@ func (a *App) doctorDrift(ctx context.Context, result *DoctorResult, cfg *config
 	a.addDriftCheck(result, report)
 }
 
-// buildDriftReport returns the raw drift findings; package-private so tests can inspect directly.
 func (a *App) buildDriftReport(ctx context.Context, cfg *config.RootConfig) (*driftReport, error) {
 	// Use currentResolvedTools (not currentResolvedToolEntries) to get the resolved install route per tool.
 	resolved, warnings := a.currentResolvedTools(ctx, cfg)
@@ -85,8 +76,7 @@ func (a *App) buildDriftReport(ctx context.Context, cfg *config.RootConfig) (*dr
 
 		switch {
 		case !provRegistered || !provAvail:
-			// Skip if the resolver already found a usable native or fallback route;
-			// the config correctly handles the unavailability in that case.
+			// The config correctly handles the unavailability when a native or fallback route resolved.
 			if rt.route.Kind == installRouteNative || rt.route.Kind == installRouteFallbackEligible {
 				continue
 			}
@@ -141,7 +131,6 @@ func (a *App) buildDriftReport(ctx context.Context, cfg *config.RootConfig) (*dr
 	return &driftReport{findings: findings, warnings: warnings}, nil
 }
 
-// addDriftCheck converts a driftReport into a DoctorCheck and appends it to result.
 func (a *App) addDriftCheck(result *DoctorResult, report *driftReport) {
 	// Always surface resolver warnings — resolution problems are meaningful even without drift findings.
 	extraDetails := make([]string, 0, len(report.warnings))
@@ -204,8 +193,6 @@ func driftClassLabel(class DriftClass) string {
 	}
 }
 
-// DoctorCheckHasNvmManagedDrift reports whether a drift check includes
-// nvm-managed system-provider findings.
 func DoctorCheckHasNvmManagedDrift(check DoctorCheck) bool {
 	if check.ID != "drift" || check.Status == DoctorStatusOK {
 		return false
@@ -213,8 +200,6 @@ func DoctorCheckHasNvmManagedDrift(check DoctorCheck) bool {
 	return doctorNvmManagedFindingCount(check) > 0
 }
 
-// DoctorHasNvmManagedDrift reports whether any doctor check includes
-// nvm-managed system-provider drift findings.
 func DoctorHasNvmManagedDrift(result *DoctorResult) bool {
 	if result == nil {
 		return false
@@ -227,8 +212,6 @@ func DoctorHasNvmManagedDrift(result *DoctorResult) bool {
 	return false
 }
 
-// DoctorNvmManagedDriftCount returns the number of nvm-managed drift findings
-// reported by doctor drift checks.
 func DoctorNvmManagedDriftCount(result *DoctorResult) int {
 	if result == nil {
 		return 0
@@ -321,7 +304,6 @@ func defaultNodeManagerLabel(nodeManager string) string {
 	return "pnpm"
 }
 
-// providerAvailabilityMap returns name → available for every registered provider.
 func (a *App) providerAvailabilityMap(ctx context.Context) (map[string]bool, error) {
 	if a.registry == nil {
 		return map[string]bool{}, nil
@@ -339,7 +321,6 @@ func (a *App) providerAvailabilityMap(ctx context.Context) (map[string]bool, err
 	return m, nil
 }
 
-// cachedToolMap returns a name-keyed map of ToolCache rows from the DB.
 func (a *App) cachedToolMap(ctx context.Context) (map[string]*database.ToolCache, error) {
 	db := a.readDB()
 	if db == nil {

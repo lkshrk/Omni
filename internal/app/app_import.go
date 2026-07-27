@@ -8,9 +8,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// ─── Import ───────────────────────────────────────────────────────────────────
-
-// ImportOptions controls Import behaviour.
 type ImportOptions struct {
 	DryRun                 bool     // collect what would be added without writing the config
 	Provider               string   // restrict to one provider; empty = all
@@ -18,7 +15,6 @@ type ImportOptions struct {
 	SkipEcosystemProviders []string // provider-family names whose tools are excluded (e.g. ["python"])
 }
 
-// ImportResult summarises what happened during an import.
 type ImportResult struct {
 	Added   []ImportedTool
 	Skipped []ImportedTool // already present in config
@@ -30,8 +26,7 @@ type ImportedTool struct {
 	Version  string
 }
 
-// Import discovers installed tools and adds them to the config.
-// Tools already declared in any group are skipped.
+// Import — Tools already declared in any group are skipped.
 func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 	skipEcosystem := make(map[string]bool, len(opts.SkipEcosystemProviders))
 	for _, s := range opts.SkipEcosystemProviders {
@@ -43,10 +38,7 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 		destGroup = currentMachineGroupName()
 	}
 
-	// Collect CLI-tool sets from providers that can distinguish CLI tools from
-	// library packages (e.g. pip). Non-CLI packages get Ignore:true so normal
-	// tool processing can skip them. Errors are non-fatal: fall back to treating
-	// all as CLI.
+	// Non-CLI packages get Ignore:true; a provider error falls back to treating all as CLI.
 	cliSets := make(map[string]map[string]bool)
 	for _, prov := range a.registry.All() {
 		if cp, ok := prov.(provider.CLIToolProvider); ok {
@@ -58,9 +50,7 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 
 	result := &ImportResult{}
 	err := a.withConfig(func(cfg *config.RootConfig) error {
-		// Index all existing entries across groups by both Name and EffectivePackage
-		// so that tap-qualified brew entries (package = "tap/tool") are matched when
-		// ListInstalled returns just the plain tool name.
+		// Indexed by Name and EffectivePackage so tap-qualified brew entries match a plain ListInstalled name.
 		configured := make(map[string]struct{})
 		configuredNames := make(map[string]struct{})
 		configuredTools, _ := a.resolvedToolEntries(ctx, cfg, cfg.Groups, false)

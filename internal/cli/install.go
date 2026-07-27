@@ -81,8 +81,7 @@ bootstrap or host assignment:
 			}
 			printInstallResult(cmd, state, name, providerName)
 
-			// After each install, check if any unselected reusable group is now
-			// fully satisfied and offer to add it to the active host.
+			// A fresh install can complete an unselected reusable group, which is then offered for the active host.
 			promptSatisfiedGroupsAfterInstall(cmd, state)
 			return nil
 		},

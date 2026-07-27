@@ -78,14 +78,45 @@ func TestMigrateV18ToV19_AllowsMissingMcpHeaders(t *testing.T) {
 	if _, err := Migrate(&cfg); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Version != 19 {
-		t.Fatalf("version = %d, want 19", cfg.Version)
+	if cfg.Version != CurrentVersion {
+		t.Fatalf("version = %d, want %d", cfg.Version, CurrentVersion)
 	}
 	if got := cfg.Agents.McpServers[0].Headers; len(got) != 0 {
 		t.Fatalf("headers = %v, want empty", got)
 	}
 	if errs := ValidateRoot(&cfg, ProviderValidation{}); len(errs) != 0 {
 		t.Fatalf("validation errors = %v", errs)
+	}
+}
+
+func TestMigrateV19ToV20_AllowsMissingSkillSelectors(t *testing.T) {
+	cfg := RootConfig{
+		Version: 19,
+		Agents: AgentsConfig{Packages: []SkillPackage{
+			{Source: "owner/repo", Ref: "main", Agents: []string{"codex"}},
+		}},
+	}
+	if _, err := Migrate(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Version != 20 {
+		t.Fatalf("version = %d, want 20", cfg.Version)
+	}
+	if cfg.Agents.Packages[0].Skills != nil {
+		t.Fatalf("skills = %v, want nil (all discovered skills)", cfg.Agents.Packages[0].Skills)
+	}
+}
+
+func TestNormalizedCopyClonesSkillSelectors(t *testing.T) {
+	cfg := &RootConfig{
+		Agents: AgentsConfig{Packages: []SkillPackage{
+			{Source: "owner/repo", Skills: []string{"one"}},
+		}},
+	}
+	copy := normalizedCopy(cfg)
+	copy.Agents.Packages[0].Skills[0] = "changed"
+	if got := cfg.Agents.Packages[0].Skills[0]; got != "one" {
+		t.Fatalf("original skill selector = %q, want one", got)
 	}
 }
 
@@ -149,7 +180,6 @@ func TestMigrateRawV8ToV9_ExpandsFamilyDisabledProviders(t *testing.T) {
 	if err := json.Unmarshal(raw["settings"], &settings); err != nil {
 		t.Fatalf("parse settings: %v", err)
 	}
-	// Unknown/sibling keys preserved.
 	if string(settings["auto_import"]) != "true" {
 		t.Errorf("auto_import = %s, want true (sibling key preserved)", settings["auto_import"])
 	}

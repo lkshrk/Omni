@@ -15,7 +15,6 @@ type grokPluginAdapter struct {
 	lookupEnv func(string) (string, bool)
 }
 
-// NewGrokPluginAdapter returns a PluginAdapter that delegates to the grok CLI.
 func NewGrokPluginAdapter(
 	execFn func(context.Context, string, ...string) (string, string, error),
 	lookupEnv func(string) (string, bool),
@@ -42,8 +41,7 @@ func (a *grokPluginAdapter) InstallPlugin(ctx context.Context, p config.Plugin) 
 	return nil
 }
 
-// RemovePlugin uninstalls by plugin name. --confirm is required when stdin is
-// not a TTY, which is always true for omni.
+// --confirm is required off a TTY, which omni always is.
 func (a *grokPluginAdapter) RemovePlugin(ctx context.Context, p config.Plugin) error {
 	_, stderr, err := a.exec(ctx, "grok", "plugin", "uninstall", p.Name, "--confirm")
 	if err != nil {
@@ -68,8 +66,6 @@ func (a *grokPluginAdapter) AddMarketplace(ctx context.Context, m config.Marketp
 	return nil
 }
 
-// grokPluginListEntry mirrors one element of `grok plugin list --json`
-// (installed-only) or `grok plugin list --json --available`.
 type grokPluginListEntry struct {
 	Status      string  `json:"status"`
 	Name        string  `json:"name"`
@@ -134,8 +130,6 @@ func grokPluginIdentity(name, marketplace string) string {
 	return name + "@" + marketplace
 }
 
-// grokMarketplaceListEntry mirrors one element of `grok plugin marketplace
-// list --json`.
 type grokMarketplaceListEntry struct {
 	Name   string `json:"name"`
 	Kind   string `json:"kind"`
@@ -182,9 +176,7 @@ func (a *grokPluginAdapter) UpdateMarketplaces(ctx context.Context) error {
 	return nil
 }
 
-// resolveInstallSource maps omni's name+marketplace manifest entry to grok's
-// plugin@qualifier install form. Qualifier is the marketplace's GitHub
-// shorthand (owner/repo), derived from `grok plugin marketplace list --json`.
+// Maps a name+marketplace manifest entry to grok's plugin@qualifier install form, where the qualifier is the marketplace's owner/repo shorthand.
 func (a *grokPluginAdapter) resolveInstallSource(ctx context.Context, p config.Plugin) (string, error) {
 	entries, err := a.listMarketplaceEntries(ctx)
 	if err != nil {
@@ -212,8 +204,7 @@ func grokMarketplaceSource(m grokMarketplaceListEntry) string {
 	return m.Source.URL
 }
 
-// grokMarketplaceQualifier returns the owner/repo shorthand grok accepts in
-// plugin install pins (e.g. affaan-m/everything-claude-code).
+// The owner/repo shorthand grok accepts in plugin install pins.
 func grokMarketplaceQualifier(m grokMarketplaceListEntry) string {
 	raw := strings.TrimSpace(m.Source.URL)
 	if raw == "" {

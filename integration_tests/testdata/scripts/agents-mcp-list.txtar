@@ -1,9 +1,4 @@
-# agents mcp list: shows manifest ("managed") servers with per-agent install
-# status parsed from claude-code's List(), which reads $HOME/.claude.json
-# directly (no exec), plus an "unmanaged" section for a server present in
-# that file but not in the manifest. A fake codex binary that reports no
-# servers via `mcp list --json` keeps codex's status deterministic ("-")
-# instead of depending on whatever real codex CLI (if any) is on the host PATH.
+# Claude reads $HOME/.claude.json directly; fake Codex keeps status independent of the host PATH.
 chmod 0755 $WORK/bin/claude
 chmod 0755 $WORK/bin/codex
 env PATH=$WORK/bin:$PATH

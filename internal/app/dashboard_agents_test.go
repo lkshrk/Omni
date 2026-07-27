@@ -11,23 +11,33 @@ import (
 func TestDashboardAgentsSummary_Enabled(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
 	t.Setenv("XDG_STATE_HOME", "")
+	installedSource := filepath.Join(t.TempDir(), "installed")
+	writeAppSkill(t, filepath.Join(installedSource, "skills", "installed-skill"), "installed-skill")
 	writeSkillLockFixture(t, home, config.SkillLockFile{
 		Version: 3,
 		Skills: map[string]config.SkillLockEntry{
-			"installed-skill": {Source: "o/installed", UpdatedAt: "2026-06-01T00:00:00Z"},
+			"installed-skill": {Source: installedSource, UpdatedAt: "2026-06-01T00:00:00Z"},
 			"unmanaged-skill": {Source: "o/unmanaged", UpdatedAt: "2026-07-05T00:00:00Z"},
 		},
 	})
 	a := newSkillsTestApp(t, config.AgentsConfig{
 		Packages: []config.SkillPackage{
-			{Source: "o/installed"},
+			{Source: installedSource},
 			{Source: "o/missing"},
 		},
 		McpServers:   []config.McpServer{{Name: "srv1", Transport: "stdio", Command: "foo"}},
 		Plugins:      []config.Plugin{{Name: "plug1", Marketplace: "mp1"}},
 		Marketplaces: []config.Marketplace{{Name: "mp1", Source: "o/mp1"}},
 	})
+	service, err := a.skillService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Install(context.Background(), config.SkillPackage{Source: installedSource}, []string{"claude-code"}); err != nil {
+		t.Fatal(err)
+	}
 	cfg, err := a.loadConfig()
 	if err != nil {
 		t.Fatal(err)
@@ -140,12 +150,6 @@ func TestDashboardAgentsSummary_MissingNamesSortedAndPopulated(t *testing.T) {
 	}
 }
 
-// TestDashboardAgentsSummary_ShadowedPackage_NotCountedMissing covers a
-// manifest skill package that an installed plugin now provides (never
-// appears in the lockfile, since plugins don't write to it — see
-// installedPluginNames). It must count as installed, not missing, mirroring
-// SkillPackageRows' ShadowedByPlugin handling; otherwise the dashboard's
-// attention row and "restore skills" nudge nag about a gap that isn't real.
 func TestDashboardAgentsSummary_ShadowedPackage_NotCountedMissing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

@@ -18,31 +18,49 @@ const (
 	agentsMarkNone agentsSyncMark = iota
 	agentsMarkMissing
 	agentsMarkOrphan
-	// agentsMarkShadowed marks a manifest row that an installed plugin of the
-	// same name already provides (see app.McpStatusShadowed /
-	// app.SkillPackageRow.ShadowedByPlugin) — declared intent, not a real
-	// gap, so it must render distinctly from agentsMarkMissing.
+	// Declared intent, not a real gap, so it must render distinctly from agentsMarkMissing.
 	agentsMarkShadowed
+	// Another managed skill package owns the path; unlike plugin shadowing, the user can transfer ownership.
+	agentsMarkPackageShadowed
+	// A real gap like agentsMarkMissing, but one restore cannot silently close.
+	agentsMarkDrifted
 )
 
-// skillPackageRowStatus reports a managed skills row's status/mark.
-// shadowed (an installed plugin already provides this package on a target
-// agent — see app.SkillPackageRow.ShadowedByPlugin) takes precedence over the
-// plain installed/missing split: it is declared intent, not a real gap.
-func skillPackageRowStatus(installed, shadowed bool) (agentsRowStatus, agentsSyncMark) {
-	if shadowed {
+// Plugin shadowing wins outright; real drift still outranks package shadowing and updates.
+func skillPackageRowStatus(installed, pluginShadowed, packageShadowed, drifted, outdated bool) (agentsRowStatus, agentsSyncMark) {
+	if pluginShadowed {
 		return agentsStatusInstalled, agentsMarkShadowed
+	}
+	if drifted {
+		return agentsStatusOutOfSync, agentsMarkDrifted
+	}
+	if packageShadowed {
+		return agentsStatusInstalled, agentsMarkPackageShadowed
 	}
 	if !installed {
 		return agentsStatusOutOfSync, agentsMarkMissing
 	}
+	if outdated {
+		return agentsStatusUpdates, agentsMarkNone
+	}
 	return agentsStatusInstalled, agentsMarkNone
+}
+
+func skillRowOutdated(r app.SkillPackageRow) bool {
+	return r.Outdated == app.SkillOutdatedBehind
+}
+
+// Includes an entry another tool took over, where the attempt surfaces the collision instead of silently overwriting.
+func agentsMarkNeedsInstall(mark agentsSyncMark) bool {
+	return mark == agentsMarkMissing || mark == agentsMarkDrifted
 }
 
 func mcpAgentRowStatus(st app.McpStatus) (agentsRowStatus, agentsSyncMark) {
 	switch st {
 	case app.McpStatusMissing:
 		return agentsStatusOutOfSync, agentsMarkMissing
+	case app.McpStatusDrifted:
+		return agentsStatusOutOfSync, agentsMarkDrifted
 	case app.McpStatusShadowed:
 		return agentsStatusInstalled, agentsMarkShadowed
 	default:
@@ -50,9 +68,13 @@ func mcpAgentRowStatus(st app.McpStatus) (agentsRowStatus, agentsSyncMark) {
 	}
 }
 
+// Ranks drift above an available update: a plugin from the wrong marketplace has to be settled before "up to date" means anything.
 func pluginAgentRowStatus(row app.PluginRow, agentID string) (agentsRowStatus, agentsSyncMark) {
-	if row.PerAgentStatus[agentID] == app.PluginStatusMissing {
+	switch row.PerAgentStatus[agentID] {
+	case app.PluginStatusMissing:
 		return agentsStatusOutOfSync, agentsMarkMissing
+	case app.PluginStatusDrifted:
+		return agentsStatusOutOfSync, agentsMarkDrifted
 	}
 	if row.Outdated() {
 		return agentsStatusUpdates, agentsMarkNone

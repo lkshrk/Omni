@@ -7,8 +7,6 @@ import (
 	"github.com/lkshrk/omni/internal/dots"
 )
 
-// doctorDotsIgnorePatterns analyses per-entry ignore patterns for redundancy,
-// contradictions, and dead rules, reporting findings as a single doctor check.
 func (a *App) doctorDotsIgnorePatterns(result *DoctorResult, cfg *config.RootConfig) {
 	var groups []DoctorDetailGroup
 	var totalFindings int
@@ -45,8 +43,7 @@ func (a *App) doctorDotsIgnorePatterns(result *DoctorResult, cfg *config.RootCon
 	result.Checks = append(result.Checks, check)
 }
 
-// DotsFixIgnorePatterns removes dead patterns identified by audit checks from
-// the config. Returns the names of entries that were modified.
+// DotsFixIgnorePatterns — Returns the names of entries that were modified.
 func (a *App) DotsFixIgnorePatterns() ([]string, error) {
 	var modified []string
 	err := a.withConfig(func(cfg *config.RootConfig) error {

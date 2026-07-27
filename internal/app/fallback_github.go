@@ -32,7 +32,7 @@ type githubAsset struct {
 
 func (a *App) SetGitHubFallbackAPIForTest(baseURL string, client *http.Client) {
 	a.githubAPI = strings.TrimRight(baseURL, "/")
-	a.githubClient = client
+	a.httpClient = client
 }
 
 func (a *App) resolveGitHubFallback(ctx context.Context, name, owner, repoName string) (config.FallbackSpec, bool, error) {
@@ -73,6 +73,10 @@ func (a *App) resolveGitHubFallback(ctx context.Context, name, owner, repoName s
 	if binary == "" {
 		binary = repoName
 	}
+	commands, err := githubReleaseAssetCommands(asset.BrowserDownloadURL)
+	if err != nil {
+		return config.FallbackSpec{}, false, fmt.Errorf("github release %s/%s asset %q: %w", owner, repoName, asset.Name, err)
+	}
 	return config.FallbackSpec{
 		Status:         config.FallbackStatusUnverified,
 		Binary:         binary,
@@ -87,32 +91,30 @@ func (a *App) resolveGitHubFallback(ctx context.Context, name, owner, repoName s
 			AssetName:        asset.Name,
 			AssetDownloadURL: asset.BrowserDownloadURL,
 		},
-		Commands: githubReleaseAssetCommands(asset.BrowserDownloadURL),
+		Commands: commands,
 	}, true, nil
 }
 
-func githubReleaseAssetCommands(downloadURL string) config.FallbackCommands {
-	install := githubReleaseAssetInstallCommand(downloadURL)
+func githubReleaseAssetCommands(downloadURL string) (config.FallbackCommands, error) {
+	install, err := githubReleaseAssetInstallCommand(downloadURL)
+	if err != nil {
+		return config.FallbackCommands{}, err
+	}
 	return config.FallbackCommands{
 		Install:   install,
 		Check:     `test -x {{bin_dir}}/{{binary}}`,
 		Uninstall: `rm -f {{bin_dir}}/{{binary}}`,
 		Upgrade:   install,
 		Version:   `{{bin_dir}}/{{binary}} --version`,
-	}
+	}, nil
 }
 
 func (a *App) fetchLatestGitHubRelease(ctx context.Context, owner, repoName string) (githubRelease, error) {
 	client := a.githubHTTPClient()
-	baseURL := a.githubAPIBase()
-	apiURL := baseURL + "/repos/" + owner + "/" + repoName + "/releases/latest"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	req, err := a.newGitHubAPIRequest(ctx, "/repos/"+owner+"/"+repoName+"/releases/latest")
 	if err != nil {
 		return githubRelease{}, err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "omni")
-	attachGitHubToken(req, baseURL)
 	resp, err := client.Do(req)
 	if err != nil {
 		return githubRelease{}, err
@@ -133,16 +135,7 @@ func (a *App) fetchLatestGitHubRelease(ctx context.Context, owner, repoName stri
 	return release, nil
 }
 
-// scoreGitHubAsset returns a relevance score for a release asset name against
-// the current runtime platform. A score ≤ 0 means the asset is not usable.
-// Higher scores are preferred. The function is deterministic and pure.
-//
-// Scoring breakdown:
-//   - OS match: exact GOOS=20, alias=15; no match → 0 (reject)
-//   - Arch match: exact GOARCH=10, alias=7; no match → 0 (reject)
-//   - Archive type: .tar.gz/.tgz=4, .zip=3, .tar.xz=2, .tar.bz2=1, bare binary=1
-//   - libc (linux only): musl=2, gnu/glibc=1
-//   - ignored suffix (.sig/.asc/.sbom/…) → 0
+// A score of zero or less rejects the asset; higher is preferred. Pure and deterministic.
 func scoreGitHubAsset(assetName string) int {
 	name := strings.ToLower(assetName)
 
@@ -151,7 +144,6 @@ func scoreGitHubAsset(assetName string) int {
 		return 0
 	}
 
-	// OS score — exact GOOS beats alias.
 	osScore := 0
 	switch runtime.GOOS {
 	case "darwin":
@@ -176,7 +168,6 @@ func scoreGitHubAsset(assetName string) int {
 		return 0
 	}
 
-	// Arch score — exact GOARCH beats alias.
 	archScore := 0
 	switch runtime.GOARCH {
 	case "amd64":
@@ -218,8 +209,7 @@ func scoreGitHubAsset(assetName string) int {
 	case strings.HasSuffix(name, ".tar.bz2"):
 		archiveScore = 1
 	default:
-		// Bare binary or unknown archive — include with minimal weight only when
-		// no extension flags it as a package format (deb/rpm/msi/…).
+		// Bare binary or unknown archive, only when no extension flags it as a package format.
 		if !strings.ContainsAny(name, ".") || strings.HasSuffix(name, ".gz") {
 			archiveScore = 1
 		}
@@ -261,9 +251,7 @@ func bestGitHubReleaseAsset(assets []githubAsset, binary string) (githubAsset, b
 		if score <= 0 {
 			continue
 		}
-		// Pick the highest-scoring asset; on an equal-score tie, prefer the
-		// lexicographically smaller name so the choice is deterministic regardless
-		// of the order GitHub returns assets.
+		// On an equal-score tie prefer the lexicographically smaller name so the pick is deterministic.
 		if !found || score > bestScore || (score == bestScore && asset.Name < best.Name) {
 			best = asset
 			bestScore = score
@@ -355,40 +343,38 @@ func githubArchNames() []string {
 	}
 }
 
-// isGitHubHost reports whether host is a recognized GitHub API hostname,
-// ensuring we only send auth tokens to GitHub's own servers.
+// Ensures auth tokens only go to GitHub's own servers.
 func isGitHubHost(host string) bool {
 	host = strings.ToLower(host)
 	return host == "api.github.com" || host == "github.com"
 }
 
-// shellSingleQuote wraps s in single quotes so it is treated as a literal
-// value by sh -c, regardless of special characters it may contain.
 func shellSingleQuote(s string) string {
 	// Replace every ' with '\'' (close quote, literal single-quote, reopen quote).
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-func githubReleaseAssetInstallCommand(downloadURL string) string {
+func githubReleaseAssetInstallCommand(downloadURL string) (string, error) {
 	assetName := path.Base(downloadURL)
 	if strings.TrimSpace(assetName) == "" || assetName == "." || assetName == "/" {
-		// No URL available: asset_path (already absolute, quoted at render time)
-		// is used directly as the local archive to extract.
+		// No URL available: asset_path is used directly as the local archive to extract.
 		return `mkdir -p {{cache_dir}} {{bin_dir}} && ` +
 			`asset={{asset_path}} && ` +
 			`tmp="$(mktemp -d)" && ` +
 			`case "$asset" in *.zip) unzip -q "$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C "$tmp" ;; *) cp "$asset" "$tmp/"{{binary}} ;; esac && ` +
 			`found="$(find "$tmp" -type f -perm -111 -name {{binary}} | head -n 1)" && ` +
-			`test -n "$found" && cp "$found" {{bin_dir}}/{{binary}} && chmod +x {{bin_dir}}/{{binary}}`
+			`test -n "$found" && cp "$found" {{bin_dir}}/{{binary}} && chmod +x {{bin_dir}}/{{binary}}`, nil
 	}
-	// downloadURL and assetName (from GitHub API browser_download_url) are
-	// shell-quoted at construction time; {{var}} placeholders are quoted at
-	// render time — so no placeholder appears inside a surrounding quote pair.
+	// The fetched asset is chmod +x'd and executed, so refuse before the URL ever reaches a curl argument.
+	if !config.IsHTTPSURL(downloadURL) {
+		return "", fmt.Errorf("%w: %q", errAssetDownloadURLScheme, downloadURL)
+	}
+	// Values are shell-quoted at construction and placeholders at render time, so none lands inside a quote pair.
 	return `mkdir -p {{cache_dir}} {{bin_dir}} && ` +
 		`asset={{cache_dir}}/` + shellSingleQuote(assetName) + ` && ` +
-		`curl -fsSL ` + shellSingleQuote(downloadURL) + ` -o "$asset" && ` +
+		config.CurlFetch + ` ` + shellSingleQuote(downloadURL) + ` -o "$asset" && ` +
 		`tmp="$(mktemp -d)" && ` +
 		`case "$asset" in *.zip) unzip -q "$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C "$tmp" ;; *) cp "$asset" "$tmp/"{{binary}} ;; esac && ` +
 		`found="$(find "$tmp" -type f -perm -111 -name {{binary}} | head -n 1)" && ` +
-		`test -n "$found" && cp "$found" {{bin_dir}}/{{binary}} && chmod +x {{bin_dir}}/{{binary}}`
+		`test -n "$found" && cp "$found" {{bin_dir}}/{{binary}} && chmod +x {{bin_dir}}/{{binary}}`, nil
 }

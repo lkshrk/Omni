@@ -1,7 +1,4 @@
-// Package buildinfo carries the binary's version identity, shared by the CLI
-// (--version, help) and the TUI header. Release values are injected via
-// -ldflags -X; builds without injection (go install, plain go build) fall
-// back to the module metadata Go embeds in every binary.
+// Package buildinfo resolves the version from -ldflags -X, else Go's embedded module metadata.
 package buildinfo
 
 import (
@@ -10,8 +7,6 @@ import (
 	"sync"
 )
 
-// Injected at build time via
-// -ldflags "-X github.com/lkshrk/omni/internal/buildinfo.Version=<tag> ...".
 var (
 	Version = "dev"
 	Commit  = ""
@@ -24,9 +19,6 @@ type info struct {
 	date    string
 }
 
-// resolve merges the ldflags values with debug.ReadBuildInfo fallbacks so
-// go-install and untagged builds still report the module version and VCS
-// revision instead of a bare "dev".
 var resolve = sync.OnceValue(func() info {
 	out := info{version: Version, commit: Commit, date: Date}
 	bi, ok := debug.ReadBuildInfo()
@@ -51,13 +43,10 @@ var resolve = sync.OnceValue(func() info {
 	return out
 })
 
-// Short returns just the version, e.g. "v0.9.10" or "dev".
 func Short() string {
 	return resolve().version
 }
 
-// Full returns the version with commit and date when known, e.g.
-// "v0.9.10 (8cd2d04, 2026-07-17)".
 func Full() string {
 	r := resolve()
 	switch {

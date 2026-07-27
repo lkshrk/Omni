@@ -14,9 +14,7 @@ import (
 	"github.com/lkshrk/omni/internal/executor"
 )
 
-// DotsAdd moves the file/dir at path into the dots repo and links it back via
-// stow. A backup is made under ~/dotfiles.bkp before any mutation, then the
-// local original is moved to trash. path must exist on disk.
+// DotsAdd — Selected paths are backed up before local mutation; path must exist on disk.
 func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) (ops []dots.Op, err error) {
 	rootCfg, err := a.loadConfig()
 	if err != nil {
@@ -98,13 +96,6 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) (op
 		return nil, fmt.Errorf("dots add: %q exists locally; pass --adopt to move it into dots management", path)
 	}
 
-	backupPath, err := dots.BackupLocalPathWithExecutor(ctx, a.newExecutor(), abs)
-	if err != nil {
-		return nil, fmt.Errorf("dots add: backup: %w", err)
-	}
-
-	// Copy filtered content into the repo package tree, move the local original
-	// to trash, then stow links it back. The backup remains a full safety copy.
 	if err := os.MkdirAll(filepath.Dir(pkgDst), 0o755); err != nil {
 		return nil, fmt.Errorf("dots add: create package dir: %w", err)
 	}
@@ -114,14 +105,47 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) (op
 		}
 		return nil, fmt.Errorf("dots add: copy to repo: %w", err)
 	}
-	if err := dots.RemoveLocalPathAfterBackupWithExecutor(ctx, a.newExecutor(), abs, backupPath); err != nil {
+	hasManagedFile, err := copiedDotPathHasManagedFile(pkgDst)
+	if err != nil {
 		if cleanupErr := cleanupPackage(); cleanupErr != nil {
-			return nil, fmt.Errorf("dots add: remove local target: %w (cleanup failed: %v)", err, cleanupErr)
+			return nil, fmt.Errorf("dots add: inspect repo copy: %w (cleanup failed: %v)", err, cleanupErr)
 		}
-		return nil, fmt.Errorf("dots add: remove local target: %w", err)
+		return nil, fmt.Errorf("dots add: inspect repo copy: %w", err)
+	}
+	if !hasManagedFile {
+		if cleanupErr := cleanupPackage(); cleanupErr != nil {
+			return nil, fmt.Errorf("dots add: no managed files selected from %q (cleanup failed: %v)", path, cleanupErr)
+		}
+		return nil, fmt.Errorf("dots add: no managed files selected from %q", path)
+	}
+	resolved := dots.ResolvedEntry{
+		Name:       name,
+		Package:    pkgName,
+		SourcePath: pkgDst,
+		TargetPath: abs,
+		Ignore:     entry.Ignore,
+	}
+	prep, err := dots.PrepareDotTargetForAdoption(ctx, a.newExecutor(), resolved)
+	if err != nil {
+		if cleanupErr := cleanupPackage(); cleanupErr != nil {
+			return nil, fmt.Errorf("dots add: prepare local target: %w (cleanup failed: %v)", err, cleanupErr)
+		}
+		return nil, fmt.Errorf("dots add: prepare local target: %w", err)
+	}
+	rollback := func() error {
+		rollbackErr := rollbackDotsAdd(ctx, a.newExecutor(), resolved, pkgDst, prep)
+		cleanupErr := cleanupPackage()
+		switch {
+		case rollbackErr != nil && cleanupErr != nil:
+			return fmt.Errorf("%v; remove package root: %w", rollbackErr, cleanupErr)
+		case rollbackErr != nil:
+			return rollbackErr
+		default:
+			return cleanupErr
+		}
 	}
 	if err := dots.Restow(ctx, a.newExecutor(), stowPath, []string{pkgName}, false); err != nil {
-		if rollbackErr := rollbackDotsAdd(ctx, a.newExecutor(), abs, pkgDst, backupPath); rollbackErr != nil {
+		if rollbackErr := rollback(); rollbackErr != nil {
 			return nil, fmt.Errorf("dots add: stow: %w (rollback failed: %v)", err, rollbackErr)
 		}
 		return nil, fmt.Errorf("dots add: stow: %w", err)
@@ -136,7 +160,7 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) (op
 		gc.Dots = append(gc.Dots, entry)
 		return nil
 	}); err != nil {
-		if rollbackErr := rollbackDotsAdd(ctx, a.newExecutor(), abs, pkgDst, backupPath); rollbackErr != nil {
+		if rollbackErr := rollback(); rollbackErr != nil {
 			return nil, fmt.Errorf("dots add: save config: %w (rollback failed: %v)", err, rollbackErr)
 		}
 		return nil, fmt.Errorf("dots add: save config: %w", err)
@@ -155,13 +179,28 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) (op
 		}
 	}
 
-	return []dots.Op{dots.LstatEntryOp(dots.ResolvedEntry{
-		Name:       name,
-		Package:    pkgName,
-		SourcePath: pkgDst,
-		TargetPath: abs,
-		Ignore:     entry.Ignore,
-	}, false)}, nil
+	return []dots.Op{dots.LstatEntryOp(resolved, false)}, nil
+}
+
+func copiedDotPathHasManagedFile(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return false, err
+	}
+	if !info.IsDir() {
+		return true, nil
+	}
+	hasFile := false
+	err = filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			hasFile = true
+		}
+		return nil
+	})
+	return hasFile, err
 }
 
 func (a *App) DotsListVariants(name string) ([]DotVariantInfo, error) {
@@ -406,8 +445,21 @@ func (a *App) DotsRemoveHostVariant(ctx context.Context, name string, opts DotsR
 	return removed, nil
 }
 
-// DotsDelete deletes the dots entry named name from all group files. Managed
-func rollbackDotsAdd(ctx context.Context, exec executor.Executor, targetPath, packagePath, backupPath string) error {
+func rollbackDotsAdd(ctx context.Context, exec executor.Executor, entry dots.ResolvedEntry, packagePath string, prep dots.PreparedDotTarget) error {
+	var errs []string
+	if err := dots.RestoreDotTargetAfterFailedRestow(ctx, exec, entry, prep); err != nil {
+		errs = append(errs, fmt.Sprintf("restore target: %v", err))
+	}
+	if err := os.RemoveAll(packagePath); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, fmt.Sprintf("remove repo package: %v", err))
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func rollbackDotTargetFromBackup(ctx context.Context, exec executor.Executor, targetPath, packagePath, backupPath string) error {
 	var errs []string
 	if err := dots.RemoveLocalPathAfterBackupWithExecutor(ctx, exec, targetPath, backupPath); err != nil {
 		errs = append(errs, fmt.Sprintf("remove target link: %v", err))

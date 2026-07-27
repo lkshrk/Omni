@@ -755,8 +755,6 @@ func TestRemoveHostDeletesSpecialHostGroup(t *testing.T) {
 	if workGroup == nil {
 		t.Fatal("work group missing")
 	}
-	// The deleted host group is removed entirely, but reusable dots elsewhere
-	// should still lose only the deleted host's scoped variant.
 	for _, group := range cfg.Groups {
 		for _, dot := range group.Dots {
 			if _, ok := dot.Hosts["laptop"]; ok {

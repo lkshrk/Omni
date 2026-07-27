@@ -7,9 +7,7 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// fullCapBase implements every optional capability namedProvider forwards, plus
-// both family interfaces so Named yields the combined multi+outdated-info
-// wrapper. Used to cover the "base implements it" branch of each delegator.
+// Implements every forwarded capability plus both family interfaces, covering each delegator's "base implements it" branch.
 type fullCapBase struct {
 	namedBaseProvider
 }
@@ -83,7 +81,6 @@ func TestNamed_ForwardsAllCapabilities(t *testing.T) {
 	if cmd, args, ok := p.(provider.PrivilegeCommandPlanner).PrivilegeCommand(provider.PrivilegeActionInstall, provider.Tool{Name: "vim"}); !ok || cmd != "apt-get" || len(args) != 2 {
 		t.Fatalf("PrivilegeCommand = %q/%v/%v", cmd, args, ok)
 	}
-	// Base implements both family interfaces → combined wrapper forwards both.
 	if _, ok := p.(provider.MultiManagerBulkChecker); !ok {
 		t.Fatal("combined wrapper should expose MultiManagerBulkChecker")
 	}

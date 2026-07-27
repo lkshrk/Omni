@@ -12,13 +12,7 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// ─── Manager probing & setup wizard ─────────────────────────────────────────
-
-// EffectiveManagers returns the binary names that the python and node
-// provider families would actually use right now, honouring settings hints and
-// falling back to PATH probing in preference order.
-//
-// Returns "" for either ecosystem when no suitable binary is found on PATH.
+// EffectiveManagers — Honours settings hints, falling back to PATH probing in preference order; empty when none is found.
 func (a *App) EffectiveManagers() (pythonBin, nodeBin string) {
 	s, _ := a.LoadSettings()
 	return a.effectiveManagersFromSettings(s)
@@ -30,9 +24,7 @@ func (a *App) effectiveManagersFromSettings(s config.Settings) (pythonBin, nodeB
 	return pythonBin, nodeBin
 }
 
-// ResolvedEcosystemProviders returns a map of provider-family name → concrete
-// provider name for every provider family in the registry that implements
-// provider.ConcreteResolver and is currently available.
+// ResolvedEcosystemProviders — Only families implementing provider.ConcreteResolver and currently available.
 func (a *App) ResolvedEcosystemProviders(ctx context.Context) map[string]string {
 	ecos := a.registry.EcosystemProviders()
 	type resolved struct {
@@ -71,9 +63,7 @@ func (a *App) EffectiveSystemManager(ctx context.Context) string {
 	return a.ResolvedEcosystemProviders(ctx)[provider.EcosystemSystem]
 }
 
-// AllAvailableManagers returns ALL binary names found on PATH for each ecosystem,
-// in priority order. Unlike EffectiveManagers (which returns the single preferred
-// binary), this is used by the setup wizard to display every available manager.
+// AllAvailableManagers — Every available manager, unlike EffectiveManagers' single preferred binary.
 func (a *App) AllAvailableManagers() (pythonBins, nodeBins []string) {
 	s, _ := a.LoadSettings()
 	return a.allAvailableManagersFromSettings(s)
@@ -135,9 +125,7 @@ func SetupDisabledProviders(options []SetupProviderOption) []string {
 	return disabled
 }
 
-// probeFirst returns hint if it is a non-empty string and exists on PATH.
-// Otherwise it returns the first candidate from the priority list that is
-// found on PATH, or "" if none are available.
+// Falls back to the first candidate from priority found on PATH.
 func probeFirst(hint string, priority []string) string {
 	if hint != "" {
 		if managerAvailable(hint) {
@@ -152,8 +140,7 @@ func probeFirst(hint string, priority []string) string {
 	return ""
 }
 
-// probeAll returns all candidate binaries from priority found on PATH, in order.
-// If hint is non-empty and on PATH it is included first (deduplicated).
+// A non-empty hint on PATH is included first, deduplicated.
 func probeAll(hint string, priority []string) []string {
 	seen := make(map[string]bool)
 	var found []string

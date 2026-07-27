@@ -1,4 +1,3 @@
-// Package apt implements the apt (Debian/Ubuntu) provider.
 package apt
 
 import (
@@ -10,12 +9,10 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// Provider implements the apt package manager.
 type Provider struct {
 	exec executor.Executor
 }
 
-// New creates an apt Provider.
 func New(exec executor.Executor) *Provider {
 	return &Provider{exec: exec}
 }
@@ -107,7 +104,6 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 }
 
 // InstalledMap returns explicitly installed apt packages as lowercase-name→version.
-// Implements provider.BulkChecker.
 func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) {
 	manual, err := p.manualPackages(ctx)
 	if err != nil {
@@ -156,7 +152,6 @@ func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, er
 }
 
 // BulkDescribe fetches descriptions for multiple tools via a single `apt-cache show` call.
-// Implements provider.BulkDescriber.
 func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map[string]string, error) {
 	if len(tools) == 0 {
 		return nil, nil
@@ -173,7 +168,6 @@ func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map
 	return parseAPTBulkDescriptions(stdout), nil
 }
 
-// parseAPTBulkDescriptions extracts name→description from multi-package apt-cache show output.
 // Prefers locale-specific "Description-xx:" over the generic "Description:".
 func parseAPTBulkDescriptions(output string) map[string]string {
 	m := make(map[string]string)
@@ -212,7 +206,6 @@ func parseAPTBulkDescriptions(output string) map[string]string {
 	return m
 }
 
-// parseAPTDescription extracts the short description from apt-cache show output.
 // Prefers locale-specific "Description-xx:" over the generic "Description:".
 func parseAPTDescription(output string) string {
 	var generic string
@@ -236,9 +229,7 @@ func parseAPTDescription(output string) string {
 	return generic
 }
 
-// parseAPTListLine parses one dpkg-query output row.
 // Expected format: "ripgrep\t14.1.1-1\tii " → ("ripgrep", "14.1.1-1", true)
-// Returns ok=false for non-installed packages (status != "ii") or malformed lines.
 func parseAPTListLine(line string) (name, version string, ok bool) {
 	fields := strings.Split(line, "\t")
 	if len(fields) < 3 {

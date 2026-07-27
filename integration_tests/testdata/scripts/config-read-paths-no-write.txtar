@@ -1,0 +1,40 @@
+# Read paths migrate the config in memory and leave the file alone; the first
+# real mutation is what persists the migrated form.
+env HOME=$WORK/home
+env XDG_DATA_HOME=$WORK/data
+
+cp settings.json settings.json.orig
+
+exec omni --config settings.json agents skills sync --dry-run
+cmp settings.json settings.json.orig
+
+exec omni --config settings.json agents skills status ./source
+cmp settings.json settings.json.orig
+
+exec omni --config settings.json agents skills upgrade --check
+cmp settings.json settings.json.orig
+
+exec omni --config settings.json agents skills import --dry-run
+cmp settings.json settings.json.orig
+
+exec omni --config settings.json doctor
+cmp settings.json settings.json.orig
+
+# A command that actually writes migrates the file on its way out.
+exec omni --config settings.json -y agents skills remove ./source
+exec grep '"version"' settings.json
+stdout '"version": 20'
+! exec grep '"skills"' settings.json
+
+-- settings.json --
+{"version":1,"agents":{"skills":[{"name":"demo","source":"./source","agents":["claude-code"]}]}}
+
+-- source/skills/demo/SKILL.md --
+---
+name: demo
+description: Read-path config write test.
+---
+
+demo
+
+-- home/.claude/.keep --

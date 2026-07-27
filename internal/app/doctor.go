@@ -10,7 +10,6 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// DoctorStatus is the severity of one diagnostic check.
 type DoctorStatus string
 
 const (
@@ -19,14 +18,11 @@ const (
 	DoctorStatusFail DoctorStatus = "fail"
 )
 
-// DoctorDetailGroup is a header with nested detail items, used when a single
-// check reports findings across multiple entries (e.g. per-dot ignore audits).
 type DoctorDetailGroup struct {
 	Header string   `json:"header"`
 	Items  []string `json:"items,omitempty"`
 }
 
-// DoctorCheck describes one read-only diagnostic result.
 type DoctorCheck struct {
 	ID      string              `json:"id"`
 	Label   string              `json:"label"`
@@ -36,26 +32,21 @@ type DoctorCheck struct {
 	Groups  []DoctorDetailGroup `json:"groups,omitempty"`
 }
 
-// DoctorSummary counts diagnostic severities.
 type DoctorSummary struct {
 	OK   int `json:"ok"`
 	Warn int `json:"warn"`
 	Fail int `json:"fail"`
 }
 
-// DoctorResult is the complete diagnostic snapshot.
 type DoctorResult struct {
 	Checks  []DoctorCheck `json:"checks"`
 	Summary DoctorSummary `json:"summary"`
 }
 
-// HasFailures reports whether any check failed.
 func (r *DoctorResult) HasFailures() bool {
 	return r != nil && r.Summary.Fail > 0
 }
 
-// Doctor runs read-only health checks for config, host activation, providers,
-// dotfiles, native services, and local cache state.
 func (a *App) Doctor(ctx context.Context) (*DoctorResult, error) {
 	result := &DoctorResult{}
 	cfg, configOK := a.doctorConfig(result)
@@ -66,7 +57,7 @@ func (a *App) Doctor(ctx context.Context) (*DoctorResult, error) {
 		a.doctorDrift(ctx, result, cfg)
 		a.doctorDots(ctx, result, cfg)
 		a.doctorDotsIgnorePatterns(result, cfg)
-		a.doctorAgents(result, cfg)
+		a.doctorAgents(ctx, result, cfg)
 	}
 	result.Summary = doctorSummary(result.Checks)
 	return result, nil

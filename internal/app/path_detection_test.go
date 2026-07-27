@@ -10,7 +10,6 @@ import (
 	isync "github.com/lkshrk/omni/internal/sync"
 )
 
-// TestRefreshInstalled_PathDetection_FailureRecordPreserved: active failure records must survive RefreshInstalled — PATH detection must not clear them.
 func TestRefreshInstalled_PathDetection_FailureRecordPreserved(t *testing.T) {
 	makeBin(t, "mytool")
 
@@ -25,7 +24,6 @@ func TestRefreshInstalled_PathDetection_FailureRecordPreserved(t *testing.T) {
 		t.Fatalf("saving config: %v", err)
 	}
 
-	// Seed an active failure record for mytool/brew before running RefreshInstalled.
 	ctx := context.Background()
 	if err := a.DB().MarkFailed(ctx, "mytool", "brew", "mytool", "prior install failure"); err != nil {
 		t.Fatalf("MarkFailed: %v", err)
@@ -99,7 +97,6 @@ func TestRefreshInstalled_PathDetection_ProviderUnavailable(t *testing.T) {
 func TestRefreshInstalled_PathDetection_ProviderUnregistered(t *testing.T) {
 	makeBin(t, "mytool")
 
-	// No providers registered at all.
 	a, cfgPath := newImportApp(t)
 
 	cfg := &config.RootConfig{
@@ -253,9 +250,6 @@ func TestRefreshProviderInstalled_PathDetection_ProviderUnavailable(t *testing.T
 	t.Error("mytool not found in ListTools output")
 }
 
-// TestRefreshInstalled_PathDetection_StaleRowCleared verifies that a stale
-// Installed=true cache row is corrected when the binary is no longer on PATH
-// and the provider is unavailable.
 func TestRefreshInstalled_PathDetection_StaleRowCleared(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "mytool")
@@ -278,7 +272,6 @@ func TestRefreshInstalled_PathDetection_StaleRowCleared(t *testing.T) {
 		t.Fatalf("RefreshInstalled pass 1: %v", err)
 	}
 
-	// Remove binary; next refresh must clear the stale installed row.
 	if err := os.Remove(bin); err != nil {
 		t.Fatalf("remove bin: %v", err)
 	}
@@ -301,8 +294,6 @@ func TestRefreshInstalled_PathDetection_StaleRowCleared(t *testing.T) {
 	t.Error("mytool not found in ListTools output")
 }
 
-// TestRefreshProviderInstalled_PathDetection_StaleRowCleared mirrors the stale-
-// clear check via the scoped RefreshProviderInstalled path.
 func TestRefreshProviderInstalled_PathDetection_StaleRowCleared(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "mytool")
@@ -347,10 +338,6 @@ func TestRefreshProviderInstalled_PathDetection_StaleRowCleared(t *testing.T) {
 	t.Error("mytool not found in ListTools output")
 }
 
-// TestRefreshInstalled_PathDetection_ConfiguredFallback_NotMasked verifies that
-// a tool with a configured fallback (any status) is NOT marked installed by PATH
-// detection — the fallback status lifecycle (gh?/gh/gh!) must remain visible
-// and not be silently overridden because the binary happens to be on PATH.
 func TestRefreshInstalled_PathDetection_ConfiguredFallback_NotMasked(t *testing.T) {
 	makeBin(t, "mytool")
 

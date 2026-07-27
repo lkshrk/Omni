@@ -294,11 +294,7 @@ func TestAgentsAll_IgnoreReclassification_ManifestChangeReflectsInRowsList(t *te
 	}
 }
 
-// TestAgentsAll_StaleIgnore_ShadowedSkillRowStaysInstalled covers a manifest
-// skill package that is both plugin-shadowed (installed via an installed
-// plugin, not the lockfile) and still listed in a stale ignore.skills entry
-// from before the plugin was installed: the shadow takes precedence, so the
-// row must classify as installed/shadowed, not ignored.
+// A plugin-shadowed package still listed in a stale ignore.skills entry must classify as installed/shadowed, not ignored.
 func TestAgentsAll_StaleIgnore_ShadowedSkillRowStaysInstalled(t *testing.T) {
 	t.Parallel()
 	m := agentsAllModel(
@@ -322,11 +318,7 @@ func TestAgentsAll_StaleIgnore_ShadowedSkillRowStaysInstalled(t *testing.T) {
 	}
 }
 
-// TestAgentsAll_StaleIgnore_ShadowedMcpRowStaysInstalled mirrors the skills
-// case for mcp servers: a manifest mcp entry shadowed by an installed plugin
-// must keep expanding into per-agent rows (shadowed status), not collapse
-// into a single ignored row, even when it's still in a stale ignore.mcp_servers
-// entry.
+// A shadowed mcp entry must keep expanding into per-agent rows rather than collapsing into a single ignored row, even with a stale ignore entry.
 func TestAgentsAll_StaleIgnore_ShadowedMcpRowStaysInstalled(t *testing.T) {
 	t.Parallel()
 	m := agentsAllModel(
@@ -625,10 +617,7 @@ func TestAgentsRowHints_SkillsAvailableRow_HasIgnoreHint(t *testing.T) {
 	}
 }
 
-// agentsEligibilityMatrix drives agentsInstallEligible/agentsGroupEligible/
-// agentsDeleteEligible against every (status, mark) combination and asserts
-// hint-visible (agentsRowHints) and action-handled (the corresponding
-// agentsRow* func) agree — the two must never independently drift again.
+// Asserts hint-visible and action-handled eligibility agree across every (status, mark) combination so the two cannot drift apart.
 func TestAgentsEligibilityMatrix_InstallGroupDelete(t *testing.T) {
 	t.Parallel()
 	statuses := []agentsRowStatus{
@@ -654,8 +643,7 @@ func TestAgentsEligibilityMatrix_InstallGroupDelete(t *testing.T) {
 		for _, mark := range marks {
 			cells++
 			t.Run("", func(t *testing.T) {
-				// Skills feature exercises agentsRowInstall/agentsRowGroup end to end;
-				// bounds checks are satisfied via a single skills row at localIdx 0.
+				// A single skills row at localIdx 0 satisfies the bounds checks.
 				m := agentsAllModel(
 					[]app.SkillPackageRow{{Name: "matrix-skill", Source: "o/matrix-skill", Installed: status != agentsStatusOutOfSync}},
 					nil, nil,
@@ -709,13 +697,7 @@ func TestAgentsEligibilityMatrix_InstallGroupDelete(t *testing.T) {
 	}
 }
 
-// TestAgentsEligibility_ShadowedRow_InstallFalseDeleteTrue covers the one
-// (status, mark) combination the matrix above deliberately excludes:
-// agentsMarkShadowed only ever pairs with agentsStatusInstalled (see
-// skillPackageRowStatus/mcpAgentRowStatus), so it can't be folded into a
-// matrix keyed on independently-varying status/mark. Install must stay
-// false — a shadowed row has nothing missing to install — but delete stays
-// true so removing the stale manifest entry remains a cleanup path.
+// agentsMarkShadowed only ever pairs with agentsStatusInstalled so it cannot fold into the matrix above: install stays false (nothing missing) but delete stays true as a cleanup path.
 func TestAgentsEligibility_ShadowedRow_InstallFalseDeleteTrue(t *testing.T) {
 	t.Parallel()
 	m := agentsAllModel(
@@ -734,6 +716,62 @@ func TestAgentsEligibility_ShadowedRow_InstallFalseDeleteTrue(t *testing.T) {
 	installHandled, _ := (&m).agentsRowInstall(e)
 	if installHandled {
 		t.Fatalf("expected agentsRowInstall handled=false for a shadowed row")
+	}
+}
+
+func TestAgentsEligibility_DriftedSkillResolveOnly(t *testing.T) {
+	t.Parallel()
+	m := agentsAllModel(
+		[]app.SkillPackageRow{{Name: "drifted-skill", Source: "o/drifted-skill", Installed: true}},
+		nil, nil,
+	)
+	e := agentsAllRow{feature: agentsSectionSkills, localIdx: 0, status: agentsStatusOutOfSync, mark: agentsMarkDrifted}
+
+	if agentsInstallEligible(e) {
+		t.Fatal("drifted skill row must not offer install")
+	}
+	if handled, _ := (&m).agentsRowInstall(e); handled {
+		t.Fatal("drifted skill row handled install")
+	}
+	for _, hint := range agentsRowHints(m, e) {
+		if hint.key == "i" {
+			t.Fatalf("drifted skill hints include install: %+v", hint)
+		}
+	}
+}
+
+func TestAgentsEligibility_PackageShadowedSkillCanTakeOwnership(t *testing.T) {
+	t.Parallel()
+	m := agentsAllModel(
+		[]app.SkillPackageRow{{
+			Name: "shadowed-skill", Source: "o/shadowed-skill",
+			PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusShadowed},
+		}},
+		nil, nil,
+	)
+	e := agentsAllRowsList(m)[0]
+
+	if e.status != agentsStatusInstalled || e.mark != agentsMarkPackageShadowed {
+		t.Fatalf("row = (%v, %v), want installed/package-shadowed", e.status, e.mark)
+	}
+	if !agentsResolveEligible(e) {
+		t.Fatal("package-shadowed skill must offer use managed")
+	}
+	if agentsInstallEligible(e) {
+		t.Fatal("package-shadowed skill must not offer install")
+	}
+	hints := agentsRowHints(m, e)
+	var managed bool
+	for _, hint := range hints {
+		if hint.key == "u" {
+			managed = true
+		}
+		if hint.key == "i" {
+			t.Fatalf("package-shadowed skill hints include install: %+v", hints)
+		}
+	}
+	if !managed {
+		t.Fatalf("package-shadowed skill hints omit use managed: %+v", hints)
 	}
 }
 
@@ -1497,10 +1535,7 @@ func TestAgentsClaimGroupPicker_Marketplace_ConfirmAdoptsAndAssignsGroup(t *test
 	}
 }
 
-// newPluginClaimTestApp mirrors newScanPlanTestApp but forces an empty
-// plugin-adapter set, so AddMarketplace/AddPlugin only ever write the
-// manifest — real adapters would otherwise pick up an actually-installed
-// claude/codex CLI on the dev machine and attempt a live network operation.
+// Forces an empty plugin-adapter set so AddMarketplace/AddPlugin only write the manifest; real adapters would find an installed CLI and attempt a live network operation.
 func newPluginClaimTestApp(t *testing.T) *app.App {
 	t.Helper()
 	dir := t.TempDir()
@@ -1826,11 +1861,7 @@ func TestConfirmTimeoutMsg_StaleGen_LeavesOfferArmed(t *testing.T) {
 	}
 }
 
-// TestDoAgentsRefreshAll_SectionGates verifies "R" dispatches a reload command
-// set per section-enabled gate: skills contributes 1 cmd (manifest load), mcp /
-// plugins / marketplaces each contribute 2 (spinner tick + row load), and the
-// dashboard agents summary is always appended regardless of gates. The
-// marketplaces gate shares pluginsEnabled (see marketplacesSectionEnabled).
+// skills contributes 1 cmd, mcp/plugins/marketplaces 2 each (spinner tick + row load), and the dashboard summary is always appended; marketplaces share pluginsEnabled.
 func TestDoAgentsRefreshAll_SectionGates(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -1888,8 +1919,7 @@ func TestDoAgentsRefreshAll_SectionGates(t *testing.T) {
 	}
 }
 
-// flattenCmdMsgs resolves cmd (recursing into tea.BatchMsg) into the flat
-// list of messages it would deliver, without feeding them back into Update.
+// Resolves cmd, recursing into tea.BatchMsg, without feeding the results back into Update.
 func flattenCmdMsgs(cmd tea.Cmd) []tea.Msg {
 	if cmd == nil {
 		return nil
@@ -2125,5 +2155,50 @@ func TestPluginWarningsText_JoinsEntries(t *testing.T) {
 	want := "codex: uninstall unverified; gemini: manifest stale"
 	if got := pluginWarningsText(warnings); got != want {
 		t.Errorf("pluginWarningsText = %q, want %q", got, want)
+	}
+}
+
+// The agents tab's S is a two-step confirm because it also claims unmanaged skills into the manifest.
+func TestAgentsSyncAll_ArmsConfirmBeforeRunning(t *testing.T) {
+	t.Parallel()
+	m := agentsAllModel(nil, nil, nil)
+	m.mode = viewSkills
+
+	handled, cmds := m.handleAgentsGlobalActionKeyMsg(tea.KeyPressMsg{Code: 'S', Text: "S"})
+
+	if !handled {
+		t.Fatal("expected the agents tab to handle S")
+	}
+	if !m.agentsSyncAllConfirm {
+		t.Fatal("expected the first S to arm the confirm")
+	}
+	if m.skillsRunning || m.mcpRunning || m.pluginRunning {
+		t.Error("expected no restore to start before the confirm is answered")
+	}
+	if len(cmds) == 0 {
+		t.Error("expected the confirm timeout cmd")
+	}
+
+	// S is global, so only the footer legend announces the armed confirm; the selected row keeps its own hints.
+	for _, hint := range agentsRowHints(m, agentsAllRow{feature: agentsSectionSkills, status: agentsStatusInstalled}) {
+		if hint.pressAgain {
+			t.Fatalf("row hints = %+v, want no inline press-again hint for a global action", hint)
+		}
+	}
+	if bar := renderStatusBar(m); !strings.Contains(bar, "again to sync all") {
+		t.Fatalf("status bar = %q, want the press-again sync all prompt", bar)
+	}
+}
+
+func TestAgentsSyncAll_UnrelatedKeyClearsConfirm(t *testing.T) {
+	t.Parallel()
+	m := agentsAllModel(nil, nil, nil)
+	m.mode = viewSkills
+	m.agentsSyncAllConfirm = true
+
+	m.handleAgentsGlobalActionKeyMsg(tea.KeyPressMsg{Code: 'R', Text: "R"}) //nolint:errcheck
+
+	if m.agentsSyncAllConfirm {
+		t.Fatal("expected an unrelated key to clear the armed sync-all confirm")
 	}
 }

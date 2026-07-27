@@ -15,10 +15,7 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// agentsAllProgressModel builds a Model backed by a real app.App (so the
-// doAgentsUpdateAll/doAgentsSyncAll sub-step Cmds actually execute), wired
-// like agentsAllModel but sourced from newCmdTestApp-style app construction
-// (see commands_test.go) instead of baseModel(nil)'s nil m.app.
+// Backed by a real app.App so the sub-step Cmds actually execute, unlike baseModel(nil)'s nil m.app.
 func agentsAllProgressModel(t *testing.T, cfg *config.RootConfig, skillsRows []app.SkillPackageRow, pluginRows []app.PluginRow, opts ...func(*app.App)) Model {
 	t.Helper()
 	dir := t.TempDir()
@@ -57,14 +54,7 @@ func agentsAllProgressModel(t *testing.T, cfg *config.RootConfig, skillsRows []a
 	return m
 }
 
-// drainProgressCmds feeds msg into m.Update, then recursively resolves any
-// tea.Cmd / tea.BatchMsg produced (running batch commands concurrently like
-// Bubble Tea and feeding each result back into Update), capturing m.progressText after every
-// step along the way. This mirrors the inline "drain the Cmd batch" pattern
-// used by other tests in this package (see TestAgentsBoot_
-// InitDoesNotFireSectionLoadsBeforeSnapshot in agents_all_test.go), adapted
-// to a generic recursive loop since this flow needs multiple rounds of
-// waitForProgress/progressMsg round-trips rather than a single flat batch.
+// Runs batch commands concurrently like Bubble Tea and feeds each result back into Update, since this flow needs several waitForProgress/progressMsg round-trips rather than one flat batch.
 func drainProgressCmds(t *testing.T, m Model, msg tea.Msg, captured *[]string) Model {
 	t.Helper()
 	tm, cmd := m.Update(msg)
@@ -126,10 +116,7 @@ func indexOfContainsFold(list []string, substr string) int {
 	return -1
 }
 
-// progressStubPluginAdapter reports the plugin's update as discoverable only
-// after UpdateMarketplaces ran — the real-world shape doAgentsUpdateAll's
-// refresh-before-outdated ordering exists for: a plugin's LatestVersion comes
-// from the marketplace clone, so a stale clone shows nothing outdated.
+// Reports the plugin's update as discoverable only after UpdateMarketplaces ran: LatestVersion comes from the marketplace clone, so a stale clone shows nothing outdated.
 type progressStubPluginAdapter struct {
 	mu        sync.Mutex
 	id        string
@@ -171,12 +158,7 @@ func (s *progressStubPluginAdapter) UpdateMarketplaces(context.Context) error {
 	return nil
 }
 
-// TestAgentsAll_UpdateAll_StreamsProgressText drives the agents tab's "U"
-// bulk action end to end: skills update, marketplace refresh, then plugin
-// updates for the plugins found outdated AFTER that refresh. The cached rows
-// and the adapter both show nothing outdated until UpdateMarketplaces runs,
-// so the plugin only gets updated if doAgentsUpdateAll recomputes outdated
-// rows from a.PluginRows post-refresh.
+// The cached rows and the adapter show nothing outdated until UpdateMarketplaces runs, so the plugin updates only if doAgentsUpdateAll recomputes outdated rows post-refresh.
 func TestAgentsAll_UpdateAll_StreamsProgressText(t *testing.T) {
 	t.Parallel()
 	fake := &progressStubPluginAdapter{id: "claude-code"}
@@ -241,8 +223,7 @@ func TestAgentsAll_UpdateAll_StreamsProgressText(t *testing.T) {
 	}
 }
 
-// missingPluginStubAdapter reports nothing installed, so RestorePluginsPreRefreshed
-// (the "U" install-missing sub-step) has something to install.
+// Reports nothing installed so the install-missing sub-step has something to install.
 type missingPluginStubAdapter struct {
 	id        string
 	installed []string
@@ -269,8 +250,7 @@ func (s *missingPluginStubAdapter) AddMarketplace(context.Context, config.Market
 }
 func (s *missingPluginStubAdapter) UpdateMarketplaces(context.Context) error { return nil }
 
-// progressStubMcpAdapter reports nothing installed, so RestoreMcpServers (the
-// "U" install-missing sub-step) has something to add.
+// Reports nothing installed so RestoreMcpServers has something to add.
 type progressStubMcpAdapter struct {
 	id    string
 	added []string
@@ -287,13 +267,6 @@ func (s *progressStubMcpAdapter) Add(_ context.Context, srv config.McpServer) er
 }
 func (s *progressStubMcpAdapter) Remove(context.Context, string) error { return nil }
 
-// TestAgentsAll_UpdateAll_InstallsMissingPluginsAndMcpServers is the
-// regression test for the "update-all should also install missing
-// plugins/mcps" request: previously "U" only updated already-installed
-// plugins found outdated and left mcp untouched entirely (mcp has no update
-// concept). Now it should also install manifest plugins/mcp servers that
-// aren't installed yet on this host — mirroring what "S" does for those two
-// sections, without requiring a full "S" sync.
 func TestAgentsAll_UpdateAll_InstallsMissingPluginsAndMcpServers(t *testing.T) {
 	t.Parallel()
 	pluginStub := &missingPluginStubAdapter{id: "claude-code"}
@@ -338,11 +311,7 @@ func TestAgentsAll_UpdateAll_InstallsMissingPluginsAndMcpServers(t *testing.T) {
 	}
 }
 
-// combinedPluginStubAdapter reports one installed-but-outdated plugin and
-// leaves a second manifest plugin unreported (so PluginRows sees it as
-// missing) — lets a single "U" run exercise both the outdated-update and the
-// install-missing sub-step together, to check the marketplace refresh really
-// happens once for the whole run rather than once per sub-step.
+// One installed-but-outdated plugin plus a second manifest plugin left unreported, so a single U run exercises both the outdated-update and install-missing sub-steps.
 type combinedPluginStubAdapter struct {
 	id           string
 	refreshes    int
@@ -383,13 +352,7 @@ func (s *combinedPluginStubAdapter) UpdateMarketplaces(context.Context) error {
 	return nil
 }
 
-// TestAgentsAll_UpdateAll_RefreshesMarketplacesOnceAcrossUpdateAndInstall
-// covers the claim in doAgentsUpdateAll's doc comment: the outdated-plugin
-// update and the missing-plugin install both use their PreRefreshed variant
-// so the single up-front marketplace refresh isn't repeated for either. Only
-// the update-outdated path was covered before (TestAgentsAll_UpdateAll_
-// StreamsProgressText); this drives a plugin manifest with BOTH an outdated
-// and a missing entry in the same "U" press so both sub-steps actually run.
+// Drives a manifest with both an outdated and a missing plugin so both sub-steps run and the marketplace refresh can be shown to happen once for the whole run.
 func TestAgentsAll_UpdateAll_RefreshesMarketplacesOnceAcrossUpdateAndInstall(t *testing.T) {
 	t.Parallel()
 	fake := &combinedPluginStubAdapter{id: "claude-code"}
@@ -435,8 +398,7 @@ func TestAgentsAll_UpdateAll_RefreshesMarketplacesOnceAcrossUpdateAndInstall(t *
 	}
 }
 
-// erroringPluginStubAdapter has nothing installed and fails every install, so
-// the "U" install-missing sub-step has a real failure to propagate.
+// Nothing installed and every install fails, so the install-missing sub-step has a real failure to propagate.
 type erroringPluginStubAdapter struct{ id string }
 
 func (s *erroringPluginStubAdapter) ID() string      { return s.id }
@@ -459,8 +421,7 @@ func (s *erroringPluginStubAdapter) AddMarketplace(context.Context, config.Marke
 }
 func (s *erroringPluginStubAdapter) UpdateMarketplaces(context.Context) error { return nil }
 
-// erroringMcpStubAdapter has nothing installed and fails every add, so the
-// "U" install-missing sub-step has a real failure to propagate.
+// Nothing installed and every add fails, so the install-missing sub-step has a real failure to propagate.
 type erroringMcpStubAdapter struct{ id string }
 
 func (s *erroringMcpStubAdapter) ID() string      { return s.id }
@@ -473,12 +434,7 @@ func (s *erroringMcpStubAdapter) Add(context.Context, config.McpServer) error {
 }
 func (s *erroringMcpStubAdapter) Remove(context.Context, string) error { return nil }
 
-// TestAgentsAll_UpdateAll_InstallMissingFailures_PropagateAsPluginAndMcpErr
-// confirms a failure in either new "U" install-missing sub-step (plugin or
-// mcp) actually reaches the model as pluginErr/mcpErr — the sub-step's error
-// isn't swallowed by combinePluginErrors/combineMcpErrors, and its running
-// flag still clears (mirrors the existing skills-error-doesn't-stick-running
-// coverage in TestAgentsAll_UpdateAll_SkillsErrorDoesNotStickRunning).
+// A failure in either install-missing sub-step must reach the model as pluginErr/mcpErr rather than being swallowed, and its running flag must still clear.
 func TestAgentsAll_UpdateAll_InstallMissingFailures_PropagateAsPluginAndMcpErr(t *testing.T) {
 	t.Parallel()
 	pluginStub := &erroringPluginStubAdapter{id: "claude-code"}
@@ -516,30 +472,33 @@ func TestAgentsAll_UpdateAll_InstallMissingFailures_PropagateAsPluginAndMcpErr(t
 	}
 }
 
-// TestAgentsAll_SyncAll_StreamsProgressTextInOrder is a red test for the
-// planned doAgentsSyncAll change: it should stream progress text for
-// "restoring skills" then "restoring mcp" then "restoring plugins" in that
-// exact order. Today doAgentsSyncAll never calls sendProgress, so this test
-// is expected to FAIL until that production change lands.
+// Pins the exact S order: the claim step first, then skills, mcp and plugins restore.
 func TestAgentsAll_SyncAll_StreamsProgressTextInOrder(t *testing.T) {
-	t.Parallel()
+	t.Setenv("HOME", t.TempDir())
 	m := agentsAllProgressModel(t, nil,
 		[]app.SkillPackageRow{{Name: "caveman", Source: "github.com/foo/caveman", Installed: true}},
 		nil,
 	)
 
+	armed, _ := m.Update(tea.KeyPressMsg{Code: 'S', Text: "S"})
+	m = armed.(Model)
+	if !m.agentsSyncAllConfirm {
+		t.Fatal("first S must arm the sync-all confirm, not start the run")
+	}
+
 	var captured []string
 	got := drainProgressCmds(t, m, tea.KeyPressMsg{Code: 'S', Text: "S"}, &captured)
 
+	importIdx := indexOfContainsFold(captured, "importing unmanaged skills")
 	skillsIdx := indexOfContainsFold(captured, "restoring skills")
 	mcpIdx := indexOfContainsFold(captured, "restoring mcp")
 	pluginsIdx := indexOfContainsFold(captured, "restoring plugins")
 
-	if skillsIdx < 0 || mcpIdx < 0 || pluginsIdx < 0 {
-		t.Fatalf("expected captured progressText to include 'restoring skills', 'restoring mcp', and 'restoring plugins', got %v", captured)
+	if importIdx < 0 || skillsIdx < 0 || mcpIdx < 0 || pluginsIdx < 0 {
+		t.Fatalf("expected captured progressText to include 'importing unmanaged skills', 'restoring skills', 'restoring mcp', and 'restoring plugins', got %v", captured)
 	}
-	if !(skillsIdx < mcpIdx && mcpIdx < pluginsIdx) {
-		t.Fatalf("expected order restoring skills < restoring mcp < restoring plugins by capture index, got skillsIdx=%d mcpIdx=%d pluginsIdx=%d in %v", skillsIdx, mcpIdx, pluginsIdx, captured)
+	if !(importIdx < skillsIdx && skillsIdx < mcpIdx && mcpIdx < pluginsIdx) {
+		t.Fatalf("expected order importing unmanaged skills < restoring skills < restoring mcp < restoring plugins by capture index, got importIdx=%d skillsIdx=%d mcpIdx=%d pluginsIdx=%d in %v", importIdx, skillsIdx, mcpIdx, pluginsIdx, captured)
 	}
 
 	if got.progressText != "" {
@@ -550,13 +509,7 @@ func TestAgentsAll_SyncAll_StreamsProgressTextInOrder(t *testing.T) {
 	}
 }
 
-// TestAgentsAll_UpdateAll_SkillsErrorDoesNotStickRunning rigs the skills
-// update sub-step to fail (via app-layer SkillsDisabled=true, the same
-// requireSkillsEnabled guard exercised by internal/app's
-// TestUpdatePlugin_GuardedByPluginsEnabled-style tests) while the Model's own
-// skillsSectionEnabled() gating stays true so doAgentsUpdateAll still appends
-// the skills Cmd. After a full drain, m.skillsErr must be set and no running
-// flag must be left stuck true, even though the sequence errors mid-way.
+// Rigs the skills sub-step to fail via app-layer SkillsDisabled while the Model's own gating stays true, so skillsErr is set and no running flag sticks.
 func TestAgentsAll_UpdateAll_SkillsErrorDoesNotStickRunning(t *testing.T) {
 	t.Parallel()
 	cfg := &config.RootConfig{
@@ -589,10 +542,6 @@ func TestAgentsAll_UpdateAll_SkillsErrorDoesNotStickRunning(t *testing.T) {
 		t.Error("mcpRunning should be false after full drain even when the sequence errored")
 	}
 }
-
-// combineSkillErrors — folding RestoreSkillsResult.Failed into the returned
-// error, mirroring combineMcpErrors/combinePluginErrors (see
-// internal/tui/agents_all.go's doc comment on combineSkillErrors).
 
 func TestCombineSkillErrors_NilErrNoFailed_ReturnsNil(t *testing.T) {
 	t.Parallel()
@@ -641,12 +590,7 @@ func TestCombineSkillErrors_ErrAndFailed_JoinsBoth(t *testing.T) {
 	}
 }
 
-// agentsProgressDoneMsg — skills-specific handling: a non-nil skillsErr
-// (whether from a top-level RestoreSkills error or from combineSkillErrors
-// folding res.Failed) must clear skillsRunning, set skillsErr, surface the
-// error via setStatus (see firstAgentsProgressError), and must NOT dispatch a
-// manifest reload (loadSkillsManifestCmd is only called on the msg.skillsErr
-// == nil branch in update.go's agentsProgressDoneMsg case).
+// A non-nil skillsErr must clear skillsRunning, surface via setStatus, and must NOT dispatch a manifest reload.
 
 func TestAgentsProgressDoneMsg_SkillsErrorFromFailedPackages_StopsRunningNoReload(t *testing.T) {
 	t.Parallel()

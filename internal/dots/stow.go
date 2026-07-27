@@ -10,7 +10,6 @@ import (
 	"github.com/lkshrk/omni/internal/executor"
 )
 
-// CheckInstalled reports whether the stow binary is reachable on PATH.
 func CheckInstalled(ctx context.Context, exec executor.Executor) bool {
 	if checker, ok := exec.(interface{ CommandAvailable(string) bool }); ok {
 		return checker.CommandAvailable("stow")
@@ -19,13 +18,7 @@ func CheckInstalled(ctx context.Context, exec executor.Executor) bool {
 	return err == nil
 }
 
-// Restow re-links all packages in the repo without folding directories and
-// with the built-in dotfile ignore patterns applied to stow itself:
-//
-//	stow -R --no-folding --ignore=<global-ignore>... [--simulate] <packages...> -d <repo> -t ~
-//
-// dryRun passes --simulate so no filesystem changes are made.
-// No-op when packages is empty.
+// Restow — --no-folding plus the global ignores; dryRun adds --simulate.
 func Restow(ctx context.Context, exec executor.Executor, repoPath string, packages []string, dryRun bool) error {
 	if len(packages) == 0 {
 		return nil
@@ -41,10 +34,7 @@ func Restow(ctx context.Context, exec executor.Executor, repoPath string, packag
 	return nil
 }
 
-// stowArgs builds the argument slice for a stow invocation. Target is always
-// the current user's home directory; if HOME cannot be resolved we refuse
-// rather than fall back to "" which stow would interpret as cwd, planting
-// symlinks in whatever directory omni was launched from.
+// Refuses an unresolvable HOME: stow reads an empty target as cwd and would plant symlinks there.
 func stowArgs(mode, repoPath string, packages []string, dryRun bool) ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

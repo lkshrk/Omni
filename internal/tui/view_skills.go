@@ -2,6 +2,7 @@ package tui
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -9,8 +10,6 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-// skillAgentIDs returns the sorted unique union of the host's enabled agents
-// and every row's declared Agents field.
 func skillAgentIDs(rows []app.SkillPackageRow, enabled []string) []string {
 	seen := make(map[string]bool)
 	for _, id := range enabled {
@@ -29,8 +28,7 @@ func skillAgentIDs(rows []app.SkillPackageRow, enabled []string) []string {
 	return ids
 }
 
-// skillRowTargetsAgent mirrors effectiveSkillAgents: a package with no declared
-// agents installs to every enabled agent, so it matches any agent filter.
+// Mirrors effectiveSkillAgents: a package with no declared agents installs to every enabled agent, so it matches any agent filter.
 func skillRowTargetsAgent(r app.SkillPackageRow, id string) bool {
 	if len(r.Agents) == 0 {
 		return true
@@ -43,8 +41,7 @@ func skillRowTargetsAgent(r app.SkillPackageRow, id string) bool {
 	return false
 }
 
-// looksLikeSkillSource returns true when the input looks like a package source
-// (contains "/" and no spaces, or starts with "https://") rather than a free-text query.
+// A source contains "/" and no spaces, or starts with "https://"; anything else is a free-text query.
 func looksLikeSkillSource(s string) bool {
 	if strings.HasPrefix(s, "https://") {
 		return true
@@ -52,35 +49,30 @@ func looksLikeSkillSource(s string) bool {
 	return strings.Contains(s, "/") && !strings.Contains(s, " ")
 }
 
-// skillsVisibleRows builds the ordered, filtered list of rows (local, find
-// results, then unmanaged lockfile packages) that the cursor indexes. Local
-// rows come first (Installed section sorted by name, then Not-Installed
-// section sorted by name), followed by find results, followed by unmanaged
-// rows. Returns the flat list plus the index at which find results begin
-// (-1 if none) and the index at which unmanaged rows begin (-1 if none).
+// Order is local rows (installed then not-installed, each by name), then find results, then unmanaged; returns the start index of the latter two, -1 when absent.
 func skillsVisibleRows(m Model) (rows []app.SkillPackageRow, findStart int, unmanagedStart int) {
 	agentIDs := skillAgentIDs(m.skillsRows, m.enabledAgents)
-	q := ""
-	if m.skillsSearchActive {
-		q = strings.ToLower(m.filter.Value())
+	q := agentsFilterQuery(m)
+
+	agentFilter := ""
+	if m.skillAgentIdx > 0 && m.skillAgentIdx <= len(agentIDs) {
+		agentFilter = agentIDs[m.skillAgentIdx-1]
+	}
+	matchesText := func(r app.SkillPackageRow) bool {
+		return q == "" || strings.Contains(strings.ToLower(r.Source+" "+r.Name), q)
 	}
 
 	var installed, missing []app.SkillPackageRow
 	for _, r := range m.skillsRows {
-		// agent filter
-		if m.skillAgentIdx > 0 && m.skillAgentIdx <= len(agentIDs) {
-			if !skillRowTargetsAgent(r, agentIDs[m.skillAgentIdx-1]) {
-				continue
-			}
+		if agentFilter != "" && !skillRowTargetsAgent(r, agentFilter) {
+			continue
 		}
-		// search-text filter
-		if q != "" {
-			hay := strings.ToLower(r.Source + " " + r.Name)
-			if !strings.Contains(hay, q) {
-				continue
-			}
+		if !matchesText(r) {
+			continue
 		}
-		if r.Installed {
+		packageShadowed := len(skillShadowedAgents(r, m.enabledAgents)) > 0 &&
+			len(skillMissingAgents(r, m.enabledAgents)) == 0
+		if r.Installed || r.ShadowedByPlugin || packageShadowed {
 			installed = append(installed, r)
 		} else {
 			missing = append(missing, r)
@@ -104,17 +96,42 @@ func skillsVisibleRows(m Model) (rows []app.SkillPackageRow, findStart int, unma
 		}
 	}
 
+	var unmanaged []app.SkillPackageRow
+	for _, r := range m.skillsUnmanagedRows {
+		// Unmanaged lockfile rows declare no agent list, so where the package actually landed is only readable from the per-agent status map.
+		if agentFilter != "" && r.PerAgentStatus[agentFilter] != app.SkillStatusInstalled {
+			continue
+		}
+		if !matchesText(r) {
+			continue
+		}
+		unmanaged = append(unmanaged, r)
+	}
 	unmanagedStart = -1
-	if len(m.skillsUnmanagedRows) > 0 {
+	if len(unmanaged) > 0 {
 		unmanagedStart = len(rows)
-		rows = append(rows, m.skillsUnmanagedRows...)
+		rows = append(rows, unmanaged...)
 	}
 	return rows, findStart, unmanagedStart
 }
 
-// skillsManagedRowsEnd returns the exclusive end index of the managed
-// (local) row range within skillsVisibleRows' output, i.e. the index of the
-// first find-result or unmanaged row, whichever comes first.
+func (m *Model) openAgentsSearch() {
+	m.skillsSearchActive = true
+	m.filter.SetValue("")
+	m.filter.Focus()
+	m.skillsCursor = 0
+	m.skillFindResults = nil
+	m.skillsErr = nil
+}
+
+// The query is tab-level: every section's row list narrows by it, not just skills.
+func agentsFilterQuery(m Model) string {
+	if !m.skillsSearchActive {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(m.filter.Value()))
+}
+
 func skillsManagedRowsEnd(findStart, unmanagedStart, total int) int {
 	end := total
 	if findStart >= 0 && findStart < end {
@@ -126,7 +143,6 @@ func skillsManagedRowsEnd(findStart, unmanagedStart, total int) int {
 	return end
 }
 
-// clampSkillsCursor clamps m.skillsCursor to the visible row count.
 func clampSkillsCursor(m *Model) {
 	visible, _, _ := skillsVisibleRows(*m)
 	n := len(visible)
@@ -162,7 +178,6 @@ func (m Model) viewSkillsBody() string {
 		return b.String()
 	}
 
-	// Pill filter bars as top lines.
 	available := max(m.width-lipgloss.Width(pad), 1)
 	disabledChips := map[int]bool{
 		agentsChipSkills: !m.skillsSectionEnabled(),
@@ -227,8 +242,8 @@ func (m Model) viewSkillsBody() string {
 			empty = []string{
 				p.styleHelp.Render(pad + "No agent skills tracked yet."),
 				"",
-				pad + p.styleNormal.Render("[i] import ") + p.styleHelp.Render(" capture skills already installed via the skills CLI"),
-				pad + p.styleNormal.Render("[r] restore") + p.styleHelp.Render(" install your declared skills on this machine"),
+				pad + p.styleNormal.Render("[i] import ") + p.styleHelp.Render(" capture legacy lockfile skills"),
+				pad + p.styleNormal.Render("[r] sync   ") + p.styleHelp.Render(" install your declared skills on this machine"),
 			}
 		}
 		return renderSectionedTab(m, sectionedTab{
@@ -242,6 +257,76 @@ func (m Model) viewSkillsBody() string {
 	}
 
 	return renderAgentsGroupedTab(m, p, topLines, agentsSectionSkills, true)
+}
+
+// Caps the modal's list so a fleet-scale drift report stays a prompt rather than a scrolling log.
+const agentsDriftPromptMaxRows = 10
+
+func renderAgentsDriftPromptPopup(m Model) string {
+	p := m.palette
+	contentW := agentsDriftPromptContentWidth(m)
+	lines := m.agentsDriftPromptLines
+
+	var sb strings.Builder
+	summary := "1 agent resource drifted from the manifest."
+	if len(lines) != 1 {
+		summary = strconv.Itoa(len(lines)) + " agent resources drifted from the manifest."
+	}
+	sb.WriteString(p.styleOutdated.Render(fitCellText(summary, contentW)))
+	sb.WriteString("\n\n")
+	shown := min(len(lines), agentsDriftPromptMaxRows)
+	for _, line := range lines[:shown] {
+		sb.WriteString(p.styleHelp.Render(fitCellText("  "+agentsDriftPromptRowText(line), contentW)))
+		sb.WriteString("\n")
+	}
+	if rest := len(lines) - shown; rest > 0 {
+		sb.WriteString(p.styleHelp.Render(fitCellText("  …and "+strconv.Itoa(rest)+" more", contentW)))
+		sb.WriteString("\n")
+	}
+	sb.WriteString(renderPickerHintItems(m, contentW, agentsDriftPromptHints(m)))
+	return lipgloss.NewStyle().Width(contentW).Render(sb.String())
+}
+
+func agentsDriftPromptHints(m Model) []hintItem {
+	if m.agentsBulkResolveConfirm {
+		armed := m.keys.AgentsUseLocalAll
+		if m.agentsBulkResolveUseManaged {
+			armed = m.keys.AgentsUseManagedAll
+		}
+		return []hintItem{pressAgainHint(armed.Help().Key, armed.Help().Desc), hintFromBindingDesc(m.keys.Back, "cancel")}
+	}
+	return []hintItem{
+		hintFromBinding(m.keys.AgentsUseManagedAll),
+		hintFromBinding(m.keys.AgentsUseLocalAll),
+		hintFromBindingDesc(m.keys.Back, "dismiss"),
+	}
+}
+
+// Drops the trailing CLI remedy every drift line carries: the modal's own U/L keys are the remedy here.
+func agentsDriftPromptRowText(line string) string {
+	if idx := strings.Index(line, "; resolve with "); idx >= 0 {
+		return line[:idx]
+	}
+	return line
+}
+
+func agentsDriftPromptContentWidth(m Model) int {
+	preferred := 56
+	for _, line := range m.agentsDriftPromptLines {
+		preferred = max(preferred, lipgloss.Width(agentsDriftPromptRowText(line))+2)
+	}
+	return popupContentWidth(m, preferred, 44, 96)
+}
+
+func agentsDriftPromptPopupFrame(m Model) popupFrame {
+	paddingX := 2
+	return popupFrame{
+		Title:          "Drift Detected",
+		PaddingY:       1,
+		PaddingX:       paddingX,
+		Width:          popupFrameWidthForContent(agentsDriftPromptContentWidth(m), paddingX),
+		NoTitleDivider: true,
+	}
 }
 
 func skillAgentsPickerFrame(m Model) popupFrame {
@@ -263,6 +348,14 @@ func skillAgentsPickerFrame(m Model) popupFrame {
 	}
 }
 
+// Kept separate from the selection checkbox so the two never read as one claim.
+func skillAgentInstalledLabel(r app.SkillAgentRow) string {
+	if r.Installed {
+		return "● installed"
+	}
+	return "○ not installed"
+}
+
 func renderSkillAgentsPicker(m Model) string {
 	p := m.palette
 	rows := m.skillAgentsRows
@@ -276,15 +369,11 @@ func renderSkillAgentsPicker(m Model) string {
 		return sb.String()
 	}
 	contentW := rowAvailableWidth(m.width)
-	labelW := 0
+	// The checkbox is selection and the detail column is on-disk state; gluing "installed" onto the name made an unchecked box beside it read as a contradiction.
+	labelW, detailW := 0, 0
 	for _, row := range rows {
-		w := lipgloss.Width(row.Display)
-		if row.Installed {
-			w += lipgloss.Width(" ● installed")
-		}
-		if w > labelW {
-			labelW = w
-		}
+		labelW = max(labelW, lipgloss.Width(row.Display))
+		detailW = max(detailW, lipgloss.Width(skillAgentInstalledLabel(row)))
 	}
 	pickerRows := make([]pickerChoiceRow, 0, len(rows))
 	for i, r := range rows {
@@ -297,14 +386,16 @@ func renderSkillAgentsPicker(m Model) string {
 		if r.Targeted {
 			mark = "[x]"
 		}
-		label := r.Display
-		if r.Installed {
-			label += " " + p.styleInstalled.Render("● installed")
-		}
-		pickerRows = append(pickerRows, pickerChoiceRow{selected: selected, label: label, mark: mark, style: style})
+		pickerRows = append(pickerRows, pickerChoiceRow{
+			selected: selected,
+			label:    r.Display,
+			detail:   skillAgentInstalledLabel(r),
+			mark:     mark,
+			style:    style,
+		})
 	}
 	var sb strings.Builder
-	sb.WriteString(renderPickerChoiceRows(p, pickerRows, labelW, 0))
+	sb.WriteString(renderPickerChoiceRows(p, pickerRows, labelW, detailW))
 	sb.WriteString("\n")
 	sb.WriteString(renderPickerHintItems(m, contentW, toggleSaveCancelActionItems(m)))
 	return sb.String()

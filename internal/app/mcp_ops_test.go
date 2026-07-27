@@ -235,7 +235,7 @@ func TestRestoreMcpServers_ContinuesAfterServerInstallFailure(t *testing.T) {
 
 func TestRestoreMcpServers_SkipsAlreadyInstalled(t *testing.T) {
 	t.Parallel()
-	stub := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "linear"}}}
+	stub := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "linear", Transport: "stdio", Command: "npx x"}}}
 	srv := config.McpServer{Name: "linear", Transport: "stdio", Command: "npx x", Agents: []string{"claude-code"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 	res, err := a.RestoreMcpServers(context.Background(), app.RestoreMcpOptions{})
@@ -287,7 +287,10 @@ func TestRestoreMcpServers_DryRunReportsChangedHeaders(t *testing.T) {
 	t.Parallel()
 	stub := &stubMcpAdapter{
 		id: "codex", available: true,
-		listed: []app.InstalledMcpServer{{Name: "grafana", Headers: map[string]string{"X-Key": "old"}, HeadersKnown: true}},
+		listed: []app.InstalledMcpServer{{
+			Name: "grafana", Transport: "http", URL: "https://mcp.example.com",
+			Headers: map[string]string{"X-Key": "old"}, HeadersKnown: true,
+		}},
 	}
 	srv := config.McpServer{Name: "grafana", Transport: "http", URL: "https://mcp.example.com", Headers: map[string]string{"X-Key": "new"}, Agents: []string{"codex"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
@@ -307,7 +310,10 @@ func TestRestoreMcpServers_HeaderUpdateRemoveFailureDoesNotAdd(t *testing.T) {
 	t.Parallel()
 	stub := &stubMcpAdapter{
 		id: "codex", available: true, removeErr: errors.New("remove failed"),
-		listed: []app.InstalledMcpServer{{Name: "grafana", Headers: map[string]string{"X-Key": "old"}, HeadersKnown: true}},
+		listed: []app.InstalledMcpServer{{
+			Name: "grafana", Transport: "http", URL: "https://mcp.example.com",
+			Headers: map[string]string{"X-Key": "old"}, HeadersKnown: true,
+		}},
 	}
 	srv := config.McpServer{Name: "grafana", Transport: "http", URL: "https://mcp.example.com", Headers: map[string]string{"X-Key": "new"}, Agents: []string{"codex"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
@@ -385,10 +391,6 @@ func TestRestoreMcpServers_HeaderUpdateRollbackSurvivesRequestCancellation(t *te
 	}
 }
 
-// TestRestoreMcpServers_SkipsShadowedByPlugin covers the restore-skip half of
-// the shadow contract: installing a user-scope duplicate of a plugin-provided
-// server would be harm, not repair, so restore must skip it and report it
-// separately rather than as installed/already-installed/erroring.
 func TestRestoreMcpServers_SkipsShadowedByPlugin(t *testing.T) {
 	t.Parallel()
 	mcpStub := &stubMcpAdapter{id: "claude-code", available: true}
@@ -461,7 +463,6 @@ func TestRestoreMcpServers_DryRun_NonTargetedNotInWouldInstall(t *testing.T) {
 	t.Parallel()
 	claudeStub := &stubMcpAdapter{id: "claude-code", available: true}
 	codexStub := &stubMcpAdapter{id: "codex", available: true}
-	// server targets only claude-code; codex must NOT appear in WouldInstall
 	srv := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x", Agents: []string{"claude-code"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}},
 		app.WithMcpAdapters([]app.McpAdapter{claudeStub, codexStub}))
@@ -548,10 +549,6 @@ func TestAddMcpServer_UpdatesChangedInstalledHeaders(t *testing.T) {
 	}
 }
 
-// TestAddMcpServer_PartialAdapterFailureStillPersistsManifest asserts the fix for
-// partial-application drift: a live install succeeding on one adapter and failing
-// on another must not leave the manifest missing the server (the manifest is the
-// source of intent, not a mirror of adapter success).
 func TestAddMcpServer_PartialAdapterFailureStillPersistsManifest(t *testing.T) {
 	t.Parallel()
 	ok := &stubMcpAdapter{id: "claude-code", available: true}
@@ -630,10 +627,6 @@ func TestRemoveMcpServer_PersistsRemoval(t *testing.T) {
 	}
 }
 
-// TestRemoveMcpServer_PersistsAcrossStaleDuplicateFragment pins the routed-write
-// consolidation: a stale full-document fragment (e.g. left by settings extract)
-// carrying a second "agents" key must not resurrect a deleted server through the
-// union merge on the next load.
 func TestRemoveMcpServer_PersistsAcrossStaleDuplicateFragment(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -710,9 +703,6 @@ func TestRemoveMcpServer_RejectsUnmanaged(t *testing.T) {
 	}
 }
 
-// TestRemoveMcpServer_PartialAdapterFailureStillPersistsManifest asserts the fix for
-// partial-application drift on remove: the manifest must drop the server even when
-// one of the targeted adapters fails to remove it live.
 func TestRemoveMcpServer_PartialAdapterFailureStillPersistsManifest(t *testing.T) {
 	t.Parallel()
 	ok := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "del"}}}
@@ -949,8 +939,8 @@ func TestAdoptUnmanagedMcpServers_PreservesHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if adopted != 1 {
-		t.Fatalf("adopted = %d, want 1", adopted)
+	if adopted.Adopted != 1 {
+		t.Fatalf("adopted = %d, want 1", adopted.Adopted)
 	}
 	cfg := loadMcpTestConfig(t, a)
 	if got := cfg.Agents.McpServers[0].Headers["X-Key"]; got != "${REMOTE_KEY}" {
@@ -972,8 +962,8 @@ func TestAdoptUnmanagedMcpServers_UnionsAgentsForIdenticalServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if adopted != 1 {
-		t.Fatalf("adopted = %d, want 1", adopted)
+	if adopted.Adopted != 1 {
+		t.Fatalf("adopted = %d, want 1", adopted.Adopted)
 	}
 	got := loadMcpTestConfig(t, a).Agents.McpServers
 	if len(got) != 1 || !slices.Equal(got[0].Agents, []string{"claude-code", "codex"}) {
@@ -997,10 +987,13 @@ func TestAdoptUnmanagedMcpServers_RejectsConflictingHeaders(t *testing.T) {
 	a := newMcpTestApp(t, config.AgentsConfig{}, app.WithMcpAdapters([]app.McpAdapter{claude, codex}))
 
 	adopted, err := a.AdoptUnmanagedMcpServers(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "conflicting configuration") {
-		t.Fatalf("error = %v, want conflicting configuration", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if adopted != 0 || len(loadMcpTestConfig(t, a).Agents.McpServers) != 0 {
-		t.Fatal("conflicting unmanaged servers must not mutate the manifest")
+	if len(adopted.Conflicts) != 1 || !strings.Contains(adopted.Conflicts[0], "conflicting configuration") {
+		t.Fatalf("conflicts = %v, want one conflicting-configuration line", adopted.Conflicts)
+	}
+	if adopted.Adopted != 0 || len(loadMcpTestConfig(t, a).Agents.McpServers) != 0 {
+		t.Fatal("conflicting unmanaged servers must not enter the manifest")
 	}
 }

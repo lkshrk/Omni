@@ -43,7 +43,6 @@ func TestSkillFilter_TypeCyclesRight(t *testing.T) {
 		t.Errorf("skillTypeIdx after third right = %d, want %d (marketplace)", m.skillTypeIdx, agentsChipMarketplace)
 	}
 
-	// At max, right clamps.
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyRight})
 	if m.skillTypeIdx != agentsChipMarketplace {
 		t.Errorf("skillTypeIdx after right at max = %d, want %d (clamped, marketplace)", m.skillTypeIdx, agentsChipMarketplace)
@@ -75,7 +74,6 @@ func TestSkillFilter_TypeCyclesLeft(t *testing.T) {
 		t.Errorf("skillTypeIdx after fourth left = %d, want %d (all)", m.skillTypeIdx, agentsChipAll)
 	}
 
-	// At min, left clamps.
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyLeft})
 	if m.skillTypeIdx != agentsChipAll {
 		t.Errorf("skillTypeIdx after left at min = %d, want %d (clamped, all)", m.skillTypeIdx, agentsChipAll)
@@ -109,7 +107,7 @@ func TestSkillFilter_SkillsTypeShowsTable(t *testing.T) {
 	m := skillFilterBaseModel()
 	m.skillTypeIdx = agentsChipSkills
 	m.skillsRows = []app.SkillPackageRow{
-		{Source: "owner/mypkg", Name: "mypkg", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+		{Source: "owner/mypkg", Name: "mypkg", Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
 	}
 
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
@@ -153,7 +151,6 @@ func TestSkillFilter_AgentFilterShowsOnlyMatchingRows(t *testing.T) {
 
 	// skillAgentIDs returns sorted agent IDs; "claude-code" < "codex" alphabetically.
 	agentIDs := skillAgentIDs(m.skillsRows, m.enabledAgents)
-	// Find the index for "codex" in the sorted list (1-based: 0=all).
 	codexIdx := -1
 	for i, id := range agentIDs {
 		if id == "codex" {
@@ -205,7 +202,6 @@ func TestSkillFilter_CurlyKeysCycleAgentIdx(t *testing.T) {
 	}
 	m.skillAgentIdx = 0
 
-	// } increments agent index
 	m = drive(m, pressRune('}'))
 	if m.skillAgentIdx != 1 {
 		t.Errorf("skillAgentIdx after } = %d, want 1", m.skillAgentIdx)
@@ -216,8 +212,7 @@ func TestSkillFilter_CurlyKeysCycleAgentIdx(t *testing.T) {
 		t.Errorf("skillAgentIdx after second } = %d, want 2", m.skillAgentIdx)
 	}
 
-	// Union of enabledAgents (["claude"]) and row agents ("codex", "claude-code")
-	// is 3 unique IDs, so max index = 3.
+	// Union of enabledAgents (["claude"]) and row agents ("codex", "claude-code") is 3 unique IDs, so max index = 3.
 	m = drive(m, pressRune('}'))
 	if m.skillAgentIdx != 3 {
 		t.Errorf("skillAgentIdx after third } = %d, want 3", m.skillAgentIdx)
@@ -229,7 +224,6 @@ func TestSkillFilter_CurlyKeysCycleAgentIdx(t *testing.T) {
 		t.Errorf("skillAgentIdx after } at max = %d, want 3 (clamped)", m.skillAgentIdx)
 	}
 
-	// { decrements
 	m = drive(m, pressRune('{'))
 	if m.skillAgentIdx != 2 {
 		t.Errorf("skillAgentIdx after { = %d, want 2", m.skillAgentIdx)
@@ -245,7 +239,6 @@ func TestSkillFilter_CurlyKeysCycleAgentIdx(t *testing.T) {
 		t.Errorf("skillAgentIdx after third { = %d, want 0", m.skillAgentIdx)
 	}
 
-	// Clamped at 0
 	m = drive(m, pressRune('{'))
 	if m.skillAgentIdx != 0 {
 		t.Errorf("skillAgentIdx after { at min = %d, want 0 (clamped)", m.skillAgentIdx)
@@ -307,8 +300,8 @@ func TestSkillFilter_FilterByEnabledAgentKeepsRowsWithEmptyAgents(t *testing.T) 
 	m.settings.AgentsUse = []string{"claude-code", "codex"}
 	m.enabledAgents = []string{"claude-code", "codex"}
 	m.skillsRows = []app.SkillPackageRow{
-		{Source: "owner/shared-pkg", Name: "shared-pkg", Installed: true, PerAgentStatus: map[string]bool{"claude-code": true, "codex": true}},
-		{Source: "owner/claude-pkg", Name: "claude-pkg", Agents: []string{"claude-code"}, Installed: true, PerAgentStatus: map[string]bool{"claude-code": true}},
+		{Source: "owner/shared-pkg", Name: "shared-pkg", Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude-code": app.SkillStatusInstalled, "codex": app.SkillStatusInstalled}},
+		{Source: "owner/claude-pkg", Name: "claude-pkg", Agents: []string{"claude-code"}, Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude-code": app.SkillStatusInstalled}},
 	}
 
 	agentIDs := skillAgentIDs(m.skillsRows, m.enabledAgents)

@@ -11,7 +11,6 @@ import (
 	"github.com/lkshrk/omni/internal/dots"
 )
 
-// writeFile creates a file with content at path, creating parent dirs.
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -22,10 +21,6 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-// ─── copyFile (via UnlinkAll) ─────────────────────────────────────────────────
-
-// TestCopyFile_DstParentReadOnly verifies that when the destination's parent
-// directory is read-only, copyFile returns an error surfaced from UnlinkAll.
 func TestCopyFile_DstParentReadOnly(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based permission tests not supported on Windows")
@@ -35,19 +30,16 @@ func TestCopyFile_DstParentReadOnly(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Entry: "~/.protected/.zshrc" → TargetPath=home/protected/.zshrc, SourcePath=repo/zsh/protected/.zshrc
 	src := filepath.Join(repo, "zsh", "protected", ".zshrc")
 	dst := filepath.Join(home, "protected", ".zshrc")
 	writeFile(t, src, "# zsh")
 
-	// Create parent dir and put the managed symlink inside it.
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(src, dst); err != nil {
 		t.Fatal(err)
 	}
-	// Make the parent read-only so that removing the symlink fails.
 	if err := os.Chmod(filepath.Dir(dst), 0o555); err != nil {
 		t.Fatal(err)
 	}
@@ -66,8 +58,6 @@ func TestCopyFile_DstParentReadOnly(t *testing.T) {
 	}
 }
 
-// TestCopyFile_SrcUnreadable verifies that copyFile returns an error when the
-// source file exists but is not readable.
 func TestCopyFile_SrcUnreadable(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based permission tests not supported on Windows")
@@ -77,16 +67,13 @@ func TestCopyFile_SrcUnreadable(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// SourcePath = repo/zsh/.zshrc, TargetPath = home/.zshrc
 	src := filepath.Join(repo, "zsh", ".zshrc")
 	dst := filepath.Join(home, ".zshrc")
 	writeFile(t, src, "# zsh content")
 
-	// Make the symlink so UnlinkAll will try to remove it and copy src→dst.
 	if err := os.Symlink(src, dst); err != nil {
 		t.Fatal(err)
 	}
-	// Make src unreadable.
 	if err := os.Chmod(src, 0o000); err != nil {
 		t.Fatal(err)
 	}
@@ -105,9 +92,7 @@ func TestCopyFile_SrcUnreadable(t *testing.T) {
 	}
 }
 
-// TestConflictOverwrite_ReplacesReadOnlyDstViaTrash verifies that overwrite does
-// not truncate the existing local file in place. The old file is moved aside and
-// the staged replacement is installed afterward.
+// Overwrite must move the old file aside and install the staged replacement, never truncate in place.
 func TestConflictOverwrite_ReplacesReadOnlyDstViaTrash(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based permission tests not supported on Windows")
@@ -119,7 +104,6 @@ func TestConflictOverwrite_ReplacesReadOnlyDstViaTrash(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".xdg"))
 	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
 
-	// SourcePath = repo/zsh/.zshrc, TargetPath = home/.zshrc
 	src := filepath.Join(repo, "zsh", ".zshrc")
 	dst := filepath.Join(home, ".zshrc")
 	writeFile(t, src, "# repo version")
@@ -245,17 +229,11 @@ func TestUnlinkAll_RefusesRepoSourceSymlink(t *testing.T) {
 	}
 }
 
-// ─── unlinkEntry (via UnlinkAll) ──────────────────────────────────────────────
-
-// TestUnlinkEntry_TargetIsDirectory verifies that when the target path is a
-// directory (not a symlink), unlinkEntry treats it as a conflict and does not
-// error — it returns OpUnlinkConflict.
 func TestUnlinkEntry_TargetIsDirectory(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// SourcePath = repo/zsh/.zshrc (a file), TargetPath = home/.zshrc (will be a dir)
 	src := filepath.Join(repo, "zsh", ".zshrc")
 	dst := filepath.Join(home, ".zshrc") // will be created as dir below
 	writeFile(t, src, "# zsh")
@@ -283,14 +261,11 @@ func TestUnlinkEntry_TargetIsDirectory(t *testing.T) {
 	}
 }
 
-// TestUnlinkEntry_TargetMissing verifies that unlinkEntry is idempotent when
-// the target path does not exist.
 func TestUnlinkEntry_TargetMissing(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// SourcePath = repo/zsh/.zshrc (exists), TargetPath = home/.zshrc (never created)
 	src := filepath.Join(repo, "zsh", ".zshrc")
 	writeFile(t, src, "# zsh")
 	// dst is never created.
@@ -314,10 +289,6 @@ func TestUnlinkEntry_TargetMissing(t *testing.T) {
 	}
 }
 
-// ─── ExpandTilde ──────────────────────────────────────────────────────────────
-
-// TestExpandTilde_NoTilde verifies that a path without a leading tilde is
-// returned unchanged.
 func TestExpandTilde_NoTilde(t *testing.T) {
 	input := "/absolute/path/to/file"
 	got, err := dots.ExpandTilde(input)
@@ -329,8 +300,6 @@ func TestExpandTilde_NoTilde(t *testing.T) {
 	}
 }
 
-// TestExpandTilde_RelativeNoTilde verifies that a relative path without a
-// tilde is returned as-is.
 func TestExpandTilde_RelativeNoTilde(t *testing.T) {
 	input := "relative/path"
 	got, err := dots.ExpandTilde(input)
@@ -342,8 +311,6 @@ func TestExpandTilde_RelativeNoTilde(t *testing.T) {
 	}
 }
 
-// TestExpandTilde_WithTilde verifies that a tilde prefix is replaced with the
-// home directory.
 func TestExpandTilde_WithTilde(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -432,8 +399,6 @@ func TestExpandTilde_WithBackslashPrefix(t *testing.T) {
 	}
 }
 
-// TestExpandTilde_EmptyPath verifies that an empty string is returned as-is
-// (no tilde prefix, so no expansion needed).
 func TestExpandTilde_EmptyPath(t *testing.T) {
 	got, err := dots.ExpandTilde("")
 	if err != nil {
@@ -444,7 +409,6 @@ func TestExpandTilde_EmptyPath(t *testing.T) {
 	}
 }
 
-// TestExpandTilde_TildeOnly verifies that a bare "~" expands to the home dir.
 func TestExpandTilde_TildeOnly(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -470,10 +434,7 @@ func TestValidateEntryName_RejectsPathComponents(t *testing.T) {
 	}
 }
 
-// TestUnlinkAll_WalkErrorDoesNotClobberTarget verifies that when the source
-// directory becomes unreadable mid-operation, UnlinkAll returns an error
-// instead of treating the target as clobberable (which would destroy managed
-// symlinks).
+// An unreadable source mid-walk must error rather than treat the target as clobberable.
 func TestUnlinkAll_WalkErrorDoesNotClobberTarget(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based permission tests not supported on Windows")
@@ -483,7 +444,6 @@ func TestUnlinkAll_WalkErrorDoesNotClobberTarget(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Set up: source dir with one file, target dir with a managed symlink.
 	src := filepath.Join(repo, "zsh", "subdir", ".zshrc")
 	writeFile(t, src, "# zsh")
 
@@ -491,12 +451,10 @@ func TestUnlinkAll_WalkErrorDoesNotClobberTarget(t *testing.T) {
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Create a managed symlink inside the target directory.
 	if err := os.Symlink(src, filepath.Join(targetDir, ".zshrc")); err != nil {
 		t.Fatal(err)
 	}
 
-	// Make the source subdirectory unreadable so that WalkDir errors.
 	srcSubdir := filepath.Join(repo, "zsh", "subdir")
 	if err := os.Chmod(srcSubdir, 0o000); err != nil {
 		t.Fatal(err)
@@ -510,14 +468,11 @@ func TestUnlinkAll_WalkErrorDoesNotClobberTarget(t *testing.T) {
 		t.Fatalf("dots.New: %v", err)
 	}
 
-	// UnlinkAll must return an error — it must NOT return nil and clobber the
-	// target directory that contains managed symlinks.
 	_, unlinkErr := m.UnlinkAll(dots.UnlinkOptions{RemoveLocal: true})
 	if unlinkErr == nil {
 		t.Fatal("UnlinkAll returned nil; want an error when source walk fails")
 	}
 
-	// The managed symlink inside the target must still exist (not destroyed).
 	if _, statErr := os.Lstat(filepath.Join(targetDir, ".zshrc")); statErr != nil {
 		t.Fatalf("managed symlink was removed despite walk error: %v", statErr)
 	}

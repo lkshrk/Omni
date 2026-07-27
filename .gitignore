@@ -1,15 +1,12 @@
-# Build output
 .worktrees/
 bin/
 dist/
 .tmp/
 site/
 
-# Database files
 *.db
 *.sqlite
 
-# OS
 .DS_Store
 .DS_Store?
 ._*
@@ -19,7 +16,6 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
-# Editors
 .vscode/
 .idea/
 *.swp
@@ -28,7 +24,6 @@ Desktop.ini
 .vim/
 *.iml
 
-# AI assistants
 CLAUDE.md
 AGENTS.md
 GEMINI.md
@@ -37,6 +32,7 @@ GEMINI.md
 .claudeignore
 .claude/
 .omc/
+.omx/
 .cursor/
 .aider*
 .copilot/
@@ -50,7 +46,6 @@ GEMINI.md
 .agent-progress.md
 docs/superpowers
 docs/research
-# Go
 vendor/
 coverage.out
 cover.out

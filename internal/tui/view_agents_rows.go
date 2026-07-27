@@ -13,22 +13,12 @@ import (
 
 const agentsAgentColW = 8
 
-// agentsAgentIDColFloor reserves space for the longest well-known agent ID
-// ("claude-code") so cols.prov starts wide enough that column x-offsets stay
-// roughly comparable to the tools tab even though agents' prov content
-// (agent IDs / linkage summaries) is shaped differently than tools' short
-// package-manager labels.
+// Widest well-known agent ID, so cols.prov starts wide enough to keep column x-offsets roughly comparable to the tools tab.
 const agentsAgentIDColFloor = len("claude-code")
 
-// agentsTypeColW is the fixed width of the feature-type column
-// (skills/mcp/plugin), positioned between the name and agent columns. Wide
-// enough for "skills"/"plugin" (6 runes) plus one column of breathing room;
-// never shrunk by fitToolColumnsToScreen, so it's reserved on every row
-// regardless of content, matching this file's fixed-grid rule for other
-// always-present columns.
+// Never shrunk by fitToolColumnsToScreen: reserved on every row like this file's other always-present columns.
 const agentsTypeColW = 7
 
-// agentsFeatureLabel returns the display label for a feature's type column.
 func agentsFeatureLabel(feature agentsSection) string {
 	switch feature {
 	case agentsSectionSkills:
@@ -44,10 +34,7 @@ func agentsFeatureLabel(feature agentsSection) string {
 	}
 }
 
-// agentsColWidths sizes the agent-label and version columns from the visible
-// flatten, then flexes the name column via fitToolColumnsToScreen — the same
-// shrink order the tools tab uses (group -> name -> ver -> prov -> ...) —
-// since agentsCols and colWidths share the same field shape once priv is 0.
+// Flexes the name column via fitToolColumnsToScreen in the tools tab's shrink order; agentsCols and colWidths share a field shape once priv is 0.
 func agentsColWidths(m Model, rows []agentsAllRow) colWidths {
 	seed := colWidths{name: 20, typ: agentsTypeColW, prov: max(agentsAgentColW, agentsAgentIDColFloor), ver: len("missing"), screenW: m.width}
 	measure := rowColWidthMeasure{
@@ -96,9 +83,7 @@ func agentsRowName(m Model, e agentsAllRow) string {
 	return ""
 }
 
-// agentsProvCellText returns the unstyled agent-cell text for width
-// measurement, mirroring the agentLabel resolution in agentsRowCells: the
-// per-agent ID for mcp/plugin rows, or the linkage summary for skills rows.
+// A drifted row names the drifted agents, not the linked ones: a drifted package stays linked elsewhere, so linked would name every agent except the one the row acts against.
 func agentsProvCellText(m Model, e agentsAllRow) string {
 	if e.synthetic {
 		return ""
@@ -106,18 +91,33 @@ func agentsProvCellText(m Model, e agentsAllRow) string {
 	if e.feature != agentsSectionSkills {
 		return e.agentID
 	}
-	rows, _, _ := skillsVisibleRows(m)
+	rows, findStart, unmanagedStart := skillsVisibleRows(m)
 	if e.localIdx < 0 || e.localIdx >= len(rows) {
 		return ""
+	}
+	if agentsSkillRowIsFindResult(e.localIdx, findStart, unmanagedStart) {
+		return rows[e.localIdx].Source
 	}
 	if e.status == agentsStatusIgnored {
 		return ""
 	}
+	if e.mark == agentsMarkDrifted {
+		return skillAgentsCellText(skillDriftedAgents(rows[e.localIdx], m.enabledAgents))
+	}
+	if e.mark == agentsMarkPackageShadowed {
+		return skillAgentsCellText(skillShadowedAgents(rows[e.localIdx], m.enabledAgents))
+	}
 	return skillLinkageSummary(rows[e.localIdx], m.enabledAgents)
 }
 
-// agentsVersionCellText returns the unstyled version/date cell text for
-// width measurement, mirroring the styled version rendered in agentsRowCells.
+// The catalog find-results block sits between the manifest rows and the unmanaged lockfile rows in skillsVisibleRows' output.
+func agentsSkillRowIsFindResult(idx, findStart, unmanagedStart int) bool {
+	if findStart < 0 || idx < findStart {
+		return false
+	}
+	return unmanagedStart < 0 || idx < unmanagedStart
+}
+
 func agentsVersionCellText(m Model, e agentsAllRow) string {
 	if e.synthetic {
 		return ""
@@ -125,11 +125,20 @@ func agentsVersionCellText(m Model, e agentsAllRow) string {
 	if e.mark == agentsMarkShadowed {
 		return "via plugin"
 	}
+	if e.mark == agentsMarkPackageShadowed {
+		return "via package"
+	}
+	if e.mark == agentsMarkDrifted {
+		return agentsDriftedCellText(e.outdated)
+	}
 	switch e.feature {
 	case agentsSectionSkills:
-		rows, _, _ := skillsVisibleRows(m)
+		rows, findStart, unmanagedStart := skillsVisibleRows(m)
 		if e.localIdx < 0 || e.localIdx >= len(rows) {
 			return ""
+		}
+		if agentsSkillRowIsFindResult(e.localIdx, findStart, unmanagedStart) {
+			return rows[e.localIdx].Ref
 		}
 		return rows[e.localIdx].Updated
 	case agentsSectionMcp:
@@ -149,13 +158,9 @@ func agentsVersionCellText(m Model, e agentsAllRow) string {
 		if row.Sha != "" && row.LatestSha != "" && row.Sha != row.LatestSha {
 			return shaShort(row.Sha) + " → " + shaShort(row.LatestSha)
 		}
-		// PathOutdated (see PluginRow.Outdated's doc comment) has no comparable
-		// before/after value to show as an arrow — it's a git-history
-		// comparison, not a version or sha pair — so fall back to a plain
-		// label rather than silently showing nothing for the common
-		// versionless-plugin case.
+		// PathOutdated is a git-history comparison with no before/after pair to render as an arrow, so fall back to a plain label.
 		if row.Outdated() {
-			return "update available"
+			return "upgrade available"
 		}
 		return row.Version
 	case agentsSectionMarketplaces:
@@ -169,9 +174,15 @@ func agentsVersionCellText(m Model, e agentsAllRow) string {
 	}
 }
 
-// marketplaceUpdatedAtText formats a marketplace's last-update time for the
-// version/date cell, blank when unknown (t is the zero value) rather than a
-// misleading placeholder date.
+// Drift owns the row's section, so without this the pending upgrade stays invisible until the contested entry is settled.
+func agentsDriftedCellText(outdated bool) string {
+	if outdated {
+		return "drifted · upgrade"
+	}
+	return "drifted"
+}
+
+// Blank when t is the zero value rather than a misleading placeholder date.
 func marketplaceUpdatedAtText(t time.Time) string {
 	if t.IsZero() {
 		return ""
@@ -179,9 +190,6 @@ func marketplaceUpdatedAtText(t time.Time) string {
 	return t.Format("2006-01-02")
 }
 
-// agentsMarketplaceRowAt resolves a marketplace row's (Name, UpdatedAt) by
-// localIdx across both the managed rows and the unmanaged flatten, mirroring
-// agentsPluginRowAt.
 func agentsMarketplaceRowAt(m Model, localIdx int) (app.MarketplaceRow, bool) {
 	if localIdx >= 0 && localIdx < len(m.marketplaceRows) {
 		return m.marketplaceRows[localIdx], true
@@ -195,10 +203,7 @@ func agentsMarketplaceRowAt(m Model, localIdx int) (app.MarketplaceRow, bool) {
 	return app.MarketplaceRow{Name: mk.Name, UpdatedAt: mk.UpdatedAt}, true
 }
 
-// agentsMcpRowAt resolves a mcp row's (Name, Version) by localIdx across
-// both the managed rows and the unmanaged flatten, mirroring
-// agentsPluginRowAt's managed/unmanaged split. Only the fields callers need
-// (name display, version cell) are populated.
+// Only the fields callers need (name display, version cell) are populated.
 func agentsMcpRowAt(m Model, localIdx int) (app.McpServerRow, bool) {
 	if localIdx >= 0 && localIdx < len(m.mcpRows) {
 		return m.mcpRows[localIdx], true
@@ -251,19 +256,12 @@ func agentsRowGroups(m Model, e agentsAllRow) []string {
 	return nil
 }
 
-// agentsHuePalette is the small set of existing hue-bearing styles cycled
-// through for per-agent-ID coloring, since the agent ID set (claude-code,
-// codex, cursor, ...) is unbounded/extensible and doesn't map onto tools'
-// fixed brew/node/python taxonomy.
+// Agent IDs are an unbounded, extensible set, so they cycle existing hue styles instead of mapping onto tools' fixed provider taxonomy.
 func agentsHuePalette(p palette) []lipgloss.Style {
 	return []lipgloss.Style{p.styleProvider, p.styleProviderLinux, p.styleProviderSystem, p.styleOrphan}
 }
 
-// styleForAgent maps an agent ID to a stable hue via a deterministic hash,
-// so the same agentID always renders in the same color. agentID is only
-// colored when it's a literal single agent ID (e.g. "claude-code") — skills
-// rows carrying a linkage summary ("2 agents") or a "-"/"" placeholder keep
-// the flat styleHelp since those strings aren't tied to one agent's hue.
+// Only a literal single agent ID gets a hue; linkage summaries ("2 agents") and placeholders keep the flat styleHelp.
 func styleForAgent(p palette, agentID string) lipgloss.Style {
 	if agentID == "" {
 		return p.styleHelp
@@ -280,15 +278,11 @@ func agentsGroupBadge(p palette, groups []string, info *app.HostInfo, colW int, 
 	return renderGroupPills(p, groups, info, colW, emphasis)
 }
 
-// agentsRowRunKey identifies an agents-all row for in-flight op tracking,
-// mirroring toolKey's "\x00"-joined composite key convention.
 func agentsRowRunKey(e agentsAllRow) string {
 	return strconv.Itoa(int(e.feature)) + "\x00" + strconv.Itoa(e.localIdx) + "\x00" + e.agentID
 }
 
-// agentsMarkCell renders the sync-status icon for the name cell, reusing the
-// same icon glyphs and styles renderToolRow applies for the equivalent
-// syncStatus so agents rows read consistently with the tools tab.
+// Reuses renderToolRow's glyphs and styles for the equivalent syncStatus so agents rows read consistently with the tools tab.
 func agentsMarkCell(p palette, status agentsRowStatus, mark agentsSyncMark, selected bool) string {
 	emphasis := func(s lipgloss.Style) lipgloss.Style {
 		return rowEmphasis(selected, s)
@@ -301,18 +295,19 @@ func agentsMarkCell(p palette, status agentsRowStatus, mark agentsSyncMark, sele
 		return emphasis(p.styleOrphan).Render(iconOrphan)
 	case status == agentsStatusUpdates:
 		return emphasis(p.styleOutdated).Render(iconOutdated)
+	case mark == agentsMarkDrifted:
+		return emphasis(p.styleMissing).Render(iconWrongProv)
 	case mark == agentsMarkMissing:
 		return emphasis(p.styleMissing).Render(iconMissing)
 	case mark == agentsMarkShadowed:
+		return emphasis(p.styleWrongProv).Render(iconWrongProv)
+	case mark == agentsMarkPackageShadowed:
 		return emphasis(p.styleWrongProv).Render(iconWrongProv)
 	default:
 		return emphasis(p.styleInstalled).Render(iconInstalled)
 	}
 }
 
-// agentsRowCells builds the shared [mark+name] [group badge] | [agent]
-// [version/date] column layout for one flattened agents row, resolving the
-// underlying feature row by (e.feature, e.localIdx).
 func agentsRowCells(m Model, p palette, cols colWidths, e agentsAllRow, selected bool) (left, right []rowCell) {
 	emphasis := func(s lipgloss.Style) lipgloss.Style {
 		return rowEmphasis(selected, s)
@@ -356,22 +351,27 @@ func agentsRowCells(m Model, p palette, cols colWidths, e agentsAllRow, selected
 	var nameCell, groupBadge, ver string
 	switch e.feature {
 	case agentsSectionSkills:
-		rows, _, _ := skillsVisibleRows(m)
+		rows, findStart, unmanagedStart := skillsVisibleRows(m)
 		if e.localIdx >= 0 && e.localIdx < len(rows) {
 			r := rows[e.localIdx]
 			nameCell = nameStyle.Render(fitCellText(r.Name, cols.name))
 			groupBadge = agentsGroupBadge(p, r.Groups, m.hostInfo, cols.group, groupEmphasis)
+			skillsLinkage = agentsProvCellText(m, e)
 			switch {
+			case agentsSkillRowIsFindResult(e.localIdx, findStart, unmanagedStart):
+				// Catalog hits have no local install state; owner and install count are the only columns worth showing.
+				ver = emphasis(p.styleVersionMuted).Render(fitCellText(r.Ref, cols.ver))
+			case e.mark == agentsMarkDrifted:
+				ver = emphasis(p.styleMissing).Render(fitCellText(agentsDriftedCellText(e.outdated), cols.ver))
 			case e.mark == agentsMarkMissing:
 				ver = emphasis(p.styleMissing).Render("missing")
 			case e.mark == agentsMarkShadowed:
 				ver = emphasis(p.styleWrongProv).Render(fitCellText("via plugin", cols.ver))
+			case e.mark == agentsMarkPackageShadowed:
+				ver = emphasis(p.styleWrongProv).Render(fitCellText("via package", cols.ver))
 			case e.status != agentsStatusIgnored:
 				verStyle := p.styleVersionMuted
 				ver = emphasis(verStyle).Render(fitCellText(r.Updated, cols.ver))
-			}
-			if e.status != agentsStatusIgnored {
-				skillsLinkage = skillLinkageSummary(r, m.enabledAgents)
 			}
 		}
 	case agentsSectionMcp:
@@ -389,6 +389,8 @@ func agentsRowCells(m Model, p palette, cols colWidths, e agentsAllRow, selected
 		switch {
 		case e.mark == agentsMarkMissing:
 			ver = emphasis(p.styleMissing).Render("missing")
+		case e.mark == agentsMarkDrifted:
+			ver = emphasis(p.styleMissing).Render(fitCellText(agentsDriftedCellText(e.outdated), cols.ver))
 		case e.mark == agentsMarkShadowed:
 			ver = emphasis(p.styleWrongProv).Render(fitCellText("via plugin", cols.ver))
 		case e.status == agentsStatusIgnored:
@@ -404,6 +406,8 @@ func agentsRowCells(m Model, p palette, cols colWidths, e agentsAllRow, selected
 			switch {
 			case e.mark == agentsMarkMissing:
 				ver = emphasis(p.styleMissing).Render("missing")
+			case e.mark == agentsMarkDrifted:
+				ver = emphasis(p.styleMissing).Render(fitCellText(agentsDriftedCellText(e.outdated), cols.ver))
 			case e.status == agentsStatusIgnored:
 				ver = emphasis(p.styleIgnored).Render(fitCellText(r.Version, cols.ver))
 			default:
@@ -473,9 +477,7 @@ func agentsRowCells(m Model, p palette, cols colWidths, e agentsAllRow, selected
 	return left, right
 }
 
-// renderPluginUpdateCell renders a plugin row's version cell from its update
-// verdict. The managed and unmanaged plugin paths share this one render so
-// neither re-decides "outdated" independently of app.PluginRow.Outdated.
+// Managed and unmanaged plugin paths share this render so neither re-decides "outdated" independently of app.PluginRow.Outdated.
 func renderPluginUpdateCell(p palette, emphasis func(lipgloss.Style) lipgloss.Style, u app.PluginUpdate, fallbackVersion string, width int) string {
 	switch u.Kind {
 	case app.PluginVersionUpgrade:
@@ -484,56 +486,60 @@ func renderPluginUpdateCell(p palette, emphasis func(lipgloss.Style) lipgloss.St
 	case app.PluginShaDrift:
 		return emphasis(p.styleMissing).Render(fitCellText(shaShort(u.Current), width/2)) + emphasis(p.styleOutdated).Render(" → "+fitCellText(shaShort(u.Latest), width/2))
 	case app.PluginUpdateAvailable:
-		return emphasis(p.styleOutdated).Render(fitCellText("update available", width))
+		return emphasis(p.styleOutdated).Render(fitCellText("upgrade available", width))
 	default:
 		return emphasis(p.styleVersionMuted).Render(fitCellText(fallbackVersion, width))
 	}
 }
 
-// skillLinkedAgents returns the agent IDs with a confirmed symlink into the
-// canonical skills store, restricted to enabledAgents (the installed ∩
-// configured-use set), sorted for stable display. A row's PerAgentStatus can
-// carry stale entries for agents no longer installed/enabled on this host
-// (managed rows keyed by prior targets, unmanaged rows keyed by every
-// installed agent at scan time); enabledAgents keeps the display in sync with
-// the host's current agent set.
-func skillLinkedAgents(r app.SkillPackageRow, enabledAgents []string) []string {
+// Restricted to enabledAgents because PerAgentStatus can carry stale entries for agents no longer installed or enabled on this host.
+func skillAgentsWithStatus(r app.SkillPackageRow, enabledAgents []string, wanted app.SkillStatus) []string {
 	enabled := make(map[string]bool, len(enabledAgents))
 	for _, id := range enabledAgents {
 		enabled[id] = true
 	}
-	var linked []string
-	for id, ok := range r.PerAgentStatus {
-		if ok && enabled[id] {
-			linked = append(linked, id)
+	var matched []string
+	for id, status := range r.PerAgentStatus {
+		if status == wanted && enabled[id] {
+			matched = append(matched, id)
 		}
 	}
-	sort.Strings(linked)
-	return linked
+	sort.Strings(matched)
+	return matched
 }
 
-// skillLinkageSummary is the agent-cell text for a package-level skills row:
-// blank when nothing (or nothing meaningful) is linked, the sole agent ID
-// when exactly one is linked, else "N agents".
+func skillLinkedAgents(r app.SkillPackageRow, enabledAgents []string) []string {
+	return skillAgentsWithStatus(r, enabledAgents, app.SkillStatusInstalled)
+}
+
+func skillDriftedAgents(r app.SkillPackageRow, enabledAgents []string) []string {
+	return skillAgentsWithStatus(r, enabledAgents, app.SkillStatusDrifted)
+}
+
+func skillShadowedAgents(r app.SkillPackageRow, enabledAgents []string) []string {
+	return skillAgentsWithStatus(r, enabledAgents, app.SkillStatusShadowed)
+}
+
+func skillMissingAgents(r app.SkillPackageRow, enabledAgents []string) []string {
+	return skillAgentsWithStatus(r, enabledAgents, app.SkillStatusMissing)
+}
+
 func skillLinkageSummary(r app.SkillPackageRow, enabledAgents []string) string {
-	linked := skillLinkedAgents(r, enabledAgents)
-	switch len(linked) {
+	return skillAgentsCellText(skillLinkedAgents(r, enabledAgents))
+}
+
+func skillAgentsCellText(ids []string) string {
+	switch len(ids) {
 	case 0:
 		return ""
 	case 1:
-		return linked[0]
+		return ids[0]
 	default:
-		return strconv.Itoa(len(linked)) + " agents"
+		return strconv.Itoa(len(ids)) + " agents"
 	}
 }
 
-// wrapNamesLines greedily fills names (comma-separated) onto as many lines
-// as needed to fit within the row's available detail-line width, with the
-// label prefixed only on the first line and continuation lines hang-indented
-// to align under the first name (i.e. padded to len(label), not a fixed
-// amount), regardless of terminal width. Never splits a name mid-word. Used
-// for skills/linked-agent detail lists that must show every entry (no "+N
-// more" truncation).
+// Continuation lines hang-indent to len(label); never splits a name mid-word and never truncates with "+N more".
 func wrapNamesLines(m Model, label string, names []string) []string {
 	if len(names) == 0 {
 		return nil
@@ -563,10 +569,6 @@ func wrapNamesLines(m Model, label string, names []string) []string {
 	return lines
 }
 
-// skillDetailLines builds the full, untruncated detail lines for a managed
-// skills row: source, then every skill name, then every linked agent, each
-// wrapped across as many lines as needed. Unlike the single-line summary this
-// replaced, no "+N more" marker is ever emitted.
 func skillDetailLines(m Model, r app.SkillPackageRow) []string {
 	var lines []string
 	if r.Description != "" {
@@ -579,17 +581,25 @@ func skillDetailLines(m Model, r app.SkillPackageRow) []string {
 	for _, l := range wrapNamesLines(m, "linked: ", skillLinkedAgents(r, m.enabledAgents)) {
 		lines = append(lines, statusDetailLineIndented(m, l))
 	}
+	for _, l := range wrapNamesLines(m, "drifted: ", skillDriftedAgents(r, m.enabledAgents)) {
+		lines = append(lines, statusDetailLineIndented(m, l))
+	}
+	for _, l := range wrapNamesLines(m, "shadowed by managed package: ", skillShadowedAgents(r, m.enabledAgents)) {
+		lines = append(lines, statusDetailLineIndented(m, l))
+	}
+	if skillRowOutdated(r) {
+		lines = append(lines, statusDetailLine(m, "upgrade available"))
+	}
 	if r.ShadowedByPlugin {
 		lines = append(lines, statusDetailLine(m, "provided by plugin "+skillPackageRepoNameDisplay(r.Source)))
+	}
+	if len(r.UnknownAgents) > 0 {
+		lines = append(lines, statusDetailLine(m, "unknown agent target(s): "+strings.Join(r.UnknownAgents, ", ")))
 	}
 	return lines
 }
 
-// skillPackageRepoNameDisplay extracts a package source's bare repo-segment
-// name for the "provided by plugin X" detail line — the plugin's Name has no
-// owner prefix, so the display must match what actually shadowed it (see
-// app.SkillPackageRow.ShadowedByPlugin's doc comment), not the full
-// owner/repo source string.
+// The plugin's Name has no owner prefix, so the display must match what actually shadowed it, not the full owner/repo source.
 func skillPackageRepoNameDisplay(source string) string {
 	if i := strings.LastIndexByte(source, '/'); i >= 0 {
 		return source[i+1:]
@@ -619,11 +629,6 @@ func agentsStatusLabel(s agentsRowStatus) string {
 	}
 }
 
-// renderAgentsGroupedTab renders the agents flatten grouped by status
-// (Updates Available / Out of Sync / Installed / Available / Ignored), same
-// section labels and order as the tools tab. When filtered is true, only
-// entries matching only are shown but iteration keeps the same status
-// ordering agentsAllRowsList already produced.
 func renderAgentsGroupedTab(m Model, p palette, topLines []string, only agentsSection, filtered bool) string {
 	pad := screenEdgeInset()
 	full := agentsAllRowsList(m)
@@ -652,10 +657,7 @@ func renderAgentsGroupedTab(m Model, p palette, topLines []string, only agentsSe
 		}
 		empty := agentsEmptyStateLines(p, pad, chip)
 		if !agentsRowsKnownForChip(m, chip) {
-			// Rows haven't arrived yet (neither cached nor live) — the
-			// onboarding hints would misread as "nothing tracked" while the
-			// initial adapter CLI loads are still running. Render nothing
-			// until the table data is ready.
+			// Rows not loaded yet — onboarding hints would misread as "nothing tracked" while the initial adapter loads are still running.
 			empty = nil
 		}
 		return renderSectionedTab(m, sectionedTab{
@@ -688,10 +690,7 @@ func renderAgentsGroupedTab(m Model, p palette, topLines []string, only agentsSe
 				fallbackIdx = i
 			}
 		}
-		// No exact (localIdx, agentID) row matched — e.g. the chip's cursor
-		// fields haven't been positioned onto a real row yet (still their
-		// zero value). Fall back to the first row sharing localIdx so a row
-		// is still visibly selected, matching pre-agentID-tracking behavior.
+		// Chip cursor not yet positioned on a real row; fall back to the first row sharing localIdx so something stays selected.
 		if selectedIdx < 0 {
 			selectedIdx = fallbackIdx
 		}
@@ -735,9 +734,7 @@ func renderAgentsGroupedTab(m Model, p palette, topLines []string, only agentsSe
 	})
 }
 
-// agentsRowsKnownForChip reports whether the rows behind chip reflect reality
-// (cache-seeded or live-loaded). The all chip needs every enabled section
-// known — one still-loading section could otherwise masquerade as empty.
+// The all chip needs every enabled section known — one still-loading section could masquerade as empty.
 func agentsRowsKnownForChip(m Model, chip int) bool {
 	switch chip {
 	case agentsChipSkills:
@@ -756,18 +753,14 @@ func agentsRowsKnownForChip(m Model, chip int) bool {
 	}
 }
 
-// agentsEmptyStateLines returns the zero-row empty-state content for the
-// given chip, mirroring the skills chip's existing rich empty state (import/
-// restore hints) in view_skills.go for mcp/plugin, instead of the flat
-// generic line that previously fired for every chip.
 func agentsEmptyStateLines(p palette, pad string, chip int) []string {
 	switch chip {
 	case agentsChipSkills:
 		return []string{
 			p.styleHelp.Render(pad + "No agent skills tracked yet."),
 			"",
-			pad + p.styleNormal.Render("[i] import ") + p.styleHelp.Render(" capture skills already installed via the skills CLI"),
-			pad + p.styleNormal.Render("[r] restore") + p.styleHelp.Render(" install your declared skills on this machine"),
+			pad + p.styleNormal.Render("[i] import ") + p.styleHelp.Render(" capture legacy lockfile skills"),
+			pad + p.styleNormal.Render("[r] sync   ") + p.styleHelp.Render(" install your declared skills on this machine"),
 		}
 	case agentsChipMcp:
 		return []string{
@@ -792,9 +785,98 @@ func agentsEmptyStateLines(p palette, pad string, chip int) []string {
 	}
 }
 
-// agentsRowDetailLines builds the selected-row detail line (an item-level
-// summary — skill names, mcp transport/command, or plugin marketplace/version
-// — since the row itself already identifies the single agent it belongs to).
+// Both sides of a drifted mcp row: 'l use local' adopts the live registration, so its values must be readable without leaving the row. nil when not drifted on this agent.
+func mcpDriftDetailLines(m Model, r app.McpServerRow, agentID string) []string {
+	fields := r.DriftFields[agentID]
+	live, ok := r.DriftLive[agentID]
+	if len(fields) == 0 || !ok {
+		return nil
+	}
+	manifestText, liveText := mcpIdentityPair(r, live)
+	return []string{
+		statusDetailLine(m, "manifest: "+manifestText),
+		statusDetailLine(m, agentID+": "+liveText),
+		statusDetailLine(m, "differs: "+strings.Join(fields, ", ")),
+	}
+}
+
+// Keeps a field whenever either side carries one, so a value present on only one side still shows as absent on the other.
+func mcpIdentityPair(r app.McpServerRow, live app.InstalledMcpServer) (manifest, installed string) {
+	var manifestParts, liveParts []string
+	add := func(label, want, got string) {
+		if want == "" && got == "" {
+			return
+		}
+		manifestParts = append(manifestParts, label+": "+mcpFieldText(want))
+		liveParts = append(liveParts, label+": "+mcpFieldText(got))
+	}
+	add("transport", r.Transport, live.Transport)
+	add("command", r.Command, live.Command)
+	add("url", r.URL, live.URL)
+	return strings.Join(manifestParts, "  "), strings.Join(liveParts, "  ")
+}
+
+func mcpFieldText(value string) string {
+	if value == "" {
+		return "—"
+	}
+	return value
+}
+
+// Only mcp adopts a value on use-local; skills and plugins keep what is installed, so every other row keeps the bare label.
+func agentsUseLocalHintLabel(m Model, e agentsAllRow) string {
+	const label = "use local"
+	value := mcpDriftLocalValue(m, e)
+	if value == "" {
+		return "confirm " + label
+	}
+	budget := m.width - lipgloss.Width(listHintPrefix()) - screenEdgePadding -
+		lipgloss.Width("press "+m.keys.AgentsUseLocal.Help().Key+" again to "+label+" ()")
+	value = clipValueHead(value, budget)
+	if value == "" {
+		return "confirm " + label
+	}
+	return label + " (" + value + ")"
+}
+
+func mcpDriftLocalValue(m Model, e agentsAllRow) string {
+	if e.feature != agentsSectionMcp || e.synthetic || e.localIdx < 0 || e.localIdx >= len(m.mcpRows) {
+		return ""
+	}
+	row := m.mcpRows[e.localIdx]
+	live, ok := row.DriftLive[e.agentID]
+	if !ok {
+		return ""
+	}
+	var parts []string
+	for _, field := range row.DriftFields[e.agentID] {
+		switch field {
+		case "transport":
+			parts = append(parts, "transport: "+mcpFieldText(live.Transport))
+		case "command":
+			parts = append(parts, "command: "+mcpFieldText(live.Command))
+		case "url":
+			parts = append(parts, "url: "+mcpFieldText(live.URL))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// Urls and commands are told apart by their tail, so the head is what can go; the detail lines still carry the value in full.
+func clipValueHead(s string, width int) string {
+	if width < 1 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= width {
+		return s
+	}
+	if width == 1 {
+		return "…"
+	}
+	return "…" + string(runes[len(runes)-width+1:])
+}
+
 func agentsRowDetailLines(m Model, e agentsAllRow) []string {
 	if e.synthetic {
 		return []string{statusDetailLine(m, "ignored — not currently installed")}
@@ -825,6 +907,9 @@ func agentsRowDetailLines(m Model, e agentsAllRow) []string {
 	case agentsSectionMcp:
 		if e.localIdx < len(m.mcpRows) {
 			r := m.mcpRows[e.localIdx]
+			if lines := mcpDriftDetailLines(m, r, e.agentID); lines != nil {
+				return lines
+			}
 			summary := "transport: " + r.Transport
 			if r.Command != "" {
 				summary += "  command: " + r.Command
@@ -897,8 +982,6 @@ func agentsRowDetailLines(m Model, e agentsAllRow) []string {
 	}
 }
 
-// agentsFeatureCursor returns the per-feature cursor value for a type chip,
-// which already indexes the same localIdx space the filtered flatten uses.
 func agentsFeatureCursor(m Model, feature agentsSection) int {
 	switch feature {
 	case agentsSectionSkills:

@@ -7,46 +7,35 @@ import (
 	"sync"
 )
 
-// defaultIgnores is the built-in list of patterns always skipped when walking
-// a dots entry. Patterns are matched against the base file name using
-// filepath.Match semantics.
+// Matched against the base file name with filepath.Match semantics.
 var defaultIgnores = []string{
-	// ── VCS ───────────────────────────────────────────────────────────────────
 	".git",
 
-	// ── macOS artifacts ───────────────────────────────────────────────────────
 	".DS_Store",
 	".Spotlight-V100",
 	".fseventsd",
 	".localized",
 
-	// ── Windows artifacts ─────────────────────────────────────────────────────
 	"Thumbs.db",
 	"desktop.ini",
 
-	// ── Editor / tool artifacts ───────────────────────────────────────────────
 	"*.swp", // Vim swap files
 	"*.swo",
 	"*~",    // emacs/generic backup files
 	"*.bak", // generic backup files (omni's settings.json.bak, others)
 	"*.log",
 
-	// ── Python ────────────────────────────────────────────────────────────────
 	"__pycache__",
 	"*.pyc",
 
-	// ── Cache directories ─────────────────────────────────────────────────────
 	".cache",
 	"cache",
 	"caches",
 	"node_modules",
 
-	// ── Runtime sockets ───────────────────────────────────────────────────────
 	"*.sock",
 
-	// ── SSH private keys ──────────────────────────────────────────────────────
-	// Explicit private-key filenames only; .pub public keys are intentionally
-	// allowed through so they can be tracked as a legitimate sync target.
+	// Private-key filenames only: .pub keys stay syncable on purpose.
 	"id_rsa",
 	"id_dsa",
 	"id_ecdsa",
@@ -55,36 +44,28 @@ var defaultIgnores = []string{
 	"id_ed25519_sk",
 	"authorized_keys",
 
-	// ── Certificate and encryption file formats ───────────────────────────────
 	"*.pem",
 	"*.key",
 	"*.secret",
-	"*.age",   // age-encrypted files
-	"*.pgp",   // PGP-encrypted files
-	"*.gpg",   // GPG-encrypted files
-	"*.p12",   // PKCS#12 certificate bundles (contain private keys)
-	"*.pfx",   // PFX certificate bundles (contain private keys)
-	"*.token", // token files
+	"*.age",
+	"*.pgp",
+	"*.gpg",
+	"*.p12", // PKCS#12 certificate bundles (contain private keys)
+	"*.pfx", // PFX certificate bundles (contain private keys)
+	"*.token",
 
-	// ── Shell completion caches ───────────────────────────────────────────────
 	".zcompdump*",    // zsh completion dump (machine-specific: hostname + version)
 	"fish_variables", // fish universal variables (machine-specific paths)
 
-	// ── macOS AppleDouble resource forks ─────────────────────────────────────
 	"._*", // resource fork sidecar files created by macOS on foreign fs
 
-	// ── Lock files (reproducible, machine-state) ──────────────────────────────
-	// .skill-lock.json is deliberately NOT ignored: it's a trackable user
-	// dotfile (see the v13→v14 migration exemption), and a stow --ignore on it
-	// silently empties any entry that targets it.
+	// .skill-lock.json stays unignored: a stow --ignore on it silently empties any entry targeting it.
 	"Brewfile.lock.json", // Homebrew Bundle lock (machine-specific formulae state)
 	"lazy-lock.json",     // Neovim lazy.nvim plugin lock
 
-	// ── Databases (always machine-state) ─────────────────────────────────────
 	"*.sqlite",
 	"*.sqlite3",
 
-	// ── Credential file names ─────────────────────────────────────────────────
 	"credentials",                          // AWS CLI (~/.aws/credentials), etc.
 	"credentials.json",                     // Google Cloud, other OAuth credential files
 	"credentials.db",                       // generic credential database
@@ -99,9 +80,7 @@ var defaultIgnores = []string{
 	"secring.gpg",                          // GnuPG secret keyring (legacy format, GnuPG < 2.1)
 	"private-keys-v1.d",                    // GnuPG private keys directory (GnuPG >= 2.1)
 
-	// Agent-tool restrictive sync proposals are intentionally not listed here.
-	// They are attached as per-entry allowlists so unrelated config trees named
-	// projects, plugins, tasks, etc. remain trackable.
+	// Agent-tool proposals stay per-entry allowlists so trees named projects, plugins, tasks stay trackable.
 }
 
 // DefaultIgnores returns a copy of the built-in ignore patterns.
@@ -111,41 +90,27 @@ func DefaultIgnores() []string {
 	return cp
 }
 
-// ShouldIgnore reports whether basename is ignored by the pattern list.
-// Uses filepath.Match for glob patterns. Later matches override earlier ones;
-// patterns prefixed with "!" include a path after an earlier ignore.
+// ShouldIgnore — Later matches override earlier ones; a "!" prefix re-includes after an earlier ignore.
 //
 // Deprecated: prefer ShouldIgnoreChecked which surfaces malformed patterns.
-// This wrapper hides malformed-pattern errors so callers using DefaultIgnores()
-// (which are pre-validated) can continue to work without error handling.
 func ShouldIgnore(basename string, patterns []string) bool {
 	matched, _ := ShouldIgnoreChecked(basename, patterns)
 	return matched
 }
 
-// ShouldIgnorePath reports whether relPath is ignored by the pattern list.
-// Patterns containing a path separator are matched against relPath;
-// basename-only patterns keep their historical basename semantics. A leading
-// "/" anchors a pattern to relPath from the entry root. A trailing "/" matches
-// that directory and all descendants.
+// ShouldIgnorePath — Patterns with a separator match relPath; a leading "/" anchors to the entry root, a trailing "/" covers descendants.
 func ShouldIgnorePath(relPath, basename string, patterns []string) bool {
 	matched, _ := ShouldIgnorePathChecked(relPath, basename, patterns)
 	return matched
 }
 
-// ShouldIgnoreAnyPath reports whether any relative path candidate is ignored by
-// the pattern list. It is useful when a caller walks a subtree and needs to
-// evaluate patterns both relative to the subtree and to the original entry root.
+// ShouldIgnoreAnyPath — For walkers needing patterns evaluated against both the subtree and the original entry root.
 func ShouldIgnoreAnyPath(relPaths []string, basename string, patterns []string) bool {
 	matched, _ := ShouldIgnoreAnyPathChecked(relPaths, basename, patterns)
 	return matched
 }
 
-// ShouldIgnoreChecked reports whether basename is ignored by the pattern list
-// and returns an error if any pattern is syntactically invalid.
-// The first bad pattern encountered is returned; matching stops at that point.
-// Use this variant when evaluating user-supplied (per-entry) patterns so that
-// typos are surfaced rather than silently causing files to be synced or skipped.
+// ShouldIgnoreChecked — Use for user-supplied patterns so typos surface instead of silently skipping or syncing files.
 func ShouldIgnoreChecked(basename string, patterns []string) (bool, error) {
 	ignored := false
 	for _, p := range patterns {
@@ -179,10 +144,7 @@ func ShouldIgnoreAnyPathChecked(relPaths []string, basename string, patterns []s
 	return matcher.MatchAnyPath(relPaths, basename)
 }
 
-// IgnoreMatcher holds a pattern list parsed once, so tree walks evaluating
-// every visited file against ~80 patterns skip re-parsing on each call.
-// Literal basename patterns (most of the built-in defaults) are bucketed into
-// a map; only the remaining glob/path patterns are scanned per file.
+// IgnoreMatcher — Parsed once so tree walks skip re-parsing ~80 patterns per visited file.
 type IgnoreMatcher struct {
 	raw         []string
 	patterns    []ignorePattern
@@ -191,8 +153,7 @@ type IgnoreMatcher struct {
 	scanned     []int            // indices of patterns needing a per-target scan
 }
 
-// CompileIgnores parses a pattern list into a reusable matcher. Compile once
-// per walk; per-file evaluation then only runs the match itself.
+// CompileIgnores — Compile once per walk; per-file evaluation then only runs the match itself.
 func CompileIgnores(patterns []string) (*IgnoreMatcher, error) {
 	m := &IgnoreMatcher{
 		raw:         patterns,
@@ -217,10 +178,7 @@ func CompileIgnores(patterns []string) (*IgnoreMatcher, error) {
 	return m, nil
 }
 
-// CompileIgnoresLenient compiles a pattern list, degrading to an empty
-// matcher when any pattern is invalid. This mirrors the historical walker
-// behavior where one bad pattern made the checked call error out and the
-// boolean wrappers then ignored nothing at all.
+// CompileIgnoresLenient — Degrades to an empty matcher when any pattern is invalid.
 func CompileIgnoresLenient(patterns []string) *IgnoreMatcher {
 	m, err := CompileIgnores(patterns)
 	if err != nil {
@@ -229,19 +187,15 @@ func CompileIgnoresLenient(patterns []string) *IgnoreMatcher {
 	return m
 }
 
-// Raw returns the original pattern strings the matcher was compiled from.
 func (m *IgnoreMatcher) Raw() []string {
 	return m.raw
 }
 
-// Ignored reports whether relPath is ignored, mirroring ShouldIgnorePath.
 func (m *IgnoreMatcher) Ignored(relPath, basename string) bool {
 	matched, _ := m.MatchAnyPath([]string{relPath}, basename)
 	return matched
 }
 
-// MatchAnyPath reports whether any relative path candidate is ignored,
-// mirroring ShouldIgnoreAnyPathChecked over the compiled list.
 func (m *IgnoreMatcher) MatchAnyPath(relPaths []string, basename string) (bool, error) {
 	if len(relPaths) == 0 {
 		relPaths = []string{basename}
@@ -260,8 +214,7 @@ func (m *IgnoreMatcher) MatchAnyPath(relPaths []string, basename string) (bool, 
 		candidates = append(candidates, basename)
 	}
 	basenameTargets := ignoreBasenameTargets(candidates[0], basename)
-	// Later patterns override earlier ones, so the verdict belongs to the
-	// highest matching pattern index regardless of evaluation order.
+	// Later patterns win, so the verdict is the highest matching index regardless of evaluation order.
 	last := -1
 	for _, target := range basenameTargets {
 		for _, i := range m.literalBase[target] {
@@ -295,8 +248,6 @@ func (m *IgnoreMatcher) MatchAnyPath(relPaths []string, basename string) (bool, 
 	return !m.patterns[last].include, nil
 }
 
-// HasIncludedDescendant reports whether any include pattern names a path below
-// relPath, mirroring the package-level HasIncludedDescendant.
 func (m *IgnoreMatcher) HasIncludedDescendant(relPath string) bool {
 	if !m.hasIncluded {
 		return false
@@ -337,12 +288,7 @@ func cleanIgnoreRelPath(relPath, basename string) string {
 	return rel
 }
 
-// ignoreBasenameTargets returns the basename plus each ancestor directory name
-// of primary (an already slash-cleaned relative path), deduplicated. Basename
-// ignores follow ancestors from the primary walk-relative path only. Extra
-// candidates may prefix the logical root for path-scoped patterns; treating
-// that synthetic prefix as an ancestor would re-ignore content after a caller
-// deliberately starts a copy inside an ignored directory.
+// Ancestors come from the primary path only: treating a synthetic prefix as an ancestor would re-ignore content a caller deliberately started inside.
 func ignoreBasenameTargets(primary, basename string) []string {
 	targets := []string{basename}
 	rest := primary
@@ -370,9 +316,7 @@ func matchIgnorePattern(pattern ignorePattern, target string) (bool, error) {
 	if err != nil || matched || pattern.include || !pattern.pathScoped {
 		return matched, err
 	}
-	// A path-scoped ignore that matches a directory also ignores everything
-	// below it. Walkers may still descend to reach a later explicit include, so
-	// descendant checks must retain the ignored ancestor's state.
+	// Walkers may descend an ignored dir to reach a later include, so descendant checks keep the ancestor's state.
 	for ancestor := target; ; {
 		i := strings.LastIndexByte(ancestor, '/')
 		if i < 0 {
@@ -400,9 +344,7 @@ func matchIgnoreGlob(pattern ignorePattern, target string) (bool, error) {
 	return filepath.Match(pattern.glob, target)
 }
 
-// HasIncludedDescendant reports whether any include pattern names a path below
-// relPath. Walkers use it to descend ignored directories that contain an
-// explicitly included child.
+// HasIncludedDescendant — Lets walkers descend ignored directories that contain an explicitly included child.
 func HasIncludedDescendant(relPath string, patterns []string) bool {
 	rel := filepath.ToSlash(filepath.Clean(relPath))
 	if rel == "." || rel == "" {
@@ -424,9 +366,7 @@ func HasIncludedDescendant(relPath string, patterns []string) bool {
 	return false
 }
 
-// ValidateIgnorePattern returns an error if pattern is not a valid dots ignore
-// glob. It understands omni's include ("!") and root anchor ("/") prefixes,
-// plus trailing "/" directory patterns.
+// ValidateIgnorePattern — Understands omni's "!" include prefix, "/" root anchor, and trailing "/" directory patterns.
 func ValidateIgnorePattern(pattern string) error {
 	parsed, err := parseIgnorePattern(pattern)
 	if err != nil {
@@ -457,9 +397,7 @@ type ignorePattern struct {
 	affix      string
 }
 
-// ignorePatternCache memoizes parsed patterns. The pattern universe is the
-// built-in defaults plus per-entry config globs, so the cache stays small while
-// hot walks skip re-parsing ~80 patterns for every visited file.
+// The pattern universe is defaults plus per-entry globs, so the cache stays small.
 var ignorePatternCache sync.Map
 
 func parseIgnorePattern(raw string) (ignorePattern, error) {
@@ -506,10 +444,7 @@ func parseIgnorePatternUncached(raw string) (ignorePattern, error) {
 	return parsed, nil
 }
 
-// classifyIgnoreGlob detects globs whose filepath.Match result reduces to a
-// plain string comparison, so hot walks skip the Match state machine. Only a
-// single edge "*" qualifies: filepath.Match's star never crosses "/", which
-// the string fast paths reproduce exactly.
+// Only a single edge "*" qualifies: Match's star never crosses "/", which the string fast paths reproduce exactly.
 func classifyIgnoreGlob(glob string) (ignorePatternKind, string) {
 	switch strings.Count(glob, "*") {
 	case 0:
@@ -534,11 +469,8 @@ func invalidIgnorePatternError(pattern string, err error) error {
 	return fmt.Errorf("invalid glob pattern %q: %w", pattern, err)
 }
 
-// combinedIgnores merges defaultIgnores with per-entry ignores and validates
-// the per-entry patterns. Returns an error if any per-entry pattern is invalid.
-// defaultIgnores are assumed valid (enforced at compile time by unit tests).
+// defaultIgnores are assumed valid; unit tests enforce that.
 func combinedIgnores(perEntry []string) ([]string, error) {
-	// Validate per-entry patterns before merging so bad patterns are caught early.
 	var badPatterns []string
 	for _, p := range perEntry {
 		if err := ValidateIgnorePattern(p); err != nil {

@@ -11,8 +11,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// ClearInstallOverrideResult describes the provider override removed from a
-// logical tool.
 type ClearInstallOverrideResult struct {
 	Name        string
 	Provider    string
@@ -21,8 +19,6 @@ type ClearInstallOverrideResult struct {
 	Scope       string
 }
 
-// NormalizedInstallOverride describes a no-op provider override removed from a
-// logical tool config.
 type NormalizedInstallOverride struct {
 	Name        string
 	Provider    string
@@ -31,16 +27,13 @@ type NormalizedInstallOverride struct {
 	Host        string
 }
 
-// NormalizeInstallOverridesOptions controls which no-op install_with values are
-// removed from logical tool config.
 type NormalizeInstallOverridesOptions struct {
 	IncludeDefaults    bool
 	IncludeCurrentHost bool
 	DryRun             bool
 }
 
-// SetTool upserts the default install spec for a logical tool. It does not add
-// the tool to any group; callers must explicitly assign memberships.
+// SetTool — Does not add the tool to any group; callers must assign memberships explicitly.
 func (a *App) SetTool(name, providerName, packageName, installWith string) error {
 	if name == "" {
 		return fmt.Errorf("tool name is required")
@@ -153,7 +146,6 @@ func (a *App) SetToolQuarantine(name, quarantine string) error {
 	})
 }
 
-// RemoveLogicalTool deletes a logical tool spec and all group memberships for it.
 func (a *App) RemoveLogicalTool(ctx context.Context, name string) error {
 	if name == "" {
 		return fmt.Errorf("tool name is required")
@@ -187,8 +179,7 @@ func (a *App) RemoveLogicalTool(ctx context.Context, name string) error {
 	return a.deleteCachedLogicalTools(ctx, []string{name})
 }
 
-// MoveToolToGroup makes groupName the logical tool's owning group. The logical
-// tool must already exist in RootConfig.Tools.
+// MoveToolToGroup — The logical tool must already exist in RootConfig.Tools.
 func (a *App) MoveToolToGroup(name, groupName string) error {
 	if name == "" {
 		return fmt.Errorf("tool name is required")
@@ -200,8 +191,7 @@ func (a *App) MoveToolToGroup(name, groupName string) error {
 	})
 }
 
-// RemoveToolFromGroup removes a logical tool membership from a group. The tool
-// spec is left intact; use RemoveLogicalTool to delete the spec itself.
+// RemoveToolFromGroup — The spec is left intact; use RemoveLogicalTool to delete it.
 func (a *App) RemoveToolFromGroup(name, groupName string) error {
 	if name == "" {
 		return fmt.Errorf("tool name is required")
@@ -407,9 +397,7 @@ func (a *App) SetToolProviderScopeWithState(ctx context.Context, name string, op
 	return &ToolProviderScopeChange{Tools: tools, ScopeDisplay: scopeDisplay}, nil
 }
 
-// ClearToolInstallOverride removes the effective install_with override for a
-// logical tool. Host-specific overrides take precedence over the default tool
-// spec, matching resolveInstallSpec.
+// ClearToolInstallOverride — Host-specific overrides take precedence over the default tool spec, matching resolveInstallSpec.
 func (a *App) ClearToolInstallOverride(ctx context.Context, name, providerName string) (ClearInstallOverrideResult, error) {
 	if name == "" {
 		return ClearInstallOverrideResult{}, fmt.Errorf("tool name is required")
@@ -418,9 +406,7 @@ func (a *App) ClearToolInstallOverride(ctx context.Context, name, providerName s
 	err := a.patchToolConfig(name, func(spec *config.ToolSpec) error {
 		install := a.resolveInstallSpec(ctx, name, *spec)
 		if providerName != "" && !installSpecMatchesProvider(install, providerName) {
-			// Ecosystem family names (e.g. "node") may be passed from TUI while the
-			// resolved install uses the pinned concrete (e.g. "pnpm"). Allow the clear
-			// to proceed for known ecosystem names so unpin/remove works.
+			// The TUI may pass an ecosystem family name while the resolved install uses the pinned concrete.
 			if !provider.BuiltinIsEcosystem(providerName) {
 				return fmt.Errorf("tool %q with provider %q not found in config", name, providerName)
 			}
@@ -494,15 +480,11 @@ func (a *App) ClearToolInstallOverride(ctx context.Context, name, providerName s
 	return result, nil
 }
 
-// NormalizeHostDefaultInstallOverrides removes current-host install_with values
-// that only restate the currently resolved ecosystem default. Global defaults
-// are left intact because they may be intentional for other hosts.
+// NormalizeHostDefaultInstallOverrides — Global defaults are left intact because they may be intentional for other hosts.
 func (a *App) NormalizeHostDefaultInstallOverrides(ctx context.Context) ([]NormalizedInstallOverride, error) {
 	return a.NormalizeDefaultInstallOverrides(ctx, NormalizeInstallOverridesOptions{IncludeCurrentHost: true})
 }
 
-// NormalizeDefaultInstallOverrides removes install_with values that only
-// restate the currently resolved ecosystem default.
 func (a *App) NormalizeDefaultInstallOverrides(ctx context.Context, opts NormalizeInstallOverridesOptions) ([]NormalizedInstallOverride, error) {
 	if !opts.IncludeDefaults && !opts.IncludeCurrentHost {
 		return nil, nil
@@ -639,8 +621,7 @@ func (a *App) setToolInstallSpec(name, host, providerName, packageName, installW
 			if spec.Hosts == nil {
 				spec.Hosts = make(map[string]config.ToolInstallSpec)
 			}
-			// hostSpec.Provider alone carries the pin; install_with on a concrete
-			// host spec is rejected by config validation (ecosystem-scoped only).
+			// hostSpec.Provider alone carries the pin; install_with on a concrete host spec is rejected by validation.
 			spec.Hosts[host] = entry
 		} else {
 			setDefaultToolProviderCandidate(spec, entry)
@@ -693,7 +674,6 @@ func (a *App) knownEcosystemProvider(providerName string) bool {
 	return provider.BuiltinIsEcosystem(providerName)
 }
 
-// KnownEcosystemProvider is the exported version for use from other packages (e.g. TUI).
 func (a *App) KnownEcosystemProvider(providerName string) bool {
 	return a.knownEcosystemProvider(providerName)
 }

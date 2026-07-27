@@ -1,12 +1,18 @@
-# startup migration persists legacy tool provider config and filters stale tracked cache rows
+# a read path applies the legacy tool provider migration in memory only, and
+# filters stale tracked cache rows
 exec omni-seed-cache docker brew docker-desktop 1.0.0 2.0.0 brew
 exec omni-seed-cache ripgrep brew ripgrep 14.0.0 15.0.0 brew
 
+cp settings.json settings.json.orig
 exec omni --config settings.json tools list --format json
 stdout '"name":"ripgrep"'
 stdout '"provider":"brew"'
 ! stdout '"name":"docker"'
 ! stdout 'docker-desktop'
+cmp settings.json settings.json.orig
+
+# the first real mutation persists the migrated form
+exec omni --config settings.json hosts ensure otherhost
 
 exec omni-assert-tool-provider-list settings.json docker brew=docker-desktop
 exec omni-assert-tool-provider-list settings.json ripgrep brew=ripgrep

@@ -9,8 +9,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// cliToolErrorProviderStub implements provider.CLIToolProvider but always
-// fails, simulating a broken python/pip dist-info scan.
 type cliToolErrorProviderStub struct {
 	internalProviderStub
 }

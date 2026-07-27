@@ -13,14 +13,15 @@ func (a *App) newExecutor() executor.Executor {
 	return executor.NewTracing(executor.New(), a)
 }
 
-// CommandExecutor returns an executor wired to this app's command trace sink.
 func (a *App) CommandExecutor() executor.Executor {
 	return a.newExecutor()
 }
 
-// RecordCommandTrace implements executor.TraceSink. It is intentionally
-// best-effort: command tracing must not break package-manager operations.
+// RecordCommandTrace — Best-effort: command tracing must not break package-manager operations.
 func (a *App) RecordCommandTrace(ctx context.Context, trace executor.TraceRecord) error {
+	if a.diagnosticMode {
+		return nil
+	}
 	db := a.readDB()
 	if db == nil {
 		return nil
@@ -39,7 +40,6 @@ func (a *App) RecordCommandTrace(ctx context.Context, trace executor.TraceRecord
 	})
 }
 
-// CommandTraces returns recent command traces, newest first.
 func (a *App) CommandTraces(ctx context.Context, limit int) ([]CommandTraceView, error) {
 	db := a.readDB()
 	if db == nil {

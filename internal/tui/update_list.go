@@ -150,7 +150,7 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 			if !ok {
 				break
 			}
-			m.loading = true
+			m.beginLoading(loadingOwnerLocalOp)
 			startOp(m, "Applying fix: "+solution.Label+"…")
 			m.startRowOperation(t.Name, t.Provider, m.statusMsg)
 			cmds = append(cmds, m.spinner.Tick, m.doApplyProviderSolution(t.Name, t.Provider, solution))
@@ -176,7 +176,7 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 				for i := range options {
 					options[i].checked = false
 				}
-				m.loading = true
+				m.beginLoading(loadingOwnerLocalOp)
 				startOp(m, "Including "+t.Name+"…")
 				cmds = append(cmds, m.spinner.Tick, m.doSaveIgnoreScopes(t.Name, options))
 			} else {
@@ -222,14 +222,14 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		if msg.IsRepeat {
 			break
 		}
-		if t := m.selectedTool(); t != nil && t.Installed && t.Outdated {
+		if t := m.selectedTool(); t != nil && app.ToolOffersUpgrade(t) {
 			if m.blockPrivilegedToolAction(t, app.PrivilegeActionUpgrade) {
 				break
 			}
 			uk := toolKey(t.Name, t.Provider)
 			if !m.upgradingKeys["*"] && !m.upgradingKeys[uk] {
 				m.upgradingKeys[uk] = true
-				m.loading = true
+				m.beginLoading(loadingOwnerProgressOp)
 				startOp(m, "Upgrading "+t.Name+"…")
 				m.startRowOperation(t.Name, t.Provider, m.statusMsg)
 				ch, gen := m.beginProgressStream()
@@ -242,7 +242,7 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		}
 		if !m.upgradingKeys["*"] && m.sectionCounts[sectionUpdates] > 0 {
 			m.upgradingKeys["*"] = true
-			m.loading = true
+			m.beginLoading(loadingOwnerProgressOp)
 			m.progressText = ""
 			ch, gen := m.beginProgressStream()
 			m.markBulkPendingUpdates()
@@ -306,7 +306,7 @@ func (m *Model) startSelectedToolInstall(t *app.ToolView) []tea.Cmd {
 	if m.blockPrivilegedToolAction(installTool, app.PrivilegeActionInstall) {
 		return nil
 	}
-	m.loading = true
+	m.beginLoading(loadingOwnerProgressOp)
 	startOp(m, "Installing "+t.Name+"…")
 	m.startRowOperation(t.Name, installTool.Provider, m.statusMsg)
 	ch, gen := m.beginProgressStream()
@@ -337,7 +337,7 @@ func (m *Model) handleListConfirmationKeyMsg(msg tea.KeyPressMsg) (bool, []tea.C
 			m.startToolSyncAllConfirmed(&cmds)
 		}
 	case listConfirmDelete:
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		if c.installed {
 			if m.blockPrivilegedToolAction(&app.ToolView{Name: c.name, Provider: c.provider, Installed: true, InstalledWith: c.installedWith}, app.PrivilegeActionUninstall) {
 				m.loading = false
@@ -351,24 +351,24 @@ func (m *Model) handleListConfirmationKeyMsg(msg tea.KeyPressMsg) (bool, []tea.C
 		}
 		m.startRowOperation(c.name, c.provider, m.statusMsg)
 	case listConfirmReinstallDefault:
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		m.migrating = true
 		startOp(m, "Reinstalling "+c.name+" with default ("+c.provider+")…")
 		m.startRowOperation(c.name, c.provider, m.statusMsg)
 		cmds = append(cmds, m.spinner.Tick, m.doMigrateProvider(c.name, c.provider, c.installedWith))
 	case listConfirmMigrateNvm:
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		m.migrating = true
 		startOp(m, "Migrating "+c.name+" off Homebrew to "+m.effectiveNodeManagerLabel()+"…")
 		m.startRowOperation(c.name, c.provider, m.statusMsg)
 		cmds = append(cmds, m.spinner.Tick, m.doMigrateNvmTool(c.name))
 	case listConfirmRemoveNvmRuntime:
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		startOp(m, "Removing "+c.name+" from omni config…")
 		m.startRowOperation(c.name, c.provider, m.statusMsg)
 		cmds = append(cmds, m.spinner.Tick, m.doMigrateNvmTool(c.name))
 	case listConfirmClearProviderOverride:
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		m.migrating = c.installed && c.installedWith != ""
 		startOp(m, "Removing provider override for "+c.name+"…")
 		m.startRowOperation(c.name, c.provider, m.statusMsg)
@@ -635,22 +635,24 @@ func (m *Model) openProviderScopePicker(t *app.ToolView) {
 }
 
 func (m *Model) refreshInstalledProviders() []tea.Cmd {
-	if len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing {
+	// The orphan and description legs count as pending too: the orphan leg settles before it starts the
+	// description leg, so a narrower guard lets a second refresh run concurrently over the same DB.
+	if m.toolRefreshPending() {
 		return nil
 	}
 	clearStatus(m)
-	m.loading = true
+	m.beginLoading(loadingOwnerToolRefresh)
 	setActivityStatus(m, "Refreshing tools…")
 	cmds := m.startCurrentProviderScans()
 	if len(m.scanningProviders) == 0 {
-		m.loading = false
+		m.endLoading(loadingOwnerToolRefresh)
 		m.progressText = ""
 	}
 	return cmds
 }
 
 func (m *Model) startToolSyncAllConfirmed(cmds *[]tea.Cmd) {
-	m.loading = true
+	m.beginLoading(loadingOwnerProgressOp)
 	m.progressText = ""
 	ch, gen := m.beginProgressStream()
 	discovered := append([]*app.ToolView(nil), m.discoveredTools...)

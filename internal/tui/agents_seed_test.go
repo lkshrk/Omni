@@ -73,10 +73,7 @@ func TestSeedAgentsRowsFromCache_NilCache_NoOp(t *testing.T) {
 	}
 }
 
-// TestToolsLoadedMsg_AgentsRowsCache_RendersRowsImmediately drives the
-// startup snapshot msg through Update and pins that the agents tab renders
-// the cache-seeded rows right away — not the loading line or the onboarding
-// empty state — while the live section loads are still in flight.
+// The agents tab must render cache-seeded rows immediately, not the loading line or the onboarding empty state, while live loads are still in flight.
 func TestToolsLoadedMsg_AgentsRowsCache_RendersRowsImmediately(t *testing.T) {
 	t.Parallel()
 	m := agentsAllProgressModel(t, nil, nil, nil)

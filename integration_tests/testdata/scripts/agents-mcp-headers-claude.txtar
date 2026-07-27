@@ -1,5 +1,4 @@
-# Real Claude Code integration: Omni passes remote headers through Claude's
-# supported CLI, Claude persists them, and a real connection attempt sends them.
+# Real Claude integration persists remote headers through the supported CLI and sends them on connection.
 # @requires: claude
 env HOME=$WORK/home
 env OMNI_TEST_TOKEN=expanded-value
@@ -11,8 +10,12 @@ exec grep '"X-Literal": "literal-value"' $HOME/.claude.json
 exec claude mcp get headers-live
 stdout 'X-Literal: literal-value'
 
-exec omni-assert-claude-mcp-header settings-updated.json headers-live X-Literal updated-value
-stdout 'updated: claude-code/headers-live'
+# Fresh stub URLs create identity drift; agents-mcp-headers-codex.txtar covers header-only convergence against a stable URL.
+exec omni --config settings-updated.json agents mcp sync
+stdout 'drift: claude-code/headers-live: drifted on claude-code \(url differ'
+
+exec omni-assert-claude-mcp-header settings-updated.json headers-live X-Literal updated-value resolve
+stdout 'reinstall headers-live on claude-code'
 stdout 'captured header X-Literal'
 
 exec omni-assert-claude-mcp-header settings-env.json headers-env X-Env expanded-value

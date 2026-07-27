@@ -9,9 +9,6 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// stubBinariesOnPath points PATH at a tmp dir containing executable stub
-// files for each given name, so binaryOnPath sees them via exec.LookPath
-// without touching the real PATH.
 func stubBinariesOnPath(t *testing.T, names ...string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -100,7 +97,6 @@ func TestInstalledAgentsSharedDirWithBinaryOnPathDetected(t *testing.T) {
 func TestInstalledAgentsDedicatedDirEmptyNotDetected(t *testing.T) {
 	home := t.TempDir()
 	stubBinariesOnPath(t)
-	// openclaw: dedicated dir, no binary configured.
 	if err := os.MkdirAll(filepath.Join(home, ".openclaw"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +164,6 @@ func TestAgentHasAnySkill(t *testing.T) {
 	if !ok {
 		t.Fatal("codex target missing")
 	}
-	// primary dir hit
 	if err := os.MkdirAll(filepath.Join(home, ".codex", "skills", "demo"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +173,6 @@ func TestAgentHasAnySkill(t *testing.T) {
 	if agentHasAnySkill(home, codex, []string{"absent"}) {
 		t.Error("absent skill should not match")
 	}
-	// shared ~/.agents/skills hit
 	if err := os.MkdirAll(filepath.Join(home, ".agents", "skills", "shared"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -222,12 +216,7 @@ func TestEffectiveSkillAgents(t *testing.T) {
 	}
 }
 
-// TestInstalledAgentsSharedDirRequiresAgentSpecificSignal pins the deliberate
-// trade-off for shared configDirs (.zencoder is shared by zencoder+zenflow,
-// .config/agents by amp/replit/universal): detection requires the agent's
-// binary, because InstalledAgents feeds restore targets and a false positive
-// would write skills/config for a product that is not installed. Binary-less
-// agents on shared dirs stay undetected; users target them via agents_use.
+// Shared configDirs need the agent's own binary: a false positive would write config for an uninstalled product.
 func TestInstalledAgentsSharedDirRequiresAgentSpecificSignal(t *testing.T) {
 	home := t.TempDir()
 	stubBinariesOnPath(t) // empty PATH, no binaries resolvable

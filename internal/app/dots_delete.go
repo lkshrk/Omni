@@ -17,9 +17,7 @@ func (a *App) DotsDelete(ctx context.Context, name string) error {
 	return a.DotsDeleteWithOptions(ctx, name, DotsDeleteOptions{KeepLocal: true})
 }
 
-// DotsDeleteWithOptions deletes the dots entry named name from all group files
-// and always removes its package from the dots repo. When KeepLocal is true,
-// managed local symlinks are first replaced with real local copies.
+// DotsDeleteWithOptions — Always removes the package from the repo; KeepLocal first replaces managed symlinks with real copies.
 func (a *App) DotsDeleteWithOptions(ctx context.Context, name string, opts DotsDeleteOptions) (err error) {
 	repoPath := ""
 	defer func() {
@@ -110,9 +108,7 @@ func (a *App) DotsDeleteWithOptions(ctx context.Context, name string, opts DotsD
 	return nil
 }
 
-// DotsDeleteLocal removes the local file or directory behind a discovered
-// local-only candidate. Nothing exists in config or the repo for these
-// entries, so deletion only touches the local path.
+// DotsDeleteLocal — Nothing exists in config or the repo for these entries, so deletion only touches the local path.
 func (a *App) DotsDeleteLocal(ctx context.Context, status DotStatus) (err error) {
 	defer func() {
 		a.recordDotsHistoryResult(ctx, "delete", status.Name, "", nil, err, false)
@@ -134,13 +130,10 @@ func (a *App) DotsDeleteLocal(ctx context.Context, status DotStatus) (err error)
 	if homeErr != nil {
 		return fmt.Errorf("dots delete %q: resolve home directory: %w", status.Name, homeErr)
 	}
-	// Resolve the parent, not the target: intermediate symlinks (~/.config →
-	// elsewhere) must not smuggle the deletion outside home, while the target
-	// itself being a symlink is fine — RemoveAll only unlinks it.
+	// Resolve the parent, not the target: an intermediate symlink must not smuggle the deletion outside home.
 	resolvedParent, parentErr := filepath.EvalSymlinks(filepath.Dir(target))
 	if parentErr != nil {
-		// Parent gone means the target is gone too: keep RemoveAll's
-		// idempotent no-op behavior for stale local-only entries.
+		// Parent gone means the target is gone: keep RemoveAll's idempotent no-op for stale entries.
 		if errors.Is(parentErr, os.ErrNotExist) {
 			return nil
 		}
@@ -223,7 +216,6 @@ func dotMembershipMapFromConfig(cfg *config.RootConfig) map[string][]string {
 	return memberships
 }
 
-// MoveDotToGroup makes groupName the dotfile entry's only owning group.
 func (a *App) MoveDotToGroup(name, groupName string) error {
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("dots entry name is required")

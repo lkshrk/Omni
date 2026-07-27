@@ -11,8 +11,6 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-// TestSkillsSearch_SlashOpensSearch verifies that pressing / in viewSkills
-// activates search mode and focuses the filter input.
 func TestSkillsSearch_SlashOpensSearch(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -29,8 +27,6 @@ func TestSkillsSearch_SlashOpensSearch(t *testing.T) {
 	}
 }
 
-// TestSkillsSearch_EscClosesSearch verifies that Esc while search is active
-// clears the search state.
 func TestSkillsSearch_EscClosesSearch(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -47,8 +43,6 @@ func TestSkillsSearch_EscClosesSearch(t *testing.T) {
 	}
 }
 
-// TestSkillsSearch_TypeFiltersLocalRows verifies that typing a query while
-// search is focused filters the visible local rows.
 func TestSkillsSearch_TypeFiltersLocalRows(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -60,8 +54,7 @@ func TestSkillsSearch_TypeFiltersLocalRows(t *testing.T) {
 	}
 
 	m = drive(m, pressRune('/'))
-	// Simulate typing "cave" into the focused filter by setting the value directly,
-	// then sending a key that triggers re-filter (a no-op rune that the textinput processes).
+	// Set the filter value directly, then send a no-op rune the textinput processes to trigger the re-filter.
 	m.filter.SetValue("cave")
 
 	visible, _, _ := skillsVisibleRows(m)
@@ -73,8 +66,6 @@ func TestSkillsSearch_TypeFiltersLocalRows(t *testing.T) {
 	}
 }
 
-// TestSkillsSearch_EnterWithFreeTextDispatchesFind verifies that pressing Enter
-// on a free-text query (no slash, no https) sets skillAddRunning (triggering find).
 func TestSkillsSearch_EnterWithFreeTextDispatchesFind(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -93,8 +84,6 @@ func TestSkillsSearch_EnterWithFreeTextDispatchesFind(t *testing.T) {
 	}
 }
 
-// TestSkillsSearch_EnterWithSourceDispatchesAdd verifies that pressing Enter
-// on a source-like query (owner/repo) sets skillAddRunning (triggering add).
 func TestSkillsSearch_EnterWithSourceDispatchesAdd(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -110,8 +99,6 @@ func TestSkillsSearch_EnterWithSourceDispatchesAdd(t *testing.T) {
 	}
 }
 
-// TestSkillsSearch_FoundMsgPopulatesFindResults verifies that skillsFoundMsg
-// stores results and clears skillAddRunning.
 func TestSkillsSearch_FoundMsgPopulatesFindResults(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -135,8 +122,6 @@ func TestSkillsSearch_FoundMsgPopulatesFindResults(t *testing.T) {
 	}
 }
 
-// TestSkillsSearch_FindResultsRenderSection verifies that find results are rendered
-// under the shared "Available" status section.
 func TestSkillsSearch_FindResultsRenderSection(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -161,8 +146,7 @@ func TestSkillsSearch_FindResultsRenderSection(t *testing.T) {
 	}
 }
 
-// TestSkillsSearch_CursorOnFindRowEnterTriggersAdd verifies that pressing Enter
-// when the cursor is on a find row (cursor >= findStart) sets skillAddRunning.
+// Enter on a find row (cursor >= findStart) sets skillAddRunning.
 func TestSkillsSearch_CursorOnFindRowEnterTriggersAdd(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -175,7 +159,6 @@ func TestSkillsSearch_CursorOnFindRowEnterTriggersAdd(t *testing.T) {
 		{Source: "owner/new-skill", Skill: "new-skill", Installs: "100"},
 	}
 
-	// visible rows: [existing(idx=0), find-row(idx=1)]; findStart=1
 	_, findStart, _ := skillsVisibleRows(m)
 	if findStart != 1 {
 		t.Fatalf("findStart = %d, want 1", findStart)
@@ -189,7 +172,6 @@ func TestSkillsSearch_CursorOnFindRowEnterTriggersAdd(t *testing.T) {
 	}
 }
 
-// TestSkillsSearch_FoundMsgWithErrorSetsErr verifies error handling on skillsFoundMsg.
 func TestSkillsSearch_FoundMsgWithErrorSetsErr(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -206,8 +188,34 @@ func TestSkillsSearch_FoundMsgWithErrorSetsErr(t *testing.T) {
 	}
 }
 
-// TestSkillsSearch_AddedMsgClearsState verifies that skillAddedMsg clears
-// search state and find results.
+func TestSkillsSearch_StaleCatalogWarningKeepsResults(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.skillAddRunning = true
+	results := []app.FindResult{{Source: "owner/pkg", Skill: "chosen"}}
+
+	m = drive(m, skillsFoundMsg{
+		results: results,
+		err:     &app.CatalogWarning{Cause: errTest("offline")},
+	})
+
+	if m.skillsErr != nil {
+		t.Fatalf("stale cache warning treated as fatal: %v", m.skillsErr)
+	}
+	if len(m.skillFindResults) != 1 {
+		t.Fatalf("stale results len = %d, want 1", len(m.skillFindResults))
+	}
+}
+
+func TestSkillFindInstallSourceIncludesSelectedSkill(t *testing.T) {
+	t.Parallel()
+	got := skillFindInstallSource(app.FindResult{Source: "owner/repo", Skill: "chosen"})
+	if got != "owner/repo@chosen" {
+		t.Fatalf("skillFindInstallSource = %q, want owner/repo@chosen", got)
+	}
+}
+
 func TestSkillsSearch_AddedMsgClearsState(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -236,7 +244,6 @@ func TestSkillsSearch_AddedMsgClearsState(t *testing.T) {
 	}
 }
 
-// TestLooksLikeSkillSource_OwnerRepo verifies that owner/repo is recognized as a source.
 func TestLooksLikeSkillSource_OwnerRepo(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -376,8 +383,7 @@ func TestSkillAdd_SpinnerTickStopsWhenDone(t *testing.T) {
 	}
 }
 
-// batchHasSpinnerTick checks whether spinnerTick appears in cmd's batch by
-// comparing function pointers — it never executes any sub-command.
+// Compares function pointers and never executes any sub-command.
 func batchHasSpinnerTick(spinnerTick tea.Cmd, cmd tea.Cmd) bool {
 	if cmd == nil || spinnerTick == nil {
 		return false
@@ -402,7 +408,6 @@ func batchHasSpinnerTick(spinnerTick tea.Cmd, cmd tea.Cmd) bool {
 	return false
 }
 
-// errTest is a minimal error value for tests.
 type errTest string
 
 func (e errTest) Error() string { return string(e) }

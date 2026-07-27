@@ -77,9 +77,9 @@ func TestGit_Pull(t *testing.T) {
 
 func TestGit_CommitAll_WithChanges(t *testing.T) {
 	g, mock := newMockGit(t,
-		executor.MockCall{},               // add -A
-		executor.MockCall{Stdout: " M x"}, // status --porcelain → has changes
-		executor.MockCall{},               // commit
+		executor.MockCall{},
+		executor.MockCall{Stdout: " M x"},
+		executor.MockCall{},
 	)
 	if err := g.CommitAll(context.Background(), "dots: add nvim"); err != nil {
 		t.Fatalf("CommitAll: %v", err)
@@ -92,10 +92,7 @@ func TestGit_CommitAll_WithChanges(t *testing.T) {
 	assertGitArgs(t, mock.Calls[2], "commit", "-m", "dots: add nvim")
 }
 
-// TestGit_SnapshotAll_DisablesSigning guards the fix for internal safety
-// checkpoints aborting when the user has commit.gpgsign enabled without an
-// available signing key: SnapshotAll must pass -c commit.gpgsign=false so the
-// pre-resolve/pre-sync snapshot commits cannot be blocked by signing.
+// SnapshotAll must pass -c commit.gpgsign=false so a missing signing key cannot block internal checkpoints.
 func TestGit_SnapshotAll_DisablesSigning(t *testing.T) {
 	g, mock := newMockGit(t,
 		executor.MockCall{},               // add -A
@@ -121,7 +118,6 @@ func TestGit_CommitAll_NothingToCommit(t *testing.T) {
 	if err := g.CommitAll(context.Background(), "dots: add nvim"); err != nil {
 		t.Fatalf("CommitAll: %v", err)
 	}
-	// No commit call should be made.
 	if len(mock.Calls) != 2 {
 		t.Fatalf("want 2 calls (add + status), got %d", len(mock.Calls))
 	}
@@ -263,7 +259,6 @@ func TestGit_Push_NothingToCommit(t *testing.T) {
 }
 
 func TestGit_Push_CommitError(t *testing.T) {
-	// CommitAll fails inside Push → Push returns the CommitAll error.
 	g, _ := newMockGit(t,
 		executor.MockCall{Err: fmt.Errorf("disk full")}, // add -A fails
 	)
@@ -272,14 +267,12 @@ func TestGit_Push_CommitError(t *testing.T) {
 	}
 }
 
-// assertGitArgs checks that the call used "git" with the expected sub-args
-// (ignoring the leading "-C <repo>" prefix added by Git.run).
+// Args layout is ["-C", repoPath, wantArgs...]; the prefix is ignored.
 func assertGitArgs(t *testing.T, call executor.MockCall, wantArgs ...string) {
 	t.Helper()
 	if call.Name != "git" {
 		t.Errorf("command = %q, want git", call.Name)
 	}
-	// args layout: ["-C", repoPath, wantArgs...]
 	if len(call.Args) < 2+len(wantArgs) {
 		t.Errorf("args too short: %v", call.Args)
 		return

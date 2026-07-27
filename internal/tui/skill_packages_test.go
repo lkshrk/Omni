@@ -18,7 +18,7 @@ func TestSkillPackages_GroupBadgeRendered(t *testing.T) {
 	m.width = 120
 	m.enabledAgents = []string{"claude"}
 	m.skillsRows = []app.SkillPackageRow{
-		{Name: "caveman", Source: "github.com/foo/caveman", Groups: []string{"work", "home"}, Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+		{Name: "caveman", Source: "github.com/foo/caveman", Groups: []string{"work", "home"}, Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
 	}
 
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
@@ -45,7 +45,7 @@ func TestSkillPackages_MultiGroupBadgeAndFullDetail(t *testing.T) {
 		Source:         "github.com/foo/caveman",
 		Groups:         []string{"alpha", "beta", "work"},
 		Installed:      true,
-		PerAgentStatus: map[string]bool{"claude": true},
+		PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled},
 	}}
 
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
@@ -60,10 +60,7 @@ func TestSkillPackages_MultiGroupBadgeAndFullDetail(t *testing.T) {
 	}
 }
 
-// TestSkillPackages_TwoGroupsShowTwoPills is the Task 6 wiring regression
-// guard: a skills row in two reusable groups (no active host filtering to
-// collapse them) must render both as separate pills, not a single compact
-// badge.
+// A skills row in two reusable groups (no active host filtering to collapse them) must render both as separate pills, not a single compact badge.
 func TestSkillPackages_TwoGroupsShowTwoPills(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -72,7 +69,7 @@ func TestSkillPackages_TwoGroupsShowTwoPills(t *testing.T) {
 	m.width = 120
 	m.enabledAgents = []string{"claude"}
 	m.skillsRows = []app.SkillPackageRow{
-		{Name: "caveman", Source: "github.com/foo/caveman", Groups: []string{"laptop", "work"}, Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+		{Name: "caveman", Source: "github.com/foo/caveman", Groups: []string{"laptop", "work"}, Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
 	}
 
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
@@ -81,11 +78,7 @@ func TestSkillPackages_TwoGroupsShowTwoPills(t *testing.T) {
 	}
 }
 
-// TestSkillPackages_ThreeGroupsNarrowWidthCollapsesToHostPlusCount verifies
-// that when a skill package belongs to a host group plus two reusable
-// groups and the group column is too narrow to fit all three pills, the row
-// collapses to the host pill plus a "+N" count instead of dropping or
-// truncating groups silently.
+// When the group column cannot fit all three pills the row collapses to the host pill plus a "+N" count instead of dropping or truncating groups silently.
 func TestSkillPackages_ThreeGroupsNarrowWidthCollapsesToHostPlusCount(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "laptop")
 	m := baseModel(nil)
@@ -100,7 +93,7 @@ func TestSkillPackages_ThreeGroupsNarrowWidthCollapsesToHostPlusCount(t *testing
 		},
 	}
 	m.skillsRows = []app.SkillPackageRow{
-		{Name: "caveman", Source: "github.com/foo/caveman", Groups: []string{"laptop", "work", "base"}, Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+		{Name: "caveman", Source: "github.com/foo/caveman", Groups: []string{"laptop", "work", "base"}, Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
 	}
 
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
@@ -151,8 +144,8 @@ func TestSkillPackages_StatusGroupingSections(t *testing.T) {
 	m.width = 120
 	m.enabledAgents = []string{"claude"}
 	m.skillsRows = []app.SkillPackageRow{
-		{Name: "installed-pkg", Source: "github.com/a/installed", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
-		{Name: "missing-pkg", Source: "github.com/b/missing", Installed: false, PerAgentStatus: map[string]bool{"claude": false}},
+		{Name: "installed-pkg", Source: "github.com/a/installed", Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
+		{Name: "missing-pkg", Source: "github.com/b/missing", Installed: false, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusMissing}},
 	}
 
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
@@ -173,8 +166,7 @@ func TestSkillPackages_StatusGroupingSections(t *testing.T) {
 	if missingRowIdx < 0 {
 		t.Fatalf("viewSkillsBody() missing row 'missing-pkg', got:\n%s", out)
 	}
-	// Section order is Out of Sync < Installed, so missing-pkg (out of sync)
-	// renders before the Installed header, and installed-pkg renders after it.
+	// Section order is Out of Sync before Installed, so missing-pkg renders before the Installed header and installed-pkg after it.
 	if missingRowIdx >= installedIdx {
 		t.Errorf("missing-pkg (idx %d) should render under Out of Sync, before the Installed header (idx %d)", missingRowIdx, installedIdx)
 	}
@@ -191,13 +183,12 @@ func TestSkillPackages_FooterHasGroupKey(t *testing.T) {
 	m.width = 120
 	m.enabledAgents = []string{"claude"}
 	m.skillsRows = []app.SkillPackageRow{
-		{Name: "caveman", Source: "github.com/foo/caveman", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+		{Name: "caveman", Source: "github.com/foo/caveman", Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
 	}
 	m.skillsCursor = 0
 
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
-	// Per-row hints render under the selected row (not a static footer).
-	// Hint format: key then desc, no brackets (e.g. "g group").
+	// Hint format is key then desc with no brackets (e.g. "g group"), rendered under the selected row rather than in a static footer.
 	if !strings.Contains(out, "g group") {
 		t.Errorf("viewSkillsBody() missing per-row hint 'g group' for selected row, got:\n%s", out)
 	}
@@ -241,19 +232,16 @@ func TestAgentsNav_RoundRobin(t *testing.T) {
 	}
 	m.skillsCursor = 0
 
-	// Up from 0 wraps to last (2).
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.skillsCursor != 2 {
 		t.Fatalf("up from 0: skillsCursor = %d, want 2", m.skillsCursor)
 	}
 
-	// Down from 2 wraps back to 0.
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.skillsCursor != 0 {
 		t.Fatalf("down from 2: skillsCursor = %d, want 0", m.skillsCursor)
 	}
 
-	// Sequential down: 0 → 1 → 2 → 0.
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.skillsCursor != 1 {
 		t.Errorf("down from 0: skillsCursor = %d, want 1", m.skillsCursor)
@@ -345,5 +333,75 @@ func TestSkillPackages_CursorWrapsAtTop(t *testing.T) {
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.skillsCursor != 1 {
 		t.Errorf("skillsCursor = %d, want 1 (wrapped) after up past first row", m.skillsCursor)
+	}
+}
+
+func TestSkillPackages_DriftedRowRendersDistinctlyFromMissing(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.agentsEnabled = true
+	m.width = 120
+	m.enabledAgents = []string{"claude"}
+	m.skillsRows = []app.SkillPackageRow{
+		{
+			Name: "drifted-pkg", Source: "github.com/a/drifted", Installed: false,
+			PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusDrifted},
+		},
+		{
+			Name: "missing-pkg", Source: "github.com/b/missing", Installed: false,
+			PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusMissing},
+		},
+	}
+
+	out := stripANSIEscapeSequences(m.viewSkillsBody())
+	if !strings.Contains(out, "drifted") {
+		t.Errorf("viewSkillsBody() missing the drifted marker, got:\n%s", out)
+	}
+	if !strings.Contains(out, "missing") {
+		t.Errorf("viewSkillsBody() missing the missing marker, got:\n%s", out)
+	}
+
+	rows := agentsAllRowsList(m)
+	byName := map[string]agentsAllRow{}
+	for _, r := range rows {
+		byName[r.sortName] = r
+	}
+	if got := byName["drifted-pkg"]; got.status != agentsStatusOutOfSync || got.mark != agentsMarkDrifted {
+		t.Errorf("drifted row = (%v, %v), want (agentsStatusOutOfSync, agentsMarkDrifted)", got.status, got.mark)
+	}
+	if got := byName["missing-pkg"]; got.mark != agentsMarkMissing {
+		t.Errorf("missing row mark = %v, want agentsMarkMissing", got.mark)
+	}
+}
+
+func TestSkillPackages_DriftedAgentsListedInRowDetail(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.agentsEnabled = true
+	m.width = 120
+	m.enabledAgents = []string{"claude", "codex"}
+	m.skillsRows = []app.SkillPackageRow{{
+		Name: "mixed-pkg", Source: "github.com/a/mixed", Skills: []string{"demo"},
+		PerAgentStatus: map[string]app.SkillStatus{
+			"claude": app.SkillStatusInstalled,
+			"codex":  app.SkillStatusDrifted,
+		},
+	}}
+
+	rows := agentsAllRowsList(m)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	var detail string
+	for _, line := range agentsRowDetailLines(m, rows[0]) {
+		detail += stripANSIEscapeSequences(line) + "\n"
+	}
+	if !strings.Contains(detail, "linked: claude") {
+		t.Errorf("detail lines missing the linked agent, got:\n%s", detail)
+	}
+	if !strings.Contains(detail, "drifted: codex") {
+		t.Errorf("detail lines missing the drifted agent, got:\n%s", detail)
 	}
 }

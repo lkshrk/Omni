@@ -7,11 +7,7 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// expandFamilyDisabledProviders converts family-level disabled provider names
-// ("system"/"node"/"python") into their concrete members (e.g. node → bun,
-// pnpm, npm), leaving concrete names untouched. Order is preserved and
-// duplicates removed. Idempotent: a list already containing only concrete names
-// is returned unchanged (aside from de-duplication).
+// Idempotent: a list of only concrete names comes back unchanged apart from de-duplication.
 func expandFamilyDisabledProviders(names []string) []string {
 	if len(names) == 0 {
 		return names
@@ -40,9 +36,7 @@ func expandFamilyDisabledProviders(names []string) []string {
 	return out
 }
 
-// migrateConfigV8ToV9 expands family-level disabled_providers into concrete
-// providers in both global and per-host settings, so disabling is expressed
-// purely in concrete terms under the provider-priority model.
+// The provider-priority model expresses disabling purely in concrete terms, so families expand here.
 func migrateConfigV8ToV9(cfg *RootConfig) error {
 	cfg.Settings.DisabledProviders = expandFamilyDisabledProviders(cfg.Settings.DisabledProviders)
 	for host, s := range cfg.HostSettings {
@@ -77,8 +71,6 @@ func migrateRawConfigV8ToV9(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// transformRawDisabledProviders rewrites the disabled_providers array inside the
-// settings object stored at key in container, preserving every other key.
 func transformRawDisabledProviders(container map[string]json.RawMessage, key string) error {
 	objRaw, ok := container[key]
 	if !ok || isJSONNull(objRaw) {

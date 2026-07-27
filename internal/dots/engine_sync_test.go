@@ -12,13 +12,6 @@ import (
 	"github.com/lkshrk/omni/internal/executor"
 )
 
-// These tests exercise Engine.Sync end-to-end against a real `stow` binary and
-// a real executor, with $HOME pointed at a temp dir. They are the payoff of
-// deepening the dots engine: the whole conflict matrix (link, skip, real-file
-// conflict, use_repo, use_local adoption, dry-run) is now reachable through the
-// engine's small interface, with no App and no injected classifier — the
-// interface is the test surface.
-
 const (
 	syncTargetRel  = ".gitconfig-omnitest"
 	syncEntryName  = "gitcfg"
@@ -27,10 +20,7 @@ const (
 	syncPackageDir = syncEntryName // package defaults to the entry name
 )
 
-// stowFailExecutor fails every `stow` invocation while delegating all other
-// commands (git, trash renames) to a real executor. It lets the rollback and
-// restore branches — the paths that only fire when restow fails — be driven
-// deterministically through the engine seam.
+// Fails only `stow` so the rollback and restore branches fire deterministically.
 type stowFailExecutor struct{ inner executor.Executor }
 
 func (e stowFailExecutor) Run(ctx context.Context, name string, args ...string) (string, string, error) {
@@ -40,15 +30,12 @@ func (e stowFailExecutor) Run(ctx context.Context, name string, args ...string) 
 	return e.inner.Run(ctx, name, args...)
 }
 
-// syncFixture builds a temp $HOME plus a stow content root holding one
-// single-file package, and returns an Engine wired with a real executor.
 // repoBody, when non-empty, seeds the repo source file for the entry.
 func syncFixture(t *testing.T, repoBody string) (*dots.Engine, string) {
 	return syncFixtureExec(t, repoBody, executor.New())
 }
 
-// syncFixtureExec is syncFixture with a caller-supplied executor, so tests can
-// inject a failing one to reach the rollback branches.
+// Lets a test inject a failing executor to reach the rollback branches.
 func syncFixtureExec(t *testing.T, repoBody string, exec executor.Executor) (*dots.Engine, string) {
 	t.Helper()
 	if _, err := os.Stat("/usr/bin/stow"); err != nil {
@@ -163,7 +150,6 @@ func TestEngineSync_RealFileConflictErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("Sync over a real-file conflict should error without a strategy")
 	}
-	// The local file must be left untouched when the conflict is unresolved.
 	info, statErr := os.Lstat(target)
 	if statErr != nil {
 		t.Fatalf("lstat target: %v", statErr)
@@ -194,8 +180,6 @@ func TestEngineSync_ConflictUseLocalAdopts(t *testing.T) {
 	if _, err := eng.Sync(context.Background(), dots.SyncOptions{ConflictStrategy: "use_local"}); err != nil {
 		t.Fatalf("Sync use_local: %v", err)
 	}
-	// Local content wins: the target is now a managed link resolving to it, and
-	// the repo source has adopted the local body.
 	assertManagedLink(t, home, syncLocalBody)
 	src := filepath.Join(eng.RepoPath, syncPackageDir, syncTargetRel)
 	got, err := os.ReadFile(src)
@@ -268,7 +252,6 @@ func TestEngineSync_UseRepoRestowFailureRestoresLocal(t *testing.T) {
 	if _, err := eng.Sync(context.Background(), dots.SyncOptions{ConflictStrategy: "use_repo"}); err == nil {
 		t.Fatal("use_repo over a failing restow should error")
 	}
-	// Rollback must leave the original local file in place, not a dangling link.
 	info, err := os.Lstat(target)
 	if err != nil {
 		t.Fatalf("lstat target after rollback: %v", err)
@@ -289,8 +272,6 @@ func TestEngineSync_UseLocalRestowFailureRollsBackSource(t *testing.T) {
 	if _, err := eng.Sync(context.Background(), dots.SyncOptions{ConflictStrategy: "use_local"}); err == nil {
 		t.Fatal("use_local over a failing restow should error")
 	}
-	// The repo source must roll back to its original body rather than keep the
-	// half-adopted local content.
 	src := filepath.Join(eng.RepoPath, syncPackageDir, syncTargetRel)
 	got, err := os.ReadFile(src)
 	if err != nil {

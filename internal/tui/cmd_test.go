@@ -1,8 +1,6 @@
 package tui
 
-// Tests for the do* Cmd closures and supporting helpers.
-// These test the actual tea.Cmd closure body by invoking cmd() directly,
-// which is the part missed by the integration-level drive() tests.
+// Tests invoke the tea.Cmd closure directly, which is the part the integration-level drive() tests miss.
 
 import (
 	"context"
@@ -27,9 +25,6 @@ import (
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
 
-// ── stub providers ─────────────────────────────────────────────────────────────
-
-// okProvider is a Provider whose Install/Uninstall/Upgrade all succeed.
 type okProvider struct{ name string }
 
 func (p *okProvider) Name() string                                       { return p.name }
@@ -115,7 +110,6 @@ func (p *privilegedMissingProvider) IsInstalled(_ context.Context, _ provider.To
 	return false, "", nil
 }
 
-// errProvider is a Provider whose Install/Upgrade always fail.
 type errProvider struct{ name string }
 
 func (p *errProvider) Name() string                              { return p.name }
@@ -134,8 +128,6 @@ func (p *errProvider) IsInstalled(_ context.Context, _ provider.Tool) (bool, str
 func (p *errProvider) ListInstalled(_ context.Context) ([]provider.InstalledTool, error) {
 	return nil, nil
 }
-
-// ── test App helpers ───────────────────────────────────────────────────────────
 
 type tuiFixtureTool struct {
 	Name string
@@ -168,7 +160,6 @@ func tuiNamedHostGroup(name string, tools ...string) *config.GroupConfig {
 	return group
 }
 
-// newCmdApp creates an App backed by a stub provider and a pre-existing settings.json.
 func newCmdApp(t *testing.T, prov provider.Provider, tools []tuiFixtureTool) (*app.App, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -313,7 +304,6 @@ func containsDotMembership(dots []config.DotEntry, name string) bool {
 	return false
 }
 
-// newCmdAppNoConfig creates an App with no settings.json (setup wizard scenario).
 func newCmdAppNoConfig(t *testing.T, prov provider.Provider) *app.App {
 	t.Helper()
 	dir := t.TempDir()
@@ -326,7 +316,6 @@ func newCmdAppNoConfig(t *testing.T, prov provider.Provider) *app.App {
 	return a
 }
 
-// modelWithApp builds a minimal Model wired to the given App.
 func modelForCmds(a *app.App) Model {
 	fi := textinput.New()
 	return Model{
@@ -357,8 +346,6 @@ func cmdTestToolInConfig(cfg *config.RootConfig, name, providerName string) bool
 	}
 	return false
 }
-
-// ── doInstall ─────────────────────────────────────────────────────────────────
 
 func TestDoInstall_Success(t *testing.T) {
 	t.Parallel()
@@ -507,8 +494,7 @@ func TestHandleListActionInstallUsesSelectedProviderCandidate(t *testing.T) {
 	if len(cmds) != 3 {
 		t.Fatalf("install action returned %d commands, want [spinner.Tick, doInstall, waitForProgress]", len(cmds))
 	}
-	// cmds[2] is waitForProgress, which blocks on the channel doInstall (cmds[1])
-	// feeds; only doInstall itself resolves synchronously to opCompleteMsg here.
+	// cmds[2] is waitForProgress, which blocks on the channel doInstall feeds; only doInstall itself resolves synchronously here.
 	done, ok := opCompleteFromCmd(cmds[1])
 	if !ok {
 		t.Fatalf("expected opCompleteMsg from install command")
@@ -538,8 +524,6 @@ func TestDoInstall_Error(t *testing.T) {
 		t.Error("expected error from failing provider")
 	}
 }
-
-// ── doDelete ───────────────────────────────────────────────────────────────
 
 func TestDoDelete_Success(t *testing.T) {
 	t.Parallel()
@@ -849,8 +833,6 @@ func TestDoDeleteFromConfig_RefreshesToolMembershipState(t *testing.T) {
 	}
 }
 
-// ── doUpgrade ─────────────────────────────────────────────────────────────────
-
 func TestDoUpgrade_Success(t *testing.T) {
 	t.Parallel()
 	prov := &okProvider{name: "brew"}
@@ -880,8 +862,6 @@ func TestDoUpgrade_Error(t *testing.T) {
 		t.Error("expected error from failing provider")
 	}
 }
-
-// ── doSyncWithProgress ────────────────────────────────────────────────────────
 
 func TestDoSyncWithProgress_Success(t *testing.T) {
 	t.Parallel()
@@ -1025,8 +1005,6 @@ func TestQueuedPrivilegedAdminTerminalContinuesAfterSuccess(t *testing.T) {
 		t.Fatalf("vim row error should remain until its prompt finishes, rowErrors=%#v", got.rowErrors)
 	}
 }
-
-// ── doUpgradeAll ──────────────────────────────────────────────────────────────
 
 func TestDoUpgradeAll_Success(t *testing.T) {
 	t.Parallel()
@@ -1204,8 +1182,6 @@ func TestDoUpgradeAll_FailureReturnsRowErrorAndContinues(t *testing.T) {
 	}
 }
 
-// ── doCreateConfig ────────────────────────────────────────────────────────────
-
 func TestDoCreateConfig_Success(t *testing.T) {
 	t.Parallel()
 	prov := &okProvider{name: "brew"}
@@ -1219,10 +1195,7 @@ func TestDoCreateConfig_Success(t *testing.T) {
 	if got.err != nil {
 		t.Errorf("unexpected error: %v", got.err)
 	}
-	// Regression: setupProviders must be populated so the setup wizard step 1
-	// (provider picker) has rows to display. Previously doCreateConfig returned
-	// without calling AllAvailableManagers/ResolvedEcosystemProviders, leaving
-	// setupProviders nil and showing 0 providers in the wizard.
+	// setupProviders must be populated or the setup wizard's provider picker shows no rows.
 	if len(got.setupProviders) == 0 {
 		t.Error("setupProviders must not be empty after doCreateConfig — step 1 needs provider rows")
 	}
@@ -1323,12 +1296,9 @@ func TestHandleSetupConfigImportDoneMsg_ErrorStopsLoading(t *testing.T) {
 	}
 }
 
-// ── doSetupImport ─────────────────────────────────────────────────────────────
-
 func TestDoSetupImport_Success(t *testing.T) {
 	t.Parallel(
-	// Use a provider that returns real tools from ListInstalled so that the
-	// import step actually processes entries and got.added > 0.
+	// Use a provider returning real tools from ListInstalled so the import step processes entries and added > 0.
 	)
 
 	prov := &listableProvider{
@@ -1368,8 +1338,6 @@ func TestDoSetupImport_Success(t *testing.T) {
 		t.Fatalf("doSetupHost after import: %v", hostDone.err)
 	}
 }
-
-// ── doSetToolGroupMembership ─────────────────────────────────────────────────
 
 func TestDoSetToolGroupMembership_AddSuccess(t *testing.T) {
 	t.Parallel()
@@ -1685,8 +1653,6 @@ func TestDoSetDotGroupMemberships_ExistingGroupJoinsHost(t *testing.T) {
 	}
 }
 
-// ── doSaveSettingsChange ──────────────────────────────────────────────────────
-
 func TestDoSaveSettingsChange_Success(t *testing.T) {
 	t.Parallel()
 	prov := &okProvider{name: "brew"}
@@ -1969,8 +1935,7 @@ func TestSettingsRowActionsPersistExpectedConfigFields(t *testing.T) {
 		t.Fatalf("row %d should persist settings.dots_git.auto_push=true", settingsRowDotsPush)
 	}
 
-	// Priority editor save: SetProviderLayout(["brew"], []) should persist
-	// provider_priority = ["brew"] in the host settings.
+	// SetProviderLayout(["brew"], []) must persist provider_priority = ["brew"] in the host settings.
 	host := cfg.HostSettings["settingsrowtest"]
 	if got := host.ProviderPriority; len(got) != 1 || got[0] != "brew" {
 		t.Fatalf("priority save should persist host_settings.settingsrowtest.provider_priority = [brew], got %v", got)
@@ -2008,14 +1973,11 @@ func TestSettingsRowActionDoesNotOverwriteConfigWithStaleModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	// The toggle read from disk (AutoImport=true) and flipped to false — the
-	// live config value must have been used, not the stale in-model zero value.
+	// The toggle read AutoImport=true from disk and flipped it, proving the live config value was used rather than the stale in-model zero value.
 	if cfg.Settings.AutoImport {
 		t.Fatal("settings.auto_import should have been toggled off from live config value")
 	}
 }
-
-// ── doConsolidate ─────────────────────────────────────────────────────────────
 
 func TestDoConsolidate_Success(t *testing.T) {
 	t.Parallel()
@@ -2047,8 +2009,6 @@ func TestDoConsolidate_UnknownEcosystem(t *testing.T) {
 		t.Error("expected error for unknown ecosystem")
 	}
 }
-
-// ── waitForProgress ───────────────────────────────────────────────────────────
 
 func TestWaitForProgress_ClosedChannel(t *testing.T) {
 	t.Parallel()
@@ -2143,8 +2103,6 @@ func TestSyncAllProgressText_AddAndInstallOnly(t *testing.T) {
 	}
 }
 
-// ── displaySection ────────────────────────────────────────────────────────────
-
 func TestDisplaySection_IgnoredTool(t *testing.T) {
 	t.Parallel()
 	tc := &app.ToolView{Name: "curl", Provider: "brew", Installed: true}
@@ -2165,10 +2123,7 @@ func TestDisplaySection_NormalTool(t *testing.T) {
 	}
 }
 
-// ── additional error / branch coverage ────────────────────────────────────────
-
-// installableProvider reports tools as not-yet-installed but installs them successfully.
-// Used to trigger the "sync complete — N installed" branch in doSyncWithProgress.
+// Reports tools as not-yet-installed but installs them successfully, triggering the "sync complete" branch in doSyncWithProgress.
 type installableProvider struct{ name string }
 
 func (p *installableProvider) Name() string                                       { return p.name }
@@ -2184,8 +2139,7 @@ func (p *installableProvider) ListInstalled(_ context.Context) ([]provider.Insta
 	return nil, nil
 }
 
-// listableProvider is a Provider whose ListInstalled returns a fixed list of tools.
-// Used to verify that doSetupImport imports tools when a real provider is present.
+// ListInstalled returns a fixed list so doSetupImport has tools to import.
 type listableProvider struct {
 	name  string
 	tools []provider.InstalledTool
@@ -2259,10 +2213,7 @@ func TestBuildAllGroupNames_PutsHostBeforeNamedGroups(t *testing.T) {
 	}
 }
 
-// ── dots helpers ──────────────────────────────────────────────────────────────
-
-// newDotsModelForCmds creates an App with settings.json pointing at a temp dir
-// as the dots repo. Returns a Model wired to that App plus the repo dir path.
+// Settings.json points at a temp dir as the dots repo; returns the Model plus the repo dir path.
 func newDotsModelForCmds(t *testing.T) (Model, string) {
 	t.Helper()
 	cfgDir := t.TempDir()
@@ -2285,8 +2236,6 @@ func newDotsModelForCmds(t *testing.T) (Model, string) {
 	m.setSettings(config.Settings{DotsRepo: repoDir})
 	return m, repoDir
 }
-
-// ── doLoadDots ────────────────────────────────────────────────────────────────
 
 func TestDoLoadDots_NoRepo(t *testing.T) {
 	t.Parallel()
@@ -2404,8 +2353,6 @@ func TestDoRefreshDotsHistory_ReadsRecentAppHistory(t *testing.T) {
 		}
 	}
 }
-
-// ── doDotsSyncOnly ────────────────────────────────────────────────────────────
 
 func TestDoDotsSyncOnly_NoRepo(t *testing.T) {
 	t.Parallel()
@@ -3057,8 +3004,6 @@ func TestHandleToolsLoadedMsg_DotsRepoPromptsForStowBeforeScans(t *testing.T) {
 	}
 }
 
-// ── doDotsPull ────────────────────────────────────────────────────────────────
-
 func TestDoDotsPull_NoRepo(t *testing.T) {
 	t.Parallel()
 	prov := &okProvider{name: "brew"}
@@ -3087,8 +3032,6 @@ func TestDoDotsPull_NonGitDir(t *testing.T) {
 	}
 }
 
-// ── doDotsPush ────────────────────────────────────────────────────────────────
-
 func TestDoDotsPush_NoRepo(t *testing.T) {
 	t.Parallel()
 	prov := &okProvider{name: "brew"}
@@ -3116,8 +3059,6 @@ func TestDoDotsPush_NonGitDir(t *testing.T) {
 		t.Error("expected error pushing from non-git directory")
 	}
 }
-
-// ── doDotsDelete ──────────────────────────────────────────────────────────────
 
 func TestDoDotsDelete_NotFound(t *testing.T) {
 	m, _ := newDotsModelForCmds(t)
@@ -3176,8 +3117,6 @@ func TestDoDotsDelete_Success(t *testing.T) {
 	}
 }
 
-// ── doResetSettings ───────────────────────────────────────────────────────────
-
 func TestDoResetSettings_Success(t *testing.T) {
 	t.Parallel()
 	prov := &okProvider{name: "brew"}
@@ -3198,8 +3137,6 @@ func TestDoResetSettings_Success(t *testing.T) {
 		t.Error("reload should be true after reset-settings")
 	}
 }
-
-// ── doResetCache ──────────────────────────────────────────────────────────────
 
 func TestDoResetCache_Success(t *testing.T) {
 	t.Parallel()
@@ -3222,12 +3159,9 @@ func TestDoResetCache_Success(t *testing.T) {
 	}
 }
 
-// ── doDisableDots ─────────────────────────────────────────────────────────────
-
 func TestDoDisableDots_NoDotsRepo(t *testing.T) {
 	t.Parallel(
-	// When dots is not configured, doDisableDots skips physical unlink work
-	// but still persists the disabled flag and triggers a reload.
+	// With dots unconfigured, doDisableDots skips the physical unlink work but still persists the flag and triggers a reload.
 	)
 
 	prov := &okProvider{name: "brew"}
@@ -3260,8 +3194,7 @@ func TestDoDisableDots_Success(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 
-	// Create source file and managed symlink at stow-derived path.
-	// Entry Path=homeDir/.zshrc → SourcePath=repoDir/dotfiles/zsh/.zshrc
+	// Entry Path=homeDir/.zshrc maps to SourcePath=repoDir/dotfiles/zsh/.zshrc.
 	srcFile := filepath.Join(repoDir, "dotfiles", "zsh", ".zshrc")
 	dstFile := filepath.Join(homeDir, ".zshrc")
 	if err := os.MkdirAll(filepath.Dir(srcFile), 0o755); err != nil {
@@ -3274,7 +3207,6 @@ func TestDoDisableDots_Success(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Write settings.json with dots_repo and dots entry.
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{DotsRepo: repoDir},
 		Groups: []*config.GroupConfig{{
@@ -3310,7 +3242,6 @@ func TestDoDisableDots_Success(t *testing.T) {
 	if !got.reload {
 		t.Error("reload should be true after successful disable")
 	}
-	// dstFile should now be a real file.
 	fi, err := os.Lstat(dstFile)
 	if err != nil {
 		t.Fatalf("Lstat %q: %v", dstFile, err)
@@ -3367,8 +3298,6 @@ func TestDoDisableDots_RemoveLocal(t *testing.T) {
 	}
 }
 
-// ── doEnableDots ──────────────────────────────────────────────────────────────
-
 func TestDoEnableDots_ClearsDisabledFlag(t *testing.T) {
 	t.Parallel()
 	prov := &okProvider{name: "brew"}
@@ -3399,11 +3328,7 @@ func TestDoEnableDots_ClearsDisabledFlag(t *testing.T) {
 	}
 }
 
-// ── doScanProvider ────────────────────────────────────────────────────────────
-
-// TestDoScanProvider_ReturnsMsg verifies that doScanProvider returns a
-// providerScannedMsg with the correct provider name. Tools are not fetched
-// here — doFetchFinalTools handles that after all providers finish.
+// Tools are not fetched here — doFetchFinalTools handles that after all providers finish.
 func TestDoScanProvider_ReturnsMsg(t *testing.T) {
 	t.Parallel()
 	prov := &okProvider{name: "brew"}
@@ -3423,8 +3348,6 @@ func TestDoScanProvider_ReturnsMsg(t *testing.T) {
 	}
 }
 
-// TestDoFetchFinalTools_ReturnsMsg verifies that doFetchFinalTools returns an
-// allProvidersDoneMsg (DB may be empty so tools can be nil/empty).
 func TestDoFetchFinalTools_ReturnsMsg(t *testing.T) {
 	t.Parallel()
 	prov := &okProvider{name: "brew"}
@@ -3460,10 +3383,7 @@ func TestDoCheckProviderOutdated_ReturnsMsg(t *testing.T) {
 	}
 }
 
-// ── doRefreshDiscovered ───────────────────────────────────────────────────────
-
-// TestDoRefreshDiscovered_ReturnsMsg verifies that doRefreshDiscovered always
-// returns a discoveredRefreshedMsg (never nil, never an error type).
+// Must always return a discoveredRefreshedMsg, never nil and never an error type.
 func TestDoRefreshDiscovered_ReturnsMsg(t *testing.T) {
 	t.Parallel()
 	prov := &okProvider{name: "brew"}
@@ -3480,9 +3400,7 @@ func TestDoRefreshDiscovered_ReturnsMsg(t *testing.T) {
 	}
 }
 
-// TestRenderDots_EmptyState_BlankWhileStartupSnapshotPending pins the dots
-// tab's zero-entry state: while the startup snapshot hasn't landed yet
-// (m.loading) it must render nothing, not "No dotfiles tracked yet".
+// While the startup snapshot has not landed (m.loading) the zero-entry dots tab must render nothing, not "No dotfiles tracked yet".
 func TestRenderDots_EmptyState_BlankWhileStartupSnapshotPending(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)

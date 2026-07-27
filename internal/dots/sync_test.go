@@ -124,10 +124,10 @@ func TestRestoreDotTargetAfterFailedRestow(t *testing.T) {
 		}
 
 		entry := ResolvedEntry{Name: "test", TargetPath: targetPath}
-		prep := preparedDotTarget{backupPath: backupPath, preservedDirectory: false}
+		prep := PreparedDotTarget{backupPath: backupPath, preservedDirectory: false}
 
-		if err := restoreDotTargetAfterFailedRestow(context.Background(), nil, entry, prep); err != nil {
-			t.Fatalf("restoreDotTargetAfterFailedRestow: %v", err)
+		if err := RestoreDotTargetAfterFailedRestow(context.Background(), nil, entry, prep); err != nil {
+			t.Fatalf("RestoreDotTargetAfterFailedRestow: %v", err)
 		}
 		got, err := os.ReadFile(targetPath)
 		if err != nil {
@@ -161,14 +161,14 @@ func TestRestoreDotTargetAfterFailedRestow(t *testing.T) {
 		}
 
 		entry := ResolvedEntry{Name: "test", TargetPath: targetDir}
-		prep := preparedDotTarget{
+		prep := PreparedDotTarget{
 			backupPath:          backupPath,
 			preservedDirectory:  true,
 			removedManagedPaths: true,
 		}
 
-		if err := restoreDotTargetAfterFailedRestow(context.Background(), nil, entry, prep); err != nil {
-			t.Fatalf("restoreDotTargetAfterFailedRestow: %v", err)
+		if err := RestoreDotTargetAfterFailedRestow(context.Background(), nil, entry, prep); err != nil {
+			t.Fatalf("RestoreDotTargetAfterFailedRestow: %v", err)
 		}
 		got, err := os.ReadFile(filepath.Join(targetDir, "sub", "file.txt"))
 		if err != nil {
@@ -185,14 +185,14 @@ func TestRestoreDotTargetAfterFailedRestow(t *testing.T) {
 		t.Setenv("HOME", home)
 
 		entry := ResolvedEntry{Name: "test", TargetPath: filepath.Join(tmp, "target")}
-		prep := preparedDotTarget{
+		prep := PreparedDotTarget{
 			backupPath:          "",
 			preservedDirectory:  true,
 			removedManagedPaths: false,
 		}
 
-		if err := restoreDotTargetAfterFailedRestow(context.Background(), nil, entry, prep); err != nil {
-			t.Fatalf("restoreDotTargetAfterFailedRestow: %v", err)
+		if err := RestoreDotTargetAfterFailedRestow(context.Background(), nil, entry, prep); err != nil {
+			t.Fatalf("RestoreDotTargetAfterFailedRestow: %v", err)
 		}
 	})
 }

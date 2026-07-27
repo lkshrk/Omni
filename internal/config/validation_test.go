@@ -72,7 +72,7 @@ func TestToolSpec_ToToolEntry(t *testing.T) {
 
 func TestToolSpec_ToToolEntry_PackageDefaultsFromLogicalName(t *testing.T) {
 	spec := config.ToolSpec{}
-	install := config.ToolInstallSpec{Provider: "brew"} // no Package
+	install := config.ToolInstallSpec{Provider: "brew"}
 	got := spec.ToToolEntry("ripgrep", install)
 	if got.Package != "ripgrep" {
 		t.Errorf("Package = %q, want fallback to logical name 'ripgrep'", got.Package)
@@ -466,8 +466,7 @@ func TestValidateRoot_GroupDuplicateTool(t *testing.T) {
 	}
 }
 
-// An item may belong to any number of host groups plus one reusable group, so a
-// tool in the host group AND one reusable group is valid.
+// Any number of host groups plus at most one reusable group is valid.
 func TestValidateRoot_ToolMayJoinHostAndOneReusableGroup(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{"a": {Provider: "brew"}},
@@ -507,29 +506,22 @@ func TestValidateRoot_DotTwoReusableGroupsRejected(t *testing.T) {
 	}
 }
 
-// rootWithLogicalTool returns a minimal RootConfig declaring a single logical
-// tool with no groups yet.
 func rootWithLogicalTool(name string) *config.RootConfig {
 	return &config.RootConfig{
 		Tools: map[string]config.ToolSpec{name: {Provider: "brew"}},
 	}
 }
 
-// reusableGroupWithTool returns a non-host (reusable) group referencing the
-// given logical tool.
 func reusableGroupWithTool(groupName, toolName string) *config.GroupConfig {
 	return &config.GroupConfig{Name: groupName, Tools: []config.ToolEntry{{Name: toolName}}}
 }
 
-// rootWithDot returns a minimal RootConfig with no groups yet; dot
-// definitions live only inside groups, not at the root.
+// Dot definitions live only inside groups, never at the root.
 func rootWithDot(name string) *config.RootConfig {
 	_ = name
 	return &config.RootConfig{}
 }
 
-// reusableGroupWithDot returns a non-host (reusable) group referencing the
-// given dotfile.
 func reusableGroupWithDot(groupName, dotName string) *config.GroupConfig {
 	return &config.GroupConfig{Name: groupName, Dots: []config.DotEntry{{Name: dotName, Path: "~/.config/" + dotName}}}
 }

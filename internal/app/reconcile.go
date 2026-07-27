@@ -11,7 +11,6 @@ import (
 	isync "github.com/lkshrk/omni/internal/sync"
 )
 
-// ReconcileOptions controls the host lifecycle reconcile operation.
 type ReconcileOptions struct {
 	CommitMessage  string
 	SkipPrivileged bool
@@ -20,11 +19,11 @@ type ReconcileOptions struct {
 	ToolProgress   func(isync.ProgressEvent)
 }
 
-// ReconcileResult records the operations attempted by Reconcile.
 type ReconcileResult struct {
 	NvmManaged         *NvmManagedMigrationBatchResult
 	SyncAll            *SyncAllResult
 	UpgradeAll         *UpgradeAllResult
+	Agents             *AgentsSyncAllResult // nil when agent features are off for this host
 	FixedIgnoreEntries []string
 	DotsOps            []dots.Op
 	DotsCommitted      bool
@@ -48,6 +47,7 @@ type ReconcileIssueSummary struct {
 	NvmFailures     int
 	SyncFailures    int
 	UpgradeFailures int
+	AgentFailures   int
 	DotsConflicts   int
 	DotsMissing     int
 }
@@ -95,6 +95,9 @@ func SummarizeReconcileIssues(result *ReconcileResult) ReconcileIssueSummary {
 	if result.UpgradeAll != nil {
 		summary.UpgradeFailures = len(result.UpgradeAll.Failures)
 	}
+	if result.Agents != nil {
+		summary.AgentFailures = len(result.Agents.Errors)
+	}
 	for _, entry := range result.DotsEntries {
 		switch entry.Health {
 		case HealthConflict:
@@ -107,16 +110,15 @@ func SummarizeReconcileIssues(result *ReconcileResult) ReconcileIssueSummary {
 }
 
 func (s ReconcileIssueSummary) Total() int {
-	return s.NvmFailures + s.SyncFailures + s.UpgradeFailures + s.DotsConflicts + s.DotsMissing
+	return s.NvmFailures + s.SyncFailures + s.UpgradeFailures + s.AgentFailures +
+		s.DotsConflicts + s.DotsMissing
 }
 
 func (s ReconcileIssueSummary) HasIssues() bool {
 	return s.Total() > 0
 }
 
-// Reconcile brings the current host toward the configured desired state:
-// sync tools, upgrade outdated tools, sync dotfiles, then commit dotfile repo
-// changes when dots are configured and enabled.
+// Reconcile — Sync tools, upgrade, sync agent resources, sync dotfiles, then commit the dots repo.
 func (a *App) Reconcile(ctx context.Context, opts ReconcileOptions) (*ReconcileResult, error) {
 	result := &ReconcileResult{}
 	var errs []error
@@ -147,6 +149,10 @@ func (a *App) Reconcile(ctx context.Context, opts ReconcileOptions) (*ReconcileR
 	result.UpgradeAll = upgradeResult
 	if err != nil {
 		errs = append(errs, fmt.Errorf("upgrade tools: %w", err))
+	}
+
+	if err := a.reconcileAgents(ctx, opts, result); err != nil {
+		errs = append(errs, fmt.Errorf("sync agents: %w", err))
 	}
 
 	fixedIgnoreEntries, err := a.DotsFixIgnorePatterns()
@@ -190,6 +196,24 @@ func (a *App) Reconcile(ctx context.Context, opts ReconcileOptions) (*ReconcileR
 	}
 
 	return result, errors.Join(errs...)
+}
+
+// A host with agent features off skips the leg entirely, and a per-feature failure never stops the dot phases.
+func (a *App) reconcileAgents(ctx context.Context, opts ReconcileOptions, result *ReconcileResult) error {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return err
+	}
+	if !a.AgentsEnabled(cfg) {
+		return nil
+	}
+	a.reconcileProgress(opts, "syncing agents...")
+	res, err := a.AgentsSyncAll(ctx, AgentsSyncAllOptions{
+		ImportUnmanaged: true,
+		Progress:        opts.Progress,
+	})
+	result.Agents = &res
+	return err
 }
 
 func (a *App) reconcileProgress(opts ReconcileOptions, message string) {

@@ -1,6 +1,6 @@
 # Test Matrix
 
-This matrix tracks the 11 actual program flows and the 65 user-visible actions
+This matrix tracks the 11 actual program flows and the 79 user-visible actions
 in `internal/actions/catalog.go`. It separates cheap model/render checks from
 real-terminal journeys so `TUI: yes` does not imply an expensive binary test for
 every action.
@@ -48,7 +48,7 @@ both cheaper and sufficient.
 | TS-06 | UNKNOWN | Dotfile lifecycle | Classification, path validation, and config mutation branches | Adopt/discover/sync/status/extract/variant/unignore/delete filesystem journeys | covered: discovered sync and ignored-candidate include persist state | GNU Stow remains in the integration environment |
 | TS-07 | UNKNOWN | Dotfile safety and services | Conflict detection, nested ignores, rollback, and service-state branches | Conflict resolution, pull/commit/push, reminder, watch, and data-preservation journeys | covered: destructive resolution is cancelled, then confirmed with backup/symlink filesystem proof | Platform service checks only where host isolation is available |
 | TS-08 | UNKNOWN | Hosts, groups, settings, and migration | Migration and unrelated-config preservation | Mutations persist across reload; lint/extract/migration flows | covered: host-group assignment and a setting toggle persist through config reload | n/a |
-| TS-09 | UNKNOWN | Agents, skills, MCP, plugins, and marketplaces | Adapter parsing, identity, status, and feature-gate contracts | Add/import/group/remove/restore/update for each resource family | covered: fake-Claude plugin install persists adapter and config state; real-Git fixture covers versionless PATH-outdated | Fake agent CLIs and real local Git fixture; no network |
+| TS-09 | UNKNOWN | Agents, skills, MCP, plugins, and marketplaces | Adapter parsing, identity, status, and feature-gate contracts | Add/import/group/remove/sync/upgrade for each resource family | covered: fake-Claude plugin install persists adapter and config state; real-Git fixture covers versionless PATH-outdated; skill outdated detection covered per source type (local dir, Git branch, pinned tag, well-known index) with a request-counting stub for the recheck cadence | Fake agent CLIs, real local Git fixture, and a local HTTP index stub; no network |
 | TS-10 | UNKNOWN | TUI shell and parity | Reducer branches, layout, key routing, modal, progress, and error state | n/a | covered: `x/vttest` current-screen checks exercise resize, help/search, cancel/confirm, async failure/recovery, nested PTY, and clean quit | n/a |
 | TS-11 | UNKNOWN | Provider families | Install/query/upgrade/uninstall parsing and command contracts | Routing through fake executors | n/a: provider permutations do not become safer through the TUI | Tagged Docker package-manager lane |
 
@@ -92,7 +92,7 @@ real-terminal test; the eight-journey budget above owns that layer.
 | `reconcile` | yes | yes | yes | yes | - |
 | `tools.sync` | yes | yes | yes | yes | - |
 | `tools.install` | yes | yes | yes | yes | - |
-| `tools.delete` | yes | yes | yes | yes | - |
+| `tools.delete` | yes | yes | yes | yes | CLI command is `tools remove --purge`; `delete` remains a deprecated alias |
 | `tools.update` | yes | yes | yes | yes | - |
 | `tools.update_all` | yes | yes | yes | yes | - |
 | `tools.sync_all` | yes | yes | yes | yes | - |
@@ -109,6 +109,7 @@ real-terminal test; the eight-journey budget above owns that layer.
 | `tools.delete_spec` | yes | yes | yes | yes | - |
 | `tools.normalize_provider_overrides` | yes | yes | yes | n/a | - |
 | `tools.heal_brew_taps` | yes | partial | yes | n/a | CLI integration covers dry-run healing. |
+| `tools.baseline_system_inventory` | yes | yes | gap | n/a | Add a CLI integration fixture with a fake system provider inventory. |
 | `tools.import` | yes | yes | yes | yes | - |
 | `tools.switch_provider` | yes | yes | yes | n/a | - |
 | `dots.sync` | yes | yes | yes | yes | - |
@@ -116,7 +117,7 @@ real-terminal test; the eight-journey budget above owns that layer.
 | `dots.add` | yes | yes | yes | yes | - |
 | `dots.edit_groups` | yes | yes | yes | yes | - |
 | `dots.variant` | yes | yes | yes | yes | - |
-| `dots.delete` | yes | yes | yes | yes | - |
+| `dots.delete` | yes | yes | yes | yes | CLI command is `dots remove`; `delete` remains a deprecated alias |
 | `dots.resolve_use_repo` | yes | yes | yes | yes | - |
 | `dots.resolve_use_local` | yes | yes | yes | yes | - |
 | `dots.resolve_all_use_repo` | yes | yes | yes | yes | - |
@@ -152,5 +153,18 @@ real-terminal test; the eight-journey budget above owns that layer.
 | `settings.migrate_host_overrides` | yes | n/a | n/a | n/a | CLI-only config migration |
 | `settings.extract` | yes | n/a | n/a | n/a | CLI-only config layout migration |
 | `setup.init` | yes | yes | yes | yes | CLI command is `bootstrap`; `init` remains an alias |
+| `agents.restore` | yes | yes | yes | yes | CLI command is `agents sync`; `restore` remains a deprecated alias |
+| `agents.sync_all` | yes | yes | yes | yes | - |
+| `agents.skills_import` | yes | yes | yes | yes | - |
+| `agents.skills_update` | yes | yes | yes | yes | CLI command is `agents skills upgrade`; `update` remains a deprecated alias |
+| `agents.skills_resolve_use_managed` | yes | yes | yes | yes | - |
+| `agents.skills_resolve_use_local` | yes | yes | yes | yes | - |
+| `agents.mcp_resolve_use_managed` | yes | yes | yes | yes | - |
+| `agents.mcp_resolve_use_local` | yes | yes | yes | yes | - |
+| `agents.plugins_resolve_use_managed` | yes | yes | yes | yes | - |
+| `agents.plugins_resolve_use_local` | yes | yes | yes | yes | - |
+| `agents.resolve_all_use_managed` | yes | yes | yes | yes | - |
+| `agents.resolve_all_use_local` | yes | yes | yes | yes | - |
+| `agents.skills_status` | yes | yes | yes | n/a | Read-only CLI view; the TUI shows the same state in the agents rows. |
 | `doctor` | yes | yes | yes | yes | - |
 | `doctor.fix` | yes | yes | yes | yes | Covers include-chain dedupe, dry-run, catalog routing, TUI execution, and doctor refresh. |

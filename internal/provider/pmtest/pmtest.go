@@ -1,7 +1,5 @@
 //go:build pmcontainer
 
-// Package pmtest contains shared assertions for real package-manager container
-// integration tests.
 package pmtest
 
 import (
@@ -25,7 +23,6 @@ func Context(t *testing.T, providerName string) (context.Context, context.Cancel
 	return context.WithTimeout(context.Background(), testTimeout)
 }
 
-// Run executes container setup commands and fails with stderr on error.
 func Run(t *testing.T, ctx context.Context, name string, args ...string) {
 	t.Helper()
 	_, stderr, err := executor.New().Run(ctx, name, args...)
@@ -34,7 +31,6 @@ func Run(t *testing.T, ctx context.Context, name string, args ...string) {
 	}
 }
 
-// RequireAvailable verifies the package-manager binary is usable in the image.
 func RequireAvailable(t *testing.T, ctx context.Context, p provider.Provider, image string) {
 	t.Helper()
 	available, err := p.Available(ctx)
@@ -46,7 +42,6 @@ func RequireAvailable(t *testing.T, ctx context.Context, p provider.Provider, im
 	}
 }
 
-// RequireInstalled verifies IsInstalled reports a package with a version.
 func RequireInstalled(t *testing.T, ctx context.Context, p provider.Provider, pkg string) string {
 	t.Helper()
 	installed, version, err := p.IsInstalled(ctx, toolFor(p, pkg))
@@ -74,7 +69,6 @@ func RequireMissing(t *testing.T, ctx context.Context, p provider.Provider, pkg 
 	}
 }
 
-// RequireInstalledMap verifies the bulk installed map contains a package.
 func RequireInstalledMap(t *testing.T, ctx context.Context, p provider.Provider, pkg string) {
 	t.Helper()
 	checker, ok := p.(provider.BulkChecker)
@@ -90,7 +84,6 @@ func RequireInstalledMap(t *testing.T, ctx context.Context, p provider.Provider,
 	}
 }
 
-// RequireListInstalled verifies ListInstalled contains a package with a version.
 func RequireListInstalled(t *testing.T, ctx context.Context, p provider.Provider, pkg string) {
 	t.Helper()
 	tools, err := p.ListInstalled(ctx)
@@ -105,7 +98,6 @@ func RequireListInstalled(t *testing.T, ctx context.Context, p provider.Provider
 	t.Fatalf("%s ListInstalled() did not include %s with provider %s", p.Name(), pkg, p.Name())
 }
 
-// RequireDescription verifies Describe returns non-empty package metadata.
 func RequireDescription(t *testing.T, ctx context.Context, p provider.Provider, pkg string) {
 	t.Helper()
 	describer, ok := p.(provider.Descriptor)
@@ -121,7 +113,6 @@ func RequireDescription(t *testing.T, ctx context.Context, p provider.Provider, 
 	}
 }
 
-// RequireBulkDescription verifies BulkDescribe returns non-empty package metadata.
 func RequireBulkDescription(t *testing.T, ctx context.Context, p provider.Provider, pkg string) {
 	t.Helper()
 	describer, ok := p.(provider.BulkDescriber)
@@ -137,7 +128,6 @@ func RequireBulkDescription(t *testing.T, ctx context.Context, p provider.Provid
 	}
 }
 
-// ExercisePackageLifecycle verifies mutating operations and post-install query APIs.
 func ExercisePackageLifecycle(t *testing.T, ctx context.Context, p provider.Provider, pkg string) {
 	t.Helper()
 	tool := toolFor(p, pkg)
@@ -179,9 +169,7 @@ func ExercisePackageLifecycle(t *testing.T, ctx context.Context, p provider.Prov
 	RequireMissing(t, ctx, p, pkg)
 }
 
-// RequirePrivilegePlan verifies that the provider implements PrivilegePlanner
-// and returns a non-empty plan for the given action. System package managers
-// (apt, dnf, pacman, apk, zypper) always require privilege for mutations.
+// System package managers always require privilege for mutations.
 func RequirePrivilegePlan(t *testing.T, ctx context.Context, p provider.Provider, action provider.PrivilegeAction, pkg string) {
 	t.Helper()
 	planner, ok := p.(provider.PrivilegePlanner)

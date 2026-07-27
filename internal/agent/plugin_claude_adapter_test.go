@@ -118,9 +118,7 @@ func TestClaudeCodePluginAdapter_UpdatePlugin_Success(t *testing.T) {
 	}
 }
 
-// TestClaudeCodePluginAdapter_UpdatePlugin_BareNameArgsWouldFail guards against
-// regressing to the bare-name arg shape: live verification 2026-07-10 showed
-// `claude plugin update <bare-name>` returns the not-found failure marker.
+// `claude plugin update <bare-name>` returns the not-found failure marker, so the bare-name arg shape must not come back.
 func TestClaudeCodePluginAdapter_UpdatePlugin_BareNameArgsWouldFail(t *testing.T) {
 	t.Parallel()
 	var gotArgs []string
@@ -143,9 +141,7 @@ func TestClaudeCodePluginAdapter_UpdatePlugin_BareNameArgsWouldFail(t *testing.T
 	}
 }
 
-// TestClaudeCodePluginAdapter_UpdatePlugin_ExitZeroFailureMarkerIsError covers
-// the live-verified case where `claude plugin update name@marketplace` prints
-// a failure line but still exits 0 — the exit code alone cannot detect this.
+// `claude plugin update` prints a failure line while still exiting 0, so the exit code alone cannot detect it.
 func TestClaudeCodePluginAdapter_UpdatePlugin_ExitZeroFailureMarkerIsError(t *testing.T) {
 	t.Parallel()
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
@@ -157,8 +153,7 @@ func TestClaudeCodePluginAdapter_UpdatePlugin_ExitZeroFailureMarkerIsError(t *te
 	}
 }
 
-// TestClaudeCodePluginAdapter_UpdatePlugin_RealExecErrorStillPropagates
-// ensures the marker-parsing path does not swallow genuine exec failures.
+// The marker-parsing path must not swallow genuine exec failures.
 func TestClaudeCodePluginAdapter_UpdatePlugin_RealExecErrorStillPropagates(t *testing.T) {
 	t.Parallel()
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
@@ -188,9 +183,7 @@ func TestClaudeCodePluginAdapter_AddMarketplace(t *testing.T) {
 	}
 }
 
-// claudePluginListEmptyFixture is the exact stdout of `claude plugins list --json`
-// with no plugins installed, captured in
-// specs/plugin-cli-probe.md.
+// Exact stdout of `claude plugins list --json` with no plugins installed.
 const claudePluginListEmptyFixture = `[]`
 
 func TestClaudeCodePluginAdapter_ListPlugins_Empty(t *testing.T) {
@@ -211,9 +204,7 @@ func TestClaudeCodePluginAdapter_ListPlugins_Empty(t *testing.T) {
 	}
 }
 
-// claudePluginListInstalledFixture is the exact stdout of
-// `claude plugins list --json` with one installed plugin, captured in
-// specs/plugin-cli-probe.md.
+// Exact stdout of `claude plugins list --json` with one installed plugin.
 const claudePluginListInstalledFixture = `[
   {
     "id": "useful-skills@lkshrk",
@@ -252,9 +243,7 @@ func TestClaudeCodePluginAdapter_ListPlugins_ParsesRealFixture(t *testing.T) {
 	}
 }
 
-// claudeMarketplaceListConfiguredFixture is the exact stdout of
-// `claude plugins marketplace list --json` with one marketplace configured,
-// captured in specs/plugin-cli-probe.md.
+// Exact stdout of `claude plugins marketplace list --json` with one marketplace configured.
 const claudeMarketplaceListConfiguredFixture = `[
   {
     "name": "lkshrk",
@@ -286,10 +275,7 @@ func TestClaudeCodePluginAdapter_ListMarketplaces_ParsesRealFixture(t *testing.T
 	}
 }
 
-// claudeMarketplaceListEmptyFixture is not captured verbatim in the probe
-// transcript (only the plain-text "No marketplaces configured" form was
-// captured for the empty case) but is the only shape consistent with
-// claudeMarketplaceListEntry's schema for an empty array.
+// Reconstructed rather than captured: the empty case only ever printed plain text, and this is the sole shape matching the entry schema.
 const claudeMarketplaceListEmptyFixture = `[]`
 
 func TestClaudeCodePluginAdapter_ListMarketplaces_Empty(t *testing.T) {
@@ -307,10 +293,7 @@ func TestClaudeCodePluginAdapter_ListMarketplaces_Empty(t *testing.T) {
 	}
 }
 
-// TestClaudeCodePluginAdapter_ListMarketplaces_UpdatedAtFromInstallLocationMtime
-// verifies UpdatedAt is derived from the installLocation directory's mtime,
-// since claude's marketplace list JSON carries no date field of its own
-// (unlike its plugin list JSON's installedAt/lastUpdated).
+// The marketplace list JSON carries no date field, so UpdatedAt must come from the installLocation mtime.
 func TestClaudeCodePluginAdapter_ListMarketplaces_UpdatedAtFromInstallLocationMtime(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -335,9 +318,7 @@ func TestClaudeCodePluginAdapter_ListMarketplaces_UpdatedAtFromInstallLocationMt
 	}
 }
 
-// TestClaudeCodePluginAdapter_ListMarketplaces_UpdatedAtZeroWhenLocationMissing
-// verifies a missing/unreadable installLocation yields a zero UpdatedAt
-// rather than an error — best-effort enrichment, never fatal.
+// Enrichment is best-effort: an unreadable installLocation yields a zero UpdatedAt, never an error.
 func TestClaudeCodePluginAdapter_ListMarketplaces_UpdatedAtZeroWhenLocationMissing(t *testing.T) {
 	t.Parallel()
 	fixture := `[{"name":"lkshrk","source":"github","repo":"lkshrk/agent-marketplace","installLocation":"/does/not/exist"}]`
@@ -387,10 +368,7 @@ func TestClaudeCodePluginAdapter_UpdateMarketplaces_PropagatesError(t *testing.T
 	}
 }
 
-// claudePluginListAvailableFixture is the real `{installed, available}` wrapper
-// shape returned by `claude plugin list --json --available`, verified live on
-// 2026-07-10. Available entries carry no version-like field in practice; this
-// fixture adds one defensively to prove the join logic works when it exists.
+// Available entries carry no version field in practice; this fixture adds one to prove the join logic works when it exists.
 const claudePluginListAvailableFixture = `{
   "installed": [
     {
@@ -434,10 +412,7 @@ func TestClaudeCodePluginAdapter_ListPlugins_JoinsLatestVersionFromAvailable(t *
 	}
 }
 
-// claudePluginListAvailableNoVersionFixture mirrors the real live payload
-// verified 2026-07-10: available entries have no version or latestVersion
-// field at all, so LatestVersion must stay empty rather than fabricated from
-// source.ref.
+// The real payload has no version field at all, so LatestVersion must stay empty rather than be fabricated from source.ref.
 const claudePluginListAvailableNoVersionFixture = `{
   "installed": [
     {
@@ -606,11 +581,7 @@ func TestClaudeCodePluginAdapter_ListPlugins_FallsBackWhenAvailableFlagFails(t *
 	}
 }
 
-// claudeAvailableFixtureWithPath builds a claude "plugins list --json
-// --available" response for one installed plugin whose available entry
-// carries a source path (the object form), with no manifest version — the
-// common real-world case (see claudeAvailableEntry's doc comment) that the
-// old repo-HEAD-sha comparison could never safely flag as outdated.
+// The common real-world case: a source path in object form with no manifest version.
 const claudeAvailableFixtureWithPath = `{
   "installed": [{"id": "superpowers@caveman", "version": "unknown", "scope": "user", "enabled": true}],
   "available": [{
@@ -655,7 +626,7 @@ func TestClaudeCodePluginAdapter_ListPlugins_PathOutdated_NilWhenGitFails(t *tes
 func TestClaudeCodePluginAdapter_ListPlugins_PathOutdated_NilWhenNoInstalledSha(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	// No installed_plugins.json written: no installed sha available.
+	// No installed_plugins.json is written, so no installed sha is available.
 
 	exec := func(_ context.Context, cmd string, args ...string) (string, string, error) {
 		if cmd == "git" {

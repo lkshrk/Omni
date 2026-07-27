@@ -8,7 +8,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider/system"
 )
 
-// describingProvider wraps fakeProvider and implements provider.Descriptor.
 type describingProvider struct {
 	fakeProvider
 	desc string

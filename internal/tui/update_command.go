@@ -13,11 +13,11 @@ func (m *Model) handleCommandKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	switch {
 	case key.Matches(msg, m.keys.Back):
 		m.closeCommandPalette()
-	case key.Matches(msg, m.keys.Up):
+	case paletteNavKey(msg, m.keys.Up):
 		if m.commandCursor > 0 {
 			m.commandCursor--
 		}
-	case key.Matches(msg, m.keys.Down):
+	case paletteNavKey(msg, m.keys.Down):
 		if m.commandCursor < len(m.commandSuggestions)-1 {
 			m.commandCursor++
 		}
@@ -62,8 +62,16 @@ func (m *Model) selectedPaletteCommand(input string) *palCmd {
 	return nil
 }
 
+// A key that carries text belongs to the query, otherwise the Up/Down bindings would eat "k" and "j" mid-word.
+func paletteNavKey(msg tea.KeyPressMsg, b key.Binding) bool {
+	return msg.Text == "" && key.Matches(msg, b)
+}
+
 func (m *Model) closeCommandPalette() {
-	m.mode = viewList
+	m.mode = m.commandOrigin
+	if m.mode == viewCommand {
+		m.mode = viewList
+	}
 	m.commandInput.SetValue("")
 	m.commandInput.Blur()
 	m.commandSuggestions = nil

@@ -9,6 +9,14 @@ on:
       - '**'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# Preserve CI evidence for every direct-to-main commit by never cancelling main runs.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   release-config:
     name: Release Configuration

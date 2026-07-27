@@ -8,7 +8,8 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-const confirmTimeout = 5 * time.Second
+// Has to outlast reading the hint that describes it and deciding: the previous 5s expired while users were still reading, and a silent re-arm on the second press reads as a frozen app.
+const confirmTimeout = 8 * time.Second
 
 type confirmTimeoutMsg struct {
 	gen int
@@ -47,6 +48,9 @@ func (m *Model) hasActiveConfirmation() bool {
 		m.marketplaceDeleteConfirm ||
 		m.agentsDeleteConfirm ||
 		m.agentsIgnoreConfirm ||
+		m.agentsResolveConfirm ||
+		m.agentsBulkResolveConfirm ||
+		m.agentsSyncAllConfirm ||
 		m.pluginMarketplaceOfferConfirm
 }
 
@@ -84,6 +88,13 @@ func (m *Model) clearActiveConfirmation() {
 	m.agentsDeleteName = ""
 	m.agentsIgnoreConfirm = false
 	m.agentsIgnoreName = ""
+	m.agentsResolveConfirm = false
+	m.agentsResolveUseLocal = false
+	m.agentsResolveSource = ""
+	m.agentsResolveOpKey = ""
+	m.agentsBulkResolveConfirm = false
+	m.agentsBulkResolveUseManaged = false
+	m.agentsSyncAllConfirm = false
 	m.pluginMarketplaceOfferConfirm = false
 	m.pluginMarketplaceOfferAgentID = ""
 	m.pluginMarketplaceOfferPlugin = app.InstalledPlugin{}
@@ -96,10 +107,29 @@ func (m *Model) clearActiveConfirmation() {
 	}
 }
 
+func quitConfirmKeyLabel(key string) string {
+	if key == "" {
+		return "q"
+	}
+	return key
+}
+
 func (m *Model) handleConfirmTimeoutMsg(msg confirmTimeoutMsg) []tea.Cmd {
 	if msg.gen != m.confirmGen || !m.hasActiveConfirmation() {
 		return nil
 	}
+	// Row confirmations carry their own on-screen prompt; the quit and agents sync-all hints live only in the footer legend, where a silent disarm is indistinguishable from a dead key.
+	expiredSyncAll := m.agentsSyncAllConfirm
+	expiredQuitKey := ""
+	if m.confirmQuit {
+		expiredQuitKey = quitConfirmKeyLabel(m.quitConfirmKey)
+	}
 	m.clearActiveConfirmation()
+	switch {
+	case expiredSyncAll:
+		return []tea.Cmd{setStatus(m, "sync all confirmation expired — press S again", false)}
+	case expiredQuitKey != "":
+		return []tea.Cmd{setStatus(m, "quit confirmation expired — press "+expiredQuitKey+" again", false)}
+	}
 	return nil
 }

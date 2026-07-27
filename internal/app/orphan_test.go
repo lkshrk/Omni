@@ -16,7 +16,6 @@ import (
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
 
-// listErrProvider is a stubProvider whose ListInstalled always returns an error.
 type listErrProvider struct {
 	stubProvider
 	err error
@@ -25,8 +24,6 @@ type listErrProvider struct {
 func (p *listErrProvider) ListInstalled(_ context.Context) ([]provider.InstalledTool, error) {
 	return nil, p.err
 }
-
-// ─── CheckSatisfiedGroups ─────────────────────────────────────────────────────
 
 func upsertInstalled(t *testing.T, db *database.DB, name, prov string) {
 	t.Helper()
@@ -158,7 +155,6 @@ func TestCheckSatisfiedGroups_ActiveGroupExcluded(t *testing.T) {
 	}
 	upsertInstalled(t, a.DB(), "slack", "brew")
 
-	// work is in the active set → should not be returned.
 	satisfied, err := a.CheckSatisfiedGroups(context.Background(), []string{testShortHostname(), "work"})
 	if err != nil {
 		t.Fatalf("CheckSatisfiedGroups: %v", err)
@@ -167,8 +163,6 @@ func TestCheckSatisfiedGroups_ActiveGroupExcluded(t *testing.T) {
 		t.Errorf("active group should be excluded, got %v", satisfied)
 	}
 }
-
-// ─── syncOrphansToMachineGroup (via Sync) ────────────────────────────────────
 
 func TestRefreshDiscovered_BaselinesSystemPackagesOnFirstObservation(t *testing.T) {
 	t.Parallel()
@@ -244,8 +238,6 @@ func TestRefreshDiscovered_SurfacesSystemPackageInstalledAfterBaseline(t *testin
 		t.Fatal(err)
 	}
 
-	// First observation on this host: libxcomposite1 becomes the baseline and
-	// must not surface as discovered.
 	if err := a.RefreshDiscovered(context.Background()); err != nil {
 		t.Fatalf("RefreshDiscovered (baseline): %v", err)
 	}
@@ -257,8 +249,6 @@ func TestRefreshDiscovered_SurfacesSystemPackageInstalledAfterBaseline(t *testin
 		t.Fatalf("discovered after baseline = %+v, want none", discovered)
 	}
 
-	// A person now runs `apt install htop` by hand: it postdates the baseline
-	// and must surface as an importable discovered tool.
 	apt.installed = append(apt.installed, installedTool("htop", "1.0", "apt"))
 	if err := a.RefreshDiscovered(context.Background()); err != nil {
 		t.Fatalf("RefreshDiscovered (post-baseline): %v", err)
@@ -336,8 +326,6 @@ func TestSync_HostActive_SystemPackageOrphansUseBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// First sync on this host: libxcomposite1 becomes the baseline and must
-	// not be claimed into the hostname group.
 	if _, err := a.Sync(context.Background(), gosync.SyncOptions{}); err != nil {
 		t.Fatalf("Sync (baseline): %v", err)
 	}
@@ -353,8 +341,6 @@ func TestSync_HostActive_SystemPackageOrphansUseBaseline(t *testing.T) {
 		t.Fatalf("hostname group tools = %+v, want baseline package left unclaimed", hostGroup.Tools)
 	}
 
-	// A person now runs `apt install htop` by hand: it postdates the baseline
-	// and must be claimed as an orphan into the hostname group.
 	apt.installed = append(apt.installed, installedTool("htop", "1.0", "apt"))
 	if _, err := a.Sync(context.Background(), gosync.SyncOptions{}); err != nil {
 		t.Fatalf("Sync (post-baseline): %v", err)
@@ -405,7 +391,6 @@ func TestSync_HostActive_OrphansAddedToHostnameGroup(t *testing.T) {
 		t.Fatalf("Sync: %v", err)
 	}
 
-	// fd (orphan) must land in the hostname group within settings.json.
 	updated, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -600,8 +585,6 @@ func TestSyncAll_ClaimResolvedDefaultConcreteDoesNotWriteInstallWith(t *testing.
 }
 
 func TestSyncAll_ClaimNodeToolWritesConcreteNotFamily(t *testing.T) {
-	// Regression: claiming a discovered node tool must write the concrete manager
-	// (bun), never the "node" family — which would fail provider validation.
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	bun := &lifecycleProvider{stubProvider: stubProvider{name: "bun", available: true}, installed: true}
 	a, cfgPath := newImportApp(t, bun)
@@ -758,7 +741,6 @@ func TestSync_HostActive_NoOrphansSkipsHostnameGroup(t *testing.T) {
 		t.Fatalf("Sync: %v", err)
 	}
 
-	// No orphans → hostname group must NOT be created with tools.
 	updated, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -833,15 +815,12 @@ func TestSync_HostActive_ReturnsSatisfiedGroups(t *testing.T) {
 	}
 }
 
-// ─── hostname group injection ─────────────────────────────────────────────────
-
 func TestSync_HostActive_HostnameGroupInjected(t *testing.T) {
 	t.Parallel()
 	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, brew)
 	short := testShortHostname()
 
-	// fd lives in the hostname group (machine-local); slack is in the work group.
 	rootCfg := &config.RootConfig{
 		Tools: logicalToolSpecs(
 			logicalTool("slack", "brew"),
@@ -862,7 +841,6 @@ func TestSync_HostActive_HostnameGroupInjected(t *testing.T) {
 		t.Fatalf("Sync: %v", err)
 	}
 
-	// Both slack (from the host-assigned reusable group) and fd (from hostname group injection) must be installed.
 	installed := make(map[string]bool, len(brew.installCalled))
 	for _, n := range brew.installCalled {
 		installed[n] = true
@@ -875,14 +853,11 @@ func TestSync_HostActive_HostnameGroupInjected(t *testing.T) {
 	}
 }
 
-// ─── ClaimFromMachineGroup ────────────────────────────────────────────────────
-
 func TestClaimFromMachineGroup_PrunesMachineGroup(t *testing.T) {
 	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	short := testShortHostname()
 
-	// Hostname group has fd and ripgrep; the "tools" group also claims fd.
 	rootCfg := &config.RootConfig{
 		Tools: logicalToolSpecs(
 			logicalTool("fd", "brew"),
@@ -910,7 +885,6 @@ func TestClaimFromMachineGroup_PrunesMachineGroup(t *testing.T) {
 		t.Errorf("host groups = %v, want 'tools' to be present", got)
 	}
 
-	// fd must not be copied into the hostname group; ripgrep must remain.
 	var hg *config.GroupConfig
 	for _, g := range updated.Groups {
 		if g.Name == short {
@@ -937,9 +911,6 @@ func TestClaimFromMachineGroup_PrunesMachineGroup(t *testing.T) {
 	}
 }
 
-// TestSync_OrphanScanProviderError_SurfacedAsWarning verifies that a provider
-// whose ListInstalled returns an error causes a warning in the Sync result
-// instead of silently swallowing the failure.
 func TestSync_OrphanScanProviderError_SurfacedAsWarning(t *testing.T) {
 	t.Parallel()
 	scanErr := errors.New("boom: list installed failed")
@@ -965,7 +936,6 @@ func TestSync_OrphanScanProviderError_SurfacedAsWarning(t *testing.T) {
 		t.Fatalf("Sync: %v", err)
 	}
 
-	// The scan failure must be surfaced as a warning, not silently dropped.
 	found := false
 	for _, w := range result.Warnings {
 		if strings.Contains(w, "brew") {

@@ -411,10 +411,7 @@ func TestDotsPeekSourceLine_MissingLocalIsConciseAndRed(t *testing.T) {
 	}
 }
 
-// TestRenderDots_IgnoredSectionTrackedChildShowsRealStatus verifies that a
-// tracked (re-included) child living under an ignored directory renders with its
-// real status in the Ignored section instead of the muted "-" reserved for
-// synthesized structural containers.
+// A tracked (re-included) child under an ignored directory renders its real status, not the muted "-" reserved for synthesized structural containers.
 func TestRenderDots_IgnoredSectionTrackedChildShowsRealStatus(t *testing.T) {
 	t.Parallel()
 	container := app.DotChild{
@@ -457,10 +454,6 @@ func TestRenderDots_IgnoredSectionTrackedChildShowsRealStatus(t *testing.T) {
 	}
 }
 
-// TestDotsExpand_MultipleLayersDeep verifies expansion works at every nested
-// directory level: a child is visible only once its parent dir is expanded, all
-// the way down the tree, and toggling a deep dir via the key path reveals its
-// children.
 func TestDotsExpand_MultipleLayersDeep(t *testing.T) {
 	t.Parallel()
 	leaf := app.DotChild{Name: "c.txt", RelPath: "a/b/c.txt", State: dots.StateSynced, Depth: 3}
@@ -494,13 +487,11 @@ func TestDotsExpand_MultipleLayersDeep(t *testing.T) {
 		return false
 	}
 
-	// Top expanded only: 'a' visible, deeper hidden.
 	rows := dotsVisibleRows(m)
 	if !has(rows, "a") || has(rows, "a/b") || has(rows, "a/b/c.txt") {
 		t.Fatalf("with only top expanded want [a], got %v", relOf(rows))
 	}
 
-	// Expand 'a' via the toggle key: 'b' appears, leaf still hidden.
 	m.dotsCursor = dotsRowIndex(dotsVisibleRows(m), dotsVisibleRow{entry: entry, child: a, isChild: true})
 	m.handleDotsToggleKeyMsg(dotsVisibleRows(m))
 	rows = dotsVisibleRows(m)
@@ -508,7 +499,6 @@ func TestDotsExpand_MultipleLayersDeep(t *testing.T) {
 		t.Fatalf("after expanding 'a' want a/b visible, leaf hidden, got %v", relOf(rows))
 	}
 
-	// Expand 'a/b': the depth-3 leaf becomes visible.
 	m.dotsCursor = dotsRowIndex(dotsVisibleRows(m), dotsVisibleRow{entry: entry, child: b, isChild: true})
 	m.handleDotsToggleKeyMsg(dotsVisibleRows(m))
 	rows = dotsVisibleRows(m)
@@ -723,9 +713,6 @@ func newDotsChildConflictFixture(t *testing.T) dotsChildConflictFixture {
 	return dotsChildConflictFixture{model: m, repoAgents: repoAgents, localAgents: localAgents}
 }
 
-// TestFlow_DotsChildVariant_ExtractsThenCreates verifies that pressing the
-// variant key on a tracked child row arms a create prompt and, on confirm,
-// begins the extract-then-variant operation for that sub-path.
 func TestFlow_DotsChildVariant_ExtractsThenCreates(t *testing.T) {
 	fx := newDotsChildConflictFixture(t)
 	m := fx.model

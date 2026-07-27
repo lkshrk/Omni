@@ -35,13 +35,10 @@ var dotsWatchDebounceChoices = []time.Duration{
 	30 * time.Second,
 }
 
-// DefaultDotsWatchDebounce is the debounce used when no watcher debounce is
-// specified.
 func DefaultDotsWatchDebounce() time.Duration {
 	return defaultDotsWatchDebounce
 }
 
-// DotsWatchDebounceChoices returns preset debounce values for watch controls.
 func DotsWatchDebounceChoices() []time.Duration {
 	return append([]time.Duration(nil), dotsWatchDebounceChoices...)
 }
@@ -53,7 +50,6 @@ func DotsWatchDebounce(service *DotsWatchService) time.Duration {
 	return DefaultDotsWatchDebounce()
 }
 
-// DotsWatchOptions configures the long-running dotfile watcher.
 type DotsWatchOptions struct {
 	Debounce time.Duration
 	OnStart  func(DotsWatchStart)
@@ -61,20 +57,17 @@ type DotsWatchOptions struct {
 	OnSync   func(DotsWatchSyncResult)
 }
 
-// DotsWatchStart reports the initial watcher state.
 type DotsWatchStart struct {
 	WatchedPaths int
 	Paths        []string
 }
 
-// DotsWatchEvent reports a filesystem change that scheduled a sync.
 type DotsWatchEvent struct {
 	Path string
 	Op   string
 }
 
-// DotsWatchSyncResult reports one debounced sync attempt. Err is included for
-// logging; the watch loop keeps running after sync failures.
+// DotsWatchSyncResult — Err is included for logging; the watch loop keeps running after sync failures.
 type DotsWatchSyncResult struct {
 	Event        DotsWatchEvent
 	Ops          []dots.Op
@@ -82,14 +75,12 @@ type DotsWatchSyncResult struct {
 	WatchedPaths int
 }
 
-// DotsWatchInstallOptions controls native user-service installation.
 type DotsWatchInstallOptions struct {
 	Debounce   time.Duration
 	Executable string
 	Activate   bool
 }
 
-// DotsWatchService describes generated watch service files.
 type DotsWatchService struct {
 	Platform  string        `json:"platform"`
 	Debounce  time.Duration `json:"debounce"`
@@ -97,8 +88,7 @@ type DotsWatchService struct {
 	Installed bool          `json:"installed"`
 }
 
-// DotsWatch runs a kernel-backed filesystem watcher over configured dotfile
-// source and target paths. On debounced changes it delegates to DotsSyncContext.
+// DotsWatch — On debounced changes it delegates to DotsSyncContext.
 func (a *App) DotsWatch(ctx context.Context, opts DotsWatchOptions) error {
 	debounce, err := normalizeDotsWatchDebounce(opts.Debounce)
 	if err != nil {
@@ -214,8 +204,6 @@ func (a *App) DotsWatch(ctx context.Context, opts DotsWatchOptions) error {
 	}
 }
 
-// InstallDotsWatchService writes and optionally activates the native user-level
-// service for continuous dotfile syncing.
 func (a *App) InstallDotsWatchService(ctx context.Context, opts DotsWatchInstallOptions) (*DotsWatchService, error) {
 	if err := a.requireStow(ctx); err != nil {
 		return nil, err
@@ -257,7 +245,6 @@ func (a *App) InstallDotsWatchService(ctx context.Context, opts DotsWatchInstall
 	return info, nil
 }
 
-// UninstallDotsWatchService disables and removes watch service files.
 func (a *App) UninstallDotsWatchService(ctx context.Context) (*DotsWatchService, error) {
 	service, err := a.dotsWatchServiceForPlatform(runtime.GOOS, "", defaultDotsWatchDebounce)
 	if err != nil {
@@ -274,7 +261,6 @@ func (a *App) UninstallDotsWatchService(ctx context.Context) (*DotsWatchService,
 	return service.info(), nil
 }
 
-// DotsWatchServiceStatus reports whether watch service files exist.
 func (a *App) DotsWatchServiceStatus() (*DotsWatchService, error) {
 	service, err := a.dotsWatchServiceForPlatform(runtime.GOOS, "", defaultDotsWatchDebounce)
 	if err != nil {

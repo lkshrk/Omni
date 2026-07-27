@@ -16,10 +16,7 @@ import (
 	"github.com/lkshrk/omni/internal/executor"
 )
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-// settingsTraceLogModel returns a model positioned on the settings tab with the
-// cursor already on settingsRowTraceLog, ready for Enter to be pressed.
+// Positioned on the settings tab with the cursor already on settingsRowTraceLog, ready for Enter.
 func settingsTraceLogModel() Model {
 	m := baseModel(nil)
 	m.mode = viewSettings
@@ -28,7 +25,6 @@ func settingsTraceLogModel() Model {
 	return m
 }
 
-// fixtureTraces returns three deterministic CommandTrace values for use in tests.
 func fixtureTraces() []app.CommandTraceView {
 	t0 := time.Date(2024, 1, 15, 10, 30, 45, 0, time.UTC)
 	return []app.CommandTraceView{
@@ -62,17 +58,13 @@ func fixtureTraces() []app.CommandTraceView {
 	}
 }
 
-// injectTraces drives the model through the full open-and-populate flow:
-//
-//  1. Enter on settingsRowTraceLog → sets traceLogLoading, dispatches cmd.
-//  2. Inject traceLogLoadedMsg with the given gen and traces.
+// Presses Enter on settingsRowTraceLog, then injects traceLogLoadedMsg with the given gen and traces.
 func injectTraces(m Model, traces []app.CommandTraceView) Model {
 	gen := m.traceLogGen + 1 // matches what handleSettingsConfirmAction will produce
 	m = drive(m, pressEnter())
 	return drive(m, traceLogLoadedMsg{gen: gen, traces: traces})
 }
 
-// manyTraces returns n identical trace rows for scroll testing.
 func manyTraces(n int) []app.CommandTraceView {
 	out := make([]app.CommandTraceView, n)
 	t0 := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
@@ -88,8 +80,6 @@ func manyTraces(n int) []app.CommandTraceView {
 	}
 	return out
 }
-
-// ── UC-TL-01: Enter on settingsRowTraceLog opens popup ───────────────────────
 
 func TestTraceLog_EnterSetsLoadingState(t *testing.T) {
 	t.Parallel()
@@ -123,8 +113,6 @@ func TestTraceLog_LoadedMsgPopulatesState(t *testing.T) {
 	}
 }
 
-// ── UC-TL-02: popup renders trace rows ───────────────────────────────────────
-
 func TestTraceLog_ViewRendersTraceRows(t *testing.T) {
 	t.Parallel()
 	m := settingsTraceLogModel()
@@ -132,19 +120,15 @@ func TestTraceLog_ViewRendersTraceRows(t *testing.T) {
 
 	view := m.View().Content
 
-	// Primary line must contain the command string.
 	if !strings.Contains(view, "brew install ripgrep") {
 		t.Error("View() missing command 'brew install ripgrep'")
 	}
-	// Status should appear.
 	if !strings.Contains(view, "ok") {
 		t.Error("View() missing status 'ok'")
 	}
-	// Error status should appear.
 	if !strings.Contains(view, "error") {
 		t.Error("View() missing status 'error'")
 	}
-	// Sub-line reason should appear.
 	if !strings.Contains(view, "reason:") {
 		t.Error("View() missing 'reason:' sub-line")
 	}
@@ -438,12 +422,9 @@ func TestTraceLog_ViewShowsPopupTitle(t *testing.T) {
 	}
 }
 
-// ── UC-TL-03: empty and loading states ───────────────────────────────────────
-
 func TestTraceLog_LoadingState(t *testing.T) {
 	t.Parallel()
 	m := settingsTraceLogModel()
-	// Press Enter but do NOT inject the loaded msg — popup is in loading state.
 	m = drive(m, pressEnter())
 
 	view := m.View().Content
@@ -458,7 +439,6 @@ func TestTraceLog_EmptyState(t *testing.T) {
 	m := settingsTraceLogModel()
 	gen := m.traceLogGen + 1
 	m = drive(m, pressEnter())
-	// Loaded msg with no traces.
 	m = drive(m, traceLogLoadedMsg{gen: gen, traces: nil})
 
 	view := m.View().Content
@@ -482,14 +462,11 @@ func TestTraceLog_EmptySliceState(t *testing.T) {
 	}
 }
 
-// ── UC-TL-04: scrolling clamps correctly ─────────────────────────────────────
-
 func TestTraceLog_ScrollDown(t *testing.T) {
 	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, manyTraces(50)) // enough rows to scroll
 
-	// Scroll starts at 0.
 	if m.traceLog.scroll != 0 {
 		t.Fatalf("initial scroll = %d, want 0", m.traceLog.scroll)
 	}
@@ -505,7 +482,6 @@ func TestTraceLog_ScrollUp_ClampsAtZero(t *testing.T) {
 	m := settingsTraceLogModel()
 	m = injectTraces(m, manyTraces(50))
 
-	// Press Down once, then Up twice — second Up should clamp at 0.
 	m = drive(m,
 		tea.KeyPressMsg{Code: tea.KeyDown},
 		tea.KeyPressMsg{Code: tea.KeyUp},
@@ -536,7 +512,6 @@ func TestTraceLog_GoToTop_Home(t *testing.T) {
 	m := settingsTraceLogModel()
 	m = injectTraces(m, manyTraces(50))
 
-	// Go to bottom first, then back to top with Home (Top binding).
 	m = drive(m, pressRune('G'))
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyHome})
 	if m.traceLog.scroll != 0 {
@@ -575,7 +550,6 @@ func TestTraceLog_ScrollClampsAtMax(t *testing.T) {
 	m := settingsTraceLogModel()
 	m = injectTraces(m, manyTraces(50))
 
-	// G to bottom, then try to scroll further.
 	m = drive(m, pressRune('G'))
 	scrollAtBottom := m.traceLog.scroll
 
@@ -584,8 +558,6 @@ func TestTraceLog_ScrollClampsAtMax(t *testing.T) {
 		t.Errorf("scroll past max = %d, want clamped %d", m.traceLog.scroll, scrollAtBottom)
 	}
 }
-
-// ── UC-TL-05: Esc closes the popup ───────────────────────────────────────────
 
 func TestTraceLog_EscClosesPopup(t *testing.T) {
 	t.Parallel()
@@ -628,8 +600,6 @@ func TestTraceLog_EscFromLoadingClosesPopup(t *testing.T) {
 	}
 }
 
-// ── UC-TL-06: stale-gen guard ─────────────────────────────────────────────────
-
 func TestTraceLog_StaleGenIgnored(t *testing.T) {
 	t.Parallel()
 	m := settingsTraceLogModel()
@@ -638,7 +608,6 @@ func TestTraceLog_StaleGenIgnored(t *testing.T) {
 	currentGen := m.traceLogGen
 	staleGen := currentGen - 1
 
-	// Inject a msg with the old gen — should be ignored.
 	m = drive(m, traceLogLoadedMsg{
 		gen:    staleGen,
 		traces: fixtureTraces(),
@@ -659,7 +628,6 @@ func TestTraceLog_CorrectGenAccepted(t *testing.T) {
 
 	currentGen := m.traceLogGen
 
-	// Inject with the correct gen — should populate.
 	m = drive(m, traceLogLoadedMsg{
 		gen:    currentGen,
 		traces: fixtureTraces(),
@@ -669,8 +637,6 @@ func TestTraceLog_CorrectGenAccepted(t *testing.T) {
 		t.Error("correct-gen traceLogLoadedMsg should populate traceLog")
 	}
 }
-
-// ── UC-TL-07: error in loaded msg does not crash ─────────────────────────────
 
 func TestTraceLog_ErrorInLoadedMsg(t *testing.T) {
 	t.Parallel()
@@ -687,16 +653,11 @@ func TestTraceLog_ErrorInLoadedMsg(t *testing.T) {
 	}
 }
 
-// ── UC-TL-08: render gate ────────────────────────────────────────────────────
-
-// TestTraceLog_RenderGate_VisibleInSettings verifies the popup is drawn when
-// m.mode == viewSettings and traceLog is populated.
 func TestTraceLog_RenderGate_VisibleInSettings(t *testing.T) {
 	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, fixtureTraces())
 
-	// Precondition: we are in viewSettings with traces loaded.
 	if m.mode != viewSettings {
 		t.Fatalf("precondition: mode = %v, want viewSettings", m.mode)
 	}
@@ -714,9 +675,7 @@ func TestTraceLog_RenderGate_VisibleInSettings(t *testing.T) {
 }
 
 func TestTraceLog_RenderGate_VisibleInList(t *testing.T) {
-	t.Parallel(
-	// Build the model in settings mode so we can populate traceLog.
-	)
+	t.Parallel()
 
 	m := settingsTraceLogModel()
 	m = injectTraces(m, fixtureTraces())
@@ -780,14 +739,7 @@ func TestTraceLog_DisablesMainTabClicksWhileOpen(t *testing.T) {
 	}
 }
 
-// ── UC-TL-09: error path rendering ───────────────────────────────────────────
-
-// TestTraceLog_ErrorPath_RendersFailureMessage verifies that when
-// handleTraceLogLoadedMsg receives msg.err != nil it:
-//
-//	(a) renders "Failed to load command log" + the error text in the popup,
-//	(b) does NOT render "No commands recorded.", and
-//	(c) sets m.statusMsg with m.statusIsErr == true.
+// On a non-nil msg.err the popup must render the failure text, must NOT render "No commands recorded.", and must set statusIsErr.
 func TestTraceLog_ErrorPath_RendersFailureMessage(t *testing.T) {
 	t.Parallel()
 	m := settingsTraceLogModel()
@@ -797,7 +749,6 @@ func TestTraceLog_ErrorPath_RendersFailureMessage(t *testing.T) {
 	sentinelErr := errSentinel("db unavailable")
 	m = drive(m, traceLogLoadedMsg{gen: gen, err: sentinelErr})
 
-	// (a) popup body must contain the failure text.
 	view := m.View().Content
 	if !strings.Contains(view, "Failed to load command log") {
 		t.Errorf("View() missing 'Failed to load command log'\nview:\n%s", view)
@@ -806,12 +757,10 @@ func TestTraceLog_ErrorPath_RendersFailureMessage(t *testing.T) {
 		t.Errorf("View() missing error text 'db unavailable'\nview:\n%s", view)
 	}
 
-	// (b) must NOT fall through to the empty-state text.
 	if strings.Contains(view, "No commands recorded.") {
 		t.Error("View() must not show 'No commands recorded.' when err is set")
 	}
 
-	// (c) status bar must reflect the error.
 	if m.statusMsg == "" {
 		t.Error("statusMsg should be set after error traceLogLoadedMsg")
 	}
@@ -820,10 +769,6 @@ func TestTraceLog_ErrorPath_RendersFailureMessage(t *testing.T) {
 	}
 }
 
-// ── UC-TL-10: half-page scroll ───────────────────────────────────────────────
-
-// TestTraceLog_HalfPageDown_AdvancesScroll verifies that ctrl+d moves the
-// scroll position forward by at least 1 row.
 func TestTraceLog_HalfPageDown_AdvancesScroll(t *testing.T) {
 	t.Parallel()
 	m := settingsTraceLogModel()
@@ -839,50 +784,37 @@ func TestTraceLog_HalfPageDown_AdvancesScroll(t *testing.T) {
 	}
 	scrollAfterDown := m.traceLog.scroll
 
-	// Half-page up should move back toward 0.
 	m = drive(m, pressCtrlU())
 	if m.traceLog.scroll >= scrollAfterDown {
 		t.Errorf("HalfPageUp (ctrl+u) should reduce scroll; got %d, was %d", m.traceLog.scroll, scrollAfterDown)
 	}
 }
 
-// TestTraceLog_HalfPageUp_ClampsAtZero verifies ctrl+u cannot go below scroll=0.
 func TestTraceLog_HalfPageUp_ClampsAtZero(t *testing.T) {
 	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, manyTraces(50))
 
-	// Starting at 0, pressing ctrl+u should not underflow.
 	m = drive(m, pressCtrlU())
 	if m.traceLog.scroll != 0 {
 		t.Errorf("HalfPageUp at top should clamp to 0, got %d", m.traceLog.scroll)
 	}
 }
 
-// errTraceLoadFailed is a sentinel error for testing the error-path.
 var errTraceLoadFailed = errSentinel("trace load failed")
 
 type errSentinel string
 
 func (e errSentinel) Error() string { return string(e) }
 
-// ── Integration: real App + real SQLite DB ────────────────────────────────────
-
-// TestTraceLog_Integration_RealAppRealDB proves the full end-to-end path:
-// real DB rows → App.CommandTraces → doLoadTraces cmd → popup render.
-//
-// Traces are seeded via App.RecordCommandTrace (the executor.TraceSink path),
-// which writes directly to the SQLite database — no stubs involved.
+// Traces are seeded via App.RecordCommandTrace, which writes directly to the SQLite database, so no stubs are involved.
 func TestTraceLog_Integration_RealAppRealDB(t *testing.T) {
 	ctx := context.Background()
 
-	// 1. Build a real App backed by a real temp SQLite DB, identical to how
-	//    newDotsModelForCmds constructs its app (reusing the same helper chain).
 	m, _ := newDotsModelForCmds(t)
 	a := m.app
 
-	// 2. Record two real command traces through App.RecordCommandTrace (the
-	//    executor.TraceSink interface), so rows land in the real SQLite table.
+	// Recorded through App.RecordCommandTrace (the executor.TraceSink interface) so rows land in the real SQLite table.
 	t0 := time.Date(2024, 3, 10, 14, 22, 33, 0, time.UTC)
 	traces := []executor.TraceRecord{
 		{
@@ -908,8 +840,6 @@ func TestTraceLog_Integration_RealAppRealDB(t *testing.T) {
 		}
 	}
 
-	// 3. Wire the model to the real App, navigate to Settings, position cursor
-	//    on settingsRowTraceLog, and press Enter.
 	m.mode = viewSettings
 	m.settingsCursor = settingsRowTraceLog
 	m.dangerConfirmRow = -1
@@ -920,14 +850,11 @@ func TestTraceLog_Integration_RealAppRealDB(t *testing.T) {
 		t.Fatal("traceLogLoading should be true after Enter")
 	}
 
-	// 4. Execute the real tea.Cmd returned by doLoadTraces — this calls
-	//    App.CommandTraces against the real SQLite DB.  Feed the resulting
-	//    message back through Update exactly as the bubbletea runtime would.
+	// Executes the real doLoadTraces cmd against the real SQLite DB, then feeds the message back through Update as the runtime would.
 	cmd := m.doLoadTraces()
-	msg := cmd() // run the Cmd synchronously; returns traceLogLoadedMsg
+	msg := cmd()
 	m = drive(m, msg)
 
-	// 5. Assert popup state populated from real DB rows.
 	if m.traceLogLoading {
 		t.Error("traceLogLoading should be false after load")
 	}
@@ -938,21 +865,19 @@ func TestTraceLog_Integration_RealAppRealDB(t *testing.T) {
 		t.Fatalf("expected ≥2 traces from DB, got %d", len(m.traceLog.traces))
 	}
 
-	// Assert rendered View contains the real command strings, status, and reasons.
 	view := m.View().Content
 	for _, want := range []string{
-		"omni-integration-canary",       // command substring shared by both rows
-		"ok",                            // status of first trace
-		"error",                         // status of second trace
-		"integration test reason alpha", // reason sub-line from first row
-		"integration test reason beta",  // reason sub-line from second row
+		"omni-integration-canary",
+		"ok",
+		"error",
+		"integration test reason alpha",
+		"integration test reason beta",
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("View() missing %q\nfull view:\n%s", want, view)
 		}
 	}
 
-	// 6. Esc closes the popup.
 	m = drive(m, pressEsc())
 	if m.traceLog != nil {
 		t.Error("traceLog should be nil after Esc")
@@ -961,11 +886,8 @@ func TestTraceLog_Integration_RealAppRealDB(t *testing.T) {
 		t.Errorf("mode = %v after Esc, want viewSettings", m.mode)
 	}
 
-	// Verify App can be closed cleanly (cleanup also runs via t.Cleanup).
 	_ = a
 }
 
-// newRealAppModel is a convenience used only by the integration test above.
-// It shadows the per-test App built by newDotsModelForCmds so callers can
-// reach m.app for direct DB operations.
+// Shadows the per-test App built by newDotsModelForCmds so callers can reach m.app for direct DB operations.
 var _ *app.App // keep the app import used

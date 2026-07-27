@@ -166,7 +166,7 @@ func (m *Model) startAdminTerminalSession() tea.Cmd {
 	state.running = true
 	state.events = make(chan tea.Msg, adminTerminalEventBuffer)
 	state.output = adminTerminalInitialOutput(*state)
-	m.loading = true
+	m.beginLoading(loadingOwnerLocalOp)
 	startOp(m, adminTerminalRunningStatus(*state))
 	m.startRowOperation(state.name, state.providerName, "Admin terminal")
 	if state.action == app.PrivilegeActionUpgrade {
@@ -227,9 +227,7 @@ func (m *Model) handleAdminTerminalDoneMsg(msg adminTerminalDoneMsg) []tea.Cmd {
 	if m.adminTerminal != nil && msg.id != 0 && m.adminTerminal.id != msg.id {
 		return nil
 	}
-	// Keep the terminal open after the process exits so its output and any
-	// error stay visible; the user dismisses it with a keypress, which then
-	// runs the post-action refresh/error handling.
+	// Keep the terminal open after the process exits so its output and any error stay visible; the dismissing keypress runs the post-action refresh.
 	if m.adminTerminal != nil {
 		m.closeAdminTerminalSession()
 		m.adminTerminal.running = false
@@ -244,8 +242,6 @@ func (m *Model) handleAdminTerminalDoneMsg(msg adminTerminalDoneMsg) []tea.Cmd {
 	return m.finalizeAdminTerminal(msg.state, msg.err)
 }
 
-// finalizeAdminTerminal runs the post-completion handling once the user has
-// dismissed the finished terminal (or when no view was open to keep).
 func (m *Model) finalizeAdminTerminal(state adminTerminalState, err error) []tea.Cmd {
 	if err != nil {
 		return m.handleOpCompleteMsg(opCompleteMsg{key: state.rowKey, err: fmt.Errorf("admin terminal: %w", err)})
@@ -256,7 +252,7 @@ func (m *Model) finalizeAdminTerminal(state adminTerminalState, err error) []tea
 
 func (m *Model) doCompleteAdminTerminalAction(state adminTerminalState) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
-	return func() tea.Msg {
+	return m.stampGate(func() tea.Msg {
 		assignHosts := []string(nil)
 		if state.addHost != "" {
 			assignHosts = []string{state.addHost}
@@ -298,7 +294,7 @@ func (m *Model) doCompleteAdminTerminalAction(state adminTerminalState) tea.Cmd 
 			msg.err = err
 		}
 		return msg
-	}
+	})
 }
 
 func adminTerminalRunningStatus(state adminTerminalState) string {
@@ -866,9 +862,7 @@ func adminTerminalTraceError(err error) string {
 	return err.Error()
 }
 
-// sendAdminTerminalOutput sends an output message to the event channel.
-// If the channel is full it drains up to 4 old output messages to make room,
-// skipping any non-output messages (e.g. doneMsg) so they are never lost.
+// When the channel is full, drains up to 4 old output messages, skipping any non-output message (e.g. doneMsg) so they are never lost.
 func sendAdminTerminalOutput(events chan tea.Msg, msg adminTerminalOutputMsg) {
 	select {
 	case events <- msg:

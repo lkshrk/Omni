@@ -162,7 +162,6 @@ func TestExtractIncludeFragments_CollapsesDivergentDuplicates(t *testing.T) {
     { "name": "core", "dots": [{ "name": "vim", "path": "~/.vim", "ignore": ["stale"] }] }
   ]
 }`,
-		// Fragment wins the merge: its ignore list is the effective one.
 		"settings.d/groups.json": `{
   "groups": [
     { "name": "core", "dots": [{ "name": "vim", "path": "~/.vim", "ignore": ["fresh"] }] }

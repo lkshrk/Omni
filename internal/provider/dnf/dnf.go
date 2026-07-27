@@ -1,4 +1,3 @@
-// Package dnf implements the dnf (Fedora/RHEL) provider.
 package dnf
 
 import (
@@ -11,12 +10,10 @@ import (
 	"github.com/lkshrk/omni/internal/provider/rpm"
 )
 
-// Provider implements the dnf package manager.
 type Provider struct {
 	exec executor.Executor
 }
 
-// New creates a dnf Provider.
 func New(exec executor.Executor) *Provider {
 	return &Provider{exec: exec}
 }
@@ -93,7 +90,6 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 }
 
 // InstalledMap returns user-installed dnf packages as lowercase-name→version.
-// Implements provider.BulkChecker.
 func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) {
 	tools, err := p.ListInstalled(ctx)
 	if err != nil {
@@ -107,7 +103,6 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 }
 
 // BulkDescribe fetches summaries for multiple installed tools from the local RPM DB.
-// Implements provider.BulkDescriber.
 func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map[string]string, error) {
 	return rpm.Summaries(ctx, p.exec, tools)
 }

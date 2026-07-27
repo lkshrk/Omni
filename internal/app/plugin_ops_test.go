@@ -17,6 +17,7 @@ type stubPluginAdapter struct {
 	available               bool
 	installErr              error
 	installErrs             map[string]error
+	installFunc             func(config.Plugin) error
 	removeErr               error
 	updateErr               error
 	updateErrs              map[string]error
@@ -60,6 +61,9 @@ func (s *stubPluginAdapter) ListPlugins(_ context.Context) ([]app.InstalledPlugi
 }
 func (s *stubPluginAdapter) InstallPlugin(_ context.Context, p config.Plugin) error {
 	s.installedPlugin = append(s.installedPlugin, p)
+	if s.installFunc != nil {
+		return s.installFunc(p)
+	}
 	if err := s.installErrs[p.Name]; err != nil {
 		return err
 	}
@@ -208,11 +212,6 @@ func TestRestorePlugins_AddsMarketplaceBeforePlugin(t *testing.T) {
 	}
 }
 
-// TestRestorePlugins_RefreshesMarketplacesOnEveryAvailableAdapter pins the
-// marketplace-before-plugin ordering fix for the restore/sync path: every
-// available adapter's marketplace snapshots are refreshed once per restore,
-// before that adapter's plugin list/install loop runs, so a stale clone never
-// precedes an install that reads from it.
 func TestRestorePlugins_RefreshesMarketplacesOnEveryAvailableAdapter(t *testing.T) {
 	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
@@ -233,9 +232,6 @@ func TestRestorePlugins_RefreshesMarketplacesOnEveryAvailableAdapter(t *testing.
 	}
 }
 
-// TestRestorePlugins_MarketplaceRefreshFailureIsWarningNotFatal verifies a
-// marketplace refresh failure surfaces as a warning and does not block the
-// plugin install loop that follows.
 func TestRestorePlugins_MarketplaceRefreshFailureIsWarningNotFatal(t *testing.T) {
 	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true, updateMarketplacesErr: errBoom}
@@ -256,9 +252,6 @@ func TestRestorePlugins_MarketplaceRefreshFailureIsWarningNotFatal(t *testing.T)
 	}
 }
 
-// TestRestorePlugins_DryRun_DoesNotRefreshMarketplaces verifies a dry-run
-// restore (which never mutates adapter state) also skips the marketplace
-// refresh call, mirroring how it skips ensureMarketplace/InstallPlugin.
 func TestRestorePlugins_DryRun_DoesNotRefreshMarketplaces(t *testing.T) {
 	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
@@ -806,10 +799,6 @@ func TestUpdatePlugin_NotFoundInManifest(t *testing.T) {
 	}
 }
 
-// TestUpdatePlugin_RefreshesMarketplacesBeforeUpdating pins the marketplace-
-// before-plugin ordering fix: a plugin update installs from the marketplace's
-// local clone, so the clone must be refreshed first or the update can silently
-// install a stale version even though the CLI call itself succeeds.
 func TestUpdatePlugin_RefreshesMarketplacesBeforeUpdating(t *testing.T) {
 	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
@@ -833,10 +822,6 @@ func TestUpdatePlugin_RefreshesMarketplacesBeforeUpdating(t *testing.T) {
 	}
 }
 
-// TestUpdatePlugin_MarketplaceRefreshFailureIsNonFatal verifies a marketplace
-// refresh failure is collected as an error but does not block the plugin
-// update attempt itself (best-effort refresh, tolerant like every other
-// per-adapter step in this file).
 func TestUpdatePlugin_MarketplaceRefreshFailureIsNonFatal(t *testing.T) {
 	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true, updateMarketplacesErr: errBoom}
@@ -878,10 +863,6 @@ func TestUpdatePlugin_MultiAdapterPartialFailureTolerant(t *testing.T) {
 	}
 }
 
-// TestUpdatePlugins_RefreshesMarketplacesOncePerAdapter pins the bulk-update
-// dedup: N outdated plugins on one adapter must trigger exactly one
-// marketplace refresh, not N — the refresh is an update-all CLI call, so
-// repeating it per plugin multiplies the same slow network fetch.
 func TestUpdatePlugins_RefreshesMarketplacesOncePerAdapter(t *testing.T) {
 	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
@@ -915,10 +896,6 @@ func TestUpdatePlugins_RefreshesMarketplacesOncePerAdapter(t *testing.T) {
 	}
 }
 
-// TestUpdateMarketplaces_RefreshesEveryAvailableAdapter covers the
-// update-all path when no plugin is outdated: UpdatePlugins is never called
-// in that case, so marketplaces need their own standalone refresh to avoid
-// going stale.
 func TestUpdateMarketplaces_RefreshesEveryAvailableAdapter(t *testing.T) {
 	t.Parallel()
 	claude := &stubPluginAdapter{id: "claude-code", available: true}
@@ -980,9 +957,6 @@ func TestRemoveMarketplace_BlockedByReferencingPlugins(t *testing.T) {
 	}
 }
 
-// TestUpdatePluginsPreRefreshed_SkipsMarketplaceRefresh pins the pre-refreshed
-// contract: callers that just ran UpdateMarketplaces themselves (the TUI's
-// update-all) must not pay a second refresh, while the updates still run.
 func TestUpdatePluginsPreRefreshed_SkipsMarketplaceRefresh(t *testing.T) {
 	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
@@ -1073,7 +1047,6 @@ func TestAddMarketplace_UpsertsManifestAndAddsToAdapters(t *testing.T) {
 		t.Fatalf("manifest marketplaces = %v, want caveman a/b", markets)
 	}
 
-	// Upsert: same name with a new source replaces, never duplicates.
 	if _, err := a.AddMarketplace(context.Background(), config.Marketplace{Name: "caveman", Source: "a/c"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1130,9 +1103,6 @@ func TestFindUndeclaredMarketplace(t *testing.T) {
 	}
 }
 
-// TestAdoptUnmanagedPlugins pins the bulk adopt: unmanaged plugins whose
-// marketplace is declared get manifest entries scoped to the reporting agent;
-// ones with undeclared marketplaces are counted as skipped, not adopted.
 func TestAdoptUnmanagedPlugins(t *testing.T) {
 	t.Parallel()
 	stub := &stubPluginAdapter{
@@ -1146,12 +1116,15 @@ func TestAdoptUnmanagedPlugins(t *testing.T) {
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
 	}
 	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
-	adopted, skipped, err := a.AdoptUnmanagedPlugins(context.Background())
+	adopted, err := a.AdoptUnmanagedPlugins(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if adopted != 1 || skipped != 1 {
-		t.Fatalf("adopted=%d skipped=%d, want 1/1", adopted, skipped)
+	if adopted.Adopted != 1 || len(adopted.Skipped) != 1 {
+		t.Fatalf("adopted=%d skipped=%v, want 1 adopted and 1 skip line", adopted.Adopted, adopted.Skipped)
+	}
+	if !strings.Contains(adopted.Skipped[0], "undeclared") {
+		t.Fatalf("skip line = %q, want the undeclared marketplace named", adopted.Skipped[0])
 	}
 	cfg, err := a.LoadConfig()
 	if err != nil {
@@ -1165,10 +1138,6 @@ func TestAdoptUnmanagedPlugins(t *testing.T) {
 	}
 }
 
-// TestAdoptUnmanagedPlugins_UnionsAgentsForIdenticalPlugin pins that when two
-// agent adapters both report the same unmanaged plugin identity (name +
-// marketplace), it is adopted once and scoped to the union of both agents,
-// mirroring AdoptUnmanagedMcpServers rather than dropping the second report.
 func TestAdoptUnmanagedPlugins_UnionsAgentsForIdenticalPlugin(t *testing.T) {
 	plugin := app.InstalledPlugin{Name: "shared-plugin", Marketplace: "caveman"}
 	claude := &stubPluginAdapter{id: "claude-code", available: true, listedPlugins: []app.InstalledPlugin{plugin}}
@@ -1178,12 +1147,12 @@ func TestAdoptUnmanagedPlugins_UnionsAgentsForIdenticalPlugin(t *testing.T) {
 	}
 	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{codex, claude}))
 
-	adopted, skipped, err := a.AdoptUnmanagedPlugins(context.Background())
+	adopted, err := a.AdoptUnmanagedPlugins(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if adopted != 1 || skipped != 0 {
-		t.Fatalf("adopted=%d skipped=%d, want 1/0", adopted, skipped)
+	if adopted.Adopted != 1 || len(adopted.Skipped) != 0 {
+		t.Fatalf("adopted=%d skipped=%v, want 1 adopted and no skips", adopted.Adopted, adopted.Skipped)
 	}
 	cfg, err := a.LoadConfig()
 	if err != nil {
@@ -1194,15 +1163,6 @@ func TestAdoptUnmanagedPlugins_UnionsAgentsForIdenticalPlugin(t *testing.T) {
 	}
 }
 
-// TestUpdateAllSequence_UpdatesOutdatedAndInstallsMissing exercises the exact
-// app-layer sequence the TUI's agents "update all" worker runs
-// (doAgentsUpdateAll): refresh marketplaces once, compute outdated plugins from
-// the rows, update only those with the pre-refreshed variant, then install any
-// manifest plugin still missing. This is the end-to-end coverage the live repro
-// lacked — the manual TUI run had nothing genuinely outdated, so the update
-// path executed but did no real work. Here an outdated plugin, an up-to-date
-// plugin, and a missing plugin are all present, pinning that update touches
-// only the outdated one and install touches only the missing one.
 func TestUpdateAllSequence_UpdatesOutdatedAndInstallsMissing(t *testing.T) {
 	t.Parallel()
 	stub := &stubPluginAdapter{
@@ -1224,13 +1184,10 @@ func TestUpdateAllSequence_UpdatesOutdatedAndInstallsMissing(t *testing.T) {
 	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
 	ctx := context.Background()
 
-	// Step 1: refresh marketplaces once up front (as the TUI does before
-	// computing outdated, so the local clones aren't stale).
 	if _, err := a.UpdateMarketplaces(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	// Step 2: compute outdated from the rows.
 	rows, _, err := a.PluginRows(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -1245,8 +1202,6 @@ func TestUpdateAllSequence_UpdatesOutdatedAndInstallsMissing(t *testing.T) {
 		t.Fatalf("outdated = %v, want only [outdated-plugin]", outdated)
 	}
 
-	// Step 3: update only the outdated plugins, pre-refreshed (no second
-	// marketplace refresh).
 	marketRefreshesBefore := stub.updateMarketplacesCalls
 	if _, err := a.UpdatePluginsPreRefreshed(ctx, outdated, nil); err != nil {
 		t.Fatal(err)
@@ -1258,7 +1213,6 @@ func TestUpdateAllSequence_UpdatesOutdatedAndInstallsMissing(t *testing.T) {
 		t.Fatalf("updated = %v, want only [outdated-plugin] (current-plugin must not be touched)", stub.updatedNames)
 	}
 
-	// Step 4: install any manifest plugin still missing.
 	res, err := a.RestorePluginsPreRefreshed(ctx, app.RestorePluginOptions{})
 	if err != nil {
 		t.Fatal(err)

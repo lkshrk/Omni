@@ -256,18 +256,12 @@ func TestMcpFlow_RestoreKeySetsRunningFlag(t *testing.T) {
 	}
 }
 
-// TestMcpFlow_HttpTransportWithoutURLShowsValidationError closes gap 1: the
-// http/sse branch of buildMcpServerFromForm requires a non-empty URL (see
-// update_keys.go's buildMcpServerFromForm, "default:" case). Cycling
-// transport away from stdio and submitting with a blank URL must reject with
-// the exact "URL is required for http transport" message, leave the form
-// open, and retain the already-typed name.
+// The http/sse branch requires a non-empty URL: submitting blank must reject with the exact message, leave the form open, and retain the typed name.
 func TestMcpFlow_HttpTransportWithoutURLShowsValidationError(t *testing.T) {
 	t.Parallel()
 	m := mcpChipFixture(nil)
 	m = drive(m, pressRune('n'))
 	m.mcpFormName.SetValue("http-server")
-	// Field 1 is transport; move focus there and cycle stdio -> http.
 	m = drive(m, pressTab())
 	if m.mcpFormField != 1 {
 		t.Fatalf("mcpFormField = %d, want 1 (transport) before cycling", m.mcpFormField)
@@ -300,10 +294,7 @@ func TestMcpFlow_HttpTransportWithoutURLShowsValidationError(t *testing.T) {
 	}
 }
 
-// TestMcpFlow_TransportCycleWrapsThroughAllValues closes gap 2: the left/right
-// keys on field 1 (transport) move through the real order defined in
-// buildMcpServerFromForm's transports slice: stdio(0) -> http(1) -> sse(2),
-// clamping (not wrapping) at each end per handleMcpFormKeyMsg's guards.
+// Transport order is stdio(0), http(1), sse(2), clamping rather than wrapping at each end.
 func TestMcpFlow_TransportCycleWrapsThroughAllValues(t *testing.T) {
 	t.Parallel()
 	m := mcpChipFixture(nil)
@@ -344,10 +335,7 @@ func TestMcpFlow_TransportCycleWrapsThroughAllValues(t *testing.T) {
 	}
 }
 
-// TestMcpFlow_ShiftTabNavigatesBackwardThroughUpdate closes gap 3: drives a
-// real tea.KeyPressMsg with Mod: tea.ModShift through Model.Update (not a
-// helper shortcut) to prove shift+tab actually reverses field focus rather
-// than behaving like a second plain tab.
+// Drives a real tea.KeyPressMsg with Mod: tea.ModShift through Model.Update, not a helper shortcut, to prove shift+tab actually reverses field focus.
 func TestMcpFlow_ShiftTabNavigatesBackwardThroughUpdate(t *testing.T) {
 	t.Parallel()
 	m := mcpChipFixture(nil)
@@ -372,10 +360,7 @@ func TestMcpFlow_ShiftTabNavigatesBackwardThroughUpdate(t *testing.T) {
 	}
 }
 
-// TestMcpFlow_AddDoneMsgSuccessClosesFormAndReloads closes gap 4 (success
-// path): feeding mcpAddDoneMsg{err:nil} back through Update while the form is
-// open must close the form, clear any form error, and queue a reload command
-// (doLoadMcpRows), per the mcpAddDoneMsg case in update.go.
+// mcpAddDoneMsg with a nil err while the form is open must close the form, clear any form error, and queue doLoadMcpRows.
 func TestMcpFlow_AddDoneMsgSuccessClosesFormAndReloads(t *testing.T) {
 	t.Parallel()
 	m := mcpChipFixture(nil)
@@ -409,10 +394,7 @@ func TestMcpFlow_AddDoneMsgSuccessClosesFormAndReloads(t *testing.T) {
 	}
 }
 
-// TestMcpFlow_AddDoneMsgErrorKeepsFormOpenWithError closes gap 4 (error
-// path): feeding mcpAddDoneMsg with a non-nil err while the form is open must
-// keep the form open and set mcpFormErr (not the global statusMsg), per the
-// "if m.mcpFormOpen" branch in update.go's mcpAddDoneMsg case.
+// A non-nil err while the form is open must keep the form open and set mcpFormErr, not the global statusMsg.
 func TestMcpFlow_AddDoneMsgErrorKeepsFormOpenWithError(t *testing.T) {
 	t.Parallel()
 	m := mcpChipFixture(nil)
@@ -444,14 +426,7 @@ func TestMcpFlow_AddDoneMsgErrorKeepsFormOpenWithError(t *testing.T) {
 	}
 }
 
-// TestMcpFlow_ClaimKeyOnUnmanagedRowQueuesAdoptCommand closes gap 5: 'c' on
-// an unmanaged (not-yet-adopted) mcp row must set mcpRunning and yield a
-// batched command (spinner tick + doImportMcpServer) rather than a no-op.
-// doImportMcpServer's closure captures m.app/m.ctx and hits the real App on
-// execution, so — mirroring how the existing valid-submit test asserts on the
-// queued batch via batchHasSpinnerTick rather than executing it against a
-// nil app — this stops at "a real adopt command was queued" instead of
-// running the network/DB call.
+// doImportMcpServer hits the real App on execution, so this stops at "a real adopt command was queued" rather than running the network/DB call.
 func TestMcpFlow_ClaimKeyOnUnmanagedRowQueuesAdoptCommand(t *testing.T) {
 	t.Parallel()
 	m := mcpChipFixture(nil)
@@ -475,11 +450,7 @@ func TestMcpFlow_ClaimKeyOnUnmanagedRowQueuesAdoptCommand(t *testing.T) {
 	}
 }
 
-// TestMcpFlow_ImportAdoptErrorClearsOpKeyAndSurfacesStatus reproduces the
-// stuck-spinner claim bug: the group-picker claim path sets agentsOpKey via
-// startAgentsOp, but the completion handler for mcpImportAdoptDoneMsg used to
-// never clear it (on success OR error), leaving the row's spinner running
-// forever whenever AddMcpServer/SetMcpGroups failed.
+// The group-picker claim path sets agentsOpKey via startAgentsOp; if mcpImportAdoptDoneMsg never clears it the row's spinner runs forever.
 func TestMcpFlow_ImportAdoptErrorClearsOpKeyAndSurfacesStatus(t *testing.T) {
 	t.Parallel()
 	m := mcpChipFixture(nil)
@@ -519,11 +490,7 @@ func TestMcpFlow_ImportKeyOnUnmanagedRowIsInert(t *testing.T) {
 	}
 }
 
-// TestMcpFlow_GroupsStatusMessagePersistsUntilReplaced closes gap 6: setStatus
-// writes m.statusMsg synchronously (see commands.go), and neither opening the
-// add-server form nor moving the cursor clears it — it persists untouched
-// until a new status/clearStatusMsg replaces it, unlike mcpFormErr which is
-// reset on form open.
+// setStatus writes statusMsg synchronously and neither opening the add form nor moving the cursor clears it, unlike mcpFormErr which resets on form open.
 func TestMcpFlow_GroupsStatusMessagePersistsUntilReplaced(t *testing.T) {
 	t.Parallel()
 	rows := []app.McpServerRow{{Name: "groups-status-server", Groups: []string{"work"}}}
@@ -539,14 +506,12 @@ func TestMcpFlow_GroupsStatusMessagePersistsUntilReplaced(t *testing.T) {
 		t.Fatalf("statusMsg = %q, want %q", m.statusMsg, wantSubstr)
 	}
 
-	// Opening the add form does not touch statusMsg.
 	m = drive(m, pressRune('n'))
 	if m.statusMsg != wantSubstr {
 		t.Errorf("statusMsg changed after opening add form: got %q, want unchanged %q", m.statusMsg, wantSubstr)
 	}
 	m = drive(m, pressEsc())
 
-	// Neither does plain cursor movement.
 	m = drive(m, pressRune('j'))
 	if m.statusMsg != wantSubstr {
 		t.Errorf("statusMsg changed after cursor move: got %q, want unchanged %q", m.statusMsg, wantSubstr)

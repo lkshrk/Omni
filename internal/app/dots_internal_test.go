@@ -19,7 +19,6 @@ func TestAgentConfigDotCandidateNames_DerivesFromCatalog(t *testing.T) {
 		nameSet[n] = struct{}{}
 	}
 
-	// A known catalog entry's ".config/<leaf>" configDir must appear.
 	if _, ok := nameSet["agents"]; !ok {
 		t.Fatalf("agentConfigDotCandidateNames() = %v, want it to include %q (from supportedAgents .config/agents entries)", names, "agents")
 	}
@@ -29,9 +28,6 @@ func TestAgentConfigDotCandidateNames_DerivesFromCatalog(t *testing.T) {
 		}
 	}
 
-	// Home-level (non-.config) catalog dirs must never be derived here: they
-	// are not swept by the generic ~/.config scan, and deriving them would be
-	// meaningless for this ignore list.
 	for _, notWant := range []string{"claude", "codex", "grok", "agents-skill-lock", "gemini"} {
 		if _, ok := nameSet[notWant]; ok {
 			t.Fatalf("agentConfigDotCandidateNames() = %v, must not include home-level dir %q", names, notWant)
@@ -45,34 +41,35 @@ func TestRollbackDotsAdd_RemovesPartialTargetBeforeRestore(t *testing.T) {
 	home := filepath.Join(tmp, "home")
 	t.Setenv("HOME", home)
 
-	targetPath := filepath.Join(home, ".config", "nvim")
-	if err := os.MkdirAll(targetPath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(targetPath, "init.lua"), []byte("original"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	backupPath, err := dots.BackupLocalPath(targetPath)
-	if err != nil {
-		t.Fatalf("BackupLocalPath: %v", err)
-	}
-
-	if err := os.RemoveAll(targetPath); err != nil {
-		t.Fatal(err)
-	}
-	partialSource := filepath.Join(tmp, "repo", "dotfiles", "nvim", ".config", "nvim")
-	if err := os.MkdirAll(partialSource, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	targetPath := filepath.Join(home, ".zshrc")
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(partialSource, targetPath); err != nil {
+	if err := os.WriteFile(targetPath, []byte("original"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	packagePath := filepath.Join(tmp, "repo", "dotfiles", "nvim", ".config", "nvim")
+	packagePath := filepath.Join(tmp, "repo", "dotfiles", "zshrc", ".zshrc")
+	if err := os.MkdirAll(filepath.Dir(packagePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(packagePath, []byte("repo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entry := dots.ResolvedEntry{
+		Name:       "zshrc",
+		Package:    "zshrc",
+		SourcePath: packagePath,
+		TargetPath: targetPath,
+	}
+	prep, err := dots.PrepareDotTargetForRestow(context.Background(), nil, entry)
+	if err != nil {
+		t.Fatalf("PrepareDotTargetForRestow: %v", err)
+	}
+	if err := os.Symlink(packagePath, targetPath); err != nil {
+		t.Fatal(err)
+	}
 
-	if err := rollbackDotsAdd(context.Background(), nil, targetPath, packagePath, backupPath); err != nil {
+	if err := rollbackDotsAdd(context.Background(), nil, entry, packagePath, prep); err != nil {
 		t.Fatalf("rollbackDotsAdd: %v", err)
 	}
 
@@ -83,7 +80,7 @@ func TestRollbackDotsAdd_RemovesPartialTargetBeforeRestore(t *testing.T) {
 	if info.Mode()&os.ModeSymlink != 0 {
 		t.Fatalf("target is still a symlink after rollback")
 	}
-	got, err := os.ReadFile(filepath.Join(targetPath, "init.lua"))
+	got, err := os.ReadFile(targetPath)
 	if err != nil {
 		t.Fatalf("read restored file: %v", err)
 	}
@@ -233,10 +230,7 @@ func TestDotsTestTargetPath_LeavesUnsupportedTildePrefixUntouched(t *testing.T) 
 }
 
 func TestCountIgnoredTree_DepthGuardPreventsRunaway(t *testing.T) {
-	t.Parallel(
-	// Build a chain deeper than countIgnoredTreeMaxDepth to verify
-	// the depth guard returns 0 instead of overflowing the stack.
-	)
+	t.Parallel()
 
 	leaf := DotChild{Name: "file.txt", IsDir: false}
 	for i := range countIgnoredTreeMaxDepth + 10 {
@@ -272,17 +266,14 @@ func TestCountIgnoredTree_NormalDepthWorks(t *testing.T) {
 }
 
 func TestCountIgnoredTree_LeafDirCountsAsOne(t *testing.T) {
-	t.Parallel(
-	// An ignored leaf directory (e.g. node_modules) with no sub-tree
-	// should count as 1, not 0.
-	)
+	t.Parallel()
 
 	tree := DotChild{
 		Name:  "root",
 		IsDir: true,
 		Children: []DotChild{
 			{Name: "a.txt"},
-			{Name: "node_modules", IsDir: true, Ignored: true}, // leaf dir
+			{Name: "node_modules", IsDir: true, Ignored: true},
 		},
 	}
 	got := countIgnoredTree(tree)
@@ -291,9 +282,6 @@ func TestCountIgnoredTree_LeafDirCountsAsOne(t *testing.T) {
 	}
 }
 
-// TestBuildIgnoredChildTree_IntermediateNotIgnored verifies that intermediate
-// directories synthesized by buildIgnoredChildTree have Ignored=false while
-// leaf entries (explicitly ignored files) keep Ignored=true.
 func TestBuildIgnoredChildTree_IntermediateNotIgnored(t *testing.T) {
 	t.Parallel()
 	flat := []DotChild{
@@ -334,8 +322,6 @@ func TestBuildIgnoredChildTree_IntermediateNotIgnored(t *testing.T) {
 	}
 }
 
-// TestBuildIgnoredChildTree_FlatLeaves verifies that flat ignored children
-// (no intermediate dirs) are returned as-is with Ignored preserved.
 func TestBuildIgnoredChildTree_FlatLeaves(t *testing.T) {
 	t.Parallel()
 	flat := []DotChild{
@@ -357,8 +343,6 @@ func TestBuildIgnoredChildTree_FlatLeaves(t *testing.T) {
 	}
 }
 
-// TestBuildIgnoredChildTree_DeepTree verifies multi-level nesting: only the
-// deepest leaf is Ignored=true; all intermediate dirs are Ignored=false.
 func TestBuildIgnoredChildTree_DeepTree(t *testing.T) {
 	t.Parallel()
 	flat := []DotChild{
@@ -389,10 +373,6 @@ func TestBuildIgnoredChildTree_DeepTree(t *testing.T) {
 	}
 }
 
-// TestIgnoredChildDotStatuses_KeepsTrackedReincludedChildren verifies that a
-// tracked (re-included) child living inside an ignored directory surfaces in the
-// synthesized Ignored-section tree carrying its real state (not muted/dropped),
-// while the ignored sibling stays ignored and the container dir stays synthetic.
 func TestIgnoredChildDotStatuses_KeepsTrackedReincludedChildren(t *testing.T) {
 	t.Parallel()
 	status := DotStatus{

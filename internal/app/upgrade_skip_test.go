@@ -35,9 +35,6 @@ func (s *manualInstallerBrewStub) Upgrade(_ context.Context, tool provider.Tool)
 	return errors.New("brew upgrade --cask battle-net: exit status 1 (stderr: Error: Not upgrading 1 `installer manual` cask.)")
 }
 
-// Homebrew refuses to automate upgrades for casks that declare `installer manual`.
-// Those require user intervention and should not fail an otherwise successful
-// upgrade-all/reconcile run.
 func TestUpgradeAll_SkipsBrewManualInstallerCaskWithoutError(t *testing.T) {
 	t.Parallel()
 	stub := &manualInstallerBrewStub{stubProvider: stubProvider{name: "brew", available: true}}
@@ -87,9 +84,6 @@ func TestUpgradeAll_SkipsBrewManualInstallerCaskWithoutError(t *testing.T) {
 	}
 }
 
-// Upgrading the pip package itself via pip in an externally managed Python is
-// impossible (PEP 668) and not fixable by switching to uv, so upgrade-all must
-// skip it gracefully rather than failing the whole run.
 func TestUpgradeAll_SkipsExternallyManagedPipSelfWithoutError(t *testing.T) {
 	t.Parallel()
 	stub := &externallyManagedPipStub{stubProvider: stubProvider{name: "pip", available: true}}

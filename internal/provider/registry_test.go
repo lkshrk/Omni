@@ -7,7 +7,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// fakeProvider is a minimal Provider used in tests.
 type fakeProvider struct {
 	name      string
 	available bool
@@ -154,9 +153,7 @@ func TestRegistry_Empty(t *testing.T) {
 	}
 }
 
-// registryWithMix builds a registry with one ecosystem provider (system),
-// two concrete providers in that ecosystem (apt, brew), and one concrete
-// provider in a different ecosystem (pip). Useful for kind/ecosystem queries.
+// One ecosystem (system), two concretes inside it (apt, brew), one concrete elsewhere (pip).
 func registryWithMix(t *testing.T) *provider.Registry {
 	t.Helper()
 	reg := provider.NewRegistry()
@@ -236,7 +233,6 @@ func TestRegistry_NamesAndKnownNames(t *testing.T) {
 	}
 
 	known := reg.KnownNames()
-	// KnownNames is in display order: system(100), apt(110), brew(160), pip(300).
 	want := []string{"system", "apt", "brew", "pip"}
 	if len(known) != len(want) {
 		t.Fatalf("KnownNames len = %d, want %d", len(known), len(want))
@@ -269,7 +265,6 @@ func TestRegistry_ConcreteEcosystems(t *testing.T) {
 			t.Errorf("ConcreteEcosystems[%q] = %q, want %q", name, got[name], eco)
 		}
 	}
-	// system is an ecosystem, not a concrete entry — should not appear.
 	if _, ok := got["system"]; ok {
 		t.Error("ConcreteEcosystems should not include ecosystem providers")
 	}
@@ -282,10 +277,10 @@ func TestRegistry_EcosystemFor(t *testing.T) {
 		want  string
 		found bool
 	}{
-		{"system", "system", true}, // ecosystem name itself
-		{"apt", "system", true},    // concrete in system
-		{"brew", "system", true},   // concrete in system via ManagerOption
-		{"pip", "python", true},    // concrete in python
+		{"system", "system", true},
+		{"apt", "system", true},
+		{"brew", "system", true},
+		{"pip", "python", true},
 		{"nonexistent", "", false},
 	}
 	for _, tt := range tests {
@@ -305,7 +300,6 @@ func TestRegistry_ManagerOptionsAndManagerOption(t *testing.T) {
 	if len(opts) != 2 {
 		t.Fatalf("ManagerOptions(system) len = %d, want 2", len(opts))
 	}
-	// Sorted by Order: apt(1), brew(2).
 	if opts[0].Name != "apt" || opts[1].Name != "brew" {
 		t.Errorf("ManagerOptions order = %v, want [apt brew]", []string{opts[0].Name, opts[1].Name})
 	}
@@ -324,7 +318,6 @@ func TestRegistry_ManagerOptionsAndManagerOption(t *testing.T) {
 func TestRegistry_DefaultInstallProviderNames(t *testing.T) {
 	reg := registryWithMix(t)
 	got := reg.DefaultInstallProviderNames()
-	// brew has DefaultInstallOrder=1, apt has 2; pip + system have 0 (excluded).
 	want := []string{"brew", "apt"}
 	if len(got) != len(want) {
 		t.Fatalf("DefaultInstallProviderNames len = %d, want %d (got %v)", len(got), len(want), got)

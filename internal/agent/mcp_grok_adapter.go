@@ -14,7 +14,6 @@ type grokMcpAdapter struct {
 	lookupEnv func(string) (string, bool)
 }
 
-// NewGrokMcpAdapter returns an McpAdapter that delegates to the grok CLI.
 func NewGrokMcpAdapter(
 	execFn func(context.Context, string, ...string) (string, string, error),
 	lookupEnv func(string) (string, bool),
@@ -75,14 +74,33 @@ func (a *grokMcpAdapter) List(ctx context.Context) ([]InstalledMcpServer, error)
 	return parseGrokMcpList(stdout)
 }
 
-// grokMcpListEntry mirrors one element of `grok mcp list --json`.
 type grokMcpListEntry struct {
-	Name    string            `json:"name"`
-	URL     string            `json:"url"`
-	Command string            `json:"command"`
-	Args    []string          `json:"args"`
-	Headers map[string]string `json:"headers"`
-	Env     map[string]string `json:"env"`
+	Name      string            `json:"name"`
+	Type      string            `json:"type"`
+	Transport string            `json:"transport"`
+	URL       string            `json:"url"`
+	Command   string            `json:"command"`
+	Args      []string          `json:"args"`
+	Headers   map[string]string `json:"headers"`
+	Env       map[string]string `json:"env"`
+}
+
+// Add installs whatever transport it is given, so reporting every url server as http made each sse
+// server read as permanent drift. grok has spelled the field both ways across versions, and a version
+// that spells it neither way leaves http a guess rather than a report.
+func (e grokMcpListEntry) urlTransport() (transport string, reported bool) {
+	transport = "http"
+	for _, raw := range []string{e.Type, e.Transport} {
+		field := strings.TrimSpace(raw)
+		if field == "" {
+			continue
+		}
+		reported = true
+		if strings.EqualFold(field, "sse") {
+			transport = "sse"
+		}
+	}
+	return transport, reported
 }
 
 func parseGrokMcpList(out string) ([]InstalledMcpServer, error) {
@@ -97,7 +115,9 @@ func parseGrokMcpList(out string) ([]InstalledMcpServer, error) {
 	for _, e := range entries {
 		s := InstalledMcpServer{Name: e.Name, EnvLiteral: e.Env}
 		if e.URL != "" {
-			s.Transport = "http"
+			transport, reported := e.urlTransport()
+			s.Transport = transport
+			s.TransportInferred = !reported
 			s.URL = e.URL
 			s.Headers = e.Headers
 			s.HeadersKnown = true

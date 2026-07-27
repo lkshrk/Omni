@@ -1,6 +1,6 @@
 package config
 
-// White-box tests for atomicWrite (unexported). Must be in package config.
+// White-box tests for the unexported atomicWrite; must stay in package config.
 
 import (
 	"os"
@@ -10,8 +10,6 @@ import (
 	"testing"
 )
 
-// TestAtomicWrite_HappyPath verifies that content is written atomically and
-// arrives at the target path unchanged.
 func TestAtomicWrite_HappyPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "output.json")
@@ -30,8 +28,6 @@ func TestAtomicWrite_HappyPath(t *testing.T) {
 	}
 }
 
-// TestAtomicWrite_CreatesNestedDirs verifies that missing parent directories
-// are created (the os.MkdirAll happy path).
 func TestAtomicWrite_CreatesNestedDirs(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "a", "b", "c", "file.json")
@@ -45,22 +41,17 @@ func TestAtomicWrite_CreatesNestedDirs(t *testing.T) {
 	}
 }
 
-// TestAtomicWrite_MkdirAllError verifies the os.MkdirAll error branch.
-// We create a regular file where the directory is supposed to be so MkdirAll
-// cannot create it.
 func TestAtomicWrite_MkdirAllError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod 000 not meaningful on Windows")
 	}
 
 	dir := t.TempDir()
-	// Create a plain file where the parent directory should be.
 	blocker := filepath.Join(dir, "notadir")
 	if err := os.WriteFile(blocker, []byte("i am a file"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	// Attempt to write to a path whose parent requires "notadir" to be a directory.
 	path := filepath.Join(blocker, "subdir", "file.json")
 	err := atomicWrite(path, []byte(`{}`))
 	if err == nil {
@@ -71,9 +62,6 @@ func TestAtomicWrite_MkdirAllError(t *testing.T) {
 	}
 }
 
-// TestAtomicWrite_CreateTempError verifies the os.CreateTemp error branch.
-// We chmod the target directory to 000 after it exists, preventing temp file
-// creation inside it.
 func TestAtomicWrite_CreateTempError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod 000 not meaningful on Windows")
@@ -85,7 +73,6 @@ func TestAtomicWrite_CreateTempError(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 
-	// Remove write permission so CreateTemp fails.
 	if err := os.Chmod(targetDir, 0o000); err != nil {
 		t.Fatalf("Chmod: %v", err)
 	}
@@ -101,7 +88,6 @@ func TestAtomicWrite_CreateTempError(t *testing.T) {
 	}
 }
 
-// TestAtomicWrite_Overwrite verifies that atomicWrite replaces an existing file.
 func TestAtomicWrite_Overwrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
@@ -167,8 +153,6 @@ func TestAtomicWrite_PreservesSettingsSymlink(t *testing.T) {
 	}
 }
 
-// TestAtomicWrite_NoTempFileLeft verifies that no temp files are left behind
-// after a successful write.
 func TestAtomicWrite_NoTempFileLeft(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")

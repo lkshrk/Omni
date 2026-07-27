@@ -80,8 +80,11 @@ omni tools sync --prune --dry-run
 ```
 
 `sync` installs missing configured tools. `--all` also claims discovered
-installed tools into config before syncing missing tools. `--prune` removes local
-installations that are no longer in config; preview with `--dry-run` first.
+installed tools into config before syncing missing tools, and then — when agent
+features are enabled for this host — imports unmanaged agent skill packages
+into the manifest and syncs agent skills, MCP servers, and plugins.
+`--prune` removes local installations that are no longer in config; preview
+with `--dry-run` first.
 
 Plain `tools sync` does not run the full discovered-tool claim pass. For the
 active host it can keep already-observed orphan tools in the machine group so
@@ -232,6 +235,26 @@ Ignore scopes:
 already exist in config. For discovered-only packages, use the Tools tab ignore
 picker (`x`) and choose **this host**, or add the name to `ignore.tools`
 directly.
+
+## System Inventory Baseline
+
+System package managers report every image-baked package as manually installed,
+so Omni records the inventory it sees on its first scan and treats that snapshot
+as the baseline. Packages present at that point are never reported as discovered.
+
+Anything a later `apt-get install` pulls in — Playwright's and Chrome's runtime
+dependencies, for example — lands outside that baseline and fills the Tools tab
+**Out of Sync** section. Re-snapshot the current inventory to absorb them:
+
+```sh
+omni tools baseline --dry-run
+omni tools baseline
+```
+
+The command lists what it is absorbing and asks for confirmation, because the
+absorbed packages stop being reported permanently on this host. It covers apt,
+dnf, pacman, apk, and zypper only; configured and explicitly ignored tools keep
+their own state, and packages installed after the re-snapshot still surface.
 
 ## NVM-Managed Provider Drift
 

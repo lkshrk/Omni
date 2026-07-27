@@ -20,7 +20,7 @@ func TestResolveGitHubFallback_GeneratedRecipeUsesNativePipeline(t *testing.T) {
 	archName := githubArchNames()[0]
 	assetName := fmt.Sprintf("tool_1.0_%s_%s.tar.gz", osName, archName)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprintf(w, `{"id":1,"tag_name":"v1.0.0","published_at":"2026-07-20T00:00:00Z","assets":[{"id":2,"name":%q,"browser_download_url":"https://example.test/tool.tar.gz"}]}`, assetName)
 	}))
@@ -43,7 +43,10 @@ func TestResolveGitHubFallback_GeneratedRecipeUsesNativePipeline(t *testing.T) {
 func TestIsNativeGitHubRecipe_PreservesCustomCommandOverrides(t *testing.T) {
 	t.Parallel()
 	const downloadURL = "https://example.test/tool.tar.gz"
-	generated := githubReleaseAssetInstallCommand(downloadURL)
+	generated, err := githubReleaseAssetInstallCommand(downloadURL)
+	if err != nil {
+		t.Fatalf("githubReleaseAssetInstallCommand: %v", err)
+	}
 	base := config.FallbackSpec{
 		Recipe: config.FallbackRecipe{
 			Type:             config.FallbackRecipeGitHubReleaseAsset,
@@ -75,7 +78,7 @@ func TestRunFallbackInstall_CustomCommandsAreActionScoped(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			t.Parallel()
 			asset := []byte("native binary")
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write(asset)
 			}))
 			t.Cleanup(srv.Close)
@@ -85,7 +88,10 @@ func TestRunFallbackInstall_CustomCommandsAreActionScoped(t *testing.T) {
 			a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
 			a.SetFallbackExecutor(executor.NewMatchMock().WithFallback(executor.MockCall{Err: fmt.Errorf("shell path invoked")}))
 			downloadURL := srv.URL + "/tool"
-			generated := githubReleaseAssetInstallCommand(downloadURL)
+			generated, err := githubReleaseAssetInstallCommand(downloadURL)
+			if err != nil {
+				t.Fatalf("githubReleaseAssetInstallCommand: %v", err)
+			}
 			fallback := &config.FallbackSpec{
 				Binary: "tool",
 				Recipe: config.FallbackRecipe{
@@ -178,7 +184,6 @@ func TestBestGitHubReleaseAsset_ReturnsNoMatchWhenNoUsableAssetExists(t *testing
 	t.Parallel()
 	osName := githubOSNames()[0]
 	archName := githubArchNames()[0]
-	// Only a checksum asset and a wrong-OS archive — no extractable current-platform asset.
 	asset, ok := bestGitHubReleaseAsset([]githubAsset{
 		{ID: "1", Name: fmt.Sprintf("fd_10.3.0_%s_%s.sha256", osName, archName), BrowserDownloadURL: "https://example.test/fd.sha256"},
 		{ID: "2", Name: fmt.Sprintf("fd_10.3.0_%s_%s.deb", osName, archName), BrowserDownloadURL: "https://example.test/fd.deb"},
@@ -295,18 +300,21 @@ func TestGitHubFallbackHasSavedReleaseMetadata(t *testing.T) {
 
 func TestGitHubReleaseAssetInstallCommandUsesAssetBasename(t *testing.T) {
 	t.Parallel()
-	got := githubReleaseAssetInstallCommand("https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_arm64.zip")
-	// Placeholders are bare so the rendered single-quoted value is the only quoting.
-	// The asset name and URL are shell-quoted at construction; no surrounding quotes in the template.
+	got, err := githubReleaseAssetInstallCommand("https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_arm64.zip")
+	if err != nil {
+		t.Fatalf("githubReleaseAssetInstallCommand: %v", err)
+	}
 	if !strings.Contains(got, `asset={{cache_dir}}/'gh_2.93.0_macOS_arm64.zip'`) {
 		t.Fatalf("install command = %q, want bare cache_dir placeholder followed by quoted asset name", got)
 	}
-	if !strings.Contains(got, `curl -fsSL 'https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_arm64.zip'`) {
-		t.Fatalf("install command = %q, want single-quoted curl download URL", got)
+	if !strings.Contains(got, `curl -fsSL --proto-redir =https 'https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_arm64.zip'`) {
+		t.Fatalf("install command = %q, want a downgrade-refusing curl and a single-quoted download URL", got)
 	}
 
-	// No-URL branch: asset_path (full absolute path, quoted at render time) used directly.
-	fallback := githubReleaseAssetInstallCommand("")
+	fallback, err := githubReleaseAssetInstallCommand("")
+	if err != nil {
+		t.Fatalf("githubReleaseAssetInstallCommand(\"\"): %v", err)
+	}
 	if !strings.Contains(fallback, `asset={{asset_path}}`) {
 		t.Fatalf("fallback install command = %q, want bare asset_path placeholder", fallback)
 	}
@@ -323,10 +331,7 @@ func TestShellSingleQuote(t *testing.T) {
 	}{
 		{in: "normal", want: "'normal'"},
 		{in: "/usr/local/bin", want: "'/usr/local/bin'"},
-		// A value containing a single-quote must be escaped so it cannot
-		// break out of the surrounding single-quoted shell word.
 		{in: "it's", want: `'it'\''s'`},
-		// Values that look like injection attempts must be neutralised.
 		{in: `'; touch pwned`, want: `''\''; touch pwned'`},
 		{in: `$(rm -rf /)`, want: `'$(rm -rf /)'`},
 	}
@@ -340,11 +345,7 @@ func TestShellSingleQuote(t *testing.T) {
 }
 
 func TestRenderFallbackCommandNeutralisesInjection(t *testing.T) {
-	t.Parallel(
-	// A binary name containing shell metacharacters (as could arrive from a
-	// compromised settings.json) must be single-quoted so it cannot break out
-	// of the generated sh -c string.
-	)
+	t.Parallel()
 
 	a := New(t.TempDir() + "/settings.json")
 	spec := config.ToolSpec{}
@@ -360,17 +361,10 @@ func TestRenderFallbackCommandNeutralisesInjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renderFallbackCommand: %v", err)
 	}
-	// The poison value must appear in the rendered command only inside its
-	// single-quoted form — the literal characters '; touch are present in the
-	// output but enclosed within the shell quoting, so they cannot execute.
 	quotedPoison := shellSingleQuote(poison)
 	if !strings.Contains(rendered, quotedPoison) {
 		t.Fatalf("rendered command does not contain properly quoted binary name:\n  rendered = %q\n  want to contain %q", rendered, quotedPoison)
 	}
-	// Verify the command can be evaluated safely by sh without side effects.
-	// We do this by checking the rendered string does not contain the word
-	// "touch" OUTSIDE of single quotes (a crude but sufficient check: the
-	// quoted form wraps all occurrences of touch inside '...').
 	withoutQuoted := strings.ReplaceAll(rendered, quotedPoison, "QUOTED")
 	if strings.Contains(withoutQuoted, "touch") {
 		t.Fatalf("rendered command contains 'touch' outside of single-quoted value: %q", rendered)
@@ -430,18 +424,11 @@ func TestParseGitHubRepo(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Scoring tests (HCL-35)
-// ---------------------------------------------------------------------------
-
-// TestScoreGitHubAsset_OSAliases verifies that OS canonical names and their
-// aliases both produce a positive score, with the exact GOOS term scoring higher.
 func TestScoreGitHubAsset_OSAliases(t *testing.T) {
 	t.Parallel()
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
-	// Map GOOS → expected aliases from the spec.
 	aliases := map[string][]string{
 		"darwin":  {"macos", "mac", "apple"},
 		"windows": {"win"},
@@ -454,7 +441,6 @@ func TestScoreGitHubAsset_OSAliases(t *testing.T) {
 		"arm64": "aarch64",
 	}
 
-	// Exact OS name must outscore its alias.
 	if osAliases, ok := aliases[goos]; ok && len(osAliases) > 0 {
 		alias := osAliases[0]
 		exactName := fmt.Sprintf("tool_1.0_%s_%s.tar.gz", goos, archExact)
@@ -472,7 +458,6 @@ func TestScoreGitHubAsset_OSAliases(t *testing.T) {
 		}
 	}
 
-	// Exact arch name must outscore its alias.
 	if aliasArch, ok := archAlias[goarch]; ok {
 		exactName := fmt.Sprintf("tool_1.0_%s_%s.tar.gz", goos, archExact)
 		aliasName := fmt.Sprintf("tool_1.0_%s_%s.tar.gz", goos, aliasArch)
@@ -490,16 +475,12 @@ func TestScoreGitHubAsset_OSAliases(t *testing.T) {
 	}
 }
 
-// TestScoreGitHubAsset_ArchAliases386 verifies 386↔i386↔x86 aliases on linux/386.
 func TestScoreGitHubAsset_ArchAliases386(t *testing.T) {
-	t.Parallel(
-	// scoreGitHubAsset is a pure function; test 386 aliases directly regardless
-	// of the current runtime arch.
-	)
+	t.Parallel()
 
 	cases := []struct {
 		name    string
-		wantPos bool // should score positive (OS matches linux)
+		wantPos bool
 	}{
 		{"tool_1.0_linux_386.tar.gz", true},
 		{"tool_1.0_linux_i386.tar.gz", true},
@@ -513,8 +494,6 @@ func TestScoreGitHubAsset_ArchAliases386(t *testing.T) {
 	}
 }
 
-// TestScoreGitHubAsset_ArchivePriority verifies every positively scored archive
-// format is supported and preferred in the documented order.
 func TestScoreGitHubAsset_ArchivePriority(t *testing.T) {
 	t.Parallel()
 	goos := runtime.GOOS
@@ -547,9 +526,6 @@ func TestScoreGitHubAsset_ArchivePriority(t *testing.T) {
 	}
 }
 
-// TestScoreGitHubAsset_IgnoredSuffix verifies that .sig/.sbom/.asc suffixes
-// yield a non-positive score (they should be filtered before scoring, but
-// scoreGitHubAsset itself should return 0 or negative for safety).
 func TestScoreGitHubAsset_IgnoredSuffix(t *testing.T) {
 	t.Parallel()
 	goos := runtime.GOOS
@@ -566,7 +542,6 @@ func TestScoreGitHubAsset_IgnoredSuffix(t *testing.T) {
 	}
 }
 
-// TestScoreGitHubAsset_SBOMIgnored verifies .sbom is in the ignored-asset list.
 func TestScoreGitHubAsset_SBOMIgnored(t *testing.T) {
 	t.Parallel()
 	if !githubReleaseAssetIgnored("tool_linux_amd64.sbom") {
@@ -577,14 +552,11 @@ func TestScoreGitHubAsset_SBOMIgnored(t *testing.T) {
 	}
 }
 
-// TestBestGitHubReleaseAsset_Scoring verifies the scorer picks the highest-scoring
-// asset deterministically when multiple candidates are present.
 func TestBestGitHubReleaseAsset_Scoring(t *testing.T) {
 	t.Parallel()
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
-	// alias names for current platform
 	osAliases := map[string]string{
 		"darwin":  "macos",
 		"windows": "win",
@@ -604,8 +576,6 @@ func TestBestGitHubReleaseAsset_Scoring(t *testing.T) {
 		archAlias = goarch
 	}
 
-	// Provide: alias-named asset AND exact-named asset.
-	// The scorer must pick the exact one.
 	exactName := fmt.Sprintf("tool_1.0_%s_%s.tar.gz", goos, goarch)
 	aliasName := fmt.Sprintf("tool_1.0_%s_%s.tar.gz", osAlias, archAlias)
 
@@ -618,20 +588,16 @@ func TestBestGitHubReleaseAsset_Scoring(t *testing.T) {
 	if !ok {
 		t.Fatal("bestGitHubReleaseAsset: no match")
 	}
-	// When exact and alias names differ, exact should win.
 	if exactName != aliasName && got.Name != exactName {
 		t.Errorf("bestGitHubReleaseAsset picked %q, want exact %q", got.Name, exactName)
 	}
 }
 
-// TestBestGitHubReleaseAsset_TieIsDeterministic verifies that when two assets
-// have identical scores, the pick is stable (same result regardless of input order).
 func TestBestGitHubReleaseAsset_TieIsDeterministic(t *testing.T) {
 	t.Parallel()
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
-	// Two assets that will always score the same (same OS, arch, archive type).
 	a1 := githubAsset{ID: "1", Name: fmt.Sprintf("tool_v1_%s_%s_variant-a.tar.gz", goos, goarch), BrowserDownloadURL: "https://example.test/a.tar.gz"}
 	a2 := githubAsset{ID: "2", Name: fmt.Sprintf("tool_v1_%s_%s_variant-b.tar.gz", goos, goarch), BrowserDownloadURL: "https://example.test/b.tar.gz"}
 
@@ -645,8 +611,6 @@ func TestBestGitHubReleaseAsset_TieIsDeterministic(t *testing.T) {
 	}
 }
 
-// TestBestGitHubReleaseAsset_LinuxLibcPreference verifies that on Linux,
-// a musl asset is preferred over a glibc/gnu asset when both otherwise match.
 func TestBestGitHubReleaseAsset_LinuxLibcPreference(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS != "linux" {
@@ -666,8 +630,6 @@ func TestBestGitHubReleaseAsset_LinuxLibcPreference(t *testing.T) {
 	}
 }
 
-// TestBestGitHubReleaseAsset_PrefersTarGzOverZip verifies archive-type preference
-// when the platform tokens match equally.
 func TestBestGitHubReleaseAsset_PrefersTarGzOverZip(t *testing.T) {
 	t.Parallel()
 	goos := runtime.GOOS

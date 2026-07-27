@@ -77,6 +77,7 @@ automatically by Omni config writes.
 | `groups` | Reusable and special host groups. |
 | `hosts` | Host to reusable-group assignments. |
 | `ignore` | Global tool and dotfile ignore lists. |
+| `agents` | Agent skill packages, MCP servers, marketplaces, plugins, and agent-specific ignores. |
 
 ## Settings
 
@@ -296,6 +297,61 @@ Dot entries use two similarly named fields:
 Ignore state keeps noisy or intentionally unmanaged items out of normal sync
 and refresh flows.
 
+## Agent Skill Packages
+
+`agents.packages` is the durable desired-state manifest for skills:
+
+```json
+{
+  "agents": {
+    "packages": [
+      {
+        "source": "vercel-labs/agent-skills",
+        "ref": "main",
+        "skills": ["frontend-design"],
+        "agents": ["claude-code", "codex"]
+      }
+    ]
+  }
+}
+```
+
+`source` accepts GitHub shorthand, GitHub/GitLab/enterprise or generic Git/SSH
+URLs, repository subpaths, well-known HTTP catalogs, `file://` URLs, and local
+directories. `ref` is an optional branch, tag, or commit. Omitting `skills`
+installs every discovered skill; otherwise only the named skills are installed.
+Omitting `agents` uses the host's enabled Agent Targets.
+
+CLI source shorthand can combine these fields:
+`owner/repo#ref@skill`. Omni stores the normalized locator, ref, and selectors
+separately. Re-adding selected skills merges unique selectors; re-adding the
+source without a selector resets the package to all skills.
+
+Direct standalone `SKILL.md` HTTP URLs are not supported. HTTP publishers must
+provide `/.well-known/agent-skills/index.json`; the legacy
+`/.well-known/skills/index.json` location is still probed when the first
+returns 404. Both locations must serve a discovery index whose `$schema` is
+`https://schemas.agentskills.io/discovery/0.2.0/schema.json`, and every entry
+needs a `sha256:` `digest` that Omni verifies before writing anything to disk.
+An index in any other format — including the pre-0.2 flat file list — is
+rejected rather than installed. When neither location answers with a
+recognized index, an HTTP source falls back to Git acquisition.
+
+Beyond the conventional `skills/` layouts, Omni also harvests skill paths
+declared by a plugin manifest at `.claude-plugin/plugin.json`,
+`.claude-plugin/marketplace.json`, or `.plugin/plugin.json`. Every `skills`
+array found in those manifests is followed; a declared path is used directly
+when it holds a `SKILL.md`, otherwise its immediate subdirectories are scanned.
+Paths that escape the repository are rejected. Directories whose `SKILL.md`
+frontmatter is unusable are skipped with a warning rather than failing the
+whole package.
+
+Legacy `agents.skills` entries migrate into `agents.packages[].skills`.
+Legacy `.skill-lock.json` state is never written automatically. Sync and
+update leave legacy CLI-managed skill directories in place and warn about
+them; only `omni agents skills import` adopts those installations into the
+canonical package store.
+
 ## Agents Ignore
 
 ```json
@@ -312,7 +368,7 @@ and refresh flows.
 ```
 
 `agents.ignore` lists managed skill packages, MCP servers, plugins, and
-marketplaces by name, skipped during restore/sync — the agents equivalent of
+marketplaces by name, skipped during sync — the agents equivalent of
 the top-level `ignore` list for tools and dots. Ignored items still render,
 dimmed, under the Ignored section of the Agents tab, and are excluded from the
 dashboard's Agents attention count.

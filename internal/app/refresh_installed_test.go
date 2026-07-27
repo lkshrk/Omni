@@ -51,7 +51,6 @@ func TestRefreshInstalled_ScriptVersionFailurePreservesCachedState(t *testing.T)
 	}
 }
 
-// bulkCheckingStub extends stubProvider with the BulkChecker interface.
 type bulkCheckingStub struct {
 	stubProvider
 	bulk map[string]string // lowercase name → version
@@ -70,8 +69,6 @@ func (b *metadataCheckingStub) InstalledMetadataMap(_ context.Context) (map[stri
 	return b.metadata, nil
 }
 
-// bulkConcreteStub extends bulkCheckingStub with ConcreteResolver — models a
-// ecosystem provider like "node" that delegates to a concrete backend (e.g. "bun").
 type bulkConcreteStub struct {
 	bulkCheckingStub
 	concreteName string // the resolved backend binary
@@ -81,7 +78,6 @@ func (b *bulkConcreteStub) ResolvedName(_ context.Context) (string, error) {
 	return b.concreteName, nil
 }
 
-// isInstalledStub extends stubProvider with a configurable IsInstalled response.
 type isInstalledStub struct {
 	stubProvider
 	installedName string
@@ -148,10 +144,7 @@ func TestRefreshInstalled_CapturesConcreteProviderForEmptyProviderTool(t *testin
 }
 
 func TestRefreshInstalled_CapturesViaIsInstalledFallbackWhenBulkMisses(t *testing.T) {
-	t.Parallel(
-	// A configured empty-provider tool installed as a brew dependency/cask is not
-	// in the bulk "leaves" map, but a per-tool IsInstalled probe finds it.
-	)
+	t.Parallel()
 
 	prov := &isInstalledStub{
 		stubProvider:  stubProvider{name: "brew", available: true},
@@ -184,10 +177,7 @@ func TestRefreshInstalled_CapturesViaIsInstalledFallbackWhenBulkMisses(t *testin
 }
 
 func TestRefreshInstalled_CapturesConcreteManagerNotFamilyForEcosystemTool(t *testing.T) {
-	t.Parallel(
-	// A python-ecosystem tool installed via uv must be captured as the concrete
-	// "uv" provider, never the "python" family (which fails config validation).
-	)
+	t.Parallel()
 
 	prov := &multiManagerStub{
 		stubProvider: stubProvider{name: "python", available: true},
@@ -419,7 +409,6 @@ func TestRefreshInstalled_BulkPath_MarksNotInstalled(t *testing.T) {
 	}
 	a, cfgPath := newImportApp(t, prov)
 
-	// Pre-seed DB as installed.
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{{
@@ -483,9 +472,7 @@ func TestRefreshInstalled_MissingToolPreservesFailureState(t *testing.T) {
 }
 
 func TestRefreshInstalled_SlowPath_MarksInstalled(t *testing.T) {
-	t.Parallel(
-	// Provider has no BulkChecker — falls back to per-tool IsInstalled.
-	)
+	t.Parallel()
 
 	prov := &isInstalledStub{
 		stubProvider:  stubProvider{name: "pip", available: true},
@@ -536,13 +523,10 @@ func TestRefreshInstalled_UnavailableProvider_SkipsTool(t *testing.T) {
 		t.Fatalf("saving config: %v", err)
 	}
 
-	// RefreshInstalled should succeed (skipping unavailable provider).
 	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
 		t.Fatalf("RefreshInstalled: %v", err)
 	}
 
-	// Provider unavailable: the config-led row still shows (not vanished), but
-	// it must be not-installed since nothing was upserted.
 	tools, err := a.ListTools(context.Background(), "")
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
@@ -595,10 +579,6 @@ func TestRefreshInstalled_Progress_BulkProvider(t *testing.T) {
 	}
 }
 
-// ── TestRefreshInstalled_Progress_SlowPath ────────────────────────────────────
-
-// TestRefreshInstalled_Progress_SlowPath verifies that the progress callback is
-// called for a non-BulkChecker provider (slow-path IsInstalled per tool).
 func TestRefreshInstalled_Progress_SlowPath(t *testing.T) {
 	t.Parallel()
 	prov := &isInstalledStub{
@@ -633,10 +613,6 @@ func TestRefreshInstalled_Progress_SlowPath(t *testing.T) {
 	}
 }
 
-// ── TestRefreshInstalled_Progress_NilCallback ─────────────────────────────────
-
-// TestRefreshInstalled_Progress_NilCallback verifies that passing nil as the
-// progress callback works without panicking.
 func TestRefreshInstalled_Progress_NilCallback(t *testing.T) {
 	t.Parallel()
 	prov := &bulkCheckingStub{
@@ -654,7 +630,6 @@ func TestRefreshInstalled_Progress_NilCallback(t *testing.T) {
 		t.Fatalf("saving config: %v", err)
 	}
 
-	// Explicit nil callback — must not panic.
 	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
 		t.Fatalf("RefreshInstalled with nil callback: %v", err)
 	}
@@ -721,8 +696,6 @@ func TestRefreshInstalled_Progress_XofY(t *testing.T) {
 	}
 }
 
-// multiManagerStub implements provider.MultiManagerBulkChecker, returning
-// per-tool InstalledEntry values with distinct ConcreteManager attribution.
 type multiManagerStub struct {
 	stubProvider
 	entries map[string]provider.InstalledEntry

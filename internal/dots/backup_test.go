@@ -251,7 +251,6 @@ func TestBackupLocalPath_SkipsCacheDirs(t *testing.T) {
 		t.Fatalf("BackupLocalPath: %v", err)
 	}
 
-	// Tracked file should be backed up.
 	if _, err := os.Stat(filepath.Join(backup, "config.toml")); err != nil {
 		t.Errorf("config.toml should be in backup: %v", err)
 	}
@@ -259,7 +258,6 @@ func TestBackupLocalPath_SkipsCacheDirs(t *testing.T) {
 		t.Errorf("sub/real.txt should be in backup: %v", err)
 	}
 
-	// Cache dirs should be excluded.
 	for _, excluded := range []string{".cache", "node_modules", "__pycache__"} {
 		if _, err := os.Stat(filepath.Join(backup, excluded)); !os.IsNotExist(err) {
 			t.Errorf("%s should NOT be in backup, got err=%v", excluded, err)
@@ -271,14 +269,12 @@ func TestBackupLocalPathFrom_GitTrackedOnly(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Create a git repo with tracked + untracked files.
 	repo := filepath.Join(home, "dotfiles", "nvim", ".config", "nvim")
 	writeFile(t, filepath.Join(repo, "init.lua"), "-- config")
 	writeFile(t, filepath.Join(repo, "lua", "plugins.lua"), "-- plugins")
 	writeFile(t, filepath.Join(repo, ".cache", "huge.bin"), "100MB of cache")
 	writeFile(t, filepath.Join(repo, "node_modules", "dep", "index.js"), "module")
 
-	// git init + add only the tracked files
 	runGit(t, repo, "init")
 	runGit(t, repo, "config", "user.email", "t@t.com")
 	runGit(t, repo, "config", "user.name", "T")
@@ -298,7 +294,6 @@ func TestBackupLocalPathFrom_GitTrackedOnly(t *testing.T) {
 		t.Fatalf("BackupLocalPathFrom: %v", err)
 	}
 
-	// Tracked files present.
 	if _, err := os.Stat(filepath.Join(backup, "init.lua")); err != nil {
 		t.Errorf("init.lua should be in backup: %v", err)
 	}
@@ -306,7 +301,6 @@ func TestBackupLocalPathFrom_GitTrackedOnly(t *testing.T) {
 		t.Errorf("lua/plugins.lua should be in backup: %v", err)
 	}
 
-	// Untracked cache dirs absent.
 	for _, excluded := range []string{".cache", "node_modules"} {
 		if _, err := os.Stat(filepath.Join(backup, excluded)); !os.IsNotExist(err) {
 			t.Errorf("%s should NOT be in backup (untracked), got err=%v", excluded, err)
@@ -373,6 +367,36 @@ func TestBackupLocalPathFiltered_HonorsEntryIgnores(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(backup, skip)); !os.IsNotExist(err) {
 			t.Errorf("expected %s absent from backup, err = %v", skip, err)
 		}
+	}
+}
+
+func TestBackupLocalPathFiltered_HonorsIgnoresInsideGitRepository(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	target := filepath.Join(home, ".claude")
+	writeFile(t, filepath.Join(target, "settings.json"), "{}")
+	writeFile(t, filepath.Join(target, "projects", "session.jsonl"), "runtime")
+	runGit(t, target, "init", "-q")
+	runGit(t, target, "add", "settings.json", "projects/session.jsonl")
+
+	backup, err := dots.BackupLocalPathFilteredWithExecutor(
+		t.Context(),
+		nil,
+		target,
+		append(dots.DefaultIgnores(), "*", "!/settings.json"),
+	)
+	if err != nil {
+		t.Fatalf("BackupLocalPathFilteredWithExecutor: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(backup, "settings.json")); err != nil {
+		t.Fatalf("settings.json missing from backup: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(backup, "projects")); !os.IsNotExist(err) {
+		t.Fatalf("projects copied into filtered backup, stat err = %v", err)
 	}
 }
 

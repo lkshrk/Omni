@@ -11,9 +11,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// ─── Switch ───────────────────────────────────────────────────────────────────
-
-// SwitchResult describes the outcome of a provider switch for a single tool.
 type SwitchResult struct {
 	Name             string
 	FromProvider     string
@@ -28,11 +25,6 @@ type providerRepairTarget struct {
 	installedWith string
 }
 
-// Switch moves a single tool from one provider to another:
-//  1. installs via toProvider
-//  2. uninstalls from fromProvider (best-effort → warning)
-//  3. rewrites the config entry
-//  4. updates the DB
 func (a *App) Switch(ctx context.Context, name, fromProvider, toProvider string) (*SwitchResult, error) {
 	if !a.knownProvider(fromProvider) {
 		return nil, fmt.Errorf("unknown provider %q", fromProvider)
@@ -40,6 +32,12 @@ func (a *App) Switch(ctx context.Context, name, fromProvider, toProvider string)
 	targetProvider, targetInstallWith, opProvider, toProv, err := a.switchTarget(toProvider)
 	if err != nil {
 		return nil, err
+	}
+
+	// Resolved outside withConfig: the route planner reads config itself and would deadlock under its lock.
+	var authored config.ToolInstallSpec
+	if spec, found, specErr := a.toolSpecSnapshot(name); specErr == nil && found {
+		authored = a.planInstallRoute(ctx, name, spec, nil).ConfiguredInstall
 	}
 
 	var (
@@ -77,20 +75,29 @@ func (a *App) Switch(ctx context.Context, name, fromProvider, toProvider string)
 			Package:      pkg,
 		}
 
-		// Skip uninstall when from == to: installing and immediately uninstalling
-		// the same provider would undo the install (e.g. cross-backend migration
-		// within the python provider where the registered name stays "python").
+		// Skip uninstall when from == to: it would undo the install (cross-backend migration within one provider).
 		if fromProvider != toProvider {
 			if uninstallErr := a.uninstallInstallSpec(ctx, install, name, opProvider, targetInstallWith); uninstallErr != nil {
 				result.UninstallWarning = uninstallErr
 			}
 		}
 
-		setDefaultToolProviderCandidate(&spec, config.ToolInstallSpec{
+		candidate := config.ToolInstallSpec{
 			Provider: targetProvider,
 			Package:  pkg,
 			Options:  cloneOptionMap(install.Options),
-		})
+		}
+		// A recipe and its source describe the tool, not the provider. Writing back the materialized
+		// options while dropping them would flatten a recipe-backed entry into a bare provider row, so a
+		// reinstall that lands on the same provider keeps what the entry was authored with.
+		if authored.Provider == targetProvider && authored.Recipe != nil {
+			candidate.Options = cloneOptionMap(authored.Options)
+			candidate.Bin = authored.Bin
+			candidate.BinDir = authored.BinDir
+			candidate.Source = authored.Source
+			candidate.Recipe = authored.Recipe
+		}
+		setDefaultToolProviderCandidate(&spec, candidate)
 		cfg.Tools[name] = spec
 		return nil
 	})
@@ -148,34 +155,28 @@ func (a *App) switchTarget(toProvider string) (targetProvider, targetInstallWith
 	return targetProvider, targetInstallWith, opProvider, prov, nil
 }
 
-// oldEnvCleaner is an optional interface that providers can implement to
-// explicitly remove a package from a specific concrete backend's environment.
-// This is used during cross-backend migration within the same logical provider
-// (e.g. uv→pip3 both map to "python" but live in different envs).
+// Implemented by providers that must remove a package from a specific concrete backend during cross-backend migration.
 type oldEnvCleaner interface {
 	UninstallFrom(ctx context.Context, tool provider.Tool, binary string) error
 }
 
-// MigrateInstallation reinstalls a tool via its config-declared provider.
-// installedWith is the concrete binary stored in InstalledWith (may be a raw
-// binary like "uv" or "pip3" that isn't a registered provider, or it may be a
-// fully registered provider name like "brew"). configProv is always a registered
-// provider name.
-//
-// Three cases:
-//  1. installedWith is a different registered provider (e.g. brew vs pip):
-//     config already has the entry under configProv; install via configProv,
-//     uninstall from installedWith, no config rewrite needed.
-//  2. installedWith is an unregistered binary (e.g. "uv", "pip3"):
-//     from=configProv; Switch runs same-provider install; old env is cleaned up
-//     via UninstallFrom when the provider supports it.
-//  3. installedWith == configProv: already consistent; Switch is a no-op install.
-func (a *App) MigrateInstallation(ctx context.Context, name, installedWith, configProv string) (*SwitchResult, error) {
+// MigrateInstallation — installedWith may be a raw binary (uv, pip3) rather than a registered provider name; configProv always is one.
+func (a *App) MigrateInstallation(ctx context.Context, name, installedWith, configProv string) (res *SwitchResult, err error) {
+	// Every branch below reinstalls without going through App.Install, so an unpinned recipe records the
+	// release it landed on here; callers refresh installed state afterwards and read it back from config.
+	defer func() {
+		spec, found, snapshotErr := a.toolSpecSnapshot(name)
+		if snapshotErr != nil || !found {
+			return
+		}
+		_, recordErr := a.recordConfiguredGitHubRecipeVersion(ctx, name, a.planInstallRoute(ctx, name, spec, nil).ConfiguredInstall)
+		if recordErr != nil && err == nil {
+			err = recordErr
+		}
+	}()
 	_, installedIsRegistered := a.registry.Get(installedWith)
 
-	// Case 1: installedWith is a different registered provider.
-	// The config already records configProv as the intended provider.
-	// Reinstall via configProv, remove from installedWith — no config rewrite.
+	// Config already records configProv, so reinstall via it and remove from installedWith without a rewrite.
 	if installedIsRegistered && installedWith != configProv {
 		return a.migrateWrongProvider(ctx, name, installedWith, configProv)
 	}
@@ -189,16 +190,12 @@ func (a *App) MigrateInstallation(ctx context.Context, name, installedWith, conf
 		return nil, err
 	}
 
-	// When from == configProv the tool's registered provider didn't change
-	// (only the concrete backend did, e.g. uv→pip3 within "python").
-	// Switch skipped the uninstall in that case, so we clean up the old env
-	// explicitly here.
+	// Switch skipped the uninstall when only the concrete backend changed, so clean the old env here.
 	if from == configProv && installedWith != "" {
 		if prov, ok := a.registry.Get(configProv); ok {
 			if cleaner, ok := prov.(oldEnvCleaner); ok {
 				tgt := provider.Tool{Name: name, Provider: configProv, Package: result.Package}
-				// Best-effort: if the tool was already absent from the old env
-				// (e.g. already migrated) the error is silently ignored.
+				// Best-effort: the tool may already be absent from the old env.
 				if cleanErr := cleaner.UninstallFrom(ctx, tgt, installedWith); cleanErr != nil {
 					result.UninstallWarning = cleanErr
 				}
@@ -335,9 +332,7 @@ func (a *App) migrateSameProviderBackend(ctx context.Context, name, installedWit
 	return result, nil
 }
 
-// ReinstallWithDefault reinstalls the tool with its configured provider and
-// then refreshes installed state so DB ownership reflects the repaired state.
-// configProv is optional and only needed to disambiguate duplicate tool names.
+// ReinstallWithDefault — configProv is optional and only needed to disambiguate duplicate tool names.
 func (a *App) ReinstallWithDefault(ctx context.Context, name, configProv string) (*SwitchResult, error) {
 	target, err := a.providerRepairTarget(ctx, name, configProv)
 	if err != nil {
@@ -356,8 +351,6 @@ func (a *App) ReinstallWithDefault(ctx context.Context, name, configProv string)
 	return result, nil
 }
 
-// ReinstallWithDefaultAfterClearingInstallOverride removes the effective
-// install_with override, then reinstalls the tool with its ecosystem default.
 func (a *App) ReinstallWithDefaultAfterClearingInstallOverride(ctx context.Context, name, configProv string) (*SwitchResult, ClearInstallOverrideResult, error) {
 	target, err := a.providerRepairTarget(ctx, name, configProv)
 	if err != nil {
@@ -510,10 +503,7 @@ func (a *App) providerRepairTarget(ctx context.Context, name, configProv string)
 	return providerRepairTarget{name: t.Name, configProv: targetProvider, installedWith: t.InstalledWith}, nil
 }
 
-// migrateWrongProvider handles the syncWrongProv scenario: the tool is in config
-// under configProv but was physically installed via a different registered provider
-// (installedWith). We install via configProv, remove from installedWith, and update
-// the DB. The config entry is already correct — no rewrite required.
+// The config entry is already correct: install via configProv, remove from installedWith, no rewrite.
 func (a *App) migrateWrongProvider(ctx context.Context, name, installedWith, configProv string) (*SwitchResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -551,8 +541,7 @@ func (a *App) migrateWrongProvider(ctx context.Context, name, installedWith, con
 		return result, err
 	}
 
-	// Remove from the old (wrong) provider — best-effort. Skip when clearing an
-	// override revealed the same concrete owner as the ecosystem default.
+	// Skip when clearing an override revealed the same concrete owner as the ecosystem default.
 	installedOwner := installedWithForOperation(ctx, toProv, opProvider, install.InstallWith)
 	if installedWith == installedOwner {
 		result.FromProvider = ""
@@ -565,7 +554,6 @@ func (a *App) migrateWrongProvider(ctx context.Context, name, installedWith, con
 		}
 	}
 
-	// Update DB: mark installed under configProv, remove stale installedWith entry.
 	if err := a.readDB().Upsert(ctx, &database.ToolCache{
 		Name:          name,
 		Provider:      install.Provider,

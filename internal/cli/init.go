@@ -17,6 +17,8 @@ func newBootstrapCmd(state *rootState) *cobra.Command {
 	var flagImport bool
 	var flagNoImport bool
 	var flagImportConfig string
+	var flagImportSkills bool
+	var flagNoImportSkills bool
 
 	cmd := &cobra.Command{
 		Use:     "bootstrap",
@@ -53,15 +55,16 @@ Run 'omni bootstrap' on every new machine to reproduce your environment.`,
 			}
 			fmt.Fprintln(out)
 
+			skillsChoice := skillsImportChoice{force: flagImportSkills, skip: flagNoImportSkills}
 			if plan.HasConfig {
-				return runExistingConfigBootstrap(cmd, state, a)
+				return runExistingConfigBootstrap(cmd, state, a, skillsChoice)
 			}
 			importedConfig, err := maybeImportExistingConfig(cmd.Context(), state, a, flagImportConfig)
 			if err != nil {
 				return err
 			}
 			if importedConfig {
-				return runExistingConfigBootstrap(cmd, state, a)
+				return runExistingConfigBootstrap(cmd, state, a, skillsChoice)
 			}
 
 			updateQuarantine := promptBootstrapUpdateQuarantine(state)
@@ -90,7 +93,6 @@ Run 'omni bootstrap' on every new machine to reproduce your environment.`,
 			fmt.Fprintln(out)
 			printBootstrapHost(applied.Host)
 
-			// ── 7. Import prompt ──────────────────────────────────────────────
 			doImport := flagImport
 			if !flagImport && !flagNoImport {
 				doImport = promptYesNo(state, "Import currently installed tools?", true)
@@ -120,14 +122,14 @@ Run 'omni bootstrap' on every new machine to reproduce your environment.`,
 				fmt.Fprintln(out)
 			}
 
-			// ── 8. Sync prompt ────────────────────────────────────────────────
+			runSkillsImportSection(cmd, state, a, skillsChoice)
+
 			if promptYesNo(state, "Run sync now to install all tools from config?", doImport) {
 				if err := runToolSyncSection(ctx, a); err != nil {
 					return err
 				}
 			}
 
-			// ── 9. Dots setup ─────────────────────────────────────────────────
 			if err := runDotsInitSection(ctx, a); err != nil {
 				// Non-fatal: dots is optional during bootstrap.
 				fmt.Fprintf(errOut, "warning: dots setup: %v\n", err)
@@ -136,7 +138,6 @@ Run 'omni bootstrap' on every new machine to reproduce your environment.`,
 				return err
 			}
 
-			// ── 10. Next steps ────────────────────────────────────────────────
 			fmt.Fprintln(out, "Next steps:")
 			fmt.Fprintln(out, "  omni sync        — install all tools from config on this machine")
 			fmt.Fprintln(out, "  omni ui          — explore and manage tools interactively")
@@ -149,6 +150,8 @@ Run 'omni bootstrap' on every new machine to reproduce your environment.`,
 	cmd.Flags().BoolVar(&flagImport, "import", false, "import installed tools without prompting")
 	cmd.Flags().BoolVar(&flagNoImport, "no-import", false, "skip importing installed tools")
 	cmd.Flags().StringVar(&flagImportConfig, "import-config", "", "import an existing settings.json before bootstrapping")
+	cmd.Flags().BoolVar(&flagImportSkills, "import-skills", false, "import existing agent skill packages without prompting")
+	cmd.Flags().BoolVar(&flagNoImportSkills, "no-import-skills", false, "skip importing existing agent skill packages")
 	return cmd
 }
 
@@ -187,7 +190,7 @@ func maybeImportExistingConfig(_ context.Context, state *rootState, a *app.App, 
 	return true, nil
 }
 
-func runExistingConfigBootstrap(cmd *cobra.Command, state *rootState, a *app.App) error {
+func runExistingConfigBootstrap(cmd *cobra.Command, state *rootState, a *app.App, skills skillsImportChoice) error {
 	ctx := cmd.Context()
 	out := cmdOut(cmd)
 	fmt.Fprintf(out, "Config already exists at %s\n", a.ConfigPath)
@@ -213,6 +216,8 @@ func runExistingConfigBootstrap(cmd *cobra.Command, state *rootState, a *app.App
 			fmt.Fprintf(out, "✓ Host %q is ready with groups: %s\n\n", active, groupList(groups))
 		}
 	}
+
+	runSkillsImportSection(cmd, state, a, skills)
 
 	if promptYesNo(state, "Run sync now to install configured tools?", true) {
 		if err := runToolSyncSection(ctx, a); err != nil {
@@ -256,6 +261,49 @@ func runToolSyncSection(ctx context.Context, a *app.App) error {
 	return nil
 }
 
+type skillsImportChoice struct {
+	force bool
+	skip  bool
+}
+
+// Adoption rewrites existing installs as links into Omni's store, so it never runs without consent, and every failure stays non-fatal.
+func runSkillsImportSection(cmd *cobra.Command, state *rootState, a *app.App, choice skillsImportChoice) {
+	if choice.skip {
+		return
+	}
+	cfg, err := a.LoadConfig()
+	if err != nil {
+		fmt.Fprintf(cmdErr(cmd), "warning: checking agent skills: %v\n", err)
+		return
+	}
+	if !a.SkillsEnabled(cfg) {
+		return
+	}
+	unmanaged, err := a.UnmanagedSkillPackages(cmd.Context())
+	if err != nil {
+		fmt.Fprintf(cmdErr(cmd), "warning: checking agent skills: %v\n", err)
+		return
+	}
+	if len(unmanaged) == 0 {
+		return
+	}
+	if !choice.force {
+		question := fmt.Sprintf(
+			"Import %d existing agent skill package(s)? (adopts legacy CLI-managed installs)", len(unmanaged))
+		// Fail-closed: an unanswered prompt must never adopt real skill installs in CI.
+		if !promptYesNoFailClosed(state, question, true) {
+			return
+		}
+	}
+	diff, err := a.ImportSkills(cmd.Context(), app.ImportSkillsOptions{})
+	if err != nil {
+		fmt.Fprintf(cmdErr(cmd), "warning: importing agent skills: %v\n", err)
+		return
+	}
+	printImportSkillsDiff(cmdOut(cmd), diff)
+	fmt.Fprintln(cmdOut(cmd))
+}
+
 func runDotsSyncSection(ctx context.Context, a *app.App) error {
 	configured, err := a.DotsSyncConfigured()
 	if err != nil {
@@ -293,7 +341,6 @@ func markBootstrapComplete(ctx context.Context, a *app.App) error {
 	return nil
 }
 
-// ensureHost guarantees that this machine has an active host entry.
 func ensureHost(a *app.App) error {
 	result, err := a.EnsureBootstrapHost()
 	if err != nil {
@@ -311,11 +358,7 @@ func printBootstrapHost(result app.BootstrapHostResult) {
 	fmt.Fprintf(stdOut(), "✓ Using host %q with groups: %s\n\n", result.Host, groupList(result.Groups))
 }
 
-// ─── dots bootstrap section ───────────────────────────────────────────────────
-
-// runDotsInitSection runs the interactive dots setup during omni bootstrap.
-// It is non-fatal: if the user skips (empty input) or an error occurs the
-// caller logs a warning and continues.
+// Non-fatal: a skip or an error only makes the caller warn and continue.
 func runDotsInitSection(ctx context.Context, a *app.App) error {
 	if ctx == nil {
 		ctx = context.Background()

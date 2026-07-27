@@ -521,6 +521,9 @@ func ReconcileIssueLines(result *ReconcileResult) []string {
 	if issues.UpgradeFailures > 0 {
 		lines = append(lines, textutil.PluralCount(issues.UpgradeFailures, "tool", "tools")+" failed to upgrade")
 	}
+	if issues.AgentFailures > 0 {
+		lines = append(lines, textutil.PluralCount(issues.AgentFailures, "agent operation", "agent operations")+" failed")
+	}
 	if issues.DotsConflicts > 0 {
 		lines = append(lines, textutil.PluralCount(issues.DotsConflicts, "dot entry", "dot entries")+" "+reconcileIssueVerb(issues.DotsConflicts)+" conflicts")
 	}
@@ -815,8 +818,7 @@ func progressEventNeedsAdmin(event isync.ProgressEvent) bool {
 }
 
 func isPrivilegeErrorText(message string) bool {
-	// Route through the single classifier (privilege.go) so this consumer cannot
-	// drift from the other one.
+	// Routed through the single classifier in privilege.go so the two consumers cannot drift.
 	return isPrivilegedInstallFailure(message)
 }
 

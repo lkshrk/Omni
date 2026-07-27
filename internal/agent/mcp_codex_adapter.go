@@ -20,7 +20,6 @@ type codexMcpAdapter struct {
 	lookupEnv func(string) (string, bool)
 }
 
-// NewCodexMcpAdapter returns an McpAdapter that delegates to the codex CLI.
 func NewCodexMcpAdapter(
 	execFn func(context.Context, string, ...string) (string, string, error),
 	lookupEnv func(string) (string, bool),
@@ -285,7 +284,6 @@ func (a *codexMcpAdapter) List(ctx context.Context) ([]InstalledMcpServer, error
 	return parseCodexMcpList(stdout)
 }
 
-// codexMcpListEntry mirrors the shape of one element of `codex mcp list --json`.
 type codexMcpListEntry struct {
 	Name      string `json:"name"`
 	Transport struct {
@@ -298,7 +296,21 @@ type codexMcpListEntry struct {
 	} `json:"transport"`
 }
 
-// parseCodexMcpList parses `codex mcp list --json` output.
+func codexReportedHeaders(e codexMcpListEntry) map[string]string {
+	total := len(e.Transport.HTTPHeaders) + len(e.Transport.EnvHTTPHeaders)
+	if total == 0 {
+		return nil
+	}
+	headers := make(map[string]string, total)
+	for name, value := range e.Transport.HTTPHeaders {
+		headers[name] = value
+	}
+	for name, envName := range e.Transport.EnvHTTPHeaders {
+		headers[name] = "${" + envName + "}"
+	}
+	return headers
+}
+
 func parseCodexMcpList(out string) ([]InstalledMcpServer, error) {
 	var entries []codexMcpListEntry
 	if err := json.Unmarshal([]byte(out), &entries); err != nil {
@@ -311,25 +323,18 @@ func parseCodexMcpList(out string) ([]InstalledMcpServer, error) {
 	for _, e := range entries {
 		s := InstalledMcpServer{Name: e.Name}
 		switch e.Transport.Type {
-		case "streamable_http":
-			s.Transport = "http"
-			s.URL = e.Transport.URL
-			s.HeadersKnown = true
-			if len(e.Transport.HTTPHeaders)+len(e.Transport.EnvHTTPHeaders) > 0 {
-				s.Headers = make(map[string]string, len(e.Transport.HTTPHeaders)+len(e.Transport.EnvHTTPHeaders))
-				for name, value := range e.Transport.HTTPHeaders {
-					s.Headers[name] = value
-				}
-				for name, envName := range e.Transport.EnvHTTPHeaders {
-					s.Headers[name] = "${" + envName + "}"
-				}
-			}
 		case "stdio":
 			s.Transport = "stdio"
 			s.Command = strings.TrimSpace(strings.Join(append([]string{e.Transport.Command}, e.Transport.Args...), " "))
 		default:
+			// codex carries the header tables on every remote transport, so the flavour it names must not gate HeadersKnown.
 			s.Transport = e.Transport.Type
+			if e.Transport.Type == "streamable_http" {
+				s.Transport = "http"
+			}
 			s.URL = e.Transport.URL
+			s.Headers = codexReportedHeaders(e)
+			s.HeadersKnown = true
 		}
 		servers = append(servers, s)
 	}

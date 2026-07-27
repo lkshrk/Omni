@@ -1,7 +1,4 @@
-// Package python implements the abstract Python tools provider.
-// Delegates to whichever Python package manager is available
-// (uv preferred, then pip3, then pip). The active manager can be pinned via
-// settings.ecosystems.python.manager in the config file.
+// Package python delegates to uv, then pip3, then pip; pinnable via settings.ecosystems.python.manager.
 package python
 
 import (
@@ -19,7 +16,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// backend describes one Python package manager.
 type backend struct {
 	binary       string
 	pythonBinary string
@@ -33,7 +29,6 @@ var supported = []backend{
 	{binary: "pip", pythonBinary: "python"},
 }
 
-// Provider is the abstract Python tools provider.
 type Provider struct {
 	exec       executor.Executor
 	hint       string // "", "uv", "pip3", "pip" — from settings.ecosystems.python.manager
@@ -51,7 +46,6 @@ func New(exec executor.Executor, hint string) *Provider {
 	}
 }
 
-// newWithPyPI creates a Provider with a custom PyPI URL and HTTP client.
 // Intended for use in tests only.
 func newWithPyPI(exec executor.Executor, hint, pypiURL string, client *http.Client) *Provider {
 	return &Provider{exec: exec, hint: hint, httpClient: client, pypiURL: pypiURL}
@@ -83,7 +77,6 @@ func (p *Provider) ErrorSolutions(code provider.ErrorCode, tool provider.Tool) [
 	}
 }
 
-// resolve returns the active backend, honouring hint when set.
 func (p *Provider) resolve(ctx context.Context) (*backend, error) {
 	if p.hint != "" {
 		for i := range supported {
@@ -109,8 +102,7 @@ func (p *Provider) Available(ctx context.Context) (bool, error) {
 	return err == nil, nil
 }
 
-// ResolvedName implements provider.ConcreteResolver.
-// Returns the binary name of the active backend ("uv", "pip3", or "pip").
+// ResolvedName — Returns the binary name of the active backend ("uv", "pip3", or "pip").
 func (p *Provider) ResolvedName(ctx context.Context) (string, error) {
 	b, err := p.resolve(ctx)
 	if err != nil {
@@ -118,8 +110,6 @@ func (p *Provider) ResolvedName(ctx context.Context) (string, error) {
 	}
 	return b.binary, nil
 }
-
-// ─── command helpers ──────────────────────────────────────────────────────────
 
 func (b *backend) installArgs(pkg string) []string {
 	if b.usesTool {
@@ -149,8 +139,6 @@ func uvLatestToolSpec(pkg string) string {
 	return pkg + "@latest"
 }
 
-// ─── Provider interface ──────────────────────────────────────────────────────
-
 func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	b, err := p.resolve(ctx)
 	if err != nil {
@@ -159,7 +147,6 @@ func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	return p.installWith(ctx, tool, b)
 }
 
-// InstallWithManager installs a package using the selected concrete Python manager.
 func (p *Provider) InstallWithManager(ctx context.Context, tool provider.Tool, manager string) error {
 	b := backendByName(manager)
 	if b == nil {
@@ -196,11 +183,7 @@ func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 	return nil
 }
 
-// UninstallFrom uninstalls the package using a specific binary, regardless of
-// the currently configured python ecosystem manager. Used during provider migration to
-// clean up from the old manager's environment (e.g. uv→pip3 leaves the tool
-// in uv's isolated env; this removes it explicitly).
-// Returns nil if the binary is not recognised or the tool wasn't in that env.
+// UninstallFrom — Used during provider migration to clean the old manager's env, e.g. a tool left in uv's isolated env after uv to pip3.
 func (p *Provider) UninstallFrom(ctx context.Context, tool provider.Tool, binary string) error {
 	for i := range supported {
 		if supported[i].binary == binary {
@@ -226,7 +209,6 @@ func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	return p.upgradeWith(ctx, tool, b)
 }
 
-// UpgradeWithManager upgrades a package using the concrete Python manager that owns it.
 func (p *Provider) UpgradeWithManager(ctx context.Context, tool provider.Tool, manager string) error {
 	b := backendByName(manager)
 	if b == nil {
@@ -255,7 +237,6 @@ func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, s
 	return p.isInstalledWith(ctx, tool, b)
 }
 
-// IsInstalledWithManager checks package status using a specific concrete manager.
 func (p *Provider) IsInstalledWithManager(ctx context.Context, tool provider.Tool, manager string) (bool, string, error) {
 	b := backendByName(manager)
 	if b == nil {
@@ -322,11 +303,7 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 	return filtered, nil
 }
 
-// InstalledByManager implements provider.MultiManagerBulkChecker.
-// Probes every available backend (uv, pip3, pip) and returns per-tool attribution.
-// The effective backend (from resolve()) is probed first so it takes priority when
-// the same tool appears in multiple environments, then remaining backends fill in
-// tools that the effective manager doesn't own.
+// InstalledByManager — The effective backend is probed first so it wins when a tool exists in several environments.
 func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.InstalledEntry, error) {
 	var effectiveBinary string
 	if b, err := p.resolve(ctx); err == nil {
@@ -335,7 +312,6 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 
 	result := make(map[string]provider.InstalledEntry)
 
-	// probeBackend fetches the installed map for b and adds entries to result.
 	// First writer wins: caller controls priority by ordering calls.
 	probeBackend := func(b *backend) error {
 		if _, _, err := p.exec.Run(ctx, b.binary, "--version"); err != nil {
@@ -372,7 +348,6 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 		return nil
 	}
 
-	// Effective backend first (highest priority).
 	for i := range supported {
 		if supported[i].binary == effectiveBinary {
 			if err := probeBackend(&supported[i]); err != nil {
@@ -381,9 +356,7 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 			break
 		}
 	}
-	// Remaining backends fill in tools not owned by the effective manager.
-	// A fill-in backend that fails to list must not abort detection: skip it and
-	// keep the effective backend's attribution plus whatever else reports.
+	// A fill-in backend that fails to list must not abort detection; keep what the others report.
 	for i := range supported {
 		if supported[i].binary != effectiveBinary {
 			if err := probeBackend(&supported[i]); err != nil {
@@ -395,7 +368,6 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 	return result, nil
 }
 
-// InstalledMap implements provider.BulkChecker.
 func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) {
 	b, err := p.resolve(ctx)
 	if err != nil {
@@ -419,9 +391,7 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 	return retainPipOwned(m, owned), nil
 }
 
-// pipOwnedPackageSetScript returns distributions whose INSTALLER metadata says
-// pip. Distro packages share the interpreter and appear in pip list output, but
-// are owned and upgraded by the system package manager instead.
+// Distro packages share the interpreter and show up in pip list, but the system PM owns them.
 const pipOwnedPackageSetScript = `import importlib.metadata,json
 owned={}
 for d in importlib.metadata.distributions():
@@ -460,10 +430,7 @@ func retainPipOwned(items map[string]string, owned map[string]bool) map[string]s
 	return filtered
 }
 
-// cliToolSetScript returns a JSON object mapping lowercase package name → 1
-// for every pip package that installs a console_scripts or scripts entry point.
-// Distributions with broken/partial dist-info metadata (seen on some Ubuntu
-// apt-managed installs) are skipped individually instead of aborting the scan.
+// Maps lowercase name to 1 for packages with an entry point; broken dist-info is skipped, not fatal.
 const cliToolSetScript = `import importlib.metadata,json
 seen={}
 def has_cli(d):
@@ -482,9 +449,7 @@ for d in importlib.metadata.distributions():
 		seen[name.lower()]=1
 print(json.dumps(seen))`
 
-// CLIToolSet implements provider.CLIToolProvider.
-// For uv: all installed tools are CLI tools by definition (uv tool only installs CLI apps).
-// For pip3/pip: uses importlib.metadata to detect packages with entry points.
+// CLIToolSet — uv installs only CLI apps, so every uv tool qualifies; pip uses importlib.metadata entry points.
 func (p *Provider) CLIToolSet(ctx context.Context) (map[string]bool, error) {
 	b, err := p.resolve(ctx)
 	if err != nil {
@@ -516,7 +481,6 @@ func (p *Provider) CLIToolSet(ctx context.Context) (map[string]bool, error) {
 	return out, nil
 }
 
-// OutdatedMap implements provider.OutdatedChecker.
 func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	byManager, err := p.OutdatedByManager(ctx)
 	if err != nil {
@@ -536,8 +500,7 @@ func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	return result, nil
 }
 
-// OutdatedByManager probes Python managers in effective-manager priority order
-// and preserves manager attribution for cache rows with InstalledWith set.
+// OutdatedByManager — Preserves manager attribution for cache rows with InstalledWith set.
 func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string]string, error) {
 	var effectiveBinary string
 	b, err := p.resolve(ctx)
@@ -593,8 +556,7 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 	}
 	for i := range supported {
 		if supported[i].binary != effectiveBinary {
-			// Generic pip fill-in failures remain best-effort, but uv and context
-			// errors must propagate because either makes the aggregate incomplete.
+			// uv and context errors propagate; either one makes the aggregate incomplete.
 			if err := probeBackend(&supported[i]); err != nil {
 				if supported[i].usesTool || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return nil, err
@@ -609,8 +571,7 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 	return result, nil
 }
 
-// OutdatedInfoMap returns outdated package versions plus PyPI upload timestamps
-// when available.
+// OutdatedInfoMap — Enriches outdated versions with PyPI upload timestamps when available.
 func (p *Provider) OutdatedInfoMap(ctx context.Context) (map[string]provider.OutdatedInfo, error) {
 	byManager, err := p.OutdatedInfoByManager(ctx)
 	if err != nil {
@@ -630,8 +591,7 @@ func (p *Provider) OutdatedInfoMap(ctx context.Context) (map[string]provider.Out
 	return result, nil
 }
 
-// OutdatedInfoByManager preserves uv/pip attribution and enriches latest
-// versions with PyPI release upload metadata.
+// OutdatedInfoByManager — Preserves uv/pip attribution and adds PyPI release upload metadata.
 func (p *Provider) OutdatedInfoByManager(ctx context.Context) (map[string]map[string]provider.OutdatedInfo, error) {
 	byManager, err := p.OutdatedByManager(ctx)
 	if err != nil {
@@ -746,10 +706,7 @@ func parsePyPIUploadTime(raw string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// BulkDescribe fetches descriptions for multiple tools via a single show command.
-// For uv: runs `uv pip show pkg1 pkg2 ...`.
-// For pip3/pip: runs `pip3 show pkg1 pkg2 ...`.
-// Implements provider.BulkDescriber.
+// BulkDescribe — One `uv pip show` / `pip3 show` call for every tool.
 func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map[string]string, error) {
 	if len(tools) == 0 {
 		return nil, nil
@@ -775,7 +732,6 @@ func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map
 	return parsePipShowDescriptions(stdout), nil
 }
 
-// parsePipShowDescriptions extracts name→summary from multi-package `pip show` / `uv pip show` output.
 // Stanzas are separated by "---" lines; each stanza has "Name:" and "Summary:" fields.
 func parsePipShowDescriptions(output string) map[string]string {
 	m := make(map[string]string)
@@ -806,8 +762,6 @@ func parsePipShowDescriptions(output string) map[string]string {
 	return m
 }
 
-// ─── internal helpers ─────────────────────────────────────────────────────────
-
 // uvInstalledMap fetches `uv tool list` and returns lowercase-name→version.
 func (p *Provider) uvInstalledMap(ctx context.Context, b *backend) (map[string]string, error) {
 	stdout, _, err := p.exec.Run(ctx, b.binary, "tool", "list")
@@ -822,7 +776,6 @@ func (p *Provider) uvInstalledMap(ctx context.Context, b *backend) (map[string]s
 	return m, nil
 }
 
-// parseUVToolList parses `uv tool list` output.
 // Non-indented lines match "<name> v?<version>"; indented lines (binaries) are skipped.
 func parseUVToolList(stdout string) []provider.InstalledTool {
 	var tools []provider.InstalledTool
@@ -847,31 +800,22 @@ func parseUVToolList(stdout string) []provider.InstalledTool {
 	return tools
 }
 
-// parseUVOutdatedList parses `uv tool list --outdated` output.
-// Each outdated tool is shown as:
-//
-//	tool-name v<installed> (update available: v<latest>)
-//
-// The returned map contains lowercase-name → latestVersion.
-// Tools without an "update available" annotation are skipped.
+// Parses "tool-name v<installed> (update available: v<latest>)" to lowercase-name to latest; unannotated tools are skipped.
 func parseUVOutdatedList(stdout string) map[string]string {
 	m := make(map[string]string)
 	for _, line := range strings.Split(stdout, "\n") {
 		if line == "" || line[0] == ' ' || line[0] == '\t' || line[0] == '-' {
 			continue
 		}
-		// Look for the "(update available: vX.Y.Z)" suffix.
 		const marker = "(update available: "
 		idx := strings.Index(line, marker)
 		if idx < 0 {
 			continue
 		}
 		rest := line[idx+len(marker):]
-		// rest is "vX.Y.Z)" — trim the closing paren.
 		rest = strings.TrimSuffix(strings.TrimSpace(rest), ")")
 		latestVer := strings.TrimPrefix(rest, "v")
 
-		// Extract the tool name from the beginning of the line.
 		fields := strings.Fields(line[:idx])
 		if len(fields) == 0 {
 			continue

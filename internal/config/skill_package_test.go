@@ -71,7 +71,7 @@ func TestMigrateLegacySkillsToPackages(t *testing.T) {
 		Agents: config.AgentsConfig{
 			Skills: []config.ManifestSkill{
 				{Name: "a", Source: "o/r", Ref: "main", Agents: []string{"codex"}},
-				{Name: "b", Source: "o/r"},
+				{Name: "b", Source: "o/r", Agents: []string{"claude-code"}},
 				{Name: "c", Source: "x/y", Ref: "v2"},
 			},
 		},
@@ -86,6 +86,15 @@ func TestMigrateLegacySkillsToPackages(t *testing.T) {
 	if root.Agents.Packages[0].Source != "o/r" || root.Agents.Packages[0].Ref != "main" {
 		t.Errorf("first package = %+v", root.Agents.Packages[0])
 	}
+	if got := root.Agents.Packages[0].Skills; !equalStringSlices(got, []string{"a", "b"}) {
+		t.Errorf("first package skills = %v, want [a b]", got)
+	}
+	if got := root.Agents.Packages[0].Agents; !equalStringSlices(got, []string{"codex", "claude-code"}) {
+		t.Errorf("first package agents = %v, want [codex claude-code]", got)
+	}
+	if got := root.Agents.Packages[1].Skills; !equalStringSlices(got, []string{"c"}) {
+		t.Errorf("second package skills = %v, want [c]", got)
+	}
 	config.MigrateSkillPackages(root)
 	if len(root.Agents.Packages) != 2 {
 		t.Errorf("second migrate changed packages: %+v", root.Agents.Packages)
@@ -96,7 +105,7 @@ func TestSkillPackageJSONRoundTrip(t *testing.T) {
 	root := &config.RootConfig{
 		Agents: config.AgentsConfig{
 			Packages: []config.SkillPackage{
-				{Source: "vercel-labs/agent-skills", Ref: "main", Agents: []string{"codex"}},
+				{Source: "vercel-labs/agent-skills", Ref: "main", Skills: []string{"review"}, Agents: []string{"codex"}},
 			},
 		},
 		Groups: []*config.GroupConfig{
@@ -114,7 +123,22 @@ func TestSkillPackageJSONRoundTrip(t *testing.T) {
 	if len(got.Agents.Packages) != 1 || got.Agents.Packages[0].Source != "vercel-labs/agent-skills" {
 		t.Fatalf("packages = %+v", got.Agents.Packages)
 	}
+	if skills := got.Agents.Packages[0].Skills; !equalStringSlices(skills, []string{"review"}) {
+		t.Fatalf("package skills = %v, want [review]", skills)
+	}
 	if len(got.Groups[0].Skills) != 1 || got.Groups[0].Skills[0] != "vercel-labs/agent-skills" {
 		t.Fatalf("group skills = %+v", got.Groups[0].Skills)
 	}
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

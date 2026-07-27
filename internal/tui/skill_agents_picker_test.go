@@ -11,7 +11,6 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-// pressSpace returns a space key press (the Toggle binding).
 func pressSpace() tea.Msg { return tea.KeyPressMsg{Code: ' ', Text: " "} }
 
 func skillsModelWithRows(rows []app.SkillPackageRow) Model {
@@ -26,9 +25,7 @@ func skillsModelWithRows(rows []app.SkillPackageRow) Model {
 	return m
 }
 
-// TestSkillAgents_OpenPickerNilApp verifies pressing 'a' on a local installed
-// row with a nil app does not panic and does open the picker (openSkillAgentsPicker
-// guards nil app for the AgentPickerRows call, but still sets skillAgentsPicker=true).
+// openSkillAgentsPicker guards a nil app for the AgentPickerRows call but still sets skillAgentsPicker=true.
 func TestSkillAgents_OpenPickerNilApp(t *testing.T) {
 	t.Parallel()
 	m := skillsModelWithRows([]app.SkillPackageRow{
@@ -38,14 +35,11 @@ func TestSkillAgents_OpenPickerNilApp(t *testing.T) {
 
 	m = drive(m, pressRune('a'))
 
-	// openSkillAgentsPicker always sets skillAgentsPicker=true regardless of nil app.
 	if !m.skillAgentsPicker {
 		t.Error("skillAgentsPicker should be true after pressing 'a' on a local row")
 	}
 }
 
-// TestSkillAgents_PopupRenderChecks verifies renderSkillAgentsPicker shows
-// [x]/[ ] marks and the toggle/save/cancel footer hints.
 func TestSkillAgents_PopupRenderChecks(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -85,8 +79,6 @@ func TestSkillAgents_PopupRenderChecks(t *testing.T) {
 	}
 }
 
-// TestSkillAgents_SpaceToggles verifies space toggles the Targeted flag on the
-// cursor row.
 func TestSkillAgents_SpaceToggles(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -109,7 +101,6 @@ func TestSkillAgents_SpaceToggles(t *testing.T) {
 	}
 }
 
-// TestSkillAgents_UpDownMoveCursor verifies up/down move the cursor and clamp.
 func TestSkillAgents_UpDownMoveCursor(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -133,7 +124,6 @@ func TestSkillAgents_UpDownMoveCursor(t *testing.T) {
 		t.Errorf("cursor after 2nd down = %d, want 2", m.skillAgentsCursor)
 	}
 
-	// Clamped at last row.
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.skillAgentsCursor != 2 {
 		t.Errorf("cursor after clamped down = %d, want 2", m.skillAgentsCursor)
@@ -144,7 +134,6 @@ func TestSkillAgents_UpDownMoveCursor(t *testing.T) {
 		t.Errorf("cursor after up = %d, want 1", m.skillAgentsCursor)
 	}
 
-	// Clamp at 0.
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyUp})
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyUp})
 	if m.skillAgentsCursor != 0 {
@@ -152,7 +141,6 @@ func TestSkillAgents_UpDownMoveCursor(t *testing.T) {
 	}
 }
 
-// TestSkillAgents_EscCancels verifies esc closes the picker.
 func TestSkillAgents_EscCancels(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -170,8 +158,7 @@ func TestSkillAgents_EscCancels(t *testing.T) {
 	}
 }
 
-// TestSkillAgents_EnterSavesAndExits verifies enter closes the picker.
-// With nil app the save command is a no-op, but the picker state must close.
+// With a nil app the save command is a no-op, but the picker state must close.
 func TestSkillAgents_EnterSavesAndExits(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -190,9 +177,7 @@ func TestSkillAgents_EnterSavesAndExits(t *testing.T) {
 	}
 }
 
-// TestSkillAgents_SavedMsgUpdatesRows verifies skillAgentsSavedMsg replaces
-// skillsRows. The picker is already closed by the enter key handler before the
-// async cmd fires; the saved msg only updates row state.
+// The picker is already closed by the enter key handler before the async cmd fires; the saved msg only updates row state.
 func TestSkillAgents_SavedMsgUpdatesRows(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -216,8 +201,6 @@ func TestSkillAgents_SavedMsgUpdatesRows(t *testing.T) {
 	}
 }
 
-// TestSkillAgents_SavedMsgWithErrorPreservesRows verifies a failed save does
-// not replace skillsRows and sets skillsErr.
 func TestSkillAgents_SavedMsgWithErrorPreservesRows(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -238,22 +221,17 @@ func TestSkillAgents_SavedMsgWithErrorPreservesRows(t *testing.T) {
 	}
 }
 
-// TestSkillAgents_PerRowHintsEligibilityDriven verifies that the inline hint
-// line rendered under the selected installed row reflects agentsRowHints'
-// eligibility checks ("u update", "g group", "x ignore" for an installed,
-// non-ignored row) rather than a static per-context hint set, and that
-// list-level actions (restore/import/update) are not mixed into it — those
-// now live only in the tab footer.
+// The inline hint line must reflect agentsRowHints' eligibility rather than a static set, and list-level actions must stay out of it since those live only in the tab footer.
 func TestSkillAgents_PerRowHintsEligibilityDriven(t *testing.T) {
 	t.Parallel()
 	m := skillsModelWithRows([]app.SkillPackageRow{
-		{Source: "github.com/foo/caveman", Name: "caveman", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+		{Source: "github.com/foo/caveman", Name: "caveman", Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
 	})
 	m.skillsCursor = 0
 
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
 
-	for _, want := range []string{"u update", "g group", "x ignore"} {
+	for _, want := range []string{"u upgrade", "g group", "x ignore"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected per-row hint %q in viewSkillsBody, got:\n%s", want, out)
 		}
@@ -276,9 +254,7 @@ func TestSkillAgents_PerRowHintsEligibilityDriven(t *testing.T) {
 	}
 }
 
-// TestSkillAgents_FooterShowsListLevelActions verifies the skills-chip footer
-// (not a stray body line) surfaces the list-level bulk-action and refresh
-// actions.
+// The list-level bulk-action and refresh actions must surface in the skills-chip footer, not a stray body line.
 func TestSkillAgents_FooterShowsListLevelActions(t *testing.T) {
 	t.Parallel()
 	m := skillsModelWithRows([]app.SkillPackageRow{
@@ -294,29 +270,25 @@ func TestSkillAgents_FooterShowsListLevelActions(t *testing.T) {
 	}
 	joined := strings.Join(got, " · ")
 
-	for _, want := range []string{"U update all", "S sync all", "R refresh"} {
+	for _, want := range []string{"U upgrade all", "S sync all", "R refresh"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("footer missing %q, got %q", want, joined)
 		}
 	}
 
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
-	if strings.Contains(out, "U update all") {
+	if strings.Contains(out, "U upgrade all") {
 		t.Errorf("viewSkillsBody must not contain a stray bulk-action line, got:\n%s", out)
 	}
 }
 
-// newBrokenConfigApp returns an *app.App whose config path is a directory, so
-// every LoadConfig/withConfig call fails deterministically without touching
-// the network or the user's real config.
+// Its config path is a directory, so every LoadConfig/withConfig call fails deterministically without touching the network or the real config.
 func newBrokenConfigApp(t *testing.T) *app.App {
 	t.Helper()
 	return app.New(t.TempDir())
 }
 
-// TestOpenSkillAgentsPicker_ErrorSetsStatusAndKeepsPickerClosed verifies that
-// when SkillAgentRows fails, openSkillAgentsPicker returns a "✗ …" status cmd
-// and does NOT open the picker or mutate picker state.
+// When SkillAgentRows fails, openSkillAgentsPicker must return an error status cmd and leave picker state untouched.
 func TestOpenSkillAgentsPicker_ErrorSetsStatusAndKeepsPickerClosed(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -341,9 +313,6 @@ func TestOpenSkillAgentsPicker_ErrorSetsStatusAndKeepsPickerClosed(t *testing.T)
 	}
 }
 
-// TestOpenSkillAgentsPicker_SuccessOpensPicker verifies the success path with
-// a live app: picker opens, source and rows are set, cursor resets to 0, and
-// no status cmd is returned.
 func TestOpenSkillAgentsPicker_SuccessOpensPicker(t *testing.T) {
 	t.Parallel()
 	a := newScanPlanTestApp(t)
@@ -367,9 +336,7 @@ func TestOpenSkillAgentsPicker_SuccessOpensPicker(t *testing.T) {
 	}
 }
 
-// TestDoSetSkillGroupMemberships_ErrorCarriedInMsg verifies a failed group
-// update (unknown package source) propagates its error into
-// skillsGroupsUpdatedMsg with no rows.
+// An unknown package source propagates its error into skillsGroupsUpdatedMsg with no rows.
 func TestDoSetSkillGroupMemberships_ErrorCarriedInMsg(t *testing.T) {
 	t.Parallel()
 	a := newScanPlanTestApp(t)
@@ -393,8 +360,6 @@ func TestDoSetSkillGroupMemberships_ErrorCarriedInMsg(t *testing.T) {
 	}
 }
 
-// TestDoSetSkillGroupMemberships_SuccessReturnsRows verifies a successful
-// group update returns refreshed rows carrying the new membership.
 func TestDoSetSkillGroupMemberships_SuccessReturnsRows(t *testing.T) {
 	t.Parallel()
 	a := newScanPlanTestApp(t)

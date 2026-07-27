@@ -8,20 +8,16 @@ import (
 	"github.com/lkshrk/omni/internal/dots"
 )
 
-// DotsAddOptions controls the behaviour of DotsAdd.
 type DotsAddOptions struct {
 	// Name overrides the name inferred from the path.
 	Name string
-	// Group is the config group name to write the entry to.
 	// Defaults to the current host group when empty.
 	Group string
 	// Adopt moves the existing file or directory into the dots repo before linking.
-	Adopt bool
-	// Ignore is a list of per-entry ignore patterns.
+	Adopt  bool
 	Ignore []string
 }
 
-// DotsDeleteOptions controls the behaviour of DotsDeleteWithOptions.
 type DotsDeleteOptions struct {
 	// KeepLocal preserves a real local copy before deleting the repo package.
 	KeepLocal bool
@@ -36,21 +32,19 @@ type DotVariantInfo struct {
 }
 
 type DotsAddVariantOptions struct {
-	// Host is the short hostname for the variant. Defaults to the current host.
+	// Defaults to the current host.
 	Host string
-	// Package is the stow package directory for this variant. Defaults to
-	// "<name>@<host>".
+	// Defaults to "<name>@<host>".
 	Package string
 	// Sync immediately syncs the entry when Host is the current host.
 	Sync bool
 }
 
 type DotsRemoveVariantOptions struct {
-	// Host is the short hostname for the variant. Defaults to the current host.
+	// Defaults to the current host.
 	Host string
 }
 
-// DotHealth summarises the symlink health of a dots entry.
 type DotHealth string
 
 const (
@@ -60,7 +54,6 @@ const (
 	HealthNoSource DotHealth = "no-source" // source does not exist in repo
 )
 
-// DotStatus describes the current state of a single dots entry.
 type DotStatus struct {
 	Name       string        `json:"name"`
 	Package    string        `json:"package,omitempty"`
@@ -76,9 +69,7 @@ type DotStatus struct {
 	Counts     DotFileCounts `json:"counts,omitempty"`
 	IsDir      bool          `json:"is_dir,omitempty"`
 	Children   []DotChild    `json:"children,omitempty"`
-	// LastError is the most recent recorded sync failure for this entry, set
-	// only while the entry still needs attention. It explains WHY an entry is
-	// out of sync (e.g. the stow conflict message), not just that it is.
+	// Set only while the entry still needs attention; explains why an entry is out of sync.
 	LastError string `json:"last_error,omitempty"`
 
 	ignoredChildren []DotChild
@@ -113,7 +104,6 @@ func (c DotFileCounts) Total() int {
 	return c.Managed() + c.Ignored
 }
 
-// DotsStatusResult bundles symlink health with the git status string.
 type DotsStatusResult struct {
 	Entries         []DotStatus         `json:"entries"`
 	GitStatus       string              `json:"git_status"` // output of "git status --short" in the dots repo
@@ -150,19 +140,14 @@ type DotsSyncAvailability struct {
 
 const dotsContentDirName = "dotfiles"
 
-// ─── public API ───────────────────────────────────────────────────────────────
-
-// DotsConfigured reports whether dots_repo is set in settings.json.
 func (a *App) DotsConfigured() bool {
 	return DotsConfiguredInSettings(config.Settings{DotsRepo: a.dotsRepoPath()})
 }
 
-// DotsConfiguredInSettings reports whether settings contains a dots repo path.
 func DotsConfiguredInSettings(settings config.Settings) bool {
 	return strings.TrimSpace(settings.DotsRepo) != ""
 }
 
-// DotsSyncAvailabilityInSettings reports dotfile sync availability from settings.
 func DotsSyncAvailabilityInSettings(settings config.Settings) DotsSyncAvailability {
 	repoPath := strings.TrimSpace(settings.DotsRepo)
 	if !DotsConfiguredInSettings(settings) {

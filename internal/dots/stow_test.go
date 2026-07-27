@@ -10,8 +10,6 @@ import (
 	"github.com/lkshrk/omni/internal/executor"
 )
 
-// ─── CheckInstalled ───────────────────────────────────────────────────────────
-
 func TestCheckInstalled_True(t *testing.T) {
 	mock := &executor.MockExecutor{} // no error = stow found
 	if !dots.CheckInstalled(context.Background(), mock) {
@@ -30,8 +28,6 @@ func TestCheckInstalled_False(t *testing.T) {
 		t.Error("expected CheckInstalled == false when stow exits non-zero")
 	}
 }
-
-// ─── Restow ───────────────────────────────────────────────────────────────────
 
 func TestRestow_CallsStow(t *testing.T) {
 	home, _ := os.UserHomeDir()
@@ -74,8 +70,6 @@ func TestRestow_PropagatesError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
 
 func assertStowArgs(t *testing.T, got []string, mode, repo, home string, dryRun bool, packages []string) {
 	t.Helper()

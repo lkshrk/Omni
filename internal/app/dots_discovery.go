@@ -72,8 +72,6 @@ func buildIgnoredDotCandidateNames(registry *agent.Registry) map[string]struct{}
 	return names
 }
 
-// agentConfigDotCandidateNames returns agent-owned direct children of
-// ~/.config that dotfiles discovery must not surface as user dotfiles.
 func agentConfigDotCandidateNames(registry *agent.Registry) []string {
 	return registry.ConfigDotCandidateNames()
 }
@@ -112,8 +110,6 @@ var omniDotIgnorePatterns = dotAllowlistIgnorePatterns(
 	"settings.d/",
 )
 
-// DiscoverDotsEntries returns initial dots candidates from the managed repo
-// subtree, ~/.config, and well-known home-level dotfile paths.
 func DiscoverDotsEntries(repoPath string) ([]config.DotEntry, error) {
 	return discoverDotsEntries(repoPath, false, buildIgnoredDotCandidateNames(newAgentRegistry()))
 }
@@ -235,8 +231,7 @@ func appendMissingStrings(values []string, additions ...string) []string {
 	return values
 }
 
-// BootstrapDotsEntries adds discovered dots candidates to this host's machine
-// group without syncing or mutating local files.
+// BootstrapDotsEntries — Adds candidates without syncing or mutating local files.
 func (a *App) BootstrapDotsEntries() ([]config.DotEntry, error) {
 	var added []config.DotEntry
 	err := a.withConfig(func(rootCfg *config.RootConfig) error {
@@ -277,8 +272,7 @@ func (a *App) BootstrapDotsEntries() ([]config.DotEntry, error) {
 	return added, nil
 }
 
-// DotsAddDiscoveredEntry persists one currently discovered dotfile candidate to
-// a config group without adopting, linking, or otherwise mutating local files.
+// DotsAddDiscoveredEntry — Persists the candidate without adopting, linking, or otherwise mutating local files.
 func (a *App) DotsAddDiscoveredEntry(nameOrPath, groupName string) (config.DotEntry, error) {
 	return a.DotsAddDiscoveredEntryContext(context.Background(), nameOrPath, groupName)
 }
@@ -324,8 +318,6 @@ func (a *App) DotsAddDiscoveredEntryContext(ctx context.Context, nameOrPath, gro
 	return added, nil
 }
 
-// FindDiscoveredDotStatus returns the discovered (untracked) candidate status
-// matching nameOrPath by candidate name or target path.
 func (a *App) FindDiscoveredDotStatus(ctx context.Context, nameOrPath string) (DotStatus, bool, error) {
 	result, err := a.DiscoverDotsStatus(ctx)
 	if result == nil {
@@ -360,9 +352,7 @@ func findDiscoveredDotCandidate(candidates []config.DotEntry, nameOrPath string)
 	return config.DotEntry{}, false
 }
 
-// DiscoverUntrackedDotsEntries returns repo/local/outlier dots candidates that
-// are not already tracked by any configured group. It does not mutate config or
-// local files; callers can present the candidates for explicit user choice.
+// DiscoverUntrackedDotsEntries — Does not mutate config or local files; callers present the candidates for explicit user choice.
 func (a *App) DiscoverUntrackedDotsEntries() ([]config.DotEntry, error) {
 	rootCfg, err := a.loadConfig()
 	if err != nil {
@@ -521,9 +511,7 @@ func dotEntryForRepoPackage(stowPath, name string, isDir, includeIgnored bool, i
 	return config.DotEntry{}, false
 }
 
-// inferDotPathFromRepoPackage derives a home target from a stow package tree when
-// the package directory name does not match the mirrored home path (for example a
-// legacy "skill-lock.json" package that actually contains ".agents/.skill-lock.json").
+// Handles a package directory whose name does not match the mirrored home path.
 func inferDotPathFromRepoPackage(stowPath, packageName string) (string, bool) {
 	pkgDir := filepath.Join(stowPath, packageName)
 	info, err := os.Lstat(pkgDir)

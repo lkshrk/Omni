@@ -1,0 +1,38 @@
+# A latest command with no way to read the installed version cannot reach a verdict. That is permanent,
+# not a bad run, so omni warns and leaves the tool upgradable rather than reporting nothing at all.
+exec omni --config settings.json hosts ensure testhost
+exec sh -c 'printf "9.9.9\n" > latest-version'
+
+exec omni --config settings.json tools sync
+stdout 'done: mytool \(script\)'
+
+# The config declares options.latest with no options.version, which older builds rejected at load.
+exec omni --config settings.json tools refresh
+stderr 'installed version is unknown; set options.version'
+exec omni --config settings.json tools list mytool --format json
+stdout '"installed":true'
+# No verdict was reached, so none is invented: the tool is not reported outdated against a latest it
+# could not compare, and it stays upgradable rather than dropping out of the update flow entirely.
+! stdout '"state":"outdated"'
+! stdout 'latest_version'
+exec omni --config settings.json tools upgrade mytool --force
+stdout 'upgraded mytool'
+
+-- settings.json --
+{
+  "settings": {
+    "disabled_providers": ["apt", "apk", "dnf", "pacman", "zypper", "brew", "node", "bun", "pnpm", "npm", "python", "uv", "pip"]
+  },
+  "tools": {
+    "mytool": {
+      "provider": "script",
+      "options": {
+        "install": "touch installed-marker",
+        "check": "test -f installed-marker",
+        "latest": "cat latest-version"
+      }
+    }
+  },
+  "hosts": {"testhost": []},
+  "groups": [{"name": "testhost", "special": "host", "tools": ["mytool"]}]
+}

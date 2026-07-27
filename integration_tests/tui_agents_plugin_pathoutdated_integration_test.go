@@ -15,26 +15,7 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// TestTUIAgentsTabDetectsPathOutdatedVersionlessPlugin is a real end-to-end
-// check of the claude plugin outdated-detection fix: most marketplace
-// entries ship no manifest version at all (plugin_rows.go's Outdated doc
-// comment), so PluginRow.Outdated() falls back to PathOutdated — comparing,
-// via a REAL git subprocess against a REAL clone, the plugin's own source
-// subdirectory's last-touched commit at HEAD vs. at the installed commit.
-// This drives the actual omni binary, a fake `claude` binary on PATH (the
-// same technique as TestTUIAgentsTabRendersFakeClaudeStub), and a real git
-// repo standing in for the marketplace clone — nothing about git or the
-// outdated computation is mocked.
-//
-// The repo history is built so a naive "installed sha == repo HEAD" check
-// would get BOTH plugins wrong in opposite directions:
-//   - stable-plugin: installed right after an unrelated commit landed
-//     (so its installed sha is "newer" than the last commit that actually
-//     touched its own subdirectory) — must NOT show as outdated.
-//   - drifting-plugin: installed right after its own subdirectory's first
-//     commit, then modified again by a later commit — must show as
-//     outdated, even though nothing about repo-HEAD-vs-installed-sha
-//     equality would prove that on its own.
+// The fixture history is built so a naive "installed sha == repo HEAD" check would get both plugins wrong in opposite directions.
 func TestTUIAgentsTabDetectsPathOutdatedVersionlessPlugin(t *testing.T) {
 	bin := buildOmniBinary(t)
 	root := t.TempDir()
@@ -103,12 +84,9 @@ func TestTUIAgentsTabDetectsPathOutdatedVersionlessPlugin(t *testing.T) {
 	if !strings.Contains(screen[installedIdx:], "stable-plugin") {
 		t.Fatalf("expected stable-plugin under Installed, screen:\n%s", screen)
 	}
-	_ = sha3 // referenced only to document the fixture's final HEAD in test failure messages if needed
+	_ = sha3
 }
 
-// buildPathOutdatedFixtureRepo creates a real git repo at root standing in
-// for a marketplace clone, with the exact three-commit history the test's
-// doc comment describes, and returns the three commit shas in order.
 func buildPathOutdatedFixtureRepo(t *testing.T, root string, env []string) (sha1, sha2, sha3 string) {
 	t.Helper()
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -162,9 +140,6 @@ func buildPathOutdatedFixtureRepo(t *testing.T, root string, env []string) (sha1
 	return sha1, sha2, sha3
 }
 
-// writeClaudeInstalledPluginsJSON writes ~/.claude/plugins/installed_plugins.json
-// with one gitCommitSha entry per identity ("name@marketplace" → sha),
-// mirroring the real file's shape (see readClaudeInstalledPluginShas).
 func writeClaudeInstalledPluginsJSON(t *testing.T, home string, shaByIdentity map[string]string) {
 	t.Helper()
 	dir := filepath.Join(home, ".claude", "plugins")
@@ -187,10 +162,7 @@ func writeClaudeInstalledPluginsJSON(t *testing.T, home string, shaByIdentity ma
 	}
 }
 
-// writeFakePathOutdatedClaudeStub writes a fake `claude` binary reporting
-// both fixture plugins as installed, with no version field on either (the
-// common real-world case per claudeAvailableEntry's doc comment) — only a
-// source path, so the outdated computation must fall back to PathOutdated.
+// Reports both fixture plugins installed with no version field, forcing the PathOutdated fallback.
 func writeFakePathOutdatedClaudeStub(t *testing.T, binDir string) {
 	t.Helper()
 	script := `#!/bin/sh

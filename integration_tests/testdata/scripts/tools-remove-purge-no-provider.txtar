@@ -1,0 +1,6 @@
+exec omni --config settings.json hosts ensure testhost
+! exec omni --config settings.json tools remove --purge ripgrep
+stderr '--provider is required'
+
+-- settings.json --
+{}

@@ -2,69 +2,120 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
 
+	"github.com/lkshrk/omni/internal/agent"
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// upsertPackage adds source to the manifest (ungrouped) or updates its ref when
-// already present. Returns the new slice and whether a new package was added.
-func upsertPackage(pkgs []config.SkillPackage, source, ref string) ([]config.SkillPackage, bool) {
+// A selectorless re-add resets the package to all discovered skills.
+func upsertPackage(pkgs []config.SkillPackage, pkg config.SkillPackage) ([]config.SkillPackage, bool) {
 	for i := range pkgs {
-		if pkgs[i].Source == source {
-			pkgs[i].Ref = ref
+		if pkgs[i].Source == pkg.Source {
+			pkgs[i].Ref = pkg.Ref
+			if len(pkg.Skills) == 0 {
+				pkgs[i].Skills = nil
+			} else {
+				for _, skill := range pkg.Skills {
+					if !slices.Contains(pkgs[i].Skills, skill) {
+						pkgs[i].Skills = append(pkgs[i].Skills, skill)
+					}
+				}
+			}
 			return pkgs, false
 		}
 	}
-	return append(pkgs, config.SkillPackage{Source: source, Ref: ref}), true
+	return append(pkgs, pkg), true
 }
 
-// AddSkillPackage registers a package in the manifest (ungrouped) and installs
-// it via the skills CLI. input may be owner/repo, owner/repo@skill, owner/repo#ref,
-// or a github URL; the @skill component is stripped (repo-level identity).
-func (a *App) AddSkillPackage(ctx context.Context, input string) (config.SkillPackage, error) {
-	source, ref, err := normalizeSkillSource(input)
+func upsertNormalizedPackages(pkgs []config.SkillPackage, pkg config.SkillPackage) ([]config.SkillPackage, bool) {
+	normalized := make([]config.SkillPackage, 0, len(pkgs)+1)
+	for _, existing := range pkgs {
+		normalized, _ = upsertPackage(normalized, normalizeConfiguredSkillPackage(existing))
+	}
+	pkg = normalizeConfiguredSkillPackage(pkg)
+	return upsertPackage(normalized, pkg)
+}
+
+func (a *App) AddSkillPackage(ctx context.Context, input string) (config.SkillPackage, []string, error) {
+	pkg, err := a.parseSkillPackage(input)
 	if err != nil {
-		return config.SkillPackage{}, err
+		return config.SkillPackage{}, nil, err
 	}
 	cfg, err := a.loadConfig()
 	if err != nil {
-		return config.SkillPackage{}, err
+		return config.SkillPackage{}, nil, err
 	}
 	if err := a.requireSkillsEnabled(cfg); err != nil {
-		return config.SkillPackage{}, err
+		return config.SkillPackage{}, nil, err
 	}
-	pkg := config.SkillPackage{Source: source, Ref: ref}
-	agents := effectiveSkillAgents(a.effectiveSettings(cfg).AgentsUse, pkg)
-	runner := skillRunner(nodeManager(cfg))
-
-	args := skillPackageAddArgs(pkg, agents)
-	stdout, stderr, err := a.fallbackExecutor().Run(ctx, runner, args...)
+	desired := pkg
+	for _, existing := range cfg.Agents.Packages {
+		existing = normalizeConfiguredSkillPackage(existing)
+		if existing.Source != pkg.Source {
+			continue
+		}
+		merged, _ := upsertPackage([]config.SkillPackage{existing}, pkg)
+		desired = merged[0]
+		break
+	}
+	use := a.effectiveSettings(cfg).AgentsUse
+	var agents []string
+	if use == nil && len(desired.Agents) > 0 {
+		agents = append([]string(nil), desired.Agents...)
+	} else {
+		if use == nil {
+			use = a.EnabledAgentIDs(cfg)
+		}
+		agents = effectiveSkillAgents(use, desired)
+	}
+	if len(agents) == 0 {
+		return config.SkillPackage{}, nil, fmt.Errorf("no enabled agent targets selected")
+	}
+	pluginNames, warnings := installedPluginNames(ctx, a)
+	repoName := skillPackageRepoName(desired.Source)
+	for _, id := range agents {
+		if pluginShadowsName(pluginNames, id, repoName) {
+			return config.SkillPackage{}, warnings, fmt.Errorf(
+				"skill package %q is provided by an installed plugin of the same name on %s; installing it would duplicate plugin-managed content",
+				pkg.Source, id)
+		}
+	}
+	service, err := a.skillService()
 	if err != nil {
-		return config.SkillPackage{}, fmt.Errorf("skills add %s: %w: %s", source, err, stderr)
+		return config.SkillPackage{}, warnings, err
 	}
-	if err := skillsCLIFailure("skills add "+source, stdout, stderr); err != nil {
-		return config.SkillPackage{}, err
-	}
-	if err := verifySkillInstalled(source); err != nil {
-		return config.SkillPackage{}, err
+	refreshWarnings, err := service.Refresh(ctx, desired, agents)
+	warnings = append(warnings, refreshWarnings...)
+	if err != nil {
+		return config.SkillPackage{}, warnings, fmt.Errorf("installing skill package %s: %w", pkg.Source, err)
 	}
 
 	if err := a.withConfig(func(c *config.RootConfig) error {
-		merged, _ := upsertPackage(c.Agents.Packages, source, ref)
+		merged, _ := upsertNormalizedPackages(c.Agents.Packages, pkg)
 		c.Agents.Packages = merged
 		return nil
 	}); err != nil {
-		return config.SkillPackage{}, fmt.Errorf("installed %s but failed to save to manifest (re-run to persist): %w", source, err)
+		return config.SkillPackage{}, warnings, fmt.Errorf("installed %s but failed to save to manifest (re-run to persist): %w", pkg.Source, err)
 	}
-	return pkg, nil
+	return pkg, warnings, nil
 }
 
-// UninstallSkillPackage removes a lockfile package from disk via the skills
-// CLI. It does not modify the manifest; use RemoveSkillPackage for that.
+// IsSkillPackageNotInstalled — Composed callers treat a not-installed uninstall as already done, not a failure.
+func IsSkillPackageNotInstalled(err error) bool {
+	var notInstalled *agent.NotInstalledError
+	return errors.As(err, &notInstalled)
+}
+
+// UninstallSkillPackage — Removes installed content only; RemoveSkillPackage unregisters from the manifest.
 func (a *App) UninstallSkillPackage(ctx context.Context, source string) error {
+	parsed, err := a.parseSkillPackage(source)
+	if err != nil {
+		return err
+	}
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return err
@@ -72,42 +123,36 @@ func (a *App) UninstallSkillPackage(ctx context.Context, source string) error {
 	if err := a.requireSkillsEnabled(cfg); err != nil {
 		return err
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("resolving home dir: %w", err)
+	identity := a.skillSourceIdentity(parsed.Source)
+	storedSource := parsed.Source
+	for _, pkg := range cfg.Agents.Packages {
+		if a.skillSourceIdentity(pkg.Source) == identity {
+			storedSource = normalizeConfiguredSkillPackage(pkg).Source
+			break
+		}
 	}
-	lock, err := config.LoadSkillLock(config.SkillLockPath(home))
+	service, err := a.skillService()
 	if err != nil {
 		return err
 	}
-	names := packageSkills(lock, source)
-	if len(names) == 0 {
-		return fmt.Errorf("skill package %q has no lockfile entries to uninstall", source)
-	}
-	agents := a.agentsWithPackageSkills(home, lock, source)
-	if len(agents) == 0 {
-		return fmt.Errorf("skill package %q is not installed on any detected agent", source)
-	}
-	runner := skillRunner(nodeManager(cfg))
-	args := skillPackageRemoveArgs(names, agents)
-	rmStdout, rmStderr, err := a.fallbackExecutor().Run(ctx, runner, args...)
-	if err != nil {
-		return fmt.Errorf("skills remove %s: %w: %s", source, err, rmStderr)
-	}
-	if err := skillsCLIFailure("skills remove "+source, rmStdout, rmStderr); err != nil {
+	if _, err := service.Remove(ctx, storedSource, a.allAgentTargetIDs()); err != nil {
 		return err
 	}
 	return a.withConfig(func(c *config.RootConfig) error {
 		c.Agents.Ignore.Skills = slices.DeleteFunc(c.Agents.Ignore.Skills, func(s string) bool {
-			return s == source
+			return a.skillSourceIdentity(s) == identity
 		})
 		return nil
 	})
 }
 
-// RemoveSkillPackage unregisters a manifest package. Manifest-only — use
-// UninstallSkillPackage to remove the package's files from agent skill dirs.
+// RemoveSkillPackage — Manifest-only; UninstallSkillPackage removes the files.
 func (a *App) RemoveSkillPackage(source string) error {
+	parsed, err := a.parseSkillPackage(source)
+	if err != nil {
+		return err
+	}
+	source = parsed.Source
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return err
@@ -115,10 +160,13 @@ func (a *App) RemoveSkillPackage(source string) error {
 	if err := a.requireSkillsEnabled(cfg); err != nil {
 		return err
 	}
+	identity := a.skillSourceIdentity(source)
 	found := false
+	storedSource := source
 	for _, p := range cfg.Agents.Packages {
-		if p.Source == source {
+		if a.skillSourceIdentity(p.Source) == identity {
 			found = true
+			storedSource = normalizeConfiguredSkillPackage(p).Source
 			break
 		}
 	}
@@ -127,21 +175,22 @@ func (a *App) RemoveSkillPackage(source string) error {
 	}
 	return a.withConfig(func(c *config.RootConfig) error {
 		c.Agents.Packages = slices.DeleteFunc(c.Agents.Packages, func(p config.SkillPackage) bool {
-			return p.Source == source
+			return a.skillSourceIdentity(p.Source) == identity
 		})
-		setSkillGroupsInConfig(c, source, map[string]struct{}{})
+		a.setSkillGroupsInConfig(c, storedSource, map[string]struct{}{})
 		c.Agents.Ignore.Skills = slices.DeleteFunc(c.Agents.Ignore.Skills, func(s string) bool {
-			return s == source
+			return a.skillSourceIdentity(s) == identity
 		})
 		return nil
 	})
 }
 
-// AdoptSkillPackage records a lockfile-only package (installed on disk but
-// absent from the manifest) into the manifest. Manifest upsert only — no
-// reinstall — the skills CLI already installed it, so re-running it would be
-// redundant.
+// AdoptSkillPackage — Manifest upsert only: the next restore converges or installs the recorded intent.
 func (a *App) AdoptSkillPackage(source string) (config.SkillPackage, error) {
+	parsed, err := a.parseSkillPackage(source)
+	if err != nil {
+		return config.SkillPackage{}, err
+	}
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return config.SkillPackage{}, err
@@ -157,16 +206,28 @@ func (a *App) AdoptSkillPackage(source string) (config.SkillPackage, error) {
 	if err != nil {
 		return config.SkillPackage{}, err
 	}
+	source = parsed.Source
+	identity := a.skillSourceIdentity(source)
 	ref := ""
+	var skills []string
 	for _, e := range lock.Skills {
-		if e.Source == source && e.Ref != "" {
-			ref = e.Ref
-			break
+		entry := normalizeConfiguredSkillPackage(config.SkillPackage{Source: e.Source, Ref: e.Ref})
+		if a.skillSourceIdentity(entry.Source) != identity {
+			continue
+		}
+		if entry.Ref != "" && ref == "" {
+			ref = entry.Ref
 		}
 	}
-	pkg := config.SkillPackage{Source: source, Ref: ref}
+	for name, e := range lock.Skills {
+		if a.skillSourceIdentity(e.Source) == identity && !slices.Contains(skills, name) {
+			skills = append(skills, name)
+		}
+	}
+	slices.Sort(skills)
+	pkg := config.SkillPackage{Source: source, Ref: ref, Skills: skills}
 	if err := a.withConfig(func(c *config.RootConfig) error {
-		merged, _ := upsertPackage(c.Agents.Packages, source, ref)
+		merged, _ := upsertNormalizedPackages(c.Agents.Packages, pkg)
 		c.Agents.Packages = merged
 		return nil
 	}); err != nil {

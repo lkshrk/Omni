@@ -14,8 +14,6 @@ func testSettingsWithProviderPriority(providers ...string) config.Settings {
 	return s
 }
 
-// ─── EffectiveSettings ────────────────────────────────────────────────────────
-
 func TestEffectiveSettings_NoHostEntry_ReturnsGlobal(t *testing.T) {
 	cfg := &config.RootConfig{
 		Settings: testSettingsWithProviderPriority("bun", "uv"),
@@ -73,8 +71,7 @@ func TestEffectiveSettings_HostDisabledProviders_AppliedWhenSet(t *testing.T) {
 }
 
 func TestEffectiveSettings_HostNilDisabledProviders_PreservesGlobal(t *testing.T) {
-	// When the host key exists but DisabledProviders is nil, the global list is
-	// preserved. Nil means "not set" — not "enable everything".
+	// Nil means "not set", not "enable everything", so the global list survives.
 	cfg := &config.RootConfig{
 		Settings: config.Settings{
 			DisabledProviders: []string{"brew"},
@@ -108,8 +105,6 @@ func TestEffectiveSettings_HostEmptyDisabledProviders_OverridesGlobal(t *testing
 }
 
 func TestEffectiveSettings_HostDotsDisabledFalse_OverridesGlobalTrue(t *testing.T) {
-	// A host can explicitly opt back into dots sync by setting DotsDisabled=false
-	// (*bool pointing to false), even when the global setting disables it (true).
 	cfg := &config.RootConfig{
 		Settings: config.Settings{
 			DotsDisabled: config.BoolPtr(true),
@@ -125,9 +120,7 @@ func TestEffectiveSettings_HostDotsDisabledFalse_OverridesGlobalTrue(t *testing.
 }
 
 func TestEffectiveSettings_HostEntryAbsentDotsDisabled_GlobalPreserved(t *testing.T) {
-	// A host entry that does NOT set DotsDisabled (nil *bool) must not override
-	// the global true. This was the silent bug: bool zero-value (false) would
-	// unconditionally overwrite global true.
+	// A nil host *bool must not override a global true.
 	cfg := &config.RootConfig{
 		Settings: config.Settings{
 			DotsDisabled: config.BoolPtr(true),
@@ -168,7 +161,6 @@ func TestEffectiveSettings_Mixed_HostProviderPriority_OverridesGlobal(t *testing
 		},
 	}
 	got := cfg.EffectiveSettings("myhost")
-	// Host provider_priority replaces global when non-nil.
 	if len(got.ProviderPriority) == 0 || got.ProviderPriority[0] != "bun" {
 		t.Errorf("ProviderPriority = %v, want bun first (host wins)", got.ProviderPriority)
 	}

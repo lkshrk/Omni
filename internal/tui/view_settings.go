@@ -182,9 +182,9 @@ var settingsRows = []settingsRowMeta{
 		valueFn: func(m Model) string { return settingsOnOff(m.palette, m.agentsEnabled) },
 		helpFn: func(m Model) string {
 			if m.agentsEnabled {
-				return m.palette.styleHelp.Render("Disable agent skill restore/import/update for this machine.")
+				return m.palette.styleHelp.Render("Disable agent skill sync/import/upgrade for this machine.")
 			}
-			return m.palette.styleHelp.Render("Re-enable agent skill restore/import/update.")
+			return m.palette.styleHelp.Render("Re-enable agent skill sync/import/upgrade.")
 		},
 	},
 	settingsRowSkillsEnabled: {
@@ -404,7 +404,6 @@ func renderSettings(m Model) string {
 			}
 		}
 
-		// Record cursor line after the section header but before the row content.
 		isSettingsCursor := i == m.settingsCursor && !m.cursorHidden
 		if isSettingsCursor {
 			buf.markCursor()
@@ -426,7 +425,6 @@ func renderSettings(m Model) string {
 			continue
 		}
 
-		// Any row awaiting second-enter confirmation.
 		if m.dangerConfirmRow == i {
 			var confirmLabel string
 			if row.danger {

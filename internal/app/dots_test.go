@@ -40,8 +40,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// newDotsApp builds an App with a dots repo configured in settings.json.
-// Returns the app, the config dir, and the dots repo dir.
 func newDotsApp(t *testing.T) (*app.App, string, string) {
 	t.Helper()
 	cfgDir := t.TempDir()
@@ -136,7 +134,6 @@ func TestDiscoverDotsEntries_DiscoversAgentsSkillLockFile(t *testing.T) {
 	t.Setenv("HOME", home)
 	repoDir := t.TempDir()
 
-	// Create the nested file that wellKnownDotPaths maps.
 	agentsDir := filepath.Join(home, ".agents")
 	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -419,13 +416,11 @@ func TestDiscoverDotsEntries_ExcludesAgentConfigDirs(t *testing.T) {
 	t.Setenv("HOME", home)
 	repoDir := t.TempDir()
 
-	// Agent-managed dirs: must never surface as discovery candidates.
 	for _, dir := range []string{".claude", ".codex", ".grok", ".agents", ".config/agents"} {
 		if err := os.MkdirAll(filepath.Join(home, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	// Real dotfiles: must still be discovered.
 	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte("zsh"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -2535,10 +2530,6 @@ func dotsTestHostGroupName() string {
 	return shortHostnameForTest(hostname)
 }
 
-// writeGroupWithDots writes dot entries to the current host group in settings.json.
-// The config file must already exist (created by newDotsApp or newDotsAppWithGitCfg).
-// Callers must set t.Setenv("HOME", home) before this call and before any
-// App method that invokes dots.New (so path derivation uses the temp home).
 func writeGroupWithDots(t *testing.T, cfgDir, _ string, entries []config.DotEntry, _ string) string {
 	t.Helper()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
@@ -2872,9 +2863,6 @@ func TestDotsSync_NoActiveEntries_ReturnsNilWithoutError(t *testing.T) {
 	a, cfgDir, repoDir := newDotsApp(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	// A group with no dot entries: DotsSync resolves an empty active set and
-	// must short-circuit to (nil, nil) after building the engine — the edge the
-	// dotsService.engineFor + len(engine.Entries)==0 path preserves.
 	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{}, home)
 	ops, err := a.DotsSync(dots.SyncOptions{})
 	if err != nil {
@@ -2890,7 +2878,6 @@ func TestDotsSync_LinksFiles(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Stow package tree: repoDir/nvim/.config/nvim/init.lua
 	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -2898,7 +2885,6 @@ func TestDotsSync_LinksFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- cfg"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Pre-create real ~/.config to exercise directory package linking beneath it.
 	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -3049,13 +3035,9 @@ func TestDotsSync_HealsAbsoluteSymlinkBeforeRestow(t *testing.T) {
 		t.Fatal(err)
 	}
 	envTarget := filepath.Join(zshTargetDir, "10-env.zsh")
-	// Absolute symlink resolving to the correct repo file but not shaped the
-	// way stow itself would write it (stow always writes a relative link).
 	if err := os.Symlink(envSrc, envTarget); err != nil {
 		t.Fatal(err)
 	}
-	// 15-completion-paths.zsh is missing entirely, which puts the directory
-	// entry into dots.StateMissing and triggers stow -R for the whole package.
 
 	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
 		{Name: "zsh", Path: zshTargetDir},
@@ -3091,7 +3073,6 @@ func TestDotsSync_DryRun(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Stow package tree: repoDir/git/.config/git/config
 	srcDir := filepath.Join(dotsContentDir(repoDir), "git", ".config", "git")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -3115,7 +3096,6 @@ func TestDotsSync_DryRun(t *testing.T) {
 	if len(ops) != 1 || ops[0].Kind != dots.OpDryLink {
 		t.Errorf("got ops %v, want [OpDryLink]", ops)
 	}
-	// Dry-run: no symlink should exist.
 	if _, err := os.Lstat(gitPath); !os.IsNotExist(err) {
 		t.Error("dry-run: symlink should not have been created")
 	}
@@ -4122,7 +4102,6 @@ func TestDotsSyncEntry_OnConflictUseRepoAutoResolves(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Local target diverged from the repo (the recurring codex case).
 	targetDir := filepath.Join(home, ".config", "codex")
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -4130,8 +4109,6 @@ func TestDotsSyncEntry_OnConflictUseRepoAutoResolves(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(targetDir, "config.toml"), []byte("-- local"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Repo newer than the divergent local file: classifies as a conflict
-	// (a newer local would auto-adopt instead).
 	setDotTestModTime(t, filepath.Join(srcDir, "config.toml"), time.Unix(1_700_000_000, 0).Add(time.Hour))
 	setDotTestModTime(t, filepath.Join(targetDir, "config.toml"), time.Unix(1_700_000_000, 0))
 
@@ -4154,7 +4131,6 @@ func TestDotsList_HealthOK(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// SourcePath = repoDir/nvim/.config/nvim; TargetPath = home/.config/nvim
 	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -4162,7 +4138,6 @@ func TestDotsList_HealthOK(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- cfg"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Create stow-managed directory symlink.
 	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -4615,7 +4590,6 @@ func TestDotsList_HealthMissing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Source dir exists but no symlink at target yet → HealthMissing.
 	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -4639,7 +4613,6 @@ func TestDotsList_HealthNoSource(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// No source dir in repo → HealthNoSource.
 	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
 		{Name: "nvim", Path: filepath.Join(home, ".config", "nvim")},
 	}, home)
@@ -4841,7 +4814,6 @@ func TestDotsDelete_RemovesSymlinkAndEntry(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Stow package tree: repoDir/nvim/.config/nvim
 	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -4849,7 +4821,6 @@ func TestDotsDelete_RemovesSymlinkAndEntry(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- cfg"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Pre-create real ~/.config so stow links inside the nvim directory.
 	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -4859,7 +4830,6 @@ func TestDotsDelete_RemovesSymlinkAndEntry(t *testing.T) {
 		{Name: "nvim", Path: nvimPath},
 	}, home)
 
-	// Use DotsSync to create the stow-managed file links.
 	if _, err := a.DotsSync(dots.SyncOptions{}); err != nil {
 		t.Fatalf("DotsSync: %v", err)
 	}
@@ -4902,7 +4872,6 @@ func TestDotsDelete_RemovesSymlinkAndEntry(t *testing.T) {
 		t.Fatalf("backup content = %q, want -- cfg", got)
 	}
 
-	// Entry should be gone from settings.json.
 	updated, err := config.Load(filepath.Join(cfgDir, "settings.json"))
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -5078,12 +5047,10 @@ func TestDotsDelete_NotFound(t *testing.T) {
 }
 
 func TestDotsDelete_SkipsUnmanagedSymlink(t *testing.T) {
-	// A symlink pointing somewhere other than the repo must not be removed.
 	a, cfgDir, repoDir := newDotsApp(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Package must exist in the repo for stow -D to run without error.
 	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -5092,7 +5059,6 @@ func TestDotsDelete_SkipsUnmanagedSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	nvimPath := filepath.Join(home, ".config", "nvim")
-	// Directory-level symlink pointing elsewhere (absolute) — stow ignores it.
 	if err := os.Symlink("/some/other/path", nvimPath); err != nil {
 		t.Fatal(err)
 	}
@@ -5104,7 +5070,6 @@ func TestDotsDelete_SkipsUnmanagedSymlink(t *testing.T) {
 	if err := a.DotsDelete(context.Background(), "nvim"); err != nil {
 		t.Fatalf("DotsDelete: %v", err)
 	}
-	// Unmanaged symlink must remain.
 	if _, err := os.Lstat(nvimPath); err != nil {
 		t.Error("unmanaged symlink should not have been removed")
 	}
@@ -5122,7 +5087,6 @@ func TestDotsAdd_ExplicitName(t *testing.T) {
 	if err := os.WriteFile(liveFile, []byte("-- cfg"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Adopt with an explicit Name — the infer branch must be skipped.
 	ops, err := a.DotsAdd(context.Background(), liveFile, app.DotsAddOptions{Name: "myvim", Adopt: true})
 	if err != nil {
 		t.Fatalf("DotsAdd with explicit name: %v", err)
@@ -5130,8 +5094,6 @@ func TestDotsAdd_ExplicitName(t *testing.T) {
 	if len(ops) == 0 {
 		t.Error("expected at least one op")
 	}
-	// Adopted file must now exist in the repo under the explicit name,
-	// mirroring the home directory structure: <repo>/myvim/.config/nvim/init.lua.
 	adopted := filepath.Join(dotsContentDir(repoDir), "myvim", ".config", "nvim", "init.lua")
 	if _, err := os.Lstat(adopted); err != nil {
 		t.Errorf("adopted file not found at %q: %v", adopted, err)
@@ -5213,6 +5175,46 @@ func TestDotsAdd_AdoptFollowsNestedSymlink(t *testing.T) {
 	assertRealDirectory(t, liveDir)
 	assertSymlinkResolvesTo(t, filepath.Join(liveDir, "settings.json"), repoFile)
 	assertSymlinkResolvesTo(t, filepath.Join(liveDir, "external.conf"), repoExternal)
+}
+
+func TestDotsAdd_AdoptPreservesTopLevelSymlinkBackup(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, _, repoDir := newDotsApp(t)
+	home := os.Getenv("HOME")
+	external := filepath.Join(home, "shared", "vimrc")
+	if err := os.MkdirAll(filepath.Dir(external), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(external, []byte("set number\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".vimrc")
+	if err := os.Symlink(external, target); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := a.DotsAdd(context.Background(), target, app.DotsAddOptions{Name: "vimrc", Adopt: true}); err != nil {
+		t.Fatalf("DotsAdd: %v", err)
+	}
+
+	backup := filepath.Join(home, dots.BackupDirName, ".vimrc")
+	info, err := os.Lstat(backup)
+	if err != nil {
+		t.Fatalf("backup symlink stat: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("backup mode = %v, want symlink", info.Mode())
+	}
+	if got, err := os.Readlink(backup); err != nil || got != external {
+		t.Fatalf("backup symlink target = %q, %v; want %q", got, err, external)
+	}
+	repoFile := filepath.Join(dotsContentDir(repoDir), "vimrc", ".vimrc")
+	if got, err := os.ReadFile(repoFile); err != nil || string(got) != "set number\n" {
+		t.Fatalf("repo file = %q, %v", got, err)
+	}
+	assertSymlinkResolvesTo(t, target, repoFile)
 }
 
 func TestDotsAddRejectsConfiguredDuplicateBeforeMutation(t *testing.T) {
@@ -5325,7 +5327,187 @@ func TestDotsAdd_AdoptSkipsDefaultIgnoredChildren(t *testing.T) {
 	}
 }
 
-// ─── coverage gap tests ───────────────────────────────────────────────────────
+func TestDotsAdd_AdoptAllowlistedDirectoryPreservesIgnoredRuntimeData(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, _, repoDir := newDotsApp(t)
+	home := os.Getenv("HOME")
+	target := filepath.Join(home, ".claude")
+	files := map[string]string{
+		"settings.json":                   `{"theme":"dark"}`,
+		"projects/session.jsonl":          "project history",
+		"plugins/cache/blob":              "plugin cache",
+		"sessions/current/transcript.log": "session data",
+	}
+	for rel, content := range files {
+		path := filepath.Join(target, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := a.DotsAdd(context.Background(), target, app.DotsAddOptions{Name: "claude", Adopt: true}); err != nil {
+		t.Fatalf("DotsAdd: %v", err)
+	}
+
+	repoTarget := filepath.Join(dotsContentDir(repoDir), "claude", ".claude")
+	backupTarget := filepath.Join(home, dots.BackupDirName, ".claude")
+	for _, root := range []string{repoTarget, backupTarget} {
+		if got, err := os.ReadFile(filepath.Join(root, "settings.json")); err != nil || string(got) != files["settings.json"] {
+			t.Fatalf("%s settings.json = %q, %v", root, got, err)
+		}
+		for _, rel := range []string{"projects", filepath.Join("plugins", "cache"), "sessions"} {
+			if _, err := os.Lstat(filepath.Join(root, rel)); !os.IsNotExist(err) {
+				t.Fatalf("%s copied ignored path %s, stat err = %v", root, rel, err)
+			}
+		}
+	}
+	for _, rel := range []string{"projects/session.jsonl", "plugins/cache/blob", "sessions/current/transcript.log"} {
+		if got, err := os.ReadFile(filepath.Join(target, rel)); err != nil || string(got) != files[rel] {
+			t.Fatalf("ignored %s = %q, %v", rel, got, err)
+		}
+	}
+	assertRealDirectory(t, target)
+	assertSymlinkResolvesTo(t, filepath.Join(target, "settings.json"), filepath.Join(repoTarget, "settings.json"))
+}
+
+func TestDotsAdd_AdoptRejectsDirectoryWithNoManagedContent(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, _, repoDir := newDotsApp(t)
+	home := os.Getenv("HOME")
+	target := filepath.Join(home, ".claude")
+	runtimePath := filepath.Join(target, "projects", "session.jsonl")
+	cachePath := filepath.Join(target, "plugins", "cache", "blob")
+	for path, content := range map[string]string{
+		runtimePath: "project history",
+		cachePath:   "plugin cache",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := a.DotsAdd(context.Background(), target, app.DotsAddOptions{Name: "claude", Adopt: true})
+	if err == nil || !strings.Contains(err.Error(), "no managed files") {
+		t.Fatalf("DotsAdd error = %v, want no managed files", err)
+	}
+	if got, readErr := os.ReadFile(runtimePath); readErr != nil || string(got) != "project history" {
+		t.Fatalf("ignored runtime content = %q, %v", got, readErr)
+	}
+	if got, readErr := os.ReadFile(cachePath); readErr != nil || string(got) != "plugin cache" {
+		t.Fatalf("ignored cache content = %q, %v", got, readErr)
+	}
+	if _, statErr := os.Lstat(filepath.Join(dotsContentDir(repoDir), "claude")); !os.IsNotExist(statErr) {
+		t.Fatalf("empty package remains, stat err = %v", statErr)
+	}
+	if _, statErr := os.Lstat(filepath.Join(home, dots.BackupDirName)); !os.IsNotExist(statErr) {
+		t.Fatalf("backup created for empty managed set, stat err = %v", statErr)
+	}
+}
+
+func TestDotsAdd_AdoptAllowlistedDirectoryRestowFailurePreservesIgnoredRuntimeData(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test stow shim requires a POSIX shell")
+	}
+	a, _, repoDir := newDotsApp(t)
+	home := os.Getenv("HOME")
+	target := filepath.Join(home, ".claude")
+	managedPath := filepath.Join(target, "settings.json")
+	ignoredPath := filepath.Join(target, "projects", "session.jsonl")
+	if err := os.MkdirAll(filepath.Dir(ignoredPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managedPath, []byte(`{"theme":"dark"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ignoredPath, []byte("project history"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	binDir := t.TempDir()
+	stowPath := filepath.Join(binDir, "stow")
+	stowScript := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\necho forced restow failure >&2\nexit 1\n"
+	if err := os.WriteFile(stowPath, []byte(stowScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	_, err := a.DotsAdd(context.Background(), target, app.DotsAddOptions{Name: "claude", Adopt: true})
+	if err == nil || !strings.Contains(err.Error(), "forced restow failure") {
+		t.Fatalf("DotsAdd error = %v, want forced restow failure", err)
+	}
+	assertRealDirectory(t, target)
+	if info, statErr := os.Lstat(managedPath); statErr != nil {
+		t.Fatalf("managed path stat: %v", statErr)
+	} else if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("managed path remains a symlink after rollback")
+	}
+	if got, readErr := os.ReadFile(managedPath); readErr != nil || string(got) != `{"theme":"dark"}` {
+		t.Fatalf("managed content = %q, %v", got, readErr)
+	}
+	if got, readErr := os.ReadFile(ignoredPath); readErr != nil || string(got) != "project history" {
+		t.Fatalf("ignored content = %q, %v", got, readErr)
+	}
+	if _, statErr := os.Lstat(filepath.Join(dotsContentDir(repoDir), "claude")); !os.IsNotExist(statErr) {
+		t.Fatalf("incomplete package remains, stat err = %v", statErr)
+	}
+}
+
+func TestDotsAdd_AdoptAllowlistedDirectoryConfigFailurePreservesIgnoredRuntimeData(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permission failure requires POSIX permissions")
+	}
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := os.Getenv("HOME")
+	target := filepath.Join(home, ".claude")
+	managedPath := filepath.Join(target, "settings.json")
+	ignoredPath := filepath.Join(target, "projects", "session.jsonl")
+	if err := os.MkdirAll(filepath.Dir(ignoredPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managedPath, []byte(`{"theme":"dark"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ignoredPath, []byte("project history"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(cfgDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(cfgDir, 0o755) })
+
+	_, err := a.DotsAdd(context.Background(), target, app.DotsAddOptions{Name: "claude", Adopt: true})
+	if err == nil || !strings.Contains(err.Error(), "save config") {
+		t.Fatalf("DotsAdd error = %v, want save config failure", err)
+	}
+	assertRealDirectory(t, target)
+	if info, statErr := os.Lstat(managedPath); statErr != nil {
+		t.Fatalf("managed path stat: %v", statErr)
+	} else if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("managed path remains a symlink after rollback")
+	}
+	if got, readErr := os.ReadFile(managedPath); readErr != nil || string(got) != `{"theme":"dark"}` {
+		t.Fatalf("managed content = %q, %v", got, readErr)
+	}
+	if got, readErr := os.ReadFile(ignoredPath); readErr != nil || string(got) != "project history" {
+		t.Fatalf("ignored content = %q, %v", got, readErr)
+	}
+	if _, statErr := os.Lstat(filepath.Join(dotsContentDir(repoDir), "claude")); !os.IsNotExist(statErr) {
+		t.Fatalf("incomplete package remains, stat err = %v", statErr)
+	}
+}
 
 func TestDotsSync_NotConfigured(t *testing.T) {
 	t.Parallel()
@@ -5421,12 +5603,10 @@ func TestDotsList_HealthConflict(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Source dir exists at SourcePath.
 	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Real directory at TargetPath (not a symlink) → conflict.
 	nvimPath := filepath.Join(home, ".config", "nvim")
 	if err := os.MkdirAll(nvimPath, 0o755); err != nil {
 		t.Fatal(err)
@@ -5619,7 +5799,6 @@ func TestDotsStatus_ReturnsEntries(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Source dir exists (HealthMissing — just need the entry to be returned).
 	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -5639,7 +5818,6 @@ func TestDotsStatus_ReturnsEntries(t *testing.T) {
 	if result.Entries[0].Name != "nvim" {
 		t.Errorf("entry name = %q, want nvim", result.Entries[0].Name)
 	}
-	// repoDir is not a git repo, so GitStatus is empty.
 	if result.GitStatus != "" {
 		t.Errorf("GitStatus = %q, want empty for non-git repo", result.GitStatus)
 	}
@@ -5757,7 +5935,7 @@ func TestDotsPull_NonGitRepo(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
-	a, _, _ := newDotsApp(t) // repoDir is a plain dir, not a git repo
+	a, _, _ := newDotsApp(t)
 	if _, err := a.DotsPull(context.Background()); err == nil {
 		t.Error("expected error pulling from non-git directory")
 	}
@@ -5892,7 +6070,6 @@ func TestDotsStatus_WithGitRepo(t *testing.T) {
 	gitCmd("config", "user.email", "test@example.com")
 	gitCmd("config", "user.name", "Test")
 
-	// Stage a file without committing so git status --short returns output.
 	untracked := filepath.Join(repoDir, "untracked.txt")
 	if err := os.WriteFile(untracked, []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)
@@ -5904,7 +6081,6 @@ func TestDotsStatus_WithGitRepo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DotsStatus: %v", err)
 	}
-	// IsRepo() is true → g.Status() was called; untracked file shows in output.
 	if result.GitStatus == "" {
 		t.Error("expected non-empty GitStatus for repo with untracked file")
 	}
@@ -5915,7 +6091,6 @@ func TestDotsAdd_WithExistingGroup(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Pre-populate settings.json with an existing dot entry.
 	existingSrc := filepath.Join(dotsContentDir(repoDir), "git", "config")
 	if err := os.MkdirAll(filepath.Dir(existingSrc), 0o755); err != nil {
 		t.Fatal(err)
@@ -5927,7 +6102,6 @@ func TestDotsAdd_WithExistingGroup(t *testing.T) {
 		{Name: "git", Path: filepath.Join(home, ".config", "git")},
 	}, home)
 
-	// Now add a second entry — DotsAdd must load the existing settings and append.
 	liveFile := filepath.Join(home, ".config", "nvim", "init.lua")
 	if err := os.MkdirAll(filepath.Dir(liveFile), 0o755); err != nil {
 		t.Fatal(err)
@@ -5964,16 +6138,12 @@ func TestDotsPush_EmptyMessageDefault(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
-	// repoDir is not a git repo → push fails, but the empty-message default branch is hit.
 	a, _, _ := newDotsApp(t)
 	if err := a.DotsPush(context.Background(), ""); err == nil {
 		t.Error("expected error pushing from non-git directory")
 	}
 }
 
-// ─── git config tests ─────────────────────────────────────────────────────────
-
-// newDotsAppWithGitCfg is like newDotsApp but also writes DotsGit settings.
 func newDotsAppWithGitCfg(t *testing.T, gitCfg config.DotsGitConfig) (*app.App, string, string) {
 	t.Helper()
 	cfgDir := t.TempDir()
@@ -5995,14 +6165,12 @@ func newDotsAppWithGitCfg(t *testing.T, gitCfg config.DotsGitConfig) (*app.App, 
 }
 
 func TestDotsGitConfig_AutoCommit(t *testing.T) {
-	// Requires a real git binary.
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
 
 	a, _, repoDir := newDotsAppWithGitCfg(t, config.DotsGitConfig{AutoCommit: true})
 
-	// Initialise a real bare git repo so CommitAll succeeds.
 	gitCmd := func(args ...string) {
 		t.Helper()
 		c := exec.Command("git", args...)
@@ -6017,7 +6185,6 @@ func TestDotsGitConfig_AutoCommit(t *testing.T) {
 	gitCmd("config", "commit.gpgsign", "false")
 	gitCmd("config", "tag.gpgsign", "false")
 
-	// Create a "live" config file under a fake home .config dir.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	liveFile := filepath.Join(home, ".config", "nvim", "init.lua")
@@ -6028,13 +6195,11 @@ func TestDotsGitConfig_AutoCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// DotsAdd with Adopt moves the file into the repo, then syncs and auto-commits.
 	_, err := a.DotsAdd(context.Background(), liveFile, app.DotsAddOptions{Adopt: true})
 	if err != nil {
 		t.Fatalf("DotsAdd: %v", err)
 	}
 
-	// Verify at least one commit exists in the repo.
 	c := exec.Command("git", "log", "--oneline")
 	c.Dir = repoDir
 	out, err := c.CombinedOutput()
@@ -6097,12 +6262,10 @@ func TestDotsGitConfig_AutoPush(t *testing.T) {
 }
 
 func TestDotsGitConfig_NoAutoCommit(t *testing.T) {
-	// Requires a real git binary.
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
 
-	// auto_commit=false (default) — no commit should be made.
 	a, _, repoDir := newDotsAppWithGitCfg(t, config.DotsGitConfig{AutoCommit: false})
 
 	gitCmd := func(args ...string) {
@@ -6132,15 +6295,12 @@ func TestDotsGitConfig_NoAutoCommit(t *testing.T) {
 		t.Fatalf("DotsAdd: %v", err)
 	}
 
-	// No commits expected — git log should fail (no HEAD).
 	c := exec.Command("git", "log", "--oneline")
 	c.Dir = repoDir
 	if out, err := c.CombinedOutput(); err == nil && len(out) > 0 {
 		t.Errorf("expected no commits with auto_commit=false, got:\n%s", out)
 	}
 }
-
-// ─── DotsResolveConflict tests ────────────────────────────────────────────────
 
 func TestDotsResolveConflict_NotConfigured(t *testing.T) {
 	t.Parallel()
@@ -6156,7 +6316,7 @@ func TestDotsResolveConflict_NotConfigured(t *testing.T) {
 }
 
 func TestDotsResolveConflict_NotFound(t *testing.T) {
-	a, _, _ := newDotsApp(t) // no entries added to config
+	a, _, _ := newDotsApp(t)
 	if _, err := a.DotsResolveConflict(context.Background(), "does-not-exist", app.DotResolveUseRepo); err == nil {
 		t.Error("expected error for unknown dots entry name")
 	}
@@ -6167,7 +6327,6 @@ func TestDotsResolveConflict_UseRepoBacksUpLocalAndRelinks(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Stow package tree: repoDir/nvim/.config/nvim/init.lua
 	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -6176,7 +6335,6 @@ func TestDotsResolveConflict_UseRepoBacksUpLocalAndRelinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a conflicting real directory at the target path.
 	nvimPath := filepath.Join(home, ".config", "nvim")
 	if err := os.MkdirAll(nvimPath, 0o755); err != nil {
 		t.Fatal(err)
@@ -6521,8 +6679,6 @@ func TestDotsResolveConflict_UseLocalIgnoresPackageRootDSStore(t *testing.T) {
 	}
 }
 
-// ─── DotsDisable ─────────────────────────────────────────────────────────────
-
 func TestDotsDisable_UnlinksManagedSymlinks(t *testing.T) {
 	a, cfgDir, repoDir := newDotsApp(t)
 	home := t.TempDir()
@@ -6530,7 +6686,6 @@ func TestDotsDisable_UnlinksManagedSymlinks(t *testing.T) {
 
 	const content = "-- nvim init"
 
-	// Stow package tree: repoDir/nvim/.config/nvim/init.lua
 	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -6538,7 +6693,6 @@ func TestDotsDisable_UnlinksManagedSymlinks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Pre-create real ~/.config so stow links inside the nvim directory.
 	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -6548,7 +6702,6 @@ func TestDotsDisable_UnlinksManagedSymlinks(t *testing.T) {
 		{Name: "nvim", Path: nvimPath},
 	}, home)
 
-	// Create the managed symlink first.
 	if _, err := a.DotsSync(dots.SyncOptions{}); err != nil {
 		t.Fatalf("DotsSync: %v", err)
 	}
@@ -6561,7 +6714,6 @@ func TestDotsDisable_UnlinksManagedSymlinks(t *testing.T) {
 		t.Errorf("got ops %v, want [OpUnlink]", ops)
 	}
 
-	// nvimPath should now be a real directory (not a symlink) with the repo content.
 	fi, err := os.Lstat(nvimPath)
 	if err != nil {
 		t.Fatalf("Lstat %q: %v", nvimPath, err)
@@ -6581,7 +6733,6 @@ func TestDotsDisable_ConflictKeepLocal(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Stow path for ~/.zshrc: repoDir/zsh/.zshrc
 	srcFile := filepath.Join(dotsContentDir(repoDir), "zsh", ".zshrc")
 	dstFile := filepath.Join(home, ".zshrc")
 	if err := os.MkdirAll(filepath.Dir(srcFile), 0o755); err != nil {
@@ -6590,7 +6741,6 @@ func TestDotsDisable_ConflictKeepLocal(t *testing.T) {
 	if err := os.WriteFile(srcFile, []byte("# repo"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Place a real (non-managed) file at the destination.
 	if err := os.WriteFile(dstFile, []byte("# local"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -6606,7 +6756,6 @@ func TestDotsDisable_ConflictKeepLocal(t *testing.T) {
 	if len(ops) != 1 || ops[0].Kind != dots.OpUnlinkConflict {
 		t.Errorf("got ops %v, want [OpUnlinkConflict]", ops)
 	}
-	// Local file must be preserved.
 	got, _ := os.ReadFile(dstFile)
 	if string(got) != "# local" {
 		t.Errorf("local file overwritten: content = %q", string(got))
@@ -6618,7 +6767,6 @@ func TestDotsDisable_ConflictOverwrite(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Stow path for ~/.zshrc: repoDir/zsh/.zshrc
 	srcFile := filepath.Join(dotsContentDir(repoDir), "zsh", ".zshrc")
 	dstFile := filepath.Join(home, ".zshrc")
 	if err := os.MkdirAll(filepath.Dir(srcFile), 0o755); err != nil {
@@ -6642,7 +6790,6 @@ func TestDotsDisable_ConflictOverwrite(t *testing.T) {
 	if len(ops) != 1 || ops[0].Kind != dots.OpUnlink {
 		t.Errorf("got ops %v, want [OpUnlink]", ops)
 	}
-	// File must have been overwritten with repo content.
 	got, _ := os.ReadFile(dstFile)
 	if string(got) != "# repo" {
 		t.Errorf("file not overwritten: content = %q, want # repo", string(got))
@@ -6741,17 +6888,11 @@ func TestDotsDisable_NotConfigured(t *testing.T) {
 	}
 }
 
-// ─── additional coverage tests ────────────────────────────────────────────────
-
-// TestDotsSyncEntry_StowNotOnPath tests the "stow not installed" branch of
-// requireStow by hiding all binaries from PATH.
 func TestDotsSyncEntry_StowNotOnPath(t *testing.T) {
 	a, cfgDir, repoDir := newDotsApp(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Create a minimal stow package tree so the entry lookup succeeds and
-	// requireStow is the first thing that would reject the call.
 	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -6764,7 +6905,6 @@ func TestDotsSyncEntry_StowNotOnPath(t *testing.T) {
 		{Name: "nvim", Path: nvimPath},
 	}, home)
 
-	// Hide stow (and everything else) by pointing PATH to an empty directory.
 	emptyDir := t.TempDir()
 	t.Setenv("PATH", emptyDir)
 
@@ -6821,13 +6961,11 @@ func TestInstallDotsStow_InstallsThroughSystemProvider(t *testing.T) {
 	}
 }
 
-// TestDotsDelete_EntryNotFound tests that DotsDelete returns a descriptive error
-// when the named entry does not exist in any configured group.
 func TestDotsDelete_EntryNotFound(t *testing.T) {
 	if _, err := exec.LookPath("stow"); err != nil {
 		t.Skip("stow not available")
 	}
-	a, _, _ := newDotsApp(t) // configured repo, no entries
+	a, _, _ := newDotsApp(t)
 	err := a.DotsDelete(context.Background(), "ghost")
 	if err == nil {
 		t.Fatal("expected error for missing entry, got nil")
@@ -6837,8 +6975,6 @@ func TestDotsDelete_EntryNotFound(t *testing.T) {
 	}
 }
 
-// TestDotsAdd_PathDoesNotExist tests that DotsAdd returns an error when the
-// given path does not exist on disk (expandAndStat error path).
 func TestDotsAdd_PathDoesNotExist(t *testing.T) {
 	a, _, _ := newDotsApp(t)
 	_, err := a.DotsAdd(context.Background(), "/this/path/does/not/exist/at/all", app.DotsAddOptions{})
@@ -6847,9 +6983,6 @@ func TestDotsAdd_PathDoesNotExist(t *testing.T) {
 	}
 }
 
-// TestDotsAdd_BackupDirectoryBranch exercises the directory backup path
-// indirectly via DotsAdd with a directory as the source path. The whole
-// directory tree must be copied into ~/dotfiles.bkp.
 func TestBackupPath_DirectoryBranch(t *testing.T) {
 	if _, err := exec.LookPath("stow"); err != nil {
 		t.Skip("stow not available")
@@ -6859,7 +6992,6 @@ func TestBackupPath_DirectoryBranch(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Create a directory tree under home that will be adopted.
 	nvimDir := filepath.Join(home, ".config", "nvim")
 	if err := os.MkdirAll(nvimDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -6875,7 +7007,6 @@ func TestBackupPath_DirectoryBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// DotsAdd with Adopt moves the directory; BackupLocalPath copies it first.
 	_, err := a.DotsAdd(context.Background(), nvimDir, app.DotsAddOptions{Name: "nvim", Adopt: true})
 	if err != nil {
 		t.Fatalf("DotsAdd: %v", err)
@@ -6916,8 +7047,6 @@ func TestDotsSync_SkipsNoSourceWithoutChoice(t *testing.T) {
 	}
 }
 
-// TestLstatOp_DryRun_ExistingManagedSymlink exercises the lstatOp dryRun=true
-// branch where the target IS a symlink pointing into the repo (OpSkip).
 func TestLstatOp_DryRun_ExistingManagedSymlink(t *testing.T) {
 	if _, err := exec.LookPath("stow"); err != nil {
 		t.Skip("stow not available")
@@ -6943,12 +7072,10 @@ func TestLstatOp_DryRun_ExistingManagedSymlink(t *testing.T) {
 		{Name: "nvim", Path: nvimPath},
 	}, home)
 
-	// First sync to create the managed file link.
 	if _, err := a.DotsSync(dots.SyncOptions{DryRun: false}); err != nil {
 		t.Fatalf("DotsSync (first): %v", err)
 	}
 
-	// Second sync in dry-run mode: symlink already exists → OpSkip.
 	ops, err := a.DotsSync(dots.SyncOptions{DryRun: true})
 	if err != nil {
 		t.Fatalf("DotsSync dry-run: %v", err)
@@ -6978,7 +7105,6 @@ func TestDotsSync_RealFileAtTargetReportsChoiceConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Pre-create a real directory at the target path (conflict condition).
 	nvimPath := filepath.Join(home, ".config", "nvim")
 	if err := os.MkdirAll(nvimPath, 0o755); err != nil {
 		t.Fatal(err)
@@ -7050,22 +7176,12 @@ func TestDotsSync_ContinuesAfterEntryConflict(t *testing.T) {
 	}
 }
 
-// TestDotsSync_HostFiltering verifies that DotsSync only syncs the groups
-// assigned to the active host, not all groups.
-//
-// Strategy: two groups — "mac" (has a dot entry) and "empty-group" (no dots).
-// The active host covers only "empty-group". collectDots should receive only
-// the empty group and return zero
-// entries, causing DotsSync to return nil without invoking stow.
-// Without the host-awareness fix, collectDots would receive all groups
-// (including "mac") and attempt to run stow.
 func TestDotsSync_HostFiltering(t *testing.T) {
 	a, cfgDir, repoDir := newDotsApp(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 
-	// Create the stow package source so it's valid if stow were called.
 	srcDir := filepath.Join(dotsContentDir(repoDir), "vimrc")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -7076,8 +7192,6 @@ func TestDotsSync_HostFiltering(t *testing.T) {
 
 	vimrcPath := filepath.Join(home, ".vimrc")
 
-	// Config: "mac" group has a dot entry; "empty-group" has none.
-	// Host "testhost" covers only "empty-group".
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	rootCfg, err := config.Load(cfgPath)
 	if err != nil {
@@ -7097,7 +7211,6 @@ func TestDotsSync_HostFiltering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DotsSync: %v", err)
 	}
-	// Active host covers only "empty-group" (no dots) -> zero ops.
 	if len(ops) != 0 {
 		t.Errorf("got %d ops, want 0 (host filtering should exclude mac group); ops=%v", len(ops), ops)
 	}
@@ -7179,7 +7292,6 @@ func TestDotsSync_PurgeMovesIgnoredRepoSourceToTrashWithSnapshot(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- ok"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Never committed: the pre-purge snapshot is its only git safety net.
 	purgedPath := filepath.Join(srcDir, "secret.txt")
 	if err := os.WriteFile(purgedPath, []byte("precious"), 0o600); err != nil {
 		t.Fatal(err)
@@ -7236,8 +7348,6 @@ func TestDotsStatus_AttachesLastSyncErrorToOutOfSyncEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	targetPath := filepath.Join(home, ".zshrc")
-	// Conflicting local regular file that is OLDER than the repo source, so
-	// the classifier reports a choice-conflict and sync records a failure.
 	if err := os.WriteFile(targetPath, []byte("local"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -7266,7 +7376,6 @@ func TestDotsStatus_AttachesLastSyncErrorToOutOfSyncEntry(t *testing.T) {
 		t.Fatalf("LastError = %q, want recorded conflict reason", entry.LastError)
 	}
 
-	// Resolving the conflict clears the annotation via the newer success record.
 	if _, err := a.DotsResolveConflict(ctx, "zshrc", app.DotResolveUseRepo); err != nil {
 		t.Fatalf("DotsResolveConflict: %v", err)
 	}
@@ -7279,9 +7388,6 @@ func TestDotsStatus_AttachesLastSyncErrorToOutOfSyncEntry(t *testing.T) {
 	}
 }
 
-// TestDotsExtractThenAddHostVariant_MissingParentErrorsWithoutVariant verifies
-// the composition fails atomically: a bad parent aborts at the extract step and
-// never creates a variant for the would-be child entry.
 func TestDotsExtractThenAddHostVariant_MissingParentErrorsWithoutVariant(t *testing.T) {
 	a, cfgDir, repoDir := newDotsApp(t)
 	home := t.TempDir()
@@ -7344,7 +7450,6 @@ func TestExtractedFragments_AppMutationsStayInFragments(t *testing.T) {
 		}
 	}
 
-	// Effective config still sees the change.
 	statuses, err := a.DotsList()
 	if err != nil {
 		t.Fatalf("DotsList: %v", err)
@@ -7354,9 +7459,6 @@ func TestExtractedFragments_AppMutationsStayInFragments(t *testing.T) {
 	}
 }
 
-// TestDotsExtractThenAddHostVariant_CreatesVariantForChild exercises the full
-// child-variant happy path on a real synced entry: extract a sub-path into its
-// own entry, then create a host variant for it.
 func TestDotsExtractThenAddHostVariant_CreatesVariantForChild(t *testing.T) {
 	if _, err := exec.LookPath("stow"); err != nil {
 		t.Skip("stow not available")
@@ -7419,8 +7521,6 @@ func TestDotsExtractThenAddHostVariant_CreatesVariantForChild(t *testing.T) {
 	}
 }
 
-// TestDotsAddHostVariant_IgnoredEntryStillWorks proves the un-gated eligibility
-// is real: a fully-ignored entry can still receive a host variant.
 func TestDotsAddHostVariant_IgnoredEntryStillWorks(t *testing.T) {
 	a, cfgDir, repoDir := newDotsApp(t)
 	home := t.TempDir()
@@ -7468,9 +7568,6 @@ func TestDotsAddHostVariant_IgnoredEntryStillWorks(t *testing.T) {
 	}
 }
 
-// TestDiscoverDotsStatus_TrackedChildUnderIgnoredDirSurfaces proves Phase 1 end
-// to end from disk: a re-included file under an ignored directory appears in the
-// synthesized Ignored-section tree carrying a real, non-ignored state.
 func TestDiscoverDotsStatus_TrackedChildUnderIgnoredDirSurfaces(t *testing.T) {
 	a, cfgDir, repoDir := newDotsApp(t)
 	home := t.TempDir()
@@ -7522,11 +7619,6 @@ func TestDiscoverDotsStatus_TrackedChildUnderIgnoredDirSurfaces(t *testing.T) {
 	}
 }
 
-// TestDotsSync_WhitelistDirectoryConvergesMixedStates reproduces the 2026-07-17
-// production incident shape in one entry: a whitelist-style ignore list
-// ("*" + negations) over a directory holding managed links, a newer local
-// regular file over a repo source, a local-only whitelisted file, a dangling
-// whitelisted link, and ignored machine-state dirs that must survive.
 func TestDotsSync_WhitelistDirectoryConvergesMixedStates(t *testing.T) {
 	if _, err := exec.LookPath("stow"); err != nil {
 		t.Skip("stow not available")
@@ -7575,7 +7667,6 @@ func TestDotsSync_WhitelistDirectoryConvergesMixedStates(t *testing.T) {
 	}
 	mustLink(claudeMdSrc, filepath.Join(target, "CLAUDE.md"))
 	mustLink(agentSrc, filepath.Join(target, "agents", "analyst.md"))
-	// Dangling whitelisted link: repo file was deleted out from under it.
 	mustLink(filepath.Join(srcDir, "RTK.md"), filepath.Join(target, "RTK.md"))
 
 	writeLocal := func(rel, content string) string {
@@ -7589,7 +7680,6 @@ func TestDotsSync_WhitelistDirectoryConvergesMixedStates(t *testing.T) {
 	writeLocal(filepath.Join("plugins", "cache", "blob"), "machine-state")
 	writeLocal(filepath.Join("projects", "p.json"), "machine-state")
 	keybindingsLocal := writeLocal("keybindings.json", "my-keys")
-	// Newer local regular file shadowing the repo source.
 	past := time.Now().Add(-time.Hour)
 	if err := os.Chtimes(settingsSrc, past, past); err != nil {
 		t.Fatal(err)

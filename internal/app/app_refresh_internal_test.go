@@ -14,7 +14,7 @@ func TestFetchLatestGitHubReleaseCached_CanceledLeaderDoesNotPoisonWaiter(t *tes
 	t.Parallel()
 	var calls int32
 	firstStarted := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if atomic.AddInt32(&calls, 1) == 1 {
 			close(firstStarted)
 			<-r.Context().Done()
@@ -61,7 +61,7 @@ func TestFetchLatestGitHubReleaseCached_CanceledLeaderDoesNotPoisonWaiter(t *tes
 func TestFetchLatestGitHubReleaseCached_ScopesCompletedResultsToOperation(t *testing.T) {
 	t.Parallel()
 	var calls int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		call := atomic.AddInt32(&calls, 1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprintf(w, `{"id":%d,"tag_name":"v%d.0.0","published_at":"2026-07-17T00:00:00Z","assets":[]}`, call, call)

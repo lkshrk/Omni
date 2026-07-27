@@ -49,7 +49,7 @@ func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 		{"tools", "sync"},
 		{"tools", "add"},
 		{"tools", "install"},
-		{"tools", "delete"},
+		{"tools", "remove"},
 		{"tools", "upgrade"},
 		{"tools", "reinstall"},
 		{"tools", "migrate-nvm"},
@@ -85,7 +85,7 @@ func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 		{"dots", "groups"},
 		{"dots", "variant", "add"},
 		{"dots", "variant", "remove"},
-		{"dots", "delete"},
+		{"dots", "remove"},
 		{"dots", "resolve"},
 		{"dots", "ignore"},
 		{"dots", "unignore"},
@@ -200,7 +200,9 @@ func TestMutatingCLICommandFlagsAreCataloged(t *testing.T) {
 		path []string
 		flag string
 	}{
-		{path: []string{"dots", "delete"}, flag: "--keep-local"},
+		{path: []string{"dots", "remove"}, flag: "--keep-local"},
+		{path: []string{"dots", "remove"}, flag: "--purge"},
+		{path: []string{"tools", "remove"}, flag: "--purge"},
 		{path: []string{"dots", "disable"}, flag: "--overwrite"},
 		{path: []string{"dots", "disable"}, flag: "--remove-local"},
 		{path: []string{"dots", "ignore"}, flag: "--entry"},
@@ -215,26 +217,61 @@ func TestMutatingCLICommandFlagsAreCataloged(t *testing.T) {
 	}
 }
 
-func TestCanonicalDeleteCLICommands(t *testing.T) {
+func TestCanonicalDestructiveCLICommands(t *testing.T) {
 	for _, path := range [][]string{
-		{"tools", "delete"},
+		{"tools", "remove"},
 		{"tools", "delete-spec"},
 		{"hosts", "remove"},
-		{"dots", "delete"},
+		{"dots", "remove"},
 		{"groups", "delete"},
 	} {
 		if findCommand(NewRootCmd(), path) == nil {
-			t.Fatalf("missing canonical delete command %q", strings.Join(path, " "))
+			t.Fatalf("missing canonical destructive command %q", strings.Join(path, " "))
 		}
 	}
 	for _, path := range [][]string{
 		{"delete"},
 		{"uninstall"},
-		{"tools", "remove"},
-		{"dots", "remove"},
 	} {
 		if findCommand(NewRootCmd(), path) != nil {
 			t.Fatalf("legacy destructive command %q should not be registered", strings.Join(path, " "))
+		}
+	}
+}
+
+// Every renamed verb keeps its old spelling registered, hidden, and reaching the canonical RunE.
+func TestDeprecatedAliasesStayRunnable(t *testing.T) {
+	root := NewRootCmd()
+	for _, spec := range []struct {
+		old   []string
+		flags []string
+	}{
+		{old: []string{"agents", "restore"}, flags: []string{"dry-run"}},
+		{old: []string{"agents", "skills", "restore"}, flags: []string{"dry-run"}},
+		{old: []string{"agents", "skills", "update"}, flags: []string{"dry-run", "check"}},
+		{old: []string{"agents", "skills", "uninstall"}},
+		{old: []string{"agents", "mcp", "restore"}, flags: []string{"dry-run"}},
+		{old: []string{"agents", "plugins", "restore"}, flags: []string{"dry-run"}},
+		{old: []string{"tools", "delete"}, flags: []string{"provider", "purge"}},
+		{old: []string{"dots", "delete"}, flags: []string{"keep-local", "purge"}},
+	} {
+		cmd := findCommand(root, spec.old)
+		if cmd == nil {
+			t.Fatalf("deprecated spelling %q must stay registered", strings.Join(spec.old, " "))
+		}
+		if !cmd.Hidden {
+			t.Errorf("deprecated spelling %q should be hidden from help", strings.Join(spec.old, " "))
+		}
+		if cmd.Annotations[annotationDeprecatedAlias] == "" {
+			t.Errorf("deprecated spelling %q is missing its alias annotation", strings.Join(spec.old, " "))
+		}
+		if cmd.RunE == nil {
+			t.Errorf("deprecated spelling %q is not runnable", strings.Join(spec.old, " "))
+		}
+		for _, flagName := range spec.flags {
+			if !commandHasFlag(cmd, flagName) {
+				t.Errorf("deprecated spelling %q lost flag --%s", strings.Join(spec.old, " "), flagName)
+			}
 		}
 	}
 }
@@ -337,7 +374,7 @@ func discoverRunnableCLICommands(root *cobra.Command) [][]string {
 	var out [][]string
 	var walk func(cmd *cobra.Command, path []string)
 	walk = func(cmd *cobra.Command, path []string) {
-		if len(path) > 0 && (cmd.Run != nil || cmd.RunE != nil) {
+		if len(path) > 0 && (cmd.Run != nil || cmd.RunE != nil) && !isDeprecatedAlias(cmd) {
 			out = append(out, append([]string(nil), path...))
 		}
 		for _, child := range cmd.Commands() {
@@ -370,24 +407,21 @@ func uncatalogedRunnableCLICommandAllowed(path []string) bool {
 		"dots list",
 		"dots status",
 		"dots variant list",
-		"agents skills restore",
-		"agents skills import",
-		"agents skills update",
+		"agents skills sync",
 		"agents skills remove",
-		"agents skills uninstall",
 		"agents skills group",
 		"agents add",
 		"agents find",
 		"agents mcp list",
 		"agents mcp add",
 		"agents mcp remove",
-		"agents mcp restore",
+		"agents mcp sync",
 		"agents mcp import",
 		"agents mcp group",
 		"agents plugins list",
 		"agents plugins add",
 		"agents plugins remove",
-		"agents plugins restore",
+		"agents plugins sync",
 		"agents plugins import",
 		"agents plugins group",
 		"agents plugins marketplace list",
@@ -398,6 +432,11 @@ func uncatalogedRunnableCLICommandAllowed(path []string) bool {
 	default:
 		return false
 	}
+}
+
+// The canonical verb carries the catalog binding, so alias paths are skipped by coverage discovery.
+func isDeprecatedAlias(cmd *cobra.Command) bool {
+	return cmd.Annotations[annotationDeprecatedAlias] != ""
 }
 
 func commandHasFlag(cmd *cobra.Command, flagName string) bool {
@@ -471,7 +510,7 @@ func discoverMutatingCLICommands(root *cobra.Command) [][]string {
 	var out [][]string
 	var walk func(cmd *cobra.Command, path []string)
 	walk = func(cmd *cobra.Command, path []string) {
-		if len(path) > 0 && (cmd.Run != nil || cmd.RunE != nil) && isMutatingCLICommand(path) {
+		if len(path) > 0 && (cmd.Run != nil || cmd.RunE != nil) && isMutatingCLICommand(path) && !isDeprecatedAlias(cmd) {
 			out = append(out, append([]string(nil), path...))
 		}
 		for _, child := range cmd.Commands() {
@@ -496,7 +535,7 @@ func isMutatingCLICommand(path []string) bool {
 	}
 	switch path[0] {
 	case "tools":
-		return len(path) == 2 && oneOf(path[1], "sync", "add", "install", "delete", "delete-spec", "upgrade", "reinstall", "import", "refresh", "consolidate", "set", "ignore", "unignore", "normalize")
+		return len(path) == 2 && oneOf(path[1], "sync", "add", "install", "remove", "group", "delete-spec", "upgrade", "reinstall", "import", "refresh", "consolidate", "set", "ignore", "unignore", "normalize")
 	case "groups":
 		return len(path) == 2 && oneOf(path[1], "create", "rename", "delete", "move-tool", "remove-tool", "ignore-tool", "unignore-tool")
 	case "hosts":
@@ -512,7 +551,7 @@ func isMutatingCLICommand(path []string) bool {
 
 func isMutatingDotsCLICommand(path []string) bool {
 	if len(path) == 2 {
-		return oneOf(path[1], "sync", "add", "groups", "delete", "resolve", "ignore", "unignore", "enable", "disable", "pull", "commit", "push")
+		return oneOf(path[1], "sync", "add", "groups", "remove", "resolve", "ignore", "unignore", "enable", "disable", "pull", "commit", "push")
 	}
 	if len(path) != 3 {
 		return false

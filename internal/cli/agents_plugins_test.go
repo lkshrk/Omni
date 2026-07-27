@@ -163,7 +163,7 @@ func TestAgentsPluginsRemove_UninstallsAndDeletesManifest(t *testing.T) {
 	}
 }
 
-func TestAgentsPluginsRestore_DryRunPrintsWouldInstallOnly(t *testing.T) {
+func TestAgentsPluginsSync_DryRunPrintsWouldInstallOnly(t *testing.T) {
 	stub := &pluginStubAdapter{id: "claude-code"}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -171,7 +171,7 @@ func TestAgentsPluginsRestore_DryRunPrintsWouldInstallOnly(t *testing.T) {
 	}
 	a := newPluginCLITestApp(t, []app.PluginAdapter{stub}, agents)
 	state := &rootState{app: a}
-	cmd := newAgentsPluginsRestoreCmd(state)
+	cmd := newAgentsPluginsSyncCmd(state)
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
@@ -190,7 +190,7 @@ func TestAgentsPluginsRestore_DryRunPrintsWouldInstallOnly(t *testing.T) {
 	}
 }
 
-func TestAgentsPluginsRestore_InstallsWithoutDryRun(t *testing.T) {
+func TestAgentsPluginsSync_InstallsWithoutDryRun(t *testing.T) {
 	stub := &pluginStubAdapter{id: "claude-code"}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -198,7 +198,7 @@ func TestAgentsPluginsRestore_InstallsWithoutDryRun(t *testing.T) {
 	}
 	a := newPluginCLITestApp(t, []app.PluginAdapter{stub}, agents)
 	state := &rootState{app: a}
-	cmd := newAgentsPluginsRestoreCmd(state)
+	cmd := newAgentsPluginsSyncCmd(state)
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)

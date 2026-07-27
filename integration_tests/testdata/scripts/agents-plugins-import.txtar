@@ -1,11 +1,3 @@
-# agents plugins import: lists plugins the fake claude CLI reports that the
-# manifest doesn't know about, then adopts one by name. Adoption is
-# identity-only (name + marketplace) and, when the reported marketplace isn't
-# declared yet, pulls the real re-addable source from the fake CLI's
-# `plugins marketplace list --json` output (never a fabricated placeholder).
-# A second unmanaged plugin whose marketplace is undiscoverable (not present
-# in that same JSON) must fail import with a "declare it first" error instead
-# of silently adopting a marketplace with no source.
 chmod 0755 $WORK/bin/claude
 env PATH=$WORK/bin:$PATH
 
@@ -14,23 +6,16 @@ stdout -count=1 '-- unmanaged \(claude-code\) --'
 stdout 'useful-skills'
 stdout 'orphan'
 
-# orphan's marketplace ("ghost") is not reported by marketplace list --json,
-# so there is no real source to adopt it with.
 ! exec omni --config settings.json agents plugins import orphan
 stderr 'ghost.*declare it first'
 
-# useful-skills' marketplace ("lkshrk") IS reported, with a real source.
 exec omni --config settings.json agents plugins import useful-skills
 stdout -count=1 'imported useful-skills'
 
 exec omni --config settings.json agents plugins marketplace list
 stdout -count=1 'lkshrk\s+lkshrk/agent-marketplace'
 
-# useful-skills is already reported installed by the fake CLI's
-# `plugins list --json`, so a dry-run restore has nothing left to install for
-# it: dry-run only prints entries pending install, never already-installed
-# ones.
-exec omni --config settings.json agents plugins restore --dry-run
+exec omni --config settings.json agents plugins sync --dry-run
 ! stdout 'useful-skills'
 ! stdout 'orphan'
 

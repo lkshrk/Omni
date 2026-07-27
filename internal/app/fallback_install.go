@@ -28,32 +28,39 @@ import (
 const (
 	downloadTimeout = 5 * time.Minute
 	downloadRetries = 3
-	// maxDownloadBytes caps the asset download to prevent disk-fill from a
-	// malicious or corrupted release (512 MiB).
+	// Caps the asset download to prevent disk-fill from a malicious or corrupted release.
 	maxDownloadBytes = 512 << 20
 	// maxEntryBytes caps each extracted tar/zip entry individually.
 	maxEntryBytes = 512 << 20
 )
 
-// nativeGitHubInstallPipeline downloads, checksums, extracts, and installs a
-// GitHub release asset using Go's standard library only — no curl, tar, or
-// unzip runtime dependencies are required.
-//
-// Invoked for FallbackRecipeGitHubReleaseAsset recipes with a resolved
-// AssetDownloadURL. Returns an error that the caller wraps into status gh!.
+// Shared by the native download and the generated curl command so one policy governs both fetch paths.
+var errAssetDownloadURLScheme = errors.New("asset_download_url must use https; the asset is downloaded and made executable, so plain http lets an on-path attacker choose the binary")
+
+var errRedirectSchemeDowngrade = errors.New("refusing an https to plain-http redirect; the response is installed as an executable or trusted as a checksum")
+
+// The redirect guard only covers later hops; a digest an on-path attacker can rewrite is not a digest.
+var errChecksumURLScheme = errors.New("checksums asset URL must use https; a checksum fetched over plain http can be rewritten by an on-path attacker")
+
+// Over plain http an on-path attacker owns this trust root and picks the asset the pipeline downloads.
+var errGitHubAPIBaseScheme = errors.New("github api base must use https; the release metadata it returns names the asset that gets downloaded and executed")
+
+// Standard library only: no curl, tar, or unzip runtime dependencies.
 func (a *App) nativeGitHubInstallPipeline(ctx context.Context, name string, fallback *config.FallbackSpec) error {
 	recipe := fallback.Recipe
 	downloadURL := strings.TrimSpace(recipe.AssetDownloadURL)
 	if downloadURL == "" {
 		return fmt.Errorf("fallback %s: native install requires a resolved asset_download_url", name)
 	}
+	// Ahead of every dial and every mkdir: the asset is chmod +x'd and executed, so a plain-http fetch lets an on-path attacker choose the binary.
+	if !config.IsHTTPSURL(downloadURL) {
+		return fmt.Errorf("fallback %s: %w: %q", name, errAssetDownloadURLScheme, downloadURL)
+	}
 	rawAssetName := strings.TrimSpace(recipe.AssetName)
 	if rawAssetName == "" {
 		rawAssetName = filepath.Base(downloadURL)
 	}
-	// Sanitise both untrusted path components before joining into fs paths.
-	// filepath.Base strips any directory traversal (../../) sequences; we then
-	// reject the degenerate values ".", "..", and "" that Base can still return.
+	// filepath.Base strips traversal; the degenerate ".", ".." and "" it can still return are rejected below.
 	assetName := filepath.Base(rawAssetName)
 	if assetName == "" || assetName == "." || assetName == ".." {
 		return fmt.Errorf("fallback %s: asset_name %q is not a valid filename", name, rawAssetName)
@@ -108,7 +115,6 @@ func (a *App) nativeGitHubInstallPipeline(ctx context.Context, name string, fall
 	return nil
 }
 
-// errNoRetry wraps a download error that must not be retried (e.g. 4xx).
 type errNoRetry struct{ cause error }
 
 func (e errNoRetry) Error() string { return e.cause.Error() }
@@ -198,13 +204,10 @@ func (b *nativeFallbackBinaryBackup) cleanup() {
 	}
 }
 
-// downloadFallbackAsset fetches downloadURL to destPath, retrying up to
-// downloadRetries times on transient errors (5xx, network). 4xx errors are
-// not retried because the resource is definitively absent or forbidden.
+// A 4xx is not retried because the resource is definitively absent or forbidden.
 func (a *App) downloadFallbackAsset(ctx context.Context, name, downloadURL, destPath string) error {
 	client := *a.githubHTTPClient()
-	// API calls use a short client timeout. Asset downloads own their longer
-	// deadline through downloadToFile's request context instead.
+	// Asset downloads own their longer deadline through downloadToFile's request context.
 	client.Timeout = 0
 	var lastErr error
 	for attempt := range downloadRetries {
@@ -219,7 +222,6 @@ func (a *App) downloadFallbackAsset(ctx context.Context, name, downloadURL, dest
 		if lastErr == nil {
 			return nil
 		}
-		// 4xx responses are definitive — no point retrying.
 		var noRetry errNoRetry
 		if errors.As(lastErr, &noRetry) {
 			break
@@ -228,8 +230,7 @@ func (a *App) downloadFallbackAsset(ctx context.Context, name, downloadURL, dest
 	return fmt.Errorf("fallback %s: download %s: %w", name, downloadURL, lastErr)
 }
 
-// downloadToFile GETs url and writes the response body to destPath atomically
-// (write to a temp file then rename).
+// Writes atomically: temp file then rename.
 func downloadToFile(ctx context.Context, client *http.Client, rawURL, destPath string) error {
 	dlCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
@@ -249,8 +250,7 @@ func downloadToFile(ctx context.Context, client *http.Client, rawURL, destPath s
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		err := fmt.Errorf("HTTP %s", resp.Status)
-		// 4xx errors are definitive; wrapping in errNoRetry prevents the caller
-		// from retrying a request that will never succeed.
+		// Wrapping in errNoRetry prevents retrying a request that will never succeed.
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 			return errNoRetry{err}
 		}
@@ -301,18 +301,9 @@ func downloadToFile(ctx context.Context, client *http.Client, rawURL, destPath s
 	return nil
 }
 
-// verifyFallbackChecksum fetches the release checksums asset, locates the line
-// for assetName, and verifies the SHA-256 of assetPath.
-//
-// When no checksums asset can be found the function returns nil (best-effort).
-// A checksum mismatch is always a hard failure.
-// On success the verified hex digest is persisted into fallback.Recipe.Checksum.
+// A missing checksums asset is best-effort nil; a mismatch is always a hard failure.
 func (a *App) verifyFallbackChecksum(ctx context.Context, name string, fallback *config.FallbackSpec, assetPath, assetName string) error {
-	// Reuse a stored checksum to skip the fetch only when it was verified
-	// against the very asset now being installed. On a version bump or a rotated
-	// asset the recorded scope no longer matches, so fall through and re-fetch
-	// the authoritative digest for the current release instead of trusting a
-	// stale one.
+	// A stored digest is reused only when its recorded asset scope still matches the asset being installed.
 	assetID := strings.TrimSpace(fallback.Recipe.AssetID)
 	if stored := strings.TrimSpace(fallback.Recipe.Checksum); stored != "" {
 		scope := strings.TrimSpace(fallback.Recipe.ChecksumAssetID)
@@ -347,8 +338,6 @@ func (a *App) verifyFallbackChecksum(ctx context.Context, name string, fallback 
 	return nil
 }
 
-// fetchReleaseChecksum retrieves the checksums asset for the given release and
-// returns the SHA-256 hex digest for assetName.
 func (a *App) fetchReleaseChecksum(ctx context.Context, owner, repo, tagName, assetName string) (string, error) {
 	release, err := a.fetchGitHubReleaseByTag(ctx, owner, repo, tagName)
 	if err != nil {
@@ -368,6 +357,10 @@ func (a *App) fetchReleaseChecksum(ctx context.Context, owner, repo, tagName, as
 		}
 
 		checksumURL := asset.BrowserDownloadURL
+		if !config.IsHTTPSURL(checksumURL) {
+			assetErrs = append(assetErrs, fmt.Errorf("checksum asset %q: %w: %q", asset.Name, errChecksumURLScheme, checksumURL))
+			continue
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, checksumURL, nil)
 		if err != nil {
 			assetErrs = append(assetErrs, fmt.Errorf("checksum asset %q: %w", asset.Name, err))
@@ -409,19 +402,12 @@ func (a *App) fetchReleaseChecksum(ctx context.Context, owner, repo, tagName, as
 	return "", fmt.Errorf("no usable checksum entry for %q: %w", assetName, errors.Join(assetErrs...))
 }
 
-// fetchGitHubReleaseByTag fetches a specific release by tag from the GitHub API.
 func (a *App) fetchGitHubReleaseByTag(ctx context.Context, owner, repo, tagName string) (githubRelease, error) {
 	client := a.githubHTTPClient()
-	baseURL := a.githubAPIBase()
-	apiURL := baseURL + "/repos/" + owner + "/" + repo + "/releases/tags/" + tagName
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	req, err := a.newGitHubAPIRequest(ctx, "/repos/"+owner+"/"+repo+"/releases/tags/"+tagName)
 	if err != nil {
 		return githubRelease{}, err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "omni")
-	attachGitHubToken(req, baseURL)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -445,9 +431,7 @@ func (a *App) fetchGitHubReleaseByTag(ctx context.Context, owner, repo, tagName 
 	return release, nil
 }
 
-// isChecksumAsset reports whether a (lowercased) filename is a recognised
-// SHA-256 checksums asset. Matches the common patterns used by Go, Rust, and
-// other release tooling: SHA256SUMS, *_checksums.txt, *.sha256sum(s).
+// Matches SHA256SUMS, *_checksums.txt and *.sha256sum(s).
 func isChecksumAsset(name string) bool {
 	return name == "sha256sums" ||
 		name == "sha256sums.txt" ||
@@ -458,8 +442,6 @@ func isChecksumAsset(name string) bool {
 		strings.HasSuffix(name, ".sha256sums")
 }
 
-// extractChecksumForFile parses a "hexdigest  filename" checksums file and
-// returns the SHA-256 hex digest matching targetName.
 func extractChecksumForFile(r io.Reader, targetName string) (string, error) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
@@ -492,8 +474,6 @@ func extractChecksumForFile(r io.Reader, targetName string) (string, error) {
 	return "", fmt.Errorf("no checksum entry for %q in checksums file", targetName)
 }
 
-// verifyFileChecksum computes the SHA-256 of path and compares it to the
-// expected hex string. Returns a hard error on mismatch.
 func verifyFileChecksum(path, expectedHex, name string) error {
 	f, err := os.Open(path)
 	if err != nil {
@@ -514,12 +494,7 @@ func verifyFileChecksum(path, expectedHex, name string) error {
 	return nil
 }
 
-// extractAndInstall extracts binaryName from archivePath and writes it
-// atomically to destPath with mode 0755.
-//
-// archiveName drives format detection: .zip, tar archives, .gz, or raw.
-// Within an archive, binaryPath is tried as an exact entry name first;
-// otherwise the first entry whose base name equals binaryName is used.
+// binaryPath is tried as an exact entry name first, otherwise the first entry whose base name matches.
 func extractAndInstall(archivePath, archiveName, binaryName, binaryPath, destPath string) error {
 	lower := strings.ToLower(archiveName)
 	switch {
@@ -629,12 +604,9 @@ func extractGzipBinary(archivePath, destPath string) error {
 	return writeExecutable(io.LimitReader(gz, maxEntryBytes+1), destPath)
 }
 
-// extractTarStream iterates over tr and installs the first matching entry.
-// Exact binaryPath match wins; otherwise the first entry whose base name
-// equals binaryName is buffered and installed after the full iteration.
+// Exact binaryPath match wins; otherwise the first name match is buffered and installed after iteration.
 func extractTarStream(tr *tar.Reader, binaryName, binaryPath, destPath string) error {
-	// Buffer the first name-matched entry to a temp file so we can continue
-	// iterating (in case an exact-path match appears later in the archive).
+	// Buffered so iteration can continue in case an exact-path match appears later in the archive.
 	tmpDir := filepath.Dir(destPath)
 	var bufPath string
 	defer func() {
@@ -651,8 +623,7 @@ func extractTarStream(tr *tar.Reader, binaryName, binaryPath, destPath string) e
 		if err != nil {
 			return fmt.Errorf("read tar: %w", err)
 		}
-		// Only regular files are eligible; symlinks, devices, and directories
-		// must not be selected as the install target.
+		// Symlinks, devices and directories must never be selected as the install target.
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
@@ -702,8 +673,7 @@ func installRawBinary(srcPath, destPath string) error {
 	return writeExecutable(src, destPath)
 }
 
-// writeExecutable writes r to destPath atomically (temp file + rename) and
-// sets permissions to 0755.
+// Atomic: temp file then rename, mode 0755.
 func writeExecutable(r io.Reader, destPath string) error {
 	tmp, err := os.CreateTemp(filepath.Dir(destPath), ".omni-install-*")
 	if err != nil {
@@ -722,8 +692,7 @@ func writeExecutable(r io.Reader, destPath string) error {
 		_ = tmp.Close()
 		return fmt.Errorf("write binary: %w", err)
 	}
-	// Callers pass a LimitReader(r, maxEntryBytes+1); if we read more than
-	// the cap the stream was larger than allowed.
+	// Callers pass a LimitReader(r, maxEntryBytes+1), so reading more means the stream exceeded the cap.
 	if n > maxEntryBytes {
 		_ = tmp.Close()
 		return fmt.Errorf("entry exceeds %d MiB limit", maxEntryBytes>>20)
@@ -745,31 +714,34 @@ func writeExecutable(r io.Reader, destPath string) error {
 	return nil
 }
 
-// githubHTTPClient returns the test-injected client or a fresh default one.
-// The default client strips the Authorization header on every redirect and caps
-// redirect depth at 10 to prevent token leakage to non-GitHub hosts.
+// The default client refuses an https→http hop, strips Authorization on redirects, and caps redirect depth.
 func (a *App) githubHTTPClient() *http.Client {
-	if a.githubClient != nil {
-		return a.githubClient
+	if a.httpClient != nil {
+		// An injected client carries a transport, not a fetch policy. Copying it and forcing the guard keeps the redirect rule out of reach of anything that can hand this App a client.
+		client := *a.httpClient
+		client.CheckRedirect = guardGitHubRedirect
+		return &client
 	}
 	return &http.Client{
 		Timeout:       30 * time.Second,
-		CheckRedirect: stripAuthOnRedirect,
+		CheckRedirect: guardGitHubRedirect,
 	}
 }
 
-// stripAuthOnRedirect removes the Authorization header before following any
-// redirect so that GITHUB_TOKEN is never forwarded to a non-GitHub host.
-// It also enforces a hard cap of 10 redirects to match Go's default behaviour.
-func stripAuthOnRedirect(req *http.Request, via []*http.Request) error {
+// The https-only check on a download URL governs the first hop only: without this, an https origin
+// answering 302 with an http location gets followed, written, chmod 0755'd and renamed into bin_dir.
+// Also prevents GITHUB_TOKEN reaching a non-GitHub host, and caps redirects at 10 to match Go's default.
+func guardGitHubRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return fmt.Errorf("too many redirects")
+	}
+	if len(via) > 0 && strings.EqualFold(via[len(via)-1].URL.Scheme, "https") && !strings.EqualFold(req.URL.Scheme, "https") {
+		return fmt.Errorf("%w: %s", errRedirectSchemeDowngrade, req.URL.Redacted())
 	}
 	req.Header.Del("Authorization")
 	return nil
 }
 
-// githubAPIBase returns the configured or default GitHub API base URL.
 func (a *App) githubAPIBase() string {
 	if base := strings.TrimRight(a.githubAPI, "/"); base != "" {
 		return base
@@ -780,8 +752,24 @@ func (a *App) githubAPIBase() string {
 	return defaultGitHubAPIBase
 }
 
-// attachGitHubToken adds an Authorization header when rawURL targets a GitHub
-// host and GITHUB_TOKEN is set. Prevents credential leakage to non-GitHub hosts.
+// Single gate for every GitHub API call; the rejection names the full URL so a bad base stays diagnosable.
+func (a *App) newGitHubAPIRequest(ctx context.Context, pathSuffix string) (*http.Request, error) {
+	base := a.githubAPIBase()
+	apiURL := base + pathSuffix
+	if !config.IsHTTPSURL(base) {
+		return nil, fmt.Errorf("%w: %q", errGitHubAPIBaseScheme, apiURL)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "omni")
+	attachGitHubToken(req, base)
+	return req, nil
+}
+
+// Prevents credential leakage to non-GitHub hosts.
 func attachGitHubToken(req *http.Request, rawURL string) {
 	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 	if token == "" {

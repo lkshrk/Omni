@@ -2,36 +2,75 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
 
+	"github.com/lkshrk/omni/internal/agent"
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// SkillPackageRow is a display row for the agents packages table.
-type SkillPackageRow struct {
-	Source         string
-	Name           string // repo segment of Source
-	Ref            string
-	Groups         []string // active group memberships (badge)
-	Agents         []string // configured target agents (the -a install targets)
-	Skills         []string // individual skill names in this package (from the lockfile)
-	Updated        string   // YYYY-MM-DD, latest across the package's lockfile skills
-	Installed      bool
-	PerAgentStatus map[string]bool // agentID -> installed on disk
-	Description    string          // from the single skill's SKILL.md frontmatter, only when len(Skills) == 1
-	// ShadowedByPlugin is true when an installed plugin's name matches this
-	// package's repo-segment name on an agent where the package is actually
-	// present (see installedPluginNames/skillPackageRepoName). Set only for
-	// managed rows (SkillPackageRows) — unmanaged rows with this property are
-	// suppressed entirely by UnmanagedSkillPackages rather than flagged.
-	ShadowedByPlugin bool
+type SkillStatus string
+
+const (
+	SkillStatusInstalled SkillStatus = "installed"
+	SkillStatusMissing   SkillStatus = "missing"
+	// Restore converges byte-identical copies on its own, so drift always needs a human decision.
+	SkillStatusDrifted SkillStatus = "drifted"
+	// Another package in Omni's store currently owns the same target path.
+	SkillStatusShadowed SkillStatus = "shadowed"
+)
+
+// SkillOutdated — Unknown is honest for a source with no cheap identity (a Git subpath), unreachable, or never probed.
+type SkillOutdated string
+
+const (
+	SkillOutdatedUnknown SkillOutdated = ""
+	SkillOutdatedCurrent SkillOutdated = "current"
+	SkillOutdatedBehind  SkillOutdated = "outdated"
+)
+
+func skillOutdatedFrom(verdict *bool) SkillOutdated {
+	switch {
+	case verdict == nil:
+		return SkillOutdatedUnknown
+	case *verdict:
+		return SkillOutdatedBehind
+	default:
+		return SkillOutdatedCurrent
+	}
 }
 
-// singleSkillDescription returns the SKILL.md description for names[0] when
-// the package contains exactly one skill; merging descriptions across
-// multiple skills is out of scope.
+type SkillPackageRow struct {
+	Source    string
+	Name      string // repo segment of Source
+	Ref       string
+	Groups    []string
+	Agents    []string
+	Skills    []string
+	Updated   string // YYYY-MM-DD, latest native check time
+	Installed bool
+	// Recorded state only; a row build never probes, so a table redraw stays offline.
+	Outdated       SkillOutdated
+	PerAgentStatus map[string]SkillStatus
+	Description    string // from the single skill's SKILL.md frontmatter, only when len(Skills) == 1
+	// Set only for managed rows; unmanaged rows with this property are suppressed entirely.
+	ShadowedByPlugin bool
+	// Display paths annotate the row instead of failing, so one manifest typo cannot blank the table.
+	UnknownAgents []string
+	// Set when the source itself could not be read; the row carries the reason instead of the inventory.
+	Error string
+}
+
+func (r SkillPackageRow) UnknownAgentsWarning() string {
+	if len(r.UnknownAgents) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s: unknown agent target(s) %s; fix agents.packages[].agents in settings.json",
+		r.Source, strings.Join(r.UnknownAgents, ", "))
+}
+
 func singleSkillDescription(home string, names []string) string {
 	if len(names) != 1 {
 		return ""
@@ -39,11 +78,11 @@ func singleSkillDescription(home string, names []string) string {
 	return skillDescription(home, names[0])
 }
 
-// packageSkills returns the lockfile skill names belonging to source, sorted.
-func packageSkills(lock *config.SkillLockFile, source string) []string {
+func (a *App) packageSkills(lock *config.SkillLockFile, source string) []string {
+	identity := a.skillSourceIdentity(source)
 	var names []string
 	for name, e := range lock.Skills {
-		if e.Source == source {
+		if a.skillSourceIdentity(e.Source) == identity {
 			names = append(names, name)
 		}
 	}
@@ -51,13 +90,12 @@ func packageSkills(lock *config.SkillLockFile, source string) []string {
 	return names
 }
 
-// packageLockStatus reports whether any lockfile entry belongs to source and
-// the latest updated date (YYYY-MM-DD) across those entries.
-func packageLockStatus(lock *config.SkillLockFile, source string) (bool, string) {
+func (a *App) packageLockStatus(lock *config.SkillLockFile, source string) (bool, string) {
+	identity := a.skillSourceIdentity(source)
 	installed := false
 	latest := ""
 	for _, e := range lock.Skills {
-		if e.Source != source {
+		if a.skillSourceIdentity(e.Source) != identity {
 			continue
 		}
 		installed = true
@@ -69,28 +107,41 @@ func packageLockStatus(lock *config.SkillLockFile, source string) (bool, string)
 	return installed, latest
 }
 
-// packageDisplayName is the full owner/repo source — the unambiguous package
-// identity (two repos named ".../skills" would collide on the repo segment).
+// Full owner/repo: two repos named .../skills would collide on the repo segment alone.
 func packageDisplayName(source string) string {
 	return source
 }
 
-// skillPackageRepoName extracts the last path segment of a package source
-// (e.g. "owner/academic-research-skills" -> "academic-research-skills"), used
-// only to compare a package's identity against installed plugin names: a
-// plugin's Name has no owner prefix, so matching must strip Source down to
-// its bare repo segment rather than comparing the full owner/repo string
-// packageDisplayName returns.
+// A plugin's Name has no owner prefix, so matching must compare the bare repo segment.
 func skillPackageRepoName(source string) string {
-	if i := strings.LastIndexByte(source, '/'); i >= 0 {
-		return source[i+1:]
+	if parsed, err := agent.ParseSkillSource(source); err == nil {
+		source = parsed.Source
 	}
-	return source
+	if i := strings.LastIndexByte(source, '/'); i >= 0 {
+		source = source[i+1:]
+	}
+	return strings.TrimSuffix(source, ".git")
 }
 
-// SkillAgentRow describes one installed agent for a package's agents picker:
-// Targeted = chosen as an install target (-a), Installed = physically present
-// in the agent's skills dir on disk.
+// Drift is only meaningful for targets the inventory did not report as installed.
+func skillPerAgentStatus(inventory agent.SkillInventory) map[string]SkillStatus {
+	out := make(map[string]SkillStatus, len(inventory.PerTarget))
+	for id, installed := range inventory.PerTarget {
+		switch {
+		case installed:
+			out[id] = SkillStatusInstalled
+		case inventory.PerTargetDrifted[id]:
+			out[id] = SkillStatusDrifted
+		case inventory.PerTargetShadowed[id]:
+			out[id] = SkillStatusShadowed
+		default:
+			out[id] = SkillStatusMissing
+		}
+	}
+	return out
+}
+
+// SkillAgentRow — Targeted and Installed are independent: a selected agent not yet restored to is targeted but not installed.
 type SkillAgentRow struct {
 	ID        string
 	Display   string
@@ -102,10 +153,13 @@ func agentHasAnySkill(home string, a AgentInfo, names []string) bool {
 	return a.HasAnySkill(home, names)
 }
 
-// SkillAgentRows returns, for a package source, every installed agent with
-// whether it is a configured install target and whether the package's skills
-// are physically present in that agent's skills dir.
 func (a *App) SkillAgentRows(source string) ([]SkillAgentRow, error) {
+	parsed, err := a.parseSkillPackage(source)
+	if err != nil {
+		return nil, err
+	}
+	source = parsed.Source
+	identity := a.skillSourceIdentity(source)
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return nil, err
@@ -114,71 +168,151 @@ func (a *App) SkillAgentRows(source string) ([]SkillAgentRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	lock, err := config.LoadSkillLock(config.SkillLockPath(home))
+	// A manifest entry with no agents list targets every enabled agent, so those rows must show selected.
+	targeted := map[string]bool{}
+	for _, p := range cfg.Agents.Packages {
+		if a.skillSourceIdentity(p.Source) != identity {
+			continue
+		}
+		// The store keys packages by the manifest's spelling; the normalized identity only matches typed input.
+		source = p.Source
+		ids := p.Agents
+		if len(ids) == 0 {
+			ids = a.restoreTargetsFor(cfg, resolvedPackage{SkillPackage: p})
+		}
+		for _, id := range ids {
+			targeted[id] = true
+		}
+		break
+	}
+	installedAgents := a.installedAgents(home)
+	ids := make([]string, 0, len(installedAgents))
+	for _, target := range installedAgents {
+		ids = append(ids, target.ID)
+	}
+	service, err := a.skillService()
 	if err != nil {
 		return nil, err
 	}
-	targeted := map[string]bool{}
-	for _, p := range cfg.Agents.Packages {
-		if p.Source == source {
-			for _, id := range p.Agents {
-				targeted[id] = true
-			}
-			break
-		}
+	inventory, err := service.Inventory(context.Background(), source, ids)
+	if err != nil {
+		return nil, err
 	}
-	names := packageSkills(lock, source)
-	rows := make([]SkillAgentRow, 0)
-	for _, ag := range a.installedAgents(home) {
+	rows := make([]SkillAgentRow, 0, len(installedAgents))
+	for _, ag := range installedAgents {
 		rows = append(rows, SkillAgentRow{
 			ID:        ag.ID,
 			Display:   ag.Display,
 			Targeted:  targeted[ag.ID],
-			Installed: agentHasAnySkill(home, ag, names),
+			Installed: inventory.PerTarget[ag.ID],
 		})
 	}
 	return rows, nil
 }
 
-// SkillPackageRows builds the agents table: packages resolved for this host,
-// joined with the lockfile for install status. Packages whose repo-segment
-// name matches an installed plugin's name on a targeted agent are flagged via
-// ShadowedByPlugin (see installedPluginNames/skillPackageRepoName) but never
-// hidden — a manifest entry is declared intent.
+// skillRowCounts — Disjoint buckets: a shadowed or drifted package is never also counted as missing.
+type skillRowCounts struct {
+	Installed int
+	Missing   []string
+	Drifted   []string
+	Errored   []string
+	Outdated  []string
+}
+
+// Sync deliberately skips a plugin-shadowed package and leaves a drifted one alone, so counting either
+// as missing would report a gap no command can close. Doctor and the dashboard share this so they cannot
+// disagree on identical data.
+func classifySkillRows(rows []SkillPackageRow) skillRowCounts {
+	var c skillRowCounts
+	for _, r := range rows {
+		if r.Error != "" {
+			c.Errored = append(c.Errored, r.Source)
+			continue
+		}
+		packageShadowed := skillRowShadowed(r) && !skillRowMissing(r)
+		shadowed := r.ShadowedByPlugin || packageShadowed
+		outdated := !shadowed && r.Outdated == SkillOutdatedBehind
+		switch {
+		case r.Installed || r.ShadowedByPlugin:
+			c.Installed++
+		case skillRowDrifted(r):
+			c.Drifted = append(c.Drifted, r.Source)
+		case packageShadowed:
+			c.Installed++
+		default:
+			c.Missing = append(c.Missing, r.Source)
+			outdated = false
+		}
+		if outdated {
+			c.Outdated = append(c.Outdated, r.Source)
+		}
+	}
+	sort.Strings(c.Missing)
+	sort.Strings(c.Drifted)
+	sort.Strings(c.Errored)
+	sort.Strings(c.Outdated)
+	return c
+}
+
+func skillRowDrifted(r SkillPackageRow) bool {
+	for _, status := range r.PerAgentStatus {
+		if status == SkillStatusDrifted {
+			return true
+		}
+	}
+	return false
+}
+
+func skillRowShadowed(r SkillPackageRow) bool {
+	for _, status := range r.PerAgentStatus {
+		if status == SkillStatusShadowed {
+			return true
+		}
+	}
+	return false
+}
+
+func skillRowMissing(r SkillPackageRow) bool {
+	for _, status := range r.PerAgentStatus {
+		if status == SkillStatusMissing {
+			return true
+		}
+	}
+	return false
+}
+
+// SkillPackageRows — A manifest entry is declared intent, so a plugin-shadowed package is flagged, never
+// hidden, and a source whose inventory cannot be read becomes an error row rather than blanking the table.
 func (a *App) SkillPackageRows(ctx context.Context) ([]SkillPackageRow, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return nil, err
 	}
-	home, err := os.UserHomeDir()
+	service, err := a.skillService()
 	if err != nil {
 		return nil, err
 	}
-	lock, err := config.LoadSkillLock(config.SkillLockPath(home))
-	if err != nil {
-		return nil, err
-	}
-	resolved := resolveSkillPackages(cfg, currentMachineGroupName())
+	resolved := a.resolveSkillPackages(cfg, currentMachineGroupName())
 	// display-only builder: shadow warnings surface via RestoreSkills
 	pluginNames, _ := installedPluginNames(ctx, a)
 	rows := make([]SkillPackageRow, 0, len(resolved))
 	for _, p := range resolved {
-		installed, updated := packageLockStatus(lock, p.Source)
-		names := packageSkills(lock, p.Source)
-		targets := p.Agents
-		if len(targets) == 0 {
-			targets = a.EnabledAgentIDs(cfg)
+		targets := a.restoreTargetsFor(cfg, p)
+		inventory, err := service.Inventory(ctx, p.Source, targets)
+		if err != nil {
+			rows = append(rows, SkillPackageRow{
+				Source: p.Source,
+				Name:   packageDisplayName(p.Source),
+				Ref:    p.Ref,
+				Groups: p.Groups,
+				Agents: append([]string(nil), p.Agents...),
+				Error:  err.Error(),
+			})
+			continue
 		}
 		repoName := skillPackageRepoName(p.Source)
-		perAgent := make(map[string]bool, len(targets))
 		shadowed := false
 		for _, id := range targets {
-			ag, ok := a.agentInfoByID(home, id)
-			if !ok {
-				perAgent[id] = false
-				continue
-			}
-			perAgent[id] = agentHasAnySkill(home, ag, names)
 			if pluginShadowsName(pluginNames, id, repoName) {
 				shadowed = true
 			}
@@ -189,23 +323,20 @@ func (a *App) SkillPackageRows(ctx context.Context) ([]SkillPackageRow, error) {
 			Ref:              p.Ref,
 			Groups:           p.Groups,
 			Agents:           append([]string(nil), p.Agents...),
-			Skills:           names,
-			Updated:          updated,
-			Installed:        installed,
-			PerAgentStatus:   perAgent,
-			Description:      singleSkillDescription(home, names),
+			Skills:           inventory.Skills,
+			Updated:          inventory.Updated,
+			Installed:        inventory.Installed,
+			Outdated:         skillOutdatedFrom(inventory.Outdated),
+			PerAgentStatus:   skillPerAgentStatus(inventory),
+			Description:      inventory.Description,
 			ShadowedByPlugin: shadowed,
+			UnknownAgents:    inventory.UnknownTargets,
 		})
 	}
 	return rows, nil
 }
 
-// UnmanagedSkillPackages returns lockfile packages absent from the manifest:
-// installed on disk (per ~/.agents/.skill-lock.json) but not tracked by any
-// config.SkillPackage entry. Packages whose repo-segment name matches an
-// installed plugin's name on an agent where the package is actually present
-// are suppressed — the plugin manages them (see installedPluginNames), so
-// offering to claim them into the manifest would create a duplicate.
+// UnmanagedSkillPackages — Packages an installed plugin provides are suppressed: claiming them would create a duplicate.
 func (a *App) UnmanagedSkillPackages(ctx context.Context) ([]SkillPackageRow, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -219,42 +350,23 @@ func (a *App) UnmanagedSkillPackages(ctx context.Context) ([]SkillPackageRow, er
 	if err != nil {
 		return nil, err
 	}
-	manifestSources := make(map[string]struct{}, len(cfg.Agents.Packages))
-	for _, p := range cfg.Agents.Packages {
-		manifestSources[p.Source] = struct{}{}
-	}
-	lockSources := make(map[string]struct{})
-	for _, e := range lock.Skills {
-		lockSources[e.Source] = struct{}{}
-	}
-	var sources []string
-	for src := range lockSources {
-		if _, managed := manifestSources[src]; !managed {
-			sources = append(sources, src)
-		}
-	}
-	sort.Strings(sources)
+	sources := a.unmanagedLockSources(cfg, lock)
 	installedAgents := a.installedAgents(home)
 	// display-only builder: shadow warnings surface via RestoreSkills
 	pluginNames, _ := installedPluginNames(ctx, a)
 	rows := make([]SkillPackageRow, 0, len(sources))
 	for _, src := range sources {
-		names := packageSkills(lock, src)
-		repoName := skillPackageRepoName(src)
-		shadowed := false
-		for _, ag := range installedAgents {
-			if agentHasAnySkill(home, ag, names) && pluginShadowsName(pluginNames, ag.ID, repoName) {
-				shadowed = true
-				break
-			}
-		}
-		if shadowed {
+		names := a.packageSkills(lock, src)
+		if _, shadowed := pluginProvidingLockPackage(home, src, names, installedAgents, pluginNames); shadowed {
 			continue
 		}
-		_, updated := packageLockStatus(lock, src)
-		perAgent := make(map[string]bool, len(installedAgents))
+		_, updated := a.packageLockStatus(lock, src)
+		perAgent := make(map[string]SkillStatus, len(installedAgents))
 		for _, ag := range installedAgents {
-			perAgent[ag.ID] = agentHasAnySkill(home, ag, names)
+			perAgent[ag.ID] = SkillStatusMissing
+			if agentHasAnySkill(home, ag, names) {
+				perAgent[ag.ID] = SkillStatusInstalled
+			}
 		}
 		rows = append(rows, SkillPackageRow{
 			Source:         src,
@@ -269,7 +381,25 @@ func (a *App) UnmanagedSkillPackages(ctx context.Context) ([]SkillPackageRow, er
 	return rows, nil
 }
 
-// skillUpdatedDate trims an ISO timestamp to its date component.
+func (a *App) unmanagedLockSources(cfg *config.RootConfig, lock *config.SkillLockFile) []string {
+	manifestSources := make(map[string]struct{}, len(cfg.Agents.Packages))
+	for _, p := range cfg.Agents.Packages {
+		manifestSources[a.skillSourceIdentity(p.Source)] = struct{}{}
+	}
+	lockSources := make(map[string]struct{})
+	for _, e := range lock.Skills {
+		lockSources[a.skillSourceIdentity(e.Source)] = struct{}{}
+	}
+	var sources []string
+	for src := range lockSources {
+		if _, managed := manifestSources[src]; !managed {
+			sources = append(sources, src)
+		}
+	}
+	sort.Strings(sources)
+	return sources
+}
+
 func skillUpdatedDate(ts string) string {
 	if len(ts) >= 10 {
 		return ts[:10]

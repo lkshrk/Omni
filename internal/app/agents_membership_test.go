@@ -153,10 +153,6 @@ func TestSetMcpGroups_GuardedByMcpEnabled(t *testing.T) {
 	}
 }
 
-// TestSetMcpGroups_NotFoundReturnsError pins the fix for the "mcp group
-// assignment silently fails" report: a nonexistent server name used to
-// silently no-op (setMcpGroupsInConfig writes into cfg.Groups regardless of
-// whether name is a real manifest server) instead of surfacing an error.
 func TestSetMcpGroups_NotFoundReturnsError(t *testing.T) {
 	t.Parallel()
 	a := newMembershipTestApp(t)
@@ -288,9 +284,6 @@ func TestSetSkillGroups_GuardedBySkillsEnabled(t *testing.T) {
 	}
 }
 
-// TestSetSkillGroups_NotFoundReturnsError pins the guard parity with
-// SetMcpGroups/SetPluginGroups: a source absent from the manifest must not
-// be written into group Skills lists as an orphan reference.
 func TestSetSkillGroups_NotFoundReturnsError(t *testing.T) {
 	t.Parallel()
 	a := newMembershipTestApp(t)
@@ -361,10 +354,6 @@ func TestSetPluginGroups_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestSetPluginGroups_NotFoundReturnsError is the plugin twin of
-// TestSetMcpGroups_NotFoundReturnsError: same not-found-name gap, fixed the
-// same mechanical way for consistency (plugin group-assign wasn't reported
-// broken, but had the identical silent-no-op hole).
 func TestSetPluginGroups_NotFoundReturnsError(t *testing.T) {
 	t.Parallel()
 	a := newMembershipTestApp(t)
@@ -462,8 +451,6 @@ func TestSetMarketplaceGroups_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestSetMarketplaceGroups_NotFoundReturnsError is the marketplace twin of
-// TestSetPluginGroups_NotFoundReturnsError.
 func TestSetMarketplaceGroups_NotFoundReturnsError(t *testing.T) {
 	t.Parallel()
 	a := newMembershipTestApp(t)

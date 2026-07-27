@@ -22,10 +22,8 @@ import (
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
 
-// errNotExist simulates a "binary not found" error from the shell.
 var errNotExist = errors.New("exec: no such file or directory")
 
-// testApp builds a complete syncer stack with an injected executor.
 type testApp struct {
 	ConfigPath string
 	DB         *database.DB
@@ -35,7 +33,6 @@ type testApp struct {
 	}
 }
 
-// newTestStackWithMock creates a fully-wired stack using the provided executor.
 func newTestStackWithMock(t *testing.T, exec executor.Executor) *testApp {
 	t.Helper()
 	dir := t.TempDir()
@@ -66,7 +63,6 @@ func newTestStackWithMock(t *testing.T, exec executor.Executor) *testApp {
 	}
 }
 
-// newTestStack creates a testApp using a sequential MockExecutor.
 // Use newTestStackWithMock + buildBrewStatefulMock for concurrent-safe tests.
 func newTestStack(t *testing.T, responses ...executor.MockCall) *testApp {
 	t.Helper()
@@ -74,7 +70,6 @@ func newTestStack(t *testing.T, responses ...executor.MockCall) *testApp {
 	return newTestStackWithMock(t, mock)
 }
 
-// writeConfig writes a Config to the test config file.
 func (ta *testApp) writeConfig(t *testing.T, cfg *config.Config) {
 	t.Helper()
 	root := &config.RootConfig{
@@ -86,7 +81,6 @@ func (ta *testApp) writeConfig(t *testing.T, cfg *config.Config) {
 	}
 }
 
-// simpleConfig creates a config from a slice of (name, provider) pairs.
 func simpleConfig(tools ...string) *config.Config {
 	var entries []config.ToolEntry
 	for i := 0; i+1 < len(tools); i += 2 {
@@ -99,23 +93,16 @@ func simpleConfig(tools ...string) *config.Config {
 	return &config.Config{Tools: entries}
 }
 
-// --- Stateful brew mock --------------------------------------------------
-
-// brewStatefulMock is an executor.Executor that simulates brew with state.
 type brewStatefulMock struct {
 	mu        sync.Mutex
 	installed map[string]string // pkg → version
 }
 
-// buildBrewStatefulMock creates a stateful brew executor.
-// installVersions: packages to install on sync (not yet installed), pkg → expected version
-// preInstalled:    packages already installed, pkg → version
 func buildBrewStatefulMock(installVersions, preInstalled map[string]string) executor.Executor {
 	installed := make(map[string]string)
 	for pkg, ver := range preInstalled {
 		installed[pkg] = ver
 	}
-	// Store installVersions separately so we can set them after install.
 	m := &brewStatefulMock{installed: installed}
 	return &brewStatefulInstaller{
 		mock:            m,
@@ -123,7 +110,6 @@ func buildBrewStatefulMock(installVersions, preInstalled map[string]string) exec
 	}
 }
 
-// brewStatefulInstaller wraps brewStatefulMock and handles install/uninstall.
 type brewStatefulInstaller struct {
 	mock            *brewStatefulMock
 	installVersions map[string]string

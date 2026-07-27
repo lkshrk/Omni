@@ -2,9 +2,7 @@ package provider
 
 import "strings"
 
-// PackageLookupKeys returns provider-map lookup keys in priority order.
-// Prefer exact package identifiers so scoped packages such as @scope/pkg work,
-// then fall back to logical names and slash basenames for tap/path aliases.
+// PackageLookupKeys — Exact package identifiers first so @scope/pkg works, then logical names and slash basenames for tap aliases.
 func PackageLookupKeys(name, pkg string) []string {
 	if pkg == "" {
 		pkg = name

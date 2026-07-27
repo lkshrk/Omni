@@ -7,18 +7,7 @@ import (
 	"github.com/lkshrk/omni/internal/database"
 )
 
-// ToolView is the app→TUI contract for a tool row. It is a plain value type: no
-// bun.BaseModel, no column tags, and sql.NullString flattened to string. This
-// decouples the UI and app business logic from the persistence schema
-// (database.ToolCache), so the SQLite/bun row can evolve without rippling into
-// the view. It carries every ToolCache field so the conversion round-trips
-// losslessly for tools that flow back into app operations (e.g. SyncAll's
-// discovered set); once those round-trips are removed the surface can be
-// trimmed to what the view actually reads.
-//
-// The nullable columns (Version, LatestVersion, Description, LastError,
-// PrivilegeReason) use empty string for "absent" — every reader already treats
-// empty as absent, so no NULL-vs-"" distinction is lost.
+// ToolView — A plain value type so the UI does not depend on the persistence schema; empty string means absent for nullable columns.
 type ToolView struct {
 	ID              int64
 	Name            string
@@ -28,6 +17,7 @@ type ToolView struct {
 	InstalledWith   string
 	Version         string
 	Outdated        bool
+	OutdatedUnknown bool
 	LatestVersion   string
 	Description     string
 	LastChecked     time.Time
@@ -47,8 +37,7 @@ type ToolView struct {
 	UpdateDateSource   string
 }
 
-// toolViewFromCache maps a persistence row to the view DTO. Returns nil for a
-// nil input so slice conversions can pass rows through unchanged.
+// Returns nil for a nil input so slice conversions pass rows through unchanged.
 func toolViewFromCache(t *database.ToolCache) *ToolView {
 	if t == nil {
 		return nil
@@ -62,6 +51,7 @@ func toolViewFromCache(t *database.ToolCache) *ToolView {
 		InstalledWith:      t.InstalledWith,
 		Version:            t.Version.String,
 		Outdated:           t.Outdated,
+		OutdatedUnknown:    t.OutdatedUnknown,
 		LatestVersion:      t.LatestVersion.String,
 		Description:        t.Description.String,
 		LastChecked:        t.LastChecked,
@@ -80,9 +70,7 @@ func toolViewFromCache(t *database.ToolCache) *ToolView {
 	}
 }
 
-// toolCacheFromView rebuilds a persistence row from the view DTO. Used where a
-// view row flows back into an app operation (e.g. SyncAll's discovered set)
-// until those round-trips are removed.
+// Used where a view row flows back into an app operation.
 func toolCacheFromView(v *ToolView) *database.ToolCache {
 	if v == nil {
 		return nil
@@ -96,6 +84,7 @@ func toolCacheFromView(v *ToolView) *database.ToolCache {
 		InstalledWith:      v.InstalledWith,
 		Version:            nullString(v.Version),
 		Outdated:           v.Outdated,
+		OutdatedUnknown:    v.OutdatedUnknown,
 		LatestVersion:      nullString(v.LatestVersion),
 		Description:        nullString(v.Description),
 		LastChecked:        v.LastChecked,
@@ -114,7 +103,6 @@ func toolCacheFromView(v *ToolView) *database.ToolCache {
 	}
 }
 
-// toolViewsFromCache converts a slice, preserving order and nil entries.
 func toolViewsFromCache(rows []*database.ToolCache) []*ToolView {
 	if rows == nil {
 		return nil
@@ -126,7 +114,6 @@ func toolViewsFromCache(rows []*database.ToolCache) []*ToolView {
 	return out
 }
 
-// toolCachesFromView is the inverse of toolViewsFromCache.
 func toolCachesFromView(views []*ToolView) []*database.ToolCache {
 	if views == nil {
 		return nil
@@ -138,8 +125,6 @@ func toolCachesFromView(views []*ToolView) []*database.ToolCache {
 	return out
 }
 
-// nullString wraps s as an absent value when empty, matching how every reader
-// treats an empty nullable column.
 func nullString(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: s != ""}
 }

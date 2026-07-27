@@ -13,10 +13,6 @@ import (
 	"github.com/lkshrk/omni/internal/database"
 )
 
-// ─── test helpers ────────────────────────────────────────────────────────────
-
-// newCompletionTestState builds a rootState with a real app initialised in test
-// mode against temp dirs.  The returned state has state.app fully wired.
 func newCompletionTestState(t *testing.T) *rootState {
 	t.Helper()
 	cfgDir := t.TempDir()
@@ -36,7 +32,6 @@ func newCompletionTestState(t *testing.T) *rootState {
 	return &rootState{configPath: cfgPath, cacheDir: cacheDir, app: a}
 }
 
-// seedTools upserts tool cache entries into the test DB.
 func seedTools(t *testing.T, state *rootState, names ...string) {
 	t.Helper()
 	for _, name := range names {
@@ -47,7 +42,6 @@ func seedTools(t *testing.T, state *rootState, names ...string) {
 	}
 }
 
-// seedGroups writes groups into the config file used by state.app.
 func seedGroups(t *testing.T, state *rootState, groupNames ...string) {
 	t.Helper()
 	cfg, err := config.Load(state.configPath)
@@ -63,8 +57,7 @@ func seedGroups(t *testing.T, state *rootState, groupNames ...string) {
 	}
 }
 
-// seedDots writes dot entries into the config used by state.app and sets up a
-// minimal dots_repo so DotsList() can resolve entries.
+// Sets up a minimal dots_repo so DotsList() can resolve the entries.
 func seedDots(t *testing.T, state *rootState, dotNames ...string) {
 	t.Helper()
 	cfg, err := config.Load(state.configPath)
@@ -72,7 +65,7 @@ func seedDots(t *testing.T, state *rootState, dotNames ...string) {
 		cfg = &config.RootConfig{}
 	}
 
-	// Create a temp dots repo with stow package dirs so buildDotsManager works.
+	// buildDotsManager needs real stow package dirs.
 	dotsRepo := t.TempDir()
 	dotfilesDir := filepath.Join(dotsRepo, "dotfiles")
 	for _, name := range dotNames {
@@ -82,7 +75,6 @@ func seedDots(t *testing.T, state *rootState, dotNames ...string) {
 	}
 	cfg.Settings.DotsRepo = dotsRepo
 
-	// Ensure there's a host group to hold dots.
 	var hostGroup *config.GroupConfig
 	for _, g := range cfg.Groups {
 		if g.IsHost() {
@@ -110,7 +102,6 @@ func seedDots(t *testing.T, state *rootState, dotNames ...string) {
 	}
 }
 
-// seedHosts writes host entries into the config used by state.app.
 func seedHosts(t *testing.T, state *rootState, hostNames ...string) {
 	t.Helper()
 	cfg, err := config.Load(state.configPath)
@@ -130,14 +121,11 @@ func seedHosts(t *testing.T, state *rootState, hostNames ...string) {
 	}
 }
 
-// dummyCmd returns a minimal cobra command for passing to completion functions.
 func dummyCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "test"}
 	cmd.SetContext(context.Background())
 	return cmd
 }
-
-// ─── completeToolNames ───────────────────────────────────────────────────────
 
 func TestCompleteToolNames_NilApp(t *testing.T) {
 	state := &rootState{}
@@ -197,8 +185,6 @@ func TestCompleteToolNames_NoMatch(t *testing.T) {
 	}
 }
 
-// ─── completeGroupNames ─────────────────────────────────────────────────────
-
 func TestCompleteGroupNames_NilApp(t *testing.T) {
 	state := &rootState{}
 	fn := completeGroupNames(state)
@@ -230,13 +216,11 @@ func TestCompleteGroupNames_EmptyPrefix(t *testing.T) {
 	fn := completeGroupNames(state)
 	names, _ := fn(dummyCmd(), nil, "")
 
-	// Includes testhost (host group) + work + personal
+	// Empty prefix includes testhost, work, and personal.
 	if len(names) < 2 {
 		t.Fatalf("expected at least 2 groups, got %v", names)
 	}
 }
-
-// ─── completeHostNames ──────────────────────────────────────────────────────
 
 func TestCompleteHostNames_NilApp(t *testing.T) {
 	state := &rootState{}
@@ -269,8 +253,6 @@ func TestCompleteHostNames_ReturnsMatchingHosts(t *testing.T) {
 	}
 }
 
-// ─── completeProviderNames ──────────────────────────────────────────────────
-
 func TestCompleteProviderNames_NilApp(t *testing.T) {
 	state := &rootState{}
 	fn := completeProviderNames(state)
@@ -300,13 +282,11 @@ func TestCompleteProviderNames_EmptyPrefix(t *testing.T) {
 	fn := completeProviderNames(state)
 	names, _ := fn(dummyCmd(), nil, "")
 
-	// brew, pip, node registered in newCompletionTestState
+	// Empty prefix includes brew, pip, and node.
 	if len(names) < 3 {
 		t.Fatalf("expected at least 3 providers, got %v", names)
 	}
 }
-
-// ─── completeDotNames ───────────────────────────────────────────────────────
 
 func TestCompleteDotNames_NilApp(t *testing.T) {
 	state := &rootState{}
@@ -344,8 +324,6 @@ func TestCompleteDotNames_EmptyPrefix(t *testing.T) {
 	}
 }
 
-// ─── completeSettingsKeys ───────────────────────────────────────────────────
-
 func TestCompleteSettingsKeys_EmptyPrefix(t *testing.T) {
 	state := &rootState{} // state.app not needed for settings keys
 	fn := completeSettingsKeys(state)
@@ -364,7 +342,7 @@ func TestCompleteSettingsKeys_PrefixFilter(t *testing.T) {
 	fn := completeSettingsKeys(&rootState{})
 	names, _ := fn(dummyCmd(), nil, "dots_")
 
-	// dots_repo, dots_disabled, dots_git.auto_commit, dots_git.auto_push
+	// Matches dots_repo, dots_disabled, dots_git.auto_commit, and dots_git.auto_push.
 	if len(names) != 4 {
 		t.Fatalf("expected 4 dots_ keys, got %v", names)
 	}
@@ -374,7 +352,7 @@ func TestCompleteSettingsKeys_DotPrefixFilter(t *testing.T) {
 	fn := completeSettingsKeys(&rootState{})
 	names, _ := fn(dummyCmd(), nil, "dots_git.")
 
-	// dots_git.auto_commit, dots_git.auto_push
+	// Matches dots_git.auto_commit and dots_git.auto_push.
 	if len(names) != 2 {
 		t.Fatalf("expected 2 dots_git. keys, got %v", names)
 	}
@@ -389,9 +367,6 @@ func TestCompleteSettingsKeys_NoMatch(t *testing.T) {
 	}
 }
 
-// ─── multi-arg positional dispatch ───────────────────────────────────────────
-
-// findSubCmd locates a subcommand by name.
 func findSubCmd(t *testing.T, parent *cobra.Command, name string) *cobra.Command {
 	t.Helper()
 	for _, c := range parent.Commands() {
@@ -403,8 +378,6 @@ func findSubCmd(t *testing.T, parent *cobra.Command, name string) *cobra.Command
 	return nil
 }
 
-// TestMultiArgPositionalDispatch verifies that commands with positional-aware
-// completion switch between entity types based on len(args).
 func TestMultiArgPositionalDispatch(t *testing.T) {
 	state := newCompletionTestState(t)
 	seedTools(t, state, "ripgrep")
@@ -413,14 +386,11 @@ func TestMultiArgPositionalDispatch(t *testing.T) {
 	root := NewRootCmd()
 	groupsCmd := findSubCmd(t, root, "groups")
 
-	// groups move-tool: arg0 = group, arg1 = tool
 	moveCmd := findSubCmd(t, groupsCmd, "move-tool")
 	if moveCmd.ValidArgsFunction == nil {
 		t.Fatal("groups move-tool should have ValidArgsFunction")
 	}
 }
-
-// ─── wiring: ValidArgsFunction is set on key commands ────────────────────────
 
 func TestCompletionWiring(t *testing.T) {
 	root := NewRootCmd()

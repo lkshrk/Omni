@@ -729,20 +729,15 @@ func githubFallbackLatestReleaseClient(t *testing.T, calls *int32, body func() i
 	})}
 }
 
-// TestRefreshOutdated_GitHubFallbackUsesVersionComparisonWhenInstalledVersionStored
-// verifies that when InstalledVersion is recorded in the recipe, the outdated
-// decision uses version comparison instead of (or in addition to) published_at.
 func TestRefreshOutdated_GitHubFallbackUsesVersionComparisonWhenInstalledVersionStored(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	asset := currentPlatformGitHubCLIAsset(t)
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, nil, func() io.ReadCloser {
-		// Latest release is v2.93.0 — newer than installed 2.92.0.
 		return githubFallbackReleaseBody("v2.93.0", "2026-05-27T17:47:41Z", asset.name, asset.downloadURL)
 	}))
 	spec := githubFallbackSpec("v2.92.0", "2026-05-01T00:00:00Z", asset)
-	// Simulate a post-HCL-36 install that stored the installed version.
 	spec.Recipe.InstalledVersion = "2.92.0"
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
@@ -760,9 +755,6 @@ func TestRefreshOutdated_GitHubFallbackUsesVersionComparisonWhenInstalledVersion
 	assertGitHubFallbackOutdated(t, a.DB(), true, "v2.93.0")
 }
 
-// TestRefreshOutdated_GitHubFallbackNotOutdatedWhenInstalledVersionMatchesLatest
-// verifies that a tool is not marked outdated when its installed version equals
-// the latest release tag, even when published_at timestamps differ.
 func TestRefreshOutdated_GitHubFallbackNotOutdatedWhenInstalledVersionMatchesLatest(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -772,7 +764,6 @@ func TestRefreshOutdated_GitHubFallbackNotOutdatedWhenInstalledVersionMatchesLat
 		return githubFallbackReleaseBody("v2.93.0", "2026-05-27T17:47:41Z", asset.name, asset.downloadURL)
 	}))
 	spec := githubFallbackSpec("v2.93.0", "2026-05-01T00:00:00Z", asset)
-	// InstalledVersion matches the latest tag — not outdated.
 	spec.Recipe.InstalledVersion = "2.93.0"
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{

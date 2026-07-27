@@ -12,8 +12,6 @@ import (
 	isync "github.com/lkshrk/omni/internal/sync"
 )
 
-// recordingProvider is a fake provider that logs Install/Uninstall calls in
-// order so tests can assert sequencing.
 type recordingProvider struct {
 	name          string
 	available     bool
@@ -73,13 +71,6 @@ func indexOf(log []string, want string) int {
 	return -1
 }
 
-// TestSync_InstallsProvidersBeforeDependents verifies that a bootstrap provider
-// declared in Settings.Providers is installed before any dependent tool that
-// relies on it.
-//
-// Scenario: pip is installed via brew in pass 1. ruff is then installed via the
-// configured concrete provider in pass 2. Both bootstrap and group/batch sync
-// must install pip before even checking the dependent provider.
 func TestSync_InstallsProvidersBeforeDependents(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -131,8 +122,6 @@ func TestSync_InstallsProvidersBeforeDependents(t *testing.T) {
 	}
 }
 
-// TestSync_SelfContainedProviderNotPruned verifies that a bootstrap provider
-// declared in Settings.Providers is not pruned even when no group tool uses it.
 func TestSync_SelfContainedProviderNotPruned(t *testing.T) {
 	t.Parallel()
 	var mu sync.Mutex
@@ -142,7 +131,6 @@ func TestSync_SelfContainedProviderNotPruned(t *testing.T) {
 
 	cfg := &config.RootConfig{
 		Settings: config.Settings{
-			// uv is declared as a bootstrap provider but no group tool depends on it.
 			Providers: []config.ProviderEntry{{Name: "uv", Provider: "brew"}},
 		},
 		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{}}},
@@ -164,9 +152,6 @@ func TestSync_SelfContainedProviderNotPruned(t *testing.T) {
 	}
 }
 
-// TestSync_ProviderFailureContinues verifies that a failed bootstrap-provider
-// install does not abort the sync: the provider op gets OpFailed, and tools
-// that depended on the unavailable provider get OpProviderUnavailable.
 func TestSync_ProviderFailureContinues(t *testing.T) {
 	t.Parallel()
 	var mu sync.Mutex
@@ -178,7 +163,6 @@ func TestSync_ProviderFailureContinues(t *testing.T) {
 		mu:        &mu,
 		log:       &log,
 	}
-	// python is unavailable so ruff cannot be installed.
 	python := &recordingProvider{name: "python", available: false, mu: &mu, log: &log}
 	a, cfgPath := newImportApp(t, brew, python)
 

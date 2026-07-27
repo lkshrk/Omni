@@ -1,10 +1,5 @@
-# agents mcp remove: unregisters a manifest server and calls the fake claude
-# CLI to remove it from the agent. The manifest entry targets claude-code
-# only, so a real codex binary on the host PATH (if any) is never invoked and
-# can't make this test flaky. Covers: successful removal drops the manifest
-# entry, and removing a name not in the manifest is a hard error.
-# RemoveMcpServer only execs the CLI when List() reports the name already
-# installed, so $HOME/.claude.json must seed myserver up front.
+# Targeting claude-code prevents host Codex binaries from affecting the fixture.
+# Seed $HOME/.claude.json because RemoveMcpServer execs only when List reports the server installed.
 chmod 0755 $WORK/bin/claude
 env PATH=$WORK/bin:$PATH
 env HOME=$WORK/home
@@ -13,7 +8,7 @@ exec omni --config settings.json agents mcp remove myserver
 stdout 'removed myserver'
 exec grep -q 'mcp remove -s user myserver' .omni-cache/claude-calls.log
 
-exec omni --config settings.json agents mcp restore --dry-run
+exec omni --config settings.json agents mcp sync --dry-run
 ! stdout 'myserver'
 
 ! exec omni --config settings.json agents mcp remove not-in-manifest

@@ -7,14 +7,12 @@ import (
 	"sync"
 )
 
-// Registry holds all registered providers.
 type Registry struct {
 	mu        sync.RWMutex
 	providers map[string]Provider
 	metadata  map[string]Metadata
 }
 
-// ProviderKind classifies provider identity in config and resolver flows.
 type ProviderKind string
 
 const (
@@ -24,7 +22,6 @@ const (
 	ProviderKindEcosystem ProviderKind = "ecosystem"
 )
 
-// Metadata describes a provider's role relative to ecosystem resolution.
 type Metadata struct {
 	Kind                           ProviderKind
 	Ecosystem                      string
@@ -33,15 +30,11 @@ type Metadata struct {
 	DefaultInstallOrder            int
 	ManagerOptions                 []ManagerOption
 	SupportsTaps                   bool
-	// RequiresPrivilege marks providers whose install/uninstall are sudo-backed
-	// system package managers. It is a coarse display hint (drives the privilege
-	// marker in tool views); the precise per-action decision lives in each
-	// provider's PrivilegePlan.
+	// Coarse display hint only; the per-action decision lives in each provider's PrivilegePlan.
 	RequiresPrivilege bool
 }
 
-// ManagerOption describes one concrete manager usable through an ecosystem
-// provider, such as node→pnpm or python→uv.
+// ManagerOption — One concrete manager reachable through an ecosystem provider, e.g. node to pnpm.
 type ManagerOption struct {
 	Name          string
 	Provider      string
@@ -50,7 +43,6 @@ type ManagerOption struct {
 	Alias         bool
 }
 
-// NewRegistry creates an empty Registry.
 func NewRegistry() *Registry {
 	return &Registry{
 		providers: make(map[string]Provider),
@@ -63,8 +55,7 @@ func (r *Registry) Register(p Provider) {
 	r.RegisterWithMetadata(p, Metadata{Kind: ProviderKindConcrete})
 }
 
-// RegisterWithMetadata adds a provider with registry metadata. Overwrites if
-// name already registered.
+// RegisterWithMetadata — Overwrites an existing registration of the same name.
 func (r *Registry) RegisterWithMetadata(p Provider, meta Metadata) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -75,7 +66,6 @@ func (r *Registry) RegisterWithMetadata(p Provider, meta Metadata) {
 	r.metadata[p.Name()] = meta
 }
 
-// Get returns a provider by name.
 func (r *Registry) Get(name string) (Provider, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -83,7 +73,6 @@ func (r *Registry) Get(name string) (Provider, bool) {
 	return p, ok
 }
 
-// Metadata returns provider metadata by name.
 func (r *Registry) Metadata(name string) (Metadata, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -91,7 +80,6 @@ func (r *Registry) Metadata(name string) (Metadata, bool) {
 	return meta, ok
 }
 
-// IsEcosystemProvider reports whether name is registered as an ecosystem provider.
 func (r *Registry) IsEcosystemProvider(name string) bool {
 	meta, ok := r.Metadata(name)
 	return ok && meta.Kind == ProviderKindEcosystem
@@ -110,8 +98,7 @@ func (r *Registry) EcosystemProviders() []Provider {
 	return ps
 }
 
-// ImportSkipsProvider reports whether full import/discovery should skip this
-// provider because its registered concrete delegates are iterated separately.
+// ImportSkipsProvider — Import skips providers whose registered concrete delegates are iterated separately.
 func (r *Registry) ImportSkipsProvider(name string) bool {
 	meta, ok := r.Metadata(name)
 	return ok && meta.ImportSkipsRegisteredDelegates
@@ -155,7 +142,6 @@ func (r *Registry) EcosystemNames() []string {
 	})
 }
 
-// ConcreteEcosystems returns concrete provider/manager name → ecosystem name.
 func (r *Registry) ConcreteEcosystems() map[string]string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -173,8 +159,7 @@ func (r *Registry) ConcreteEcosystems() map[string]string {
 	return out
 }
 
-// EcosystemFor reports the ecosystem identity for an ecosystem provider,
-// concrete provider, or concrete manager name.
+// EcosystemFor — Accepts an ecosystem provider, a concrete provider, or a concrete manager name.
 func (r *Registry) EcosystemFor(name string) (string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -203,8 +188,7 @@ func (r *Registry) EcosystemFor(name string) (string, bool) {
 	return "", false
 }
 
-// ManagerOptions returns concrete manager choices for an ecosystem in stable
-// order.
+// ManagerOptions — Stable order.
 func (r *Registry) ManagerOptions(ecosystem string) []ManagerOption {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -219,7 +203,6 @@ func (r *Registry) ManagerOptions(ecosystem string) []ManagerOption {
 	return opts
 }
 
-// ManagerOption returns one concrete manager choice for an ecosystem.
 func (r *Registry) ManagerOption(ecosystem, manager string) (ManagerOption, bool) {
 	for _, opt := range r.ManagerOptions(ecosystem) {
 		if opt.Name == manager {
@@ -229,8 +212,7 @@ func (r *Registry) ManagerOption(ecosystem, manager string) (ManagerOption, bool
 	return ManagerOption{}, false
 }
 
-// DefaultInstallProviderNames returns registered providers with a configured
-// default install priority, in priority order.
+// DefaultInstallProviderNames — Only providers with a configured default install priority, in priority order.
 func (r *Registry) DefaultInstallProviderNames() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

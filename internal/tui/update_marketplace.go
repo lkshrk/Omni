@@ -10,8 +10,6 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-// combineMarketplaceErrors folds a top-level error with per-adapter errors,
-// mirroring combinePluginErrors.
 func combineMarketplaceErrors(err error, adapterErrs []app.PluginError) error {
 	if err == nil && len(adapterErrs) == 0 {
 		return nil
@@ -60,13 +58,7 @@ func (m *Model) doRemoveMarketplace(name string) tea.Cmd {
 	}
 }
 
-// marketplaceUnmanagedAgentsFor returns every agent ID whose unmanaged map
-// has an entry named name, unioned with clickedAgentID, sorted for
-// determinism. Mirrors mcpUnmanagedAgentsFor/pluginUnmanagedAgentsFor's
-// rationale: claiming one row of a marketplace unmanaged under several
-// agents must declare all of them, or the other agents' installs vanish from
-// every agents-tab view once the name is no longer "unmanaged" but also not
-// targeted.
+// Claiming one row of a marketplace unmanaged under several agents must declare all of them, or the other agents' installs vanish from every agents-tab view.
 func marketplaceUnmanagedAgentsFor(unmanaged map[string][]app.InstalledMarketplace, name, clickedAgentID string) []string {
 	set := map[string]struct{}{clickedAgentID: {}}
 	for agentID, marketplaces := range unmanaged {
@@ -85,11 +77,7 @@ func marketplaceUnmanagedAgentsFor(unmanaged map[string][]app.InstalledMarketpla
 	return ids
 }
 
-// marketplaceUnmanagedConflict reports whether name is unmanaged under more
-// than one agent with a differing source, mirroring the mcp/plugin conflict
-// guards in update_mcp.go/update_plugin.go so the TUI claim path refuses the
-// same ambiguous case instead of silently picking one agent's source to
-// write to the manifest.
+// Mirrors the mcp/plugin conflict guards so the TUI refuses the same ambiguous case instead of silently picking one agent's source.
 func marketplaceUnmanagedConflict(unmanaged map[string][]app.InstalledMarketplace, name string, first app.InstalledMarketplace) bool {
 	for _, marketplaces := range unmanaged {
 		for _, mk := range marketplaces {
@@ -104,12 +92,7 @@ func marketplaceUnmanagedConflict(unmanaged map[string][]app.InstalledMarketplac
 	return false
 }
 
-// doImportMarketplaceWithGroup adopts one unmanaged marketplace then assigns
-// it to group in one command, mirroring doImportPluginWithGroup.
-// SetMarketplaceGroups assumes the target group already exists, matching the
-// existing marketplace group-membership picker's behavior. Agents declares
-// every agent unmanaged has this marketplace under (not just agentID), see
-// marketplaceUnmanagedAgentsFor.
+// SetMarketplaceGroups assumes the target group already exists; Agents declares every agent the marketplace is unmanaged under (see marketplaceUnmanagedAgentsFor).
 func (m *Model) doImportMarketplaceWithGroup(agentID string, mk app.InstalledMarketplace, group string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	unmanaged := m.marketplaceUnmanaged
@@ -130,9 +113,6 @@ func (m *Model) doImportMarketplaceWithGroup(agentID string, mk app.InstalledMar
 	}
 }
 
-// doSetMarketplaceGroupMemberships persists group membership for a
-// marketplace via App.SetMarketplaceGroups, mirroring
-// doSetPluginGroupMemberships.
 func (m *Model) doSetMarketplaceGroupMemberships(name string, groups []string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {

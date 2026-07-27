@@ -4,16 +4,13 @@ on:
   workflow_run:
     workflows: ["CI Pipeline"]
     types: [completed]
-  # CI listens to branch pushes only; without this, a tag on an
-  # already-pushed tip never releases.
+  # CI listens only to branch pushes, so tags on tested tips need their own trigger.
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
 
-# Constant group: runs must serialize or the release-exists check below
-# races (per-sha keys can't match — annotated tag pushes key on the tag
-# object sha).
+# Serialize runs because annotated tag and commit SHAs cannot share a per-SHA race guard.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -30,8 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.0
         with:
-          # By ref: on annotated tag pushes github.sha is the tag object
-          # sha, not the commit.
+          # Annotated tag pushes set github.sha to the tag object, not its commit.
           ref: ${{ github.event.workflow_run.head_sha || github.ref }}
           fetch-depth: 0
 
@@ -57,8 +53,7 @@ jobs:
             exit 0
           fi
 
-          # Tag arriving mid-CI is not an error: the workflow_run trigger
-          # releases once CI passes.
+          # A tag arriving mid-CI is deferred to the successful workflow_run trigger.
           pending_count="$(gh api --method GET "/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
             -f head_sha="${TARGET_SHA}" \
             -f per_page=10 \
@@ -85,8 +80,7 @@ jobs:
             echo "No vX.Y.Z tag points at this commit; skipping release."
             exit 0
           fi
-          # A tag can reach this job twice (tag-push + workflow_run);
-          # publishing is idempotent.
+          # Tag-push and workflow_run may both reach this idempotent publish step.
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "tag=" >> "$GITHUB_OUTPUT"
             echo "Release $TAG already exists; skipping duplicate publish."

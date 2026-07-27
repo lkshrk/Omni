@@ -191,7 +191,7 @@ func TestTUIFallbackEditorPrefillsConfiguredGitHint(t *testing.T) {
 		Version:  config.CurrentVersion,
 		Settings: config.Settings{DisabledProviders: []string{"node", "python", "pip"}},
 		Tools: map[string]config.ToolSpec{
-			// synthetic name — must never resolve on PATH, or executableDetectSingleTool marks it installed and f is ineligible
+			// This synthetic name must not resolve on PATH or fallback is ineligible.
 			"omni-test-fbtool": {
 				Providers: []config.ToolInstallSpec{{Provider: "apt", Package: "omni-test-fbtool"}},
 				Git:       "https://github.com/BurntSushi/ripgrep",
@@ -229,8 +229,7 @@ func TestTUIFallbackEditorPrefillsConfiguredGitHint(t *testing.T) {
 				strings.Contains(text, "BurntSushi/ripgrep")
 		}, "TUI did not prefill fallback editor from configured git hint")
 		writeTUIKeys(t, term, "\r")
-		// Status text is transient and width-truncated; assert the persisted
-		// fallback instead, which is the behavior this flow owns.
+		// Status text is transient and width-truncated; assert the persisted fallback this flow owns.
 		savedScreen := waitForRequiredScreen(t, term, 8*time.Second, func(_ string) bool {
 			cfg, err := config.Load(configPath)
 			if err != nil {
@@ -512,7 +511,7 @@ func TestTUIDotsRootFileIgnoreCompletesPromptly(t *testing.T) {
 				strings.Contains(text, "dots synced")
 		}, "TUI did not finish the launch sync for the claude dots entry")
 		writeTUIKeys(t, term, " ")
-		// setup, not the measured latency: expanding scans ~5000 files
+		// Generous timeout covers setup, not measured latency: expanding scans ~5000 files.
 		waitForRequiredScreen(t, term, 10*time.Second, func(text string) bool {
 			return strings.Contains(text, "settings.json")
 		}, "TUI did not expand the claude dots entry")
@@ -567,8 +566,7 @@ func TestTUIDashboardReconcileFixesDotIgnorePatterns(t *testing.T) {
 			{
 				Name: "dev",
 				Dots: []config.DotEntry{
-					// Not an agent config dir: those are dropped from dots by the
-					// v13→v14 migration on load, which would empty this scenario.
+					// Agent config dirs are dropped from dots by the v13 to v14 migration, which would empty this scenario.
 					{Name: "editor", Path: "~/.editor", Ignore: []string{"*", "!/settings.json", "!/skills/", "skills", "!/hooks/", "hooks"}},
 				},
 			},
@@ -655,33 +653,14 @@ func integrationRepoRoot(t *testing.T) string {
 	}
 }
 
-// minimalTestPATH deliberately excludes any developer-machine bin directory
-// that might hold real agent CLIs (claude, grok, codex, ...). The TUI's
-// agents feature shells out to those binaries by name (e.g. "claude plugins
-// list --json --available", "grok plugin list --json --available") to
-// enumerate plugins/mcp servers; if a real install is reachable on PATH it
-// runs for real and bootstraps its own state (e.g. ~/.claude, ~/.claude.json,
-// ~/.grok/...) inside the test's otherwise-isolated HOME. Those freshly
-// created directories then surface as unexpected dots candidates, shifting
-// row order/cursor position and breaking assertions that assume a specific
-// candidate is at the cursor.
-// Tool dirs stay (dots needs stow, typically brew-installed), but agent CLIs
-// must not run for real: agentCLIStubs shadows them via a dir prepended to
-// PATH, so a brew- or ~/.local/bin-installed claude/grok can never win.
+// Agent CLIs must not run for real: they bootstrap state into the isolated HOME, which surfaces as dots candidates and shifts cursor-sensitive assertions.
 var minimalTestPATH = strings.Join([]string{
 	"/usr/bin", "/bin", "/usr/sbin", "/sbin",
 	"/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin",
 }, string(os.PathListSeparator))
 
-// agentCLIStubs are the binaries the agents feature execs by name (plugin/mcp
-// adapters and catalog detection). Each stub exits 0 with no output and no
-// side effects — the real CLIs bootstrap first-run state (~/.claude.json,
-// ~/.grok/...) into the test HOME, which then surfaces as unexpected dots
-// candidates and shifts cursor-position-sensitive assertions.
 var agentCLIStubs = []string{"claude", "codex", "grok", "cursor", "gemini", "opencode", "cline"}
 
-// stubAgentCLIDir creates a directory of no-op agent CLI stubs to prepend to
-// the isolated PATH.
 func stubAgentCLIDir(t *testing.T, home string) string {
 	t.Helper()
 	dir := filepath.Join(home, ".test-stub-bin")
@@ -808,9 +787,7 @@ func runTUI(t *testing.T, bin, dir string, env []string, args []string, interact
 			_ = cmd.Process.Kill()
 			_, waited = awaitTUIWait(waitDone, tuiQuitTimeout)
 		}
-		// x/vttest.Close races its emulator reader (upstream x/vt Close is not
-		// synchronized). The package process owns this bounded set of PTYs, so
-		// let process exit reclaim them instead of making the race lane unsound.
+		// Upstream x/vt Close is unsynchronized; let process exit reclaim this bounded set of PTYs instead.
 	}()
 	if err := term.Start(cmd); err != nil {
 		t.Fatalf("start TUI: %v", err)
@@ -856,9 +833,7 @@ func awaitTUIWait(done <-chan error, timeout time.Duration) (error, bool) {
 
 func writeTUIKeys(t *testing.T, term *vttest.Terminal, keys ...string) {
 	t.Helper()
-	// vttest.Terminal.SendText takes the terminal mutex before the emulator
-	// mutex, while output callbacks take them in the opposite order. Sending
-	// through the concurrency-safe emulator avoids that upstream lock inversion.
+	// SendText and output callbacks take the terminal and emulator mutexes in opposite orders; go through the emulator to avoid it.
 	term.Emulator.SendText(strings.Join(keys, ""))
 }
 

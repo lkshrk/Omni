@@ -1,10 +1,5 @@
 package tui
 
-// flows2_test.go — additional flow tests UC-66 through UC-136,
-// covering global messages, setup wizard steps 2-5, file picker,
-// dots tab pull key, settings rows 1-9, hosts tab full navigation,
-// group picker inline new-group, and all remaining message handlers.
-
 import (
 	"context"
 	"errors"
@@ -22,10 +17,7 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-// setupStep2Model builds a model at setup step 2 (no-host re-run, all
-// providers enabled). Step 2 uses the same provider-selection UI as step 1.
+// Step 2 uses the same provider-selection UI as step 1.
 func setupStep2Model() Model {
 	m := Model{
 		keys:          DefaultKeyMap(),
@@ -51,7 +43,6 @@ func setupStep2Model() Model {
 	return m
 }
 
-// setupStep3Model builds a model at setup step 3 (provider priority editor).
 func setupStep3Model() Model {
 	m := Model{
 		keys:             DefaultKeyMap(),
@@ -78,7 +69,6 @@ func setupStep3Model() Model {
 	return m
 }
 
-// setupStep5Model builds a model at setup step 5 (enable dotfiles?).
 func setupStep5Model() Model {
 	m := Model{
 		keys:             DefaultKeyMap(),
@@ -99,8 +89,6 @@ func setupStep5Model() Model {
 	return m
 }
 
-// setupStep6Model builds a model at setup step 6 (dots repo path, no file
-// picker active yet).
 func setupStep6Model() Model {
 	m := Model{
 		keys:             DefaultKeyMap(),
@@ -151,7 +139,6 @@ func setupStep9Model() Model {
 	return m
 }
 
-// loadingSetup builds a loading model stuck at a given setup step.
 func loadingSetup(step int) Model {
 	m := Model{
 		keys:             DefaultKeyMap(),
@@ -173,8 +160,6 @@ func loadingSetup(step int) Model {
 	return m
 }
 
-// hostsModel builds a model in viewGroups with two hosts and hostname
-// mappings.
 func hostsModel() Model {
 	m := baseModel(nil)
 	m.mode = viewGroups
@@ -189,9 +174,6 @@ func hostsModel() Model {
 	return m
 }
 
-// ── Group A — Global / Special Messages ──────────────────────────────────────
-
-// UC-66: BackgroundColorMsg — light/dark detection.
 func TestFlow2_UC66_BackgroundColorMsg(t *testing.T) {
 	t.Parallel()
 	t.Run("light terminal sets isDark=false", func(t *testing.T) {
@@ -211,7 +193,6 @@ func TestFlow2_UC66_BackgroundColorMsg(t *testing.T) {
 	})
 }
 
-// UC-67: FocusMsg/BlurMsg.
 func TestFlow2_UC67_FocusBlur(t *testing.T) {
 	t.Parallel()
 	t.Run("BlurMsg sets focused=false", func(t *testing.T) {
@@ -233,7 +214,6 @@ func TestFlow2_UC67_FocusBlur(t *testing.T) {
 	})
 }
 
-// UC-68: PasteMsg in viewSearch appends to filter.
 func TestFlow2_UC68_PasteMsgSearch(t *testing.T) {
 	t.Parallel()
 	m := baseModel(threeTools())
@@ -248,7 +228,6 @@ func TestFlow2_UC68_PasteMsgSearch(t *testing.T) {
 	}
 }
 
-// UC-69: PasteMsg in viewCommand appends to command input.
 func TestFlow2_UC69_PasteMsgCommand(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -260,7 +239,6 @@ func TestFlow2_UC69_PasteMsgCommand(t *testing.T) {
 	}
 }
 
-// UC-70: Second q returns tea.Quit cmd (non-nil).
 func TestFlow2_UC70_SecondQQuits(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -271,7 +249,6 @@ func TestFlow2_UC70_SecondQQuits(t *testing.T) {
 	}
 }
 
-// UC-71: q while hostRequired uses footer confirmation.
 func TestFlow2_UC71_QWithHostRequired(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -306,8 +283,9 @@ func TestConfirmTimeoutClearsQuitConfirmation(t *testing.T) {
 	if got.quitConfirmKey != "" {
 		t.Fatalf("quitConfirmKey = %q, want empty after timeout", got.quitConfirmKey)
 	}
-	if got.statusMsg != "" {
-		t.Fatalf("statusMsg = %q, want empty after silent timeout", got.statusMsg)
+	// The armed state only lives in the footer legend, so a silent disarm made the next q re-arm instead of exiting — indistinguishable from a hung app.
+	if got.statusMsg != "quit confirmation expired — press q again" {
+		t.Fatalf("statusMsg = %q, want the expiry notice", got.statusMsg)
 	}
 }
 
@@ -350,14 +328,14 @@ func TestConfirmTimeoutClearsAllConfirmationState(t *testing.T) {
 	m.dotsIgnoreIdx = 4
 
 	cmds := m.handleConfirmTimeoutMsg(confirmTimeoutMsg{gen: 9})
-	if len(cmds) != 0 {
-		t.Fatalf("confirmation timeout commands = %d, want none", len(cmds))
+	if len(cmds) != 1 {
+		t.Fatalf("confirmation timeout commands = %d, want the quit expiry status", len(cmds))
 	}
 	if m.hasActiveConfirmation() {
 		t.Fatal("confirmation state should be cleared after timeout")
 	}
-	if m.statusMsg != "" {
-		t.Fatalf("statusMsg = %q, want empty after silent timeout", m.statusMsg)
+	if m.statusMsg != "quit confirmation expired — press q again" {
+		t.Fatalf("statusMsg = %q, want the quit expiry notice", m.statusMsg)
 	}
 }
 
@@ -428,9 +406,6 @@ func TestGlobalNavigationClearsActiveConfirmations(t *testing.T) {
 	}
 }
 
-// ── Group B — Setup Wizard ────────────────────────────────────────────────────
-
-// UC-72: Setup step 2 — all enabled (node enabled) → advance to step 3 (node manager picker).
 func TestFlow2_UC72_SetupStep2AllEnabled(t *testing.T) {
 	t.Parallel()
 	t.Run("all enabled with node Enter advances to step 3 (node manager)", func(t *testing.T) {
@@ -438,14 +413,12 @@ func TestFlow2_UC72_SetupStep2AllEnabled(t *testing.T) {
 		if got.setupStep != 3 {
 			t.Errorf("setupStep = %d, want 3 (node manager step)", got.setupStep)
 		}
-		// Node manager step does not focus settingsInput.
 		if got.settingsInput.Focused() {
 			t.Error("settingsInput should NOT be focused at step 3 (node manager)")
 		}
 	})
 
 	t.Run("some disabled Enter sets loading", func(t *testing.T) {
-		// Toggle first provider off then submit.
 		got := drive(setupStep2Model(), pressRune(' '), pressEnter())
 		if !got.loading {
 			t.Error("loading should be true when disabled providers need saving")
@@ -552,7 +525,6 @@ func TestFlow2_SetupNoHostCopyAndGroups(t *testing.T) {
 	})
 }
 
-// UC-76: Setup step 5 — enter opens file picker (step 6); n/esc skip.
 func TestFlow2_UC76_SetupStep5(t *testing.T) {
 	t.Parallel()
 	t.Run("enter advances to step 6 and shows file picker", func(t *testing.T) {
@@ -664,7 +636,7 @@ func TestFlow2_UC76_SetupStep5(t *testing.T) {
 		if !got.setupReloading || !got.descRefreshing {
 			t.Fatalf("setup reload should wait for descriptions, setupReloading=%v descRefreshing=%v", got.setupReloading, got.descRefreshing)
 		}
-		if got.progressText != "Refreshing tool descriptions…" {
+		if got.progressText != descriptionRefreshStatus {
 			t.Fatalf("progressText = %q, want tool description refresh", got.progressText)
 		}
 		got = drive(got, descRefreshDoneMsg{gen: got.descRefreshGen})
@@ -761,7 +733,6 @@ func TestFlow2_UC76_SetupStep5(t *testing.T) {
 	})
 }
 
-// UC-77: Setup step 6 — Esc (no file picker) → loading=true.
 func TestFlow2_UC77_SetupStep6Esc(t *testing.T) {
 	t.Parallel()
 	got := drive(setupStep6Model(), pressEsc())
@@ -770,11 +741,8 @@ func TestFlow2_UC77_SetupStep6Esc(t *testing.T) {
 	}
 }
 
-// UC-78: setupImportDoneMsg → priority editor (step 3).
 func TestFlow2_UC78_SetupImportDoneMsg(t *testing.T) {
-	t.Parallel(
-	// After import the wizard opens the provider-priority editor (step 3).
-	)
+	t.Parallel()
 
 	m := loadingSetup(1)
 	m.allTools = []*app.ToolView{{Name: "snapshot", Provider: "brew"}}
@@ -790,11 +758,8 @@ func TestFlow2_UC78_SetupImportDoneMsg(t *testing.T) {
 	}
 }
 
-// UC-79: setupProvidersDoneMsg → priority editor (step 3).
 func TestFlow2_UC79_SetupProvidersDoneMsg(t *testing.T) {
-	t.Parallel(
-	// After providers are saved the wizard opens the provider-priority editor.
-	)
+	t.Parallel()
 
 	got := drive(loadingSetup(2), setupProvidersDoneMsg{})
 	if got.setupStep != 3 {
@@ -805,7 +770,6 @@ func TestFlow2_UC79_SetupProvidersDoneMsg(t *testing.T) {
 	}
 }
 
-// UC-80: setupHostDoneMsg → step 5, status ✓.
 func TestFlow2_UC80_SetupHostDoneMsg(t *testing.T) {
 	t.Parallel()
 	info := &app.HostInfo{
@@ -825,8 +789,7 @@ func TestFlow2_UC80_SetupHostDoneMsg(t *testing.T) {
 	if got.hostRequired {
 		t.Fatal("hostRequired should clear after setup host succeeds")
 	}
-	// Status is set via setStatus (async cmd), but the statusMsg may not be
-	// populated synchronously. Check that loading is cleared and step advanced.
+	// Status is set via an async cmd so statusMsg may not be populated synchronously; check that loading cleared and the step advanced instead.
 }
 
 func TestFlow2_SetupErrorsStayOnCurrentStep(t *testing.T) {
@@ -877,9 +840,6 @@ func TestFlow2_SetupErrorsStayOnCurrentStep(t *testing.T) {
 	})
 }
 
-// ── Group C — File Picker ─────────────────────────────────────────────────────
-
-// UC-81: Esc with file picker open → close picker.
 func TestFlow2_UC81_FilePickerEscClosesPicker(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -890,7 +850,6 @@ func TestFlow2_UC81_FilePickerEscClosesPicker(t *testing.T) {
 	}
 }
 
-// UC-82: Pick path in settings → saves DotsRepo.
 func TestFlow2_UC82_FilePickerPickSettings(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
@@ -909,7 +868,6 @@ func TestFlow2_UC82_FilePickerPickSettings(t *testing.T) {
 	}
 }
 
-// UC-83: Pick path in setup → loading=true.
 func TestFlow2_UC83_FilePickerPickSetup(t *testing.T) {
 	t.Parallel()
 	tmp := t.TempDir()
@@ -924,9 +882,6 @@ func TestFlow2_UC83_FilePickerPickSetup(t *testing.T) {
 	}
 }
 
-// ── Group D — Dots Tab ────────────────────────────────────────────────────────
-
-// UC-84: R key → dotsLoading=true.
 func TestFlow2_UC84_DotsRefreshKey(t *testing.T) {
 	t.Parallel()
 	got := drive(dotsModel(), pressRune('R'))
@@ -935,7 +890,6 @@ func TestFlow2_UC84_DotsRefreshKey(t *testing.T) {
 	}
 }
 
-// UC-85: R with IsRepeat → no-op (dotsLoading stays false).
 func TestFlow2_UC85_DotsRefreshKeyRepeat(t *testing.T) {
 	t.Parallel()
 	got := drive(dotsModel(), tea.KeyPressMsg{Code: 'R', Text: "R", IsRepeat: true})
@@ -944,7 +898,6 @@ func TestFlow2_UC85_DotsRefreshKeyRepeat(t *testing.T) {
 	}
 }
 
-// UC-85b: D key is no longer bound in dots tab (was discover, now R=refresh).
 func TestFlow2_UC85b_DotsOldDiscoverKeyNoop(t *testing.T) {
 	t.Parallel()
 	got := drive(dotsModel(), pressRune('D'))
@@ -953,9 +906,6 @@ func TestFlow2_UC85b_DotsOldDiscoverKeyNoop(t *testing.T) {
 	}
 }
 
-// ── Group E — Settings Tab ────────────────────────────────────────────────────
-
-// UC-89: Commit Changes row toggles AutoCommit (only when AutoPush=false).
 func TestFlow2_UC89_SettingsAutoCommit(t *testing.T) {
 	t.Parallel()
 	t.Run("AutoPush=false: toggles AutoCommit", func(t *testing.T) {
@@ -979,7 +929,6 @@ func TestFlow2_UC89_SettingsAutoCommit(t *testing.T) {
 	})
 }
 
-// UC-90: Push Changes row toggles AutoPush.
 func TestFlow2_UC90_SettingsAutoPush(t *testing.T) {
 	t.Parallel()
 	msgs := append(toSettings(), nj(settingsRowDotsPush)...)
@@ -990,7 +939,6 @@ func TestFlow2_UC90_SettingsAutoPush(t *testing.T) {
 	}
 }
 
-// UC-91: Danger row 11: second Enter fires doResetSettings (loading=true).
 func TestFlow2_UC91_DangerResetSettings(t *testing.T) {
 	t.Parallel()
 	msgs := append(toSettings(), nj(settingsRowResetSettings)...)
@@ -1005,7 +953,6 @@ func TestFlow2_UC91_DangerResetSettings(t *testing.T) {
 	}
 }
 
-// UC-92: Danger row 12: second Enter fires doResetCache (loading=true).
 func TestFlow2_UC92_DangerResetCache(t *testing.T) {
 	t.Parallel()
 	msgs := append(toSettings(), nj(settingsRowResetCache)...)
@@ -1017,7 +964,6 @@ func TestFlow2_UC92_DangerResetCache(t *testing.T) {
 	}
 }
 
-// UC-93: Dots sync row: keep-local choice fires.
 func TestFlow2_UC93_DangerDisableDots(t *testing.T) {
 	got := drive(openSettingsDotsSyncChoice(t), pressRune('y')) // fires doDisableDots keeping local files
 	if !got.loading {
@@ -1028,19 +974,15 @@ func TestFlow2_UC93_DangerDisableDots(t *testing.T) {
 	}
 }
 
-// UC-94: Provider-order editor — K swaps item up.
 func TestFlow2_UC94_PriorityEditorGrabCarryUp(t *testing.T) {
-	t.Parallel(
-	// Navigate to the provider-order row, open it, move cursor down once,
-	// then grab+↑+drop to carry the item up (moving item 1 to position 0).
-	)
+	t.Parallel()
 
 	msgs := append(toSettings(), nj(settingsRowProviderPriority)...)
-	msgs = append(msgs, pressEnter())   // opens priority editor
-	msgs = append(msgs, pressRune('j')) // move cursor to index 1
-	msgs = append(msgs, pressRune(' ')) // grab
-	msgs = append(msgs, pressRune('k')) // carry up
-	msgs = append(msgs, pressRune(' ')) // drop
+	msgs = append(msgs, pressEnter())
+	msgs = append(msgs, pressRune('j'))
+	msgs = append(msgs, pressRune(' '))
+	msgs = append(msgs, pressRune('k'))
+	msgs = append(msgs, pressRune(' '))
 	got := drive(baseModel(nil), msgs...)
 	if !got.editingPriority {
 		t.Error("editingPriority should still be true")
@@ -1051,21 +993,15 @@ func TestFlow2_UC94_PriorityEditorGrabCarryUp(t *testing.T) {
 	if got.priorityHolding {
 		t.Error("priorityHolding should be false after dropping")
 	}
-	// The item that was at index 1 should now be at index 0.
 	if len(got.priorityDraft) < 2 {
 		t.Fatal("priorityDraft should have at least 2 items")
 	}
-	// Default draft is [brew, apt, apk, ...]. After j (cursor=1) and grab+k+drop,
-	// draft[0] is the item originally at index 1 (apt).
 	original := []string{"brew", "apt", "apk", "dnf", "pacman", "zypper", "bun", "pnpm", "npm", "uv", "pip"}
 	if got.priorityDraft[0] != original[1] {
 		t.Errorf("priorityDraft[0] = %q, want %q (carried up)", got.priorityDraft[0], original[1])
 	}
 }
 
-// ── Group F — Hosts Tab ────────────────────────────────────────────────────
-
-// UC-95: Up at top of groups → back to hosts section.
 func TestFlow2_UC95_GroupSectionUpAtTop(t *testing.T) {
 	t.Parallel()
 	m := hostsModel()
@@ -1077,11 +1013,9 @@ func TestFlow2_UC95_GroupSectionUpAtTop(t *testing.T) {
 	}
 }
 
-// UC-97: Down at last host → advances to group section.
 func TestFlow2_UC97_HostSectionDownAtLast(t *testing.T) {
 	t.Parallel()
 	m := hostsModel()
-	// 2 hosts (alpha, beta), cursor at last index = 1
 	m.hostCursor = 1
 	got := drive(m, pressRune('j'))
 	if got.assignmentSection != 1 {
@@ -1092,7 +1026,6 @@ func TestFlow2_UC97_HostSectionDownAtLast(t *testing.T) {
 	}
 }
 
-// UC-98: Down at last group wraps to top of hosts section.
 func TestFlow2_UC98_GroupSectionDownAtLast(t *testing.T) {
 	t.Parallel()
 	m := hostsModel()
@@ -1108,7 +1041,6 @@ func TestFlow2_UC98_GroupSectionDownAtLast(t *testing.T) {
 	}
 }
 
-// UC-99: r key → hostRenameMode=true (only when a host is selected).
 func TestFlow2_UC99_HostRenameKey(t *testing.T) {
 	t.Parallel()
 	m := hostsModel()
@@ -1179,7 +1111,6 @@ func TestFlow2_HostRowEnterDoesNotActivate(t *testing.T) {
 	}
 }
 
-// UC-100: hostRenameMode Enter/Esc.
 func TestFlow2_UC100_HostRenameMode(t *testing.T) {
 	t.Parallel()
 	t.Run("Enter clears hostRenameMode", func(t *testing.T) {
@@ -1254,7 +1185,6 @@ func TestFlow2_HostRenameUsesCapturedHostAfterCursorMoves(t *testing.T) {
 	}
 }
 
-// UC-101: g key → hostEditMode=1 (edit group picker).
 func TestFlow2_UC101_EditHostGroups(t *testing.T) {
 	t.Parallel()
 	m := hostsModel()
@@ -1337,7 +1267,6 @@ func TestFlow2_HostGroupEditUsesCapturedHostAfterCursorMoves(t *testing.T) {
 	}
 }
 
-// UC-102: h no longer opens the legacy host→host mapping editor.
 func TestFlow2_UC102_HDoesNotOpenLegacyHostMapping(t *testing.T) {
 	t.Parallel()
 	m := hostsModel()
@@ -1352,7 +1281,6 @@ func TestFlow2_UC102_HDoesNotOpenLegacyHostMapping(t *testing.T) {
 	}
 }
 
-// UC-103: host group picker j/k/Space/Enter/Esc.
 func TestFlow2_UC103_HostGroupPickerNavigation(t *testing.T) {
 	t.Parallel()
 	t.Run("j moves picker cursor", func(t *testing.T) {
@@ -1419,7 +1347,6 @@ func TestFlow2_UC103_HostGroupPickerNavigation(t *testing.T) {
 	})
 }
 
-// UC-104: n in assignmentSection=1 → groupCreating=true.
 func TestFlow2_UC104_NewGroupCreating(t *testing.T) {
 	t.Parallel()
 	m := hostsModel()
@@ -1459,7 +1386,6 @@ func TestFlow2_GroupCreationAvailableFromHostSection(t *testing.T) {
 	}
 }
 
-// UC-105: d on host group (index 0) is blocked.
 func TestFlow2_UC105_DeleteHostGroupBlocked(t *testing.T) {
 	t.Parallel()
 	m := hostsModel()
@@ -1471,7 +1397,6 @@ func TestFlow2_UC105_DeleteHostGroupBlocked(t *testing.T) {
 	}
 }
 
-// UC-106: r on host group is blocked.
 func TestFlow2_UC106_RenameHostGroupBlocked(t *testing.T) {
 	t.Parallel()
 	m := hostsModel()
@@ -1671,7 +1596,6 @@ func TestFlow2_HostGroupBlockedBeforeReusableGroups(t *testing.T) {
 	}
 }
 
-// UC-109: t in group section → opens group tools editor.
 func TestFlow2_UC109_GroupSectionToolsKey(t *testing.T) {
 	t.Parallel()
 	m := hostsModel()
@@ -1821,7 +1745,6 @@ func TestFlow2_GroupDotsEditorStagesMembershipAndSearch(t *testing.T) {
 	}
 }
 
-// UC-112: hostRequired blocks Esc from leaving hosts view.
 func TestFlow2_UC112_HostRequiredBlocksEsc(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -1833,7 +1756,6 @@ func TestFlow2_UC112_HostRequiredBlocksEsc(t *testing.T) {
 	}
 }
 
-// UC-113: Group rename Enter with empty name — loading stays false.
 func TestFlow2_UC113_GroupRenameEmptyName(t *testing.T) {
 	t.Parallel()
 	m := hostsModel()
@@ -1850,9 +1772,6 @@ func TestFlow2_UC113_GroupRenameEmptyName(t *testing.T) {
 	}
 }
 
-// ── Group G — Group Picker ────────────────────────────────────────────────────
-
-// UC-114: Inline new-group Enter (non-empty, install assignment) → loading=true.
 func TestFlow2_UC114_InlineNewGroupEnter(t *testing.T) {
 	t.Parallel()
 	m := baseModel(threeTools())
@@ -1874,11 +1793,8 @@ func TestFlow2_UC114_InlineNewGroupEnter(t *testing.T) {
 	}
 }
 
-// UC-115: Inline new-group Enter (non-empty, claim) → loading=true.
 func TestFlow2_UC115_InlineNewGroupEnterClaim(t *testing.T) {
-	t.Parallel(
-	// Build a model with an orphan tool selected.
-	)
+	t.Parallel()
 
 	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Tracked: false},
@@ -1903,7 +1819,6 @@ func TestFlow2_UC115_InlineNewGroupEnterClaim(t *testing.T) {
 	}
 }
 
-// UC-116: Inline new-group Enter (empty name) → close picker, no dispatch.
 func TestFlow2_UC116_InlineNewGroupEmptyName(t *testing.T) {
 	t.Parallel()
 	m := baseModel(threeTools())
@@ -1924,9 +1839,6 @@ func TestFlow2_UC116_InlineNewGroupEmptyName(t *testing.T) {
 	}
 }
 
-// ── Group H — Message Handlers ────────────────────────────────────────────────
-
-// UC-117: createGroupDoneMsg — success positions cursor.
 func TestFlow2_UC117_CreateGroupDoneMsg(t *testing.T) {
 	t.Parallel()
 	t.Run("success positions cursor on new group", func(t *testing.T) {
@@ -1984,7 +1896,6 @@ func TestFlow2_CreateGroupDonePropagatesToHostViewsAndPickers(t *testing.T) {
 	}
 }
 
-// UC-118: groupChangedMsg — success, cursor clamp.
 func TestFlow2_UC118_GroupChangedMsg(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -2066,7 +1977,6 @@ func TestFlow2_GroupDotsChangedMsgRefreshesEntriesAndMemberships(t *testing.T) {
 	}
 }
 
-// UC-119: hostGroupChangedMsg — add group.
 func TestFlow2_UC119_HostGroupChangedMsgAdd(t *testing.T) {
 	t.Parallel()
 	m := baseModel([]*app.ToolView{{Name: "ripgrep", Provider: "system", Tracked: true}})
@@ -2094,7 +2004,6 @@ func TestFlow2_UC119_HostGroupChangedMsgAdd(t *testing.T) {
 	}
 }
 
-// UC-120: hostGroupChangedMsg — remove group.
 func TestFlow2_UC120_HostGroupChangedMsgRemove(t *testing.T) {
 	t.Parallel()
 	got := drive(baseModel(nil), hostGroupChangedMsg{
@@ -2107,7 +2016,6 @@ func TestFlow2_UC120_HostGroupChangedMsgRemove(t *testing.T) {
 	}
 }
 
-// UC-121: hostGroupChangedMsg — host deleted.
 func TestFlow2_UC121_HostGroupChangedMsgDelete(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -2124,7 +2032,6 @@ func TestFlow2_UC121_HostGroupChangedMsgDelete(t *testing.T) {
 	}
 }
 
-// UC-125: debouncedSearchMsg — cache miss fires search (searching=true).
 func TestFlow2_UC125_DebouncedSearchMsgCacheMiss(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -2138,7 +2045,6 @@ func TestFlow2_UC125_DebouncedSearchMsgCacheMiss(t *testing.T) {
 	}
 }
 
-// UC-126: debouncedSearchMsg — stale gen dropped.
 func TestFlow2_UC126_DebouncedSearchMsgStale(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -2153,7 +2059,6 @@ func TestFlow2_UC126_DebouncedSearchMsgStale(t *testing.T) {
 	}
 }
 
-// UC-127: searchResultsMsg — stale gen dropped.
 func TestFlow2_UC127_SearchResultsMsgStale(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -2167,7 +2072,6 @@ func TestFlow2_UC127_SearchResultsMsgStale(t *testing.T) {
 	}
 }
 
-// UC-128: searchResultsMsg — success caches results.
 func TestFlow2_UC128_SearchResultsMsgSuccess(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -2186,7 +2090,6 @@ func TestFlow2_UC128_SearchResultsMsgSuccess(t *testing.T) {
 	}
 }
 
-// UC-129: allProvidersDoneMsg — effectiveSystemManager updated.
 func TestFlow2_UC129_AllProvidersDoneMsg(t *testing.T) {
 	t.Parallel()
 	got := drive(baseModel(nil), allProvidersDoneMsg{
@@ -2198,21 +2101,16 @@ func TestFlow2_UC129_AllProvidersDoneMsg(t *testing.T) {
 	}
 }
 
-// ── Group I — Search blurred state ────────────────────────────────────────────
-
-// UC-130: Blurred viewSearch — j moves cursor.
 func TestFlow2_UC130_BlurredSearchJMovesCursor(t *testing.T) {
 	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewSearch
-	// filter is not focused by default in baseModel
 	got := drive(m, pressRune('j'))
 	if got.cursor != 1 {
 		t.Errorf("cursor = %d, want 1 after j in blurred viewSearch", got.cursor)
 	}
 }
 
-// UC-131: Blurred viewSearch — ] cycles provider tabs.
 func TestFlow2_UC131_BlurredSearchTabCycle(t *testing.T) {
 	t.Parallel()
 	m := baseModel(threeTools())
@@ -2228,7 +2126,6 @@ func TestFlow2_UC131_BlurredSearchTabCycle(t *testing.T) {
 	}
 }
 
-// UC-132: Blurred viewSearch — / refocuses input.
 func TestFlow2_UC132_BlurredSearchSlashRefocusesInput(t *testing.T) {
 	t.Parallel()
 	m := baseModel(threeTools())
@@ -2267,12 +2164,9 @@ func TestFlow2_BlurredSearchActionKeyTriggersSelectedRowAction(t *testing.T) {
 	}
 }
 
-// ── Group J — Command Palette navigation ──────────────────────────────────────
-
-// UC-133: j/k navigate commandCursor.
-func TestFlow2_UC133_CommandPaletteJK(t *testing.T) {
+func TestFlow2_UC133_CommandPaletteArrows(t *testing.T) {
 	t.Parallel()
-	t.Run("j increments commandCursor", func(t *testing.T) {
+	t.Run("down increments commandCursor", func(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewCommand
 		m.commandCursor = -1
@@ -2280,27 +2174,24 @@ func TestFlow2_UC133_CommandPaletteJK(t *testing.T) {
 		if len(m.commandSuggestions) < 2 {
 			t.Skip("need at least 2 suggestions")
 		}
-		got := drive(m, pressRune('j'))
+		got := drive(m, pressDown())
 		if got.commandCursor != 0 {
-			t.Errorf("commandCursor = %d, want 0 after first j from -1", got.commandCursor)
+			t.Errorf("commandCursor = %d, want 0 after first down from -1", got.commandCursor)
 		}
 	})
 
-	t.Run("k at -1 stays at -1 (clamped at 0)", func(t *testing.T) {
+	t.Run("up at -1 stays at -1 (clamped at 0)", func(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewCommand
 		m.commandCursor = -1
 		m.commandSuggestions = buildPalette(m)
-		got := drive(m, pressRune('k'))
-		// k when cursor=-1 → max(-1-1, 0) or stays 0; it tries to decrement from 0
-		// which is already at the floor. Should stay ≥ -1.
+		got := drive(m, pressUp())
 		if got.commandCursor < -1 {
 			t.Errorf("commandCursor = %d, should not go below -1", got.commandCursor)
 		}
 	})
 }
 
-// UC-134: Enter in command palette with cursor on a suggestion executes it.
 func TestFlow2_UC134_CommandPaletteEnter(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -2311,7 +2202,6 @@ func TestFlow2_UC134_CommandPaletteEnter(t *testing.T) {
 	}
 	m.commandCursor = 0 // select first suggestion
 	got := drive(m, pressEnter())
-	// After Enter the palette closes.
 	if got.mode == viewCommand {
 		t.Errorf("mode = %v, want command palette closed after Enter", got.mode)
 	}
@@ -2320,7 +2210,6 @@ func TestFlow2_UC134_CommandPaletteEnter(t *testing.T) {
 	}
 }
 
-// UC-135: Esc from command palette returns to list.
 func TestFlow2_UC135_CommandPaletteEsc(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -2332,7 +2221,6 @@ func TestFlow2_UC135_CommandPaletteEsc(t *testing.T) {
 	}
 }
 
-// UC-136: WindowSizeMsg with file picker open clamps picker height without panic.
 func TestFlow2_UC136_WindowSizeMsgWithFilePicker(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -2344,7 +2232,6 @@ func TestFlow2_UC136_WindowSizeMsgWithFilePicker(t *testing.T) {
 	if got.height != 50 {
 		t.Errorf("height = %d, want 50", got.height)
 	}
-	// Verifies no panic from picker height clamping.
 }
 
 func TestFlow2_DotsAddFilePickerAllowsFiles(t *testing.T) {
@@ -2361,8 +2248,6 @@ func TestFlow2_DotsAddFilePickerAllowsFiles(t *testing.T) {
 		t.Fatal("dots add picker should allow files")
 	}
 }
-
-// ── UC-137: i on untracked uninstalled tool → group picker ───────────────────
 
 func TestFlow2_UC137_InstallUntrackedTool(t *testing.T) {
 	t.Parallel()
@@ -2385,8 +2270,6 @@ func TestFlow2_UC137_InstallUntrackedTool(t *testing.T) {
 	}
 }
 
-// ── UC-138: R key is a no-op when scanningProviders already has entries ───────
-
 func TestFlow2_UC138_RefreshBlockedWhileScanning(t *testing.T) {
 	t.Parallel()
 	m := baseModel(threeTools())
@@ -2401,8 +2284,6 @@ func TestFlow2_UC138_RefreshBlockedWhileScanning(t *testing.T) {
 	}
 }
 
-// ── UC-139: s IsRepeat in dots view → no-op ───────────────────────────────────
-
 func TestFlow2_UC139_DotsSyncIsRepeatNoOp(t *testing.T) {
 	t.Parallel()
 	got := drive(dotsModel(), tea.KeyPressMsg{Code: 's', Text: "s", IsRepeat: true})
@@ -2410,8 +2291,6 @@ func TestFlow2_UC139_DotsSyncIsRepeatNoOp(t *testing.T) {
 		t.Error("dotsLoading should stay false after s IsRepeat in dots view")
 	}
 }
-
-// ── UC-140: IsRepeat guards on all viewList action keys ───────────────────────
 
 func TestFlow2_UC140_ViewListIsRepeatNoOps(t *testing.T) {
 	t.Parallel()
@@ -2524,8 +2403,6 @@ func TestFlow2_UC140_ViewListIsRepeatNoOps(t *testing.T) {
 	}
 }
 
-// ── UC-141: Esc in dots view clears both dotsConfirmIdx and dotsOverwriteIdx ──
-
 func TestFlow2_UC141_DotsEscClearsBothIndicesSimultaneously(t *testing.T) {
 	t.Parallel()
 	m := dotsModel()
@@ -2550,7 +2427,6 @@ func TestFlow2_UC141_DotsEscClearsBothIndicesSimultaneously(t *testing.T) {
 	}
 }
 
-// assertNotLoading is a helper that fails if model.loading is true.
 func assertNotLoading(t *testing.T, m Model) {
 	t.Helper()
 	if m.loading {
@@ -2558,19 +2434,14 @@ func assertNotLoading(t *testing.T, m Model) {
 	}
 }
 
-// ── UC-142: Setup step 3 — provider priority editor ───────────────────────────
-
 func TestFlow2_UC142_SetupStep3PriorityEditor(t *testing.T) {
 	t.Parallel()
 	t.Run("keys route through priority editor while editingPriority", func(t *testing.T) {
-		// 'x' should toggle the provider at the cursor position disabled.
 		m := setupStep3Model()
-		// cursor starts at 0 (brew); x toggles it disabled.
 		got := drive(m, tea.KeyPressMsg{Code: 'x', Text: "x"})
 		if !got.priorityDisabled["brew"] {
 			t.Error("x should toggle brew into priorityDisabled")
 		}
-		// A second x should re-enable it.
 		got2 := drive(got, tea.KeyPressMsg{Code: 'x', Text: "x"})
 		if got2.priorityDisabled["brew"] {
 			t.Error("second x should remove brew from priorityDisabled")
@@ -2595,8 +2466,7 @@ func TestFlow2_UC142_SetupStep3PriorityEditor(t *testing.T) {
 	})
 
 	t.Run("enter closes editor and advances wizard to step 5", func(t *testing.T) {
-		// With a nil app the save cmd is a no-op, but editingPriority must
-		// close and the wizard must advance past step 3.
+		// With a nil app the save cmd is a no-op, but editingPriority must close and the wizard must advance past step 3.
 		got := drive(setupStep3Model(), pressEnter())
 		if got.editingPriority {
 			t.Error("editingPriority should be false after enter")
@@ -2607,11 +2477,7 @@ func TestFlow2_UC142_SetupStep3PriorityEditor(t *testing.T) {
 	})
 }
 
-// ── UC-144–146: Group filter pills ({/}) ─────────────────────────────────────
-
-// multiGroupModel returns a baseModel pre-loaded with tools spread across
-// "base", "work", and "personal" groups, so group-filter tests have
-// a realistic fixture without touching the real app layer.
+// Tools spread across "base", "work" and "personal" so group-filter tests have a realistic fixture without touching the real app layer.
 func multiGroupModel() Model {
 	brew := func(name, group string) *app.ToolView {
 		return &app.ToolView{Name: name, Provider: "brew", Installed: true}
@@ -2632,7 +2498,6 @@ func multiGroupModel() Model {
 	return m
 }
 
-// UC-144: } cycles group filter forward; groupFilter and groupTabIdx stay in sync.
 func TestFlow2_UC144_GroupNextFilter(t *testing.T) {
 	t.Parallel()
 	t.Run("} at idx=0 advances to host (idx=1)", func(t *testing.T) {
@@ -2659,7 +2524,6 @@ func TestFlow2_UC144_GroupNextFilter(t *testing.T) {
 	})
 }
 
-// UC-145: { cycles group filter backward.
 func TestFlow2_UC145_GroupPrevFilter(t *testing.T) {
 	t.Parallel()
 	t.Run("{ at idx=0 wraps to last", func(t *testing.T) {
@@ -2684,8 +2548,6 @@ func TestFlow2_UC145_GroupPrevFilter(t *testing.T) {
 	})
 }
 
-// UC-146: newColWidths reserves group column when visible tools have a host
-// or reusable group badge.
 func TestFlow2_UC146_GroupColAlwaysVisible(t *testing.T) {
 	t.Parallel(
 	// Two tools both in the host group.
@@ -2718,7 +2580,6 @@ func TestFlow2_UC146_GroupColAlwaysVisible(t *testing.T) {
 	})
 }
 
-// UC-143: Setup step 2 with node disabled → priority editor (step 3).
 func TestFlow2_UC143_SetupStep2NodeDisabled(t *testing.T) {
 	t.Parallel()
 	m := Model{
@@ -2749,9 +2610,7 @@ func TestFlow2_UC143_SetupStep2NodeDisabled(t *testing.T) {
 	}
 }
 
-// agentsProgressDoneMsg — error surfacing on the combined agents U/S progress
-// handler, and firstAgentsProgressError precedence (skills > mcp > plugin >
-// marketplace, per source order in update.go).
+// firstAgentsProgressError precedence is skills, mcp, plugin, marketplace, per source order in update.go.
 
 func TestAgentsProgressDoneMsg_MCPErrorSetsStatus(t *testing.T) {
 	t.Parallel()
@@ -2857,8 +2716,6 @@ func TestAgentsProgressDoneMsg_StaleGenIgnored(t *testing.T) {
 		t.Error("statusIsErr should remain false for stale gen message")
 	}
 }
-
-// viewSkillsBody — chip-scoped error rendering for mcp/plugin/marketplace.
 
 func TestViewSkillsBody_MCPErrorShownOnMCPChip(t *testing.T) {
 	t.Parallel()

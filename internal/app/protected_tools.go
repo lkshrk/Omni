@@ -13,7 +13,6 @@ func (a *App) rejectProviderToolDelete(name string) error {
 	return nil
 }
 
-// ValidateToolDelete rejects tool names reserved for package managers/providers.
 func (a *App) ValidateToolDelete(name string) error {
 	return a.rejectProviderToolDelete(name)
 }

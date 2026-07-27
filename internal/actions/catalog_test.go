@@ -46,7 +46,6 @@ func TestAction_Requires(t *testing.T) {
 	if install.Requires(Requirement("nonexistent")) {
 		t.Error("ToolInstall should not require an unknown Requirement")
 	}
-	// An action with no Requirements never reports a requirement.
 	zero := Action{}
 	if zero.Requires(RequiresToolName) {
 		t.Error("zero-value Action should not declare any requirement")
@@ -106,8 +105,6 @@ func TestMustDescription_PanicsOnUnknown(t *testing.T) {
 }
 
 func TestMustLongDescription_FallsBackToDescription(t *testing.T) {
-	// Construct a synthetic action with no long description and verify the
-	// fallback path. The catalog test guarantees real entries always set both.
 	stub := Action{ID: ID("test.fallback"), Description: "short"}
 	byID[stub.ID] = stub
 	defer delete(byID, stub.ID)
@@ -136,7 +133,6 @@ func TestMustConfirmDescription_PanicsOnUnknown(t *testing.T) {
 }
 
 func TestMustPalette_PanicsOnMissingBinding(t *testing.T) {
-	// Inject an action with no Palette to exercise the second panic branch.
 	stub := Action{ID: ID("test.no_palette")}
 	byID[stub.ID] = stub
 	defer delete(byID, stub.ID)
@@ -164,7 +160,6 @@ func TestMustPalette_PanicsOnUnknownID(t *testing.T) {
 }
 
 func TestMustPalette_ReturnsBindingForRegistered(t *testing.T) {
-	// Find any action with a Palette binding to verify the success path.
 	var withPalette Action
 	for _, a := range All() {
 		if a.Palette != nil {

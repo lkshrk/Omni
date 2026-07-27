@@ -5,7 +5,6 @@ import (
 	"github.com/lkshrk/omni/internal/dots"
 )
 
-// toolsLoadedMsg is sent when the initial tool list and settings have been fetched.
 type toolsLoadedMsg struct {
 	tools                  []*app.ToolView
 	discovered             []*app.ToolView // locally installed but not in config
@@ -77,14 +76,11 @@ type skillsGroupsUpdatedMsg struct {
 }
 
 type skillsUpdatedMsg struct {
-	err error
+	updated bool
+	err     error
 }
 
-// agentsProgressDoneMsg signals completion of the agents tab's U/S combined
-// progress-streaming sequence (doAgentsUpdateAll/doAgentsSyncAll). Unlike
-// progressDoneMsg (tools tab), it carries one error per feature since the
-// sequence runs multiple independently-tracked sub-steps (skills, mcp,
-// plugins) that each have their own running/err fields on Model.
+// Carries one error per feature: the sequence runs skills, mcp, and plugins as independently-tracked sub-steps.
 type agentsProgressDoneMsg struct {
 	gen            int
 	skills         bool
@@ -95,6 +91,8 @@ type agentsProgressDoneMsg struct {
 	mcpErr         error
 	pluginErr      error
 	marketplaceErr error
+	// The per-feature errors above only carry failures; a run that skipped a drifted entry and installed everything else has nothing to say without this.
+	report *app.AgentsSyncAllResult
 }
 
 type agentsToggledMsg struct {
@@ -138,7 +136,8 @@ type skillsFoundMsg struct {
 }
 
 type skillAddedMsg struct {
-	err error
+	err     error
+	warning string
 }
 
 type skillAgentsSavedMsg struct {
@@ -151,18 +150,13 @@ type setupConfigImportDoneMsg struct {
 	err  error
 }
 
-// providerScannedMsg is sent when the per-provider installed-state scan
-// goroutine completes. Tools are NOT fetched here to avoid concurrent ListTools
-// calls racing each other and producing stale snapshots. The handler launches a
-// single allProvidersDoneMsg fetch once the set empties.
+// Tools are NOT fetched here: concurrent ListTools calls race and produce stale snapshots. The handler launches one allProvidersDoneMsg fetch once the set empties.
 type providerScannedMsg struct {
 	gen      int
 	provider string
 	err      error
 }
 
-// allProvidersDoneMsg is sent after all per-provider goroutines have finished
-// and a single, consistent ListTools call has captured the final DB state.
 type allProvidersDoneMsg struct {
 	gen                    int
 	tools                  []*app.ToolView
@@ -183,15 +177,12 @@ type outdatedProvidersDoneMsg struct {
 	err                    error
 }
 
-// discoveredRefreshedMsg is sent when the background RefreshDiscovered pass
-// (orphan scan) completes.
 type discoveredRefreshedMsg struct {
 	gen        int
 	discovered []*app.ToolView
 	err        error
 }
 
-// createGroupDoneMsg is sent after a new named group has been created.
 type createGroupDoneMsg struct {
 	err             error
 	name            string
@@ -220,11 +211,11 @@ type setupHostGroupsDoneMsg struct {
 	info   *app.HostInfo
 }
 
-// opCompleteMsg is sent after an async operation (install/uninstall/upgrade) finishes.
 // key is the upgradingKeys entry to remove ("name\x00provider"); empty for non-upgrade ops.
 type opCompleteMsg struct {
 	key                    string
 	message                string
+	loadingGen             int // gate generation at dispatch; 0 when unstamped
 	err                    error
 	tools                  []*app.ToolView // refreshed list after op
 	removeDiscoveredKeys   []string        // exact "name\x00provider" orphan rows consumed by the op
@@ -236,7 +227,6 @@ type opCompleteMsg struct {
 	preserveOtherRowErrors bool
 }
 
-// settingsSavedMsg is sent after an async settings save completes.
 type settingsSavedMsg struct {
 	gen         int
 	settings    app.Settings
@@ -312,12 +302,9 @@ type progressUpdate struct {
 	groupNames           []string
 }
 
-// progressMsg carries one progress update from a background operation.
 type progressMsg progressUpdate
 
-// progressStreamClosedMsg signals that the progress update channel closed. It
-// is not an operation result; the corresponding operation returns
-// progressDoneMsg separately.
+// Not an operation result; the operation returns progressDoneMsg separately.
 type progressStreamClosedMsg struct {
 	gen int
 }
@@ -332,15 +319,12 @@ type dotsProgressUpdate struct {
 	dotMemberships map[string][]string
 }
 
-// dotsProgressMsg carries one dots sync progress update.
 type dotsProgressMsg dotsProgressUpdate
 
-// dotsProgressStreamClosedMsg signals that the dots progress channel closed.
 type dotsProgressStreamClosedMsg struct {
 	gen int
 }
 
-// progressDoneMsg signals that a progress-emitting operation has finished.
 // key is the upgradingKeys entry to remove ("*" for upgrade-all); empty for sync.
 type progressDoneMsg struct {
 	gen                     int
@@ -357,8 +341,7 @@ type progressDoneMsg struct {
 	promptPrivilegedActions map[string]app.PrivilegeAction
 }
 
-// descRefreshDoneMsg is sent when the background bulk-description refresh
-// finishes. tools/discovered are refreshed snapshots (nil on error or empty config).
+// tools/discovered are refreshed snapshots, nil on error or empty config.
 type descRefreshDoneMsg struct {
 	gen        int
 	err        error
@@ -366,33 +349,26 @@ type descRefreshDoneMsg struct {
 	discovered []*app.ToolView
 }
 
-// setupImportDoneMsg is sent after the setup-wizard import step completes.
 type setupImportDoneMsg struct {
 	added    int
 	err      error
 	hostInfo *app.HostInfo
 }
 
-// setupProvidersDoneMsg is sent after the setup-wizard provider selection step saves.
 type setupProvidersDoneMsg struct{ err error }
 
-// setupBootstrapDoneMsg is sent after the existing-host bootstrap activation
-// applies one optional action.
 type setupBootstrapDoneMsg struct {
 	action  string
 	message string
 	err     error
 }
 
-// setupHostDoneMsg is sent after the setup-wizard host step completes.
 type setupHostDoneMsg struct {
 	hostName string
 	info     *app.HostInfo
 	err      error
 }
 
-// setupAgentsDiffMsg carries the diff-only unmanaged mcp/plugin counts for
-// the setup wizard's agents onboarding step.
 type setupAgentsDiffMsg struct {
 	unmanagedSkills  int
 	unmanagedMcp     int
@@ -400,13 +376,14 @@ type setupAgentsDiffMsg struct {
 	err              error
 }
 
-// setupAgentsImportDoneMsg is sent after the agents onboarding step's
-// import-all action finishes adopting unmanaged skills/mcp/plugins.
 type setupAgentsImportDoneMsg struct {
 	skills  int
 	mcp     int
 	plugins int
-	err     error
+	// Servers omni declined to claim, and servers claimed while carrying a literal header value: an
+	// adopted header is copied verbatim into settings.json, so silence here hides a written secret.
+	advisories []string
+	err        error
 }
 
 type stowInstallDoneMsg struct {
@@ -414,11 +391,9 @@ type stowInstallDoneMsg struct {
 	err    error
 }
 
-// clearStatusMsg is sent by a timer to erase the transient status message.
 // gen must match Model.statusGen — stale timers from overwritten messages are ignored.
 type clearStatusMsg struct{ gen int }
 
-// dotsLoadedMsg is sent when the dots status (entries + git status) is fetched.
 type dotsLoadedMsg struct {
 	gen            int
 	entries        []app.DotStatus
@@ -449,7 +424,6 @@ type traceLogLoadedMsg struct {
 	err    error
 }
 
-// dotsPreparedMsg is sent when the launch-time, non-mutating dots snapshot is fetched.
 type dotsPreparedMsg struct {
 	gen            int
 	opGen          int
@@ -459,7 +433,6 @@ type dotsPreparedMsg struct {
 	err            error
 }
 
-// dotsSyncedMsg is sent after a dots sync completes.
 type dotsSyncedMsg struct {
 	gen            int
 	entries        []app.DotStatus
@@ -470,7 +443,6 @@ type dotsSyncedMsg struct {
 	err            error
 }
 
-// dotsDiscoveredMsg is sent after non-mutating dotfile candidate discovery.
 type dotsDiscoveredMsg struct {
 	gen             int
 	entries         []app.DotStatus
@@ -480,7 +452,6 @@ type dotsDiscoveredMsg struct {
 	err             error
 }
 
-// dotsPulledMsg is sent after a dots pull+resync completes.
 type dotsPulledMsg struct {
 	gen            int
 	entries        []app.DotStatus
@@ -489,7 +460,6 @@ type dotsPulledMsg struct {
 	err            error
 }
 
-// dotsPushedMsg is sent after a dots push completes.
 type dotsPushedMsg struct {
 	gen            int
 	entries        []app.DotStatus
@@ -498,7 +468,6 @@ type dotsPushedMsg struct {
 	err            error
 }
 
-// dotsCommittedMsg is sent after a dots commit completes.
 type dotsCommittedMsg struct {
 	gen            int
 	entries        []app.DotStatus
@@ -507,7 +476,6 @@ type dotsCommittedMsg struct {
 	err            error
 }
 
-// dotsDeletedMsg is sent after a dots entry delete completes.
 type dotsDeletedMsg struct {
 	gen            int
 	name           string
@@ -517,8 +485,6 @@ type dotsDeletedMsg struct {
 	err            error
 }
 
-// dotsFixedMsg is sent after a conflict entry has been resolved by backing up
-// the original file and creating the symlink.
 type dotsFixedMsg struct {
 	gen            int
 	name           string
@@ -528,7 +494,6 @@ type dotsFixedMsg struct {
 	err            error
 }
 
-// dotsAddedMsg is sent after a path has been adopted into the dots repo.
 type dotsAddedMsg struct {
 	gen            int
 	path           string // the tilde-form path that was added
@@ -538,7 +503,6 @@ type dotsAddedMsg struct {
 	err            error
 }
 
-// dotsVariantChangedMsg is sent after this host's dots package variant changes.
 type dotsVariantChangedMsg struct {
 	gen            int
 	name           string
@@ -550,7 +514,6 @@ type dotsVariantChangedMsg struct {
 	err            error
 }
 
-// searchResultsMsg is sent when a provider search completes.
 type searchResultsMsg struct {
 	query          string          // the query that produced these results (for caching)
 	providerFilter string          // provider tab filter active when the search started
@@ -559,13 +522,11 @@ type searchResultsMsg struct {
 	err            error
 }
 
-// debouncedSearchMsg is sent after the search debounce delay to trigger a provider search.
 type debouncedSearchMsg struct {
 	query string
 	gen   int
 }
 
-// dangerOpDoneMsg is sent after a high-impact maintenance action completes.
 // action is a short label (e.g. "delete-host", "reset-settings").
 type dangerOpDoneMsg struct {
 	action        string
@@ -578,7 +539,6 @@ type dangerOpDoneMsg struct {
 	setupComplete bool            // true when an onboarding action should leave setup
 }
 
-// groupChangedMsg is sent after a group rename or delete completes.
 type groupChangedMsg struct {
 	err             error
 	detail          string
@@ -589,7 +549,6 @@ type groupChangedMsg struct {
 	info            *app.HostInfo // refreshed host info
 }
 
-// groupToolsChangedMsg is sent after a group tools popup save completes.
 type groupToolsChangedMsg struct {
 	err             error
 	detail          string
@@ -602,7 +561,6 @@ type groupToolsChangedMsg struct {
 	groupIgnoreSet  map[string]map[string]bool
 }
 
-// groupDotsChangedMsg is sent after a group dots popup save completes.
 type groupDotsChangedMsg struct {
 	err            error
 	detail         string
@@ -611,7 +569,6 @@ type groupDotsChangedMsg struct {
 	dotMemberships map[string][]string
 }
 
-// hostGroupChangedMsg is sent after a host group add/remove or host delete.
 type hostGroupChangedMsg struct {
 	err             error
 	host            string
@@ -624,7 +581,6 @@ type hostGroupChangedMsg struct {
 	groupNames      []string
 }
 
-// claimDoneMsg is sent after an orphan tool has been added to the config.
 type claimDoneMsg struct {
 	err             error
 	name            string
@@ -636,7 +592,6 @@ type claimDoneMsg struct {
 	hostInfo        *app.HostInfo
 }
 
-// ignoreDoneMsg is sent after a tool's ignore status has been toggled.
 type ignoreDoneMsg struct {
 	err            error
 	name           string
@@ -648,8 +603,6 @@ type ignoreDoneMsg struct {
 	groupIgnoreSet map[string]map[string]bool
 }
 
-// migrateProviderDoneMsg is sent after a wrong-provider tool has been migrated
-// (installed via the correct provider and removed from the old one).
 type migrateProviderDoneMsg struct {
 	err                     error
 	name                    string
@@ -669,7 +622,6 @@ type fallbackSavedMsg struct {
 	toolFallbacks map[string]app.FallbackSpec
 }
 
-// dotsIgnoredMsg is sent after a dots ignore/include operation completes.
 type dotsIgnoredMsg struct {
 	gen            int
 	name           string

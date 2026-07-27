@@ -1,10 +1,143 @@
 package app
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
 )
+
+type listingMcpAdapter struct {
+	id     string
+	listed []InstalledMcpServer
+}
+
+func (s *listingMcpAdapter) ID() string      { return s.id }
+func (s *listingMcpAdapter) Available() bool { return true }
+func (s *listingMcpAdapter) List(context.Context) ([]InstalledMcpServer, error) {
+	return append([]InstalledMcpServer(nil), s.listed...), nil
+}
+func (s *listingMcpAdapter) Add(context.Context, config.McpServer) error { return nil }
+func (s *listingMcpAdapter) Remove(context.Context, string) error        { return nil }
+
+func adoptTestApp(t *testing.T) *App {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	mcp := &listingMcpAdapter{id: "claude-code", listed: []InstalledMcpServer{
+		{
+			Name: "secret-remote", Transport: "http", URL: "https://secret.example.com",
+			Headers: map[string]string{"Authorization": "Bearer sk-live-1"}, HeadersKnown: true,
+		},
+		{
+			Name: "env-remote", Transport: "http", URL: "https://env.example.com",
+			Headers:      map[string]string{"X-Key": "${REMOTE_KEY}"},
+			EnvLiteral:   map[string]string{"MODE": "prod"},
+			HeadersKnown: true,
+		},
+	}}
+	plugins := &shadowTestPluginAdapter{id: "claude-code", listedPlugins: []InstalledPlugin{
+		{Name: "helper", Marketplace: "declared"},
+	}}
+	return newSkillsTestApp(t,
+		config.AgentsConfig{Marketplaces: []config.Marketplace{{Name: "declared", Source: "o/declared"}}},
+		WithMcpAdapters([]McpAdapter{mcp}),
+		WithPluginAdapters([]PluginAdapter{plugins}),
+		WithEnvLookup(func(name string) string {
+			if name == "MODE" {
+				return "prod"
+			}
+			return ""
+		}))
+}
+
+// Adoption is omni copying what another tool configured, so a header literal the user never typed is
+// refused rather than written with advice. The reference-bearing sibling is unaffected: one refused
+// server must not take the rest of the pass down with it.
+func TestAdoptUnmanagedMcpServers_RefusesLiteralHeaderValues(t *testing.T) {
+	a := adoptTestApp(t)
+
+	res, err := a.AdoptUnmanagedMcpServers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Adopted != 1 || len(res.Skipped) != 1 {
+		t.Fatalf("result = %+v, want the literal header refused and the reference-bearing server claimed", res)
+	}
+	if len(res.Warnings) != 0 {
+		t.Fatalf("Warnings = %v, want no adopt path to produce an advisory", res.Warnings)
+	}
+	if !strings.Contains(res.Skipped[0], "secret-remote") || !strings.Contains(res.Skipped[0], "Authorization") {
+		t.Fatalf("Skipped = %v, want the refusal naming the server and the resolved header", res.Skipped)
+	}
+	if strings.Contains(res.Skipped[0], "sk-live-1") {
+		t.Fatalf("Skipped = %v, want the refusal to name the header without quoting the value", res.Skipped)
+	}
+	cfg, err := a.loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if findMcpServer(cfg.Agents.McpServers, "secret-remote") != nil {
+		t.Fatalf("manifest = %+v, want nothing written for the refused server", cfg.Agents.McpServers)
+	}
+}
+
+func TestAdoptUnmanagedMcpServers_RecordsProvenEnvAsPassthroughName(t *testing.T) {
+	a := adoptTestApp(t)
+
+	if _, err := a.AdoptUnmanagedMcpServers(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := a.loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adopted := findMcpServer(cfg.Agents.McpServers, "env-remote")
+	if adopted == nil {
+		t.Fatalf("manifest = %+v, want the env-referencing server claimed", cfg.Agents.McpServers)
+	}
+	if len(adopted.Env) != 1 || adopted.Env[0] != "MODE" {
+		t.Fatalf("Env = %v, want the ambient variable recorded by name", adopted.Env)
+	}
+	if len(adopted.EnvLiteral) != 0 {
+		t.Fatalf("EnvLiteral = %v, want no value carried into the manifest", adopted.EnvLiteral)
+	}
+}
+
+func TestAdoptUnmanaged_DryRunPreviewsWithoutWriting(t *testing.T) {
+	a := adoptTestApp(t)
+	ctx := context.Background()
+
+	mcpRes, err := a.adoptUnmanagedMcpServers(ctx, mcpAdoptOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mcpRes.Adopted != 0 || len(mcpRes.WouldAdopt) != 1 {
+		t.Fatalf("mcp preview = %+v, want the claimable server previewed and nothing claimed", mcpRes)
+	}
+	if !strings.Contains(mcpRes.WouldAdopt[0], "env-remote") {
+		t.Fatalf("mcp preview = %+v, want the claimable server named", mcpRes)
+	}
+	// A preview that promised a claim the real path refuses would be a licence to commit the secret.
+	if len(mcpRes.Skipped) != 1 || !strings.Contains(mcpRes.Skipped[0], "secret-remote") {
+		t.Fatalf("mcp preview = %+v, want the literal-header server refused on the dry path too", mcpRes)
+	}
+	pluginRes, err := a.adoptUnmanagedPlugins(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pluginRes.Adopted != 0 || len(pluginRes.WouldAdopt) != 1 || !strings.Contains(pluginRes.WouldAdopt[0], "helper") {
+		t.Fatalf("plugin preview = %+v, want the claimable plugin previewed and nothing claimed", pluginRes)
+	}
+
+	cfg, err := a.loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Agents.McpServers) != 0 || len(cfg.Agents.Plugins) != 0 {
+		t.Fatalf("manifest = %+v, want a dry run to leave it untouched", cfg.Agents)
+	}
+}
 
 func resolveNames(cfg *config.RootConfig, group string) []string {
 	servers := resolveMcpServers(cfg, group)
@@ -111,7 +244,6 @@ func TestResolveMcpServers_ServerInMultipleGroups_AppearsOncePerActiveGroup(t *t
 			{Name: "home", McpServers: []string{"shared"}},
 		},
 	}
-	// active group "work" → shared appears
 	got := resolveNames(cfg, "work")
 	var count int
 	for _, n := range got {
@@ -122,7 +254,6 @@ func TestResolveMcpServers_ServerInMultipleGroups_AppearsOncePerActiveGroup(t *t
 	if count != 1 {
 		t.Fatalf("shared server must appear exactly once; got %d in %v", count, got)
 	}
-	// inactive group "other" → shared is excluded
 	got2 := resolveNames(cfg, "other")
 	if containsName(got2, "shared") {
 		t.Fatalf("shared server must not appear when neither group is active; got %v", got2)

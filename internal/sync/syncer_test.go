@@ -14,17 +14,15 @@ import (
 	syncer "github.com/lkshrk/omni/internal/sync"
 )
 
-// --- mock provider for sync tests ---
-
 type mockProvider struct {
 	name         string
 	available    bool
 	isInstalled  map[string]bool // pkg → installed
 	isInstallErr error
 	versions     map[string]string // pkg → version
-	installed    []string          // record of Install calls
-	uninstalled  []string          // record of Uninstall calls
-	upgraded     []string          // record of Upgrade calls
+	installed    []string
+	uninstalled  []string
+	upgraded     []string
 }
 
 func (m *mockProvider) Name() string        { return m.name }
@@ -101,8 +99,6 @@ func (p *privilegedMockProvider) PrivilegePlan(_ context.Context, _ provider.Pri
 	return p.plan, nil
 }
 
-// --- helpers ---
-
 func newDB(t *testing.T) *database.DB {
 	t.Helper()
 	db, err := database.Open(":memory:")
@@ -128,8 +124,6 @@ func entryPackage(name, prov, pkg string) config.ToolEntry {
 	return config.ToolEntry{Name: name, Provider: prov, Package: pkg}
 }
 
-// --- tests ---
-
 func TestSync_AllInstalled_NoInstallCalls(t *testing.T) {
 	ctx := context.Background()
 	mock := &mockProvider{
@@ -154,7 +148,6 @@ func TestSync_AllInstalled_NoInstallCalls(t *testing.T) {
 	if skipped := result.Skipped(); len(skipped) != 2 {
 		t.Errorf("expected 2 skipped, got %d", len(skipped))
 	}
-	// No OpInstall entries should appear in result.Ops.
 	for _, op := range result.Ops {
 		if op.Kind == syncer.OpInstall {
 			t.Errorf("unexpected OpInstall for %q in result.Ops", op.Tool.Name)
@@ -189,7 +182,6 @@ func TestSync_SomeMissing_InstallsExactlyThose(t *testing.T) {
 	if len(installed) != 2 {
 		t.Errorf("result.Installed() = %d, want 2", len(installed))
 	}
-	// Confirm the specific tool names appear in the installed ops.
 	wantInstalled := map[string]bool{"node": false, "jq": false}
 	for _, op := range installed {
 		if _, ok := wantInstalled[op.Tool.Name]; ok {
@@ -420,11 +412,10 @@ func TestSync_ProviderUnavailable(t *testing.T) {
 
 func TestSync_UnknownProvider(t *testing.T) {
 	ctx := context.Background()
-	reg := provider.NewRegistry() // empty registry
+	reg := provider.NewRegistry()
 	db := newDB(t)
 	s := syncer.New(reg, db)
 
-	// "cargo" is not registered
 	result, err := s.Sync(ctx, cfg(entry("rustup", "cargo")), syncer.SyncOptions{})
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
@@ -556,14 +547,12 @@ func TestSync_Prune(t *testing.T) {
 	reg.Register(mock)
 
 	db := newDB(t)
-	// Pre-populate cache with a tool that's no longer in config.
 	_ = db.Upsert(ctx, &database.ToolCache{
 		Name: "jq", Provider: "brew", Package: "jq", Installed: true,
 	})
 
 	s := syncer.New(reg, db)
 
-	// Config has no tools (empty) → jq should be pruned.
 	result, err := s.Sync(ctx, cfg(), syncer.SyncOptions{Prune: true})
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
@@ -571,7 +560,6 @@ func TestSync_Prune(t *testing.T) {
 	if len(mock.uninstalled) != 1 || mock.uninstalled[0] != "jq" {
 		t.Errorf("expected jq to be uninstalled, got %v", mock.uninstalled)
 	}
-	// result.Ops must contain an OpUninstall entry for "jq".
 	found := false
 	for _, op := range result.Ops {
 		if op.Kind == syncer.OpUninstall && op.Tool.Name == "jq" {
@@ -719,8 +707,6 @@ func TestSyncResult_Errors(t *testing.T) {
 	}
 }
 
-// ─── IgnoreList ───────────────────────────────────────────────────────────────
-
 func TestSync_IgnoreList_SkipsTools(t *testing.T) {
 	ctx := context.Background()
 	mock := &mockProvider{
@@ -751,7 +737,6 @@ func TestSync_IgnoreList_SkipsTools(t *testing.T) {
 		t.Errorf("ignored tool = %q, want 'node'", ignored[0].Tool.Name)
 	}
 
-	// git and ripgrep should be non-ignored ops (OpInstall in dry-run)
 	nonIgnored := 0
 	for _, op := range result.Ops {
 		if op.Kind != syncer.OpIgnored {
@@ -826,9 +811,6 @@ func TestSync_IgnoreList_Empty_NoEffect(t *testing.T) {
 	}
 }
 
-// ─── BulkChecker / OutdatedChecker mocks ─────────────────────────────────────
-
-// bulkMockProvider additionally implements BulkChecker.
 type bulkMockProvider struct {
 	mockProvider
 	installedMap map[string]string // lowercase name → version
@@ -870,7 +852,6 @@ func (m *multiManagerMockProvider) ResolvedName(_ context.Context) (string, erro
 	return m.concreteName, nil
 }
 
-// outdatedMockProvider additionally implements OutdatedChecker.
 type outdatedMockProvider struct {
 	bulkMockProvider
 	outdatedMap map[string]string // lowercase name → latest version
@@ -891,9 +872,6 @@ func (e *errAvailProvider) Available(_ context.Context) (bool, error) {
 	return false, errors.New("binary check failed")
 }
 
-// ─── Resilience helpers ───────────────────────────────────────────────────────
-
-// failingProvider always returns installErr from Install.
 type failingProvider struct {
 	mockProvider
 	installErr error
@@ -904,7 +882,6 @@ func (f *failingProvider) Install(_ context.Context, t provider.Tool) error {
 	return f.installErr
 }
 
-// slowProvider blocks in Install until delay elapses or the context is cancelled.
 type slowProvider struct {
 	mockProvider
 	delay time.Duration
@@ -945,8 +922,6 @@ func TestSync_IgnoreList_MultipleTools(t *testing.T) {
 		t.Fatalf("Ignored() = %d, want 2", len(result.Ignored()))
 	}
 }
-
-// ─── Resilience tests ─────────────────────────────────────────────────────────
 
 func TestSync_InstallFails_ProducesOpFailed(t *testing.T) {
 	ctx := context.Background()
@@ -1095,7 +1070,6 @@ func TestSync_InstallFails_ContinuesOtherTools(t *testing.T) {
 func TestSync_RetryFailed_OnlyRetriesFailedTools(t *testing.T) {
 	ctx := context.Background()
 	db := newDB(t)
-	// Pre-mark ripgrep as failed; jq has no failure.
 	_ = db.MarkFailed(ctx, "ripgrep", "brew", "ripgrep", "prior error")
 
 	mock := &mockProvider{
@@ -1114,7 +1088,6 @@ func TestSync_RetryFailed_OnlyRetriesFailedTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
-	// Only ripgrep should be attempted (jq filtered out — no prior failure).
 	if len(result.Ops) != 1 {
 		t.Fatalf("expected 1 op, got %d", len(result.Ops))
 	}
@@ -1146,8 +1119,6 @@ func TestSync_RetryFailed_EmptyWhenNoFailures(t *testing.T) {
 		t.Errorf("expected 0 ops (no failures in DB), got %d", len(result.Ops))
 	}
 }
-
-// ─── Coverage gap tests ───────────────────────────────────────────────────────
 
 func TestSync_Progress_Callback(t *testing.T) {
 	ctx := context.Background()
@@ -1203,7 +1174,6 @@ func TestSync_BulkChecker_UsesInstalledMap(t *testing.T) {
 	if len(skipped) != 2 {
 		t.Fatalf("Skipped() = %d, want 2", len(skipped))
 	}
-	// Versions should be populated from the bulk map.
 	for _, op := range skipped {
 		if op.Version == "" {
 			t.Errorf("tool %s: expected version from BulkChecker, got empty", op.Tool.Name)
@@ -1436,7 +1406,6 @@ func TestSync_AvailabilityCheckError_PropagatesErr(t *testing.T) {
 
 func TestSync_PackageNameWithSlash_LooksUpByBasename(t *testing.T) {
 	ctx := context.Background()
-	// Package "hashicorp/tap/terraform" — BulkChecker key must be "terraform".
 	mock := &bulkMockProvider{
 		mockProvider: mockProvider{
 			name:        "brew",
@@ -1465,7 +1434,6 @@ func TestSync_PackageNameWithSlash_LooksUpByBasename(t *testing.T) {
 
 func TestSync_Prune_UnknownProviderSkipped(t *testing.T) {
 	ctx := context.Background()
-	// Registry only has "brew"; DB has a "cargo" tool that is no longer registered.
 	mock := &mockProvider{
 		name:        "brew",
 		available:   true,
@@ -1485,7 +1453,6 @@ func TestSync_Prune_UnknownProviderSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
-	// The "cargo" tool should be silently skipped (not produce an Uninstall op).
 	for _, op := range result.Ops {
 		if op.Kind == syncer.OpUninstall {
 			t.Errorf("unexpected OpUninstall for unknown-provider tool: %+v", op)

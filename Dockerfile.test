@@ -2,9 +2,7 @@
 
 FROM golang:1.26-alpine AS integration-test
 
-# stow  — dotfile symlink manager (needed by integration tests)
-# git   — used by dots pull/push/status in integration tests
-# bash  — shell runtime for command integration coverage
+# Integration tests exercise Bash commands, Git-backed dots, and Stow symlinks.
 # build-base provides the C toolchain required by `go test -race`.
 RUN apk add --no-cache \
         bash \
@@ -34,7 +32,6 @@ RUN case "$TARGETARCH" in \
     chmod 0755 /usr/local/bin/grok && \
     grok --version
 
-# Pre-install a small pip package so pip integration tests have something to query.
 # --break-system-packages is required by externally-managed system Python installs.
 RUN pip3 install --break-system-packages cowsay==6.1
 
@@ -42,13 +39,10 @@ WORKDIR /app
 
 RUN adduser -D -u 10001 omni && chown omni:omni /app
 
-# Configure git so dots tests that commit don't fail on missing identity.
 RUN git config --system user.email "ci@omni" && \
     git config --system user.name "omni-ci"
 
-# Run tests as an unprivileged user. Several filesystem error-path tests rely on
-# chmod denying access; root bypasses those permissions and makes the assertions
-# meaningless.
+# Filesystem error-path tests require an unprivileged user because root bypasses chmod.
 USER omni
 ENV HOME=/home/omni
 ENV GOCACHE=/home/omni/.cache/go-build

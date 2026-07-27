@@ -153,8 +153,10 @@ func newHostsCopyCmd(state *rootState) *cobra.Command {
 func newHostsRemoveCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remove <hostname>",
-		Short: "Remove a host assignment",
-		Args:  cobra.ExactArgs(1),
+		Short: "Undeclare a host and its group assignments",
+		Long: "Remove a host entry from config. Nothing installed on that machine is touched — " +
+			"config is the only store a host has — so it simply stops being a sync target.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ok, err := confirmAction(cmd, state, fmt.Sprintf("Remove host %q?", args[0]))
 			if err != nil || !ok {

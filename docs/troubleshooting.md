@@ -147,8 +147,8 @@ Fix:
 ```sh
 omni settings set ecosystems.node.manager pnpm
 omni tools migrate-nvm --all
-omni consolidate --to pnpm --dry-run
-omni consolidate --to pnpm
+omni tools consolidate --to pnpm --dry-run
+omni tools consolidate --to pnpm
 omni tools refresh
 omni doctor
 ```

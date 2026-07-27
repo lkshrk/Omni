@@ -49,12 +49,12 @@ func TestOpsGatedByFeatureFlags(t *testing.T) {
 
 	t.Run("skills add", func(t *testing.T) {
 		a := newFeatureGateApp(t, config.Settings{SkillsDisabled: config.BoolPtr(true)})
-		_, err := a.AddSkillPackage(ctx, "owner/repo")
+		_, _, err := a.AddSkillPackage(ctx, "owner/repo")
 		wantDisabledErr(t, err, "skills are disabled")
 	})
 	t.Run("skills find", func(t *testing.T) {
 		a := newFeatureGateApp(t, config.Settings{SkillsDisabled: config.BoolPtr(true)})
-		_, err := a.FindSkillPackages(ctx, "q")
+		_, err := a.FindSkillPackages(ctx, "q", "")
 		wantDisabledErr(t, err, "skills are disabled")
 	})
 	t.Run("mcp add", func(t *testing.T) {

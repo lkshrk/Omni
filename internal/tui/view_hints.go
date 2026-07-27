@@ -11,7 +11,6 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-// hintItem pairs a key label and its action description for rendered hints.
 type hintItem struct {
 	key        string
 	desc       string
@@ -87,7 +86,6 @@ func pressAgainHint(key, action string) hintItem {
 	return hintItem{key: key, desc: action, danger: true, pressAgain: true}
 }
 
-// hintKey renders a key+description pair with the key styled like the legend.
 func hintKey(pal palette, k, desc string) string {
 	return pal.styleTitle.Render(k) + pal.styleHintDesc.Render(" "+desc)
 }
@@ -104,8 +102,6 @@ func renderHintItem(pal palette, h hintItem) string {
 	return hintKey(pal, h.key, h.desc)
 }
 
-// hintJoin joins pre-rendered hint strings with the same separator used by the
-// footer help model.
 func hintJoin(pal palette, parts ...string) string {
 	sep := pal.styleSep.Render(" • ")
 	return strings.Join(parts, sep)
@@ -206,8 +202,6 @@ func renderPopupActionEdgeLine(width int, left, right string) string {
 	}
 }
 
-// renderInlineHints renders a list of hintItems joined by the footer help
-// separator and prefixed with prefix. Returns "" when hints is empty.
 func renderInlineHints(pal palette, hints []hintItem, prefix string) string {
 	return renderActionHints(pal, actionHints{prefix: prefix, items: hints})
 }
@@ -271,9 +265,7 @@ func selectCancelActionItems(m Model) []hintItem {
 	}
 }
 
-// membershipPickerActionItems describes the multi-select membership picker: an
-// item may join any number of host groups plus one reusable group, so Toggle
-// accumulates selections and Confirm persists them.
+// An item may join any number of host groups plus one reusable group, so Toggle accumulates selections and Confirm persists them.
 func membershipPickerActionItems(m Model) []hintItem {
 	return []hintItem{
 		hintFromBindingDesc(m.keys.Toggle, "toggle"),
@@ -579,7 +571,7 @@ func toolInlineHints(m Model, t *app.ToolView) []hintItem {
 	isIgnored := m.displaySection(t) == sectionIgnored
 	var hints []hintItem
 
-	if !isIgnored && t.Installed && t.Outdated && t.UpdateBlocked != app.UpdateBlockSelfUpdates {
+	if !isIgnored && app.ToolOffersUpgrade(t) {
 		hints = append(hints, hintFromBinding(m.keys.Upgrade))
 	}
 
@@ -661,7 +653,7 @@ func tabShortHelpBindings(m *Model) []key.Binding {
 		actions := []key.Binding{k.NewGroup}
 		return footerBindings(k, actions, nil)
 	case viewSkills:
-		listActions := []key.Binding{agentsUpdateAllBinding(), agentsSyncAllBinding(), agentsRefreshBinding()}
+		listActions := []key.Binding{agentsUpgradeAllBinding(), agentsSyncAllBinding(), agentsRefreshBinding()}
 		return footerBindings(k, listActions, []key.Binding{agentsFilterBinding(k), agentsAgentFilterBinding(k)})
 	default:
 		if m.listConfirm.action == listConfirmSyncAll {
@@ -716,17 +708,13 @@ func footerFilterBinding(k KeyMap, includeGroup bool) key.Binding {
 	return key.NewBinding(key.WithKeys(keys...), key.WithHelp(strings.Join(labels, ","), providerHelp.Desc))
 }
 
-// agentsInstallBinding, agentsUpdateBinding, agentsGroupBinding,
-// agentsIgnoreBinding, and agentsDeleteBinding describe the agents-all row
-// actions (i/u/g/x/d) for the full-help popup. They're constructed ad hoc
-// rather than added to KeyMap since they're footer/popup-display-only —
-// handleAgentsAllRowActionKeyMsg matches on the raw key string directly.
+// Constructed ad hoc rather than added to KeyMap because they are display-only — handleAgentsAllRowActionKeyMsg matches the raw key string directly.
 func agentsInstallBinding() key.Binding {
 	return key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "install"))
 }
 
-func agentsUpdateBinding() key.Binding {
-	return key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update"))
+func agentsUpgradeBinding() key.Binding {
+	return key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "upgrade"))
 }
 
 func agentsGroupBinding() key.Binding {
@@ -741,11 +729,7 @@ func agentsDeleteBinding() key.Binding {
 	return key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
 }
 
-// agentsFilterBinding and agentsAgentFilterBinding describe the agents tab's
-// two independent filter chip bars ([,] type chip, {,} agent chip) for the
-// footer defaults row, kept as separate hint entries (unlike tools' single
-// combined footerFilterBinding) since the agent chip's label ("agent") means
-// something different from tools' group filter.
+// Kept as separate hint entries (unlike tools' combined footerFilterBinding) since the agent chip's label means something different from tools' group filter.
 func agentsFilterBinding(k KeyMap) key.Binding {
 	help := k.PrevTab.Help()
 	return key.NewBinding(key.WithKeys(k.PrevTab.Keys()...), key.WithHelp(compactFilterLabel(help.Key), "filter"))
@@ -756,13 +740,9 @@ func agentsAgentFilterBinding(k KeyMap) key.Binding {
 	return key.NewBinding(key.WithKeys(k.GroupPrev.Keys()...), key.WithHelp(compactFilterLabel(help.Key), "agent"))
 }
 
-// agentsUpdateAllBinding, agentsSyncAllBinding, and agentsRefreshBinding
-// describe the agents tab's three global bulk actions (U/S/R), mirroring
-// tools' UpgradeAll/SyncAll/Refresh footer row exactly. Handled directly by
-// key string in handleAgentsGlobalActionKeyMsg (see the "U"/"S"/"R" cases),
-// so these exist for display only.
-func agentsUpdateAllBinding() key.Binding {
-	return key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "update all"))
+// Display only: handleAgentsGlobalActionKeyMsg handles U/S/R directly by key string.
+func agentsUpgradeAllBinding() key.Binding {
+	return key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "upgrade all"))
 }
 
 func agentsSyncAllBinding() key.Binding {
@@ -841,7 +821,7 @@ func tabFullHelpBindings(m *Model) [][]key.Binding {
 	case viewSkills:
 		return [][]key.Binding{
 			common,
-			{agentsInstallBinding(), agentsUpdateBinding(), agentsGroupBinding(), agentsIgnoreBinding(), agentsDeleteBinding()},
+			{agentsInstallBinding(), agentsUpgradeBinding(), agentsGroupBinding(), agentsIgnoreBinding(), agentsDeleteBinding(), k.AgentsUseManaged, k.AgentsUseLocal},
 			{footerFilterBinding(k, true)},
 		}
 	default:
@@ -862,8 +842,15 @@ func renderHelpPopupWithWidth(m Model, width int) string {
 	return strings.Join([]string{
 		renderHelpGroups(p, "Current Tab Actions", helpActionGroups(m), width),
 		renderHelpSection(p, "Navigation", helpGlobalItems(m), width),
+		renderHelpStoreModel(p, width),
 		renderHelpLegend(m, width),
 	}, "\n\n")
+}
+
+// Names the three stores every verb moves between, so the keys above read as directions instead of unrelated commands.
+func renderHelpStoreModel(p palette, width int) string {
+	return lipgloss.NewStyle().Width(width).Render(
+		p.styleHelp.Render("manifest = what you want · store = what omni holds · live = what agents/machines see"))
 }
 
 func helpPopupContentWidth(m Model) int {
@@ -919,6 +906,8 @@ func activeConfirmationHelpItems(m Model) []hintItem {
 			label = "uninstall"
 		}
 		return []hintItem{pressAgainHint(m.keys.Delete.Help().Key, label)}
+	case m.agentsSyncAllConfirm:
+		return []hintItem{pressAgainHint("S", "sync all")}
 	case m.agentsIgnoreConfirm:
 		label := "confirm ignore"
 		if m.agentsIgnoreName != "" {
@@ -1060,13 +1049,13 @@ func helpActionGroups(m Model) []helpGroup {
 		return []helpGroup{
 			{title: "Row", items: []hintItem{
 				hintFromBinding(agentsInstallBinding()),
-				hintFromBinding(agentsUpdateBinding()),
+				hintFromBinding(agentsUpgradeBinding()),
 				hintFromBinding(agentsGroupBinding()),
 				hintFromBinding(agentsIgnoreBinding()),
 				hintFromBinding(agentsDeleteBinding()),
 			}},
 			{title: "Bulk", items: []hintItem{
-				hintFromBinding(agentsUpdateAllBinding()),
+				hintFromBinding(agentsUpgradeAllBinding()),
 				hintFromBinding(agentsSyncAllBinding()),
 				hintFromBinding(agentsRefreshBinding()),
 			}},
@@ -1171,7 +1160,7 @@ func helpLegendItems(m Model) []string {
 		return []string{
 			p.styleInstalled.Render(iconInstalled) + p.styleHelp.Render(" installed"),
 			p.styleMissing.Render(iconMissing) + p.styleHelp.Render(" missing"),
-			p.styleOutdated.Render(iconOutdated) + p.styleHelp.Render(" update"),
+			p.styleOutdated.Render(iconOutdated) + p.styleHelp.Render(" upgrade"),
 			p.styleOrphan.Render(iconOrphan) + p.styleHelp.Render(" orphan"),
 			p.styleWrongProv.Render(iconWrongProv) + p.styleHelp.Render(" wrong provider"),
 			p.styleWrongProv.Render(providerWrongGlyph+" ") + p.styleHelp.Render("non-preferred provider"),

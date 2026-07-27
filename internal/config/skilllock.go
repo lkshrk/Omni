@@ -8,9 +8,7 @@ import (
 	"path/filepath"
 )
 
-// SkillLockEntry mirrors a single entry in the upstream skills CLI lockfile
-// (vercel-labs/skills, schema v3). Omni reads this for import and drift checks
-// and never writes it.
+// SkillLockEntry — Mirrors the legacy skills CLI lockfile (vercel-labs/skills, schema v3), which omni reads for import/adopt but never writes.
 type SkillLockEntry struct {
 	Source          string `json:"source"`
 	SourceType      string `json:"sourceType"`
@@ -40,8 +38,6 @@ func ParseSkillLock(data []byte) (*SkillLockFile, error) {
 	return &lock, nil
 }
 
-// SkillLockPath returns the global lockfile path: $XDG_STATE_HOME/skills/.skill-lock.json
-// when set, else <home>/.agents/.skill-lock.json.
 func SkillLockPath(home string) string {
 	if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
 		return filepath.Join(xdg, "skills", ".skill-lock.json")
@@ -49,8 +45,7 @@ func SkillLockPath(home string) string {
 	return filepath.Join(home, ".agents", ".skill-lock.json")
 }
 
-// LoadSkillLock reads and parses the lockfile at path. A missing file yields an
-// empty lockfile and no error.
+// LoadSkillLock — A missing file yields an empty lockfile and no error.
 func LoadSkillLock(path string) (*SkillLockFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -37,8 +37,6 @@ func tool(name string) provider.Tool {
 	return provider.Tool{Name: name, Provider: "python", Package: name}
 }
 
-// ── New / Name / Description ──────────────────────────────────────────────────
-
 func TestNew_ReturnsNonNil(t *testing.T) {
 	m := executor.NewMatchMock()
 	p := New(m, "")
@@ -60,8 +58,6 @@ func TestDescription_NonEmpty(t *testing.T) {
 		t.Error("Description() is empty")
 	}
 }
-
-// ── Available ─────────────────────────────────────────────────────────────────
 
 func TestAvailable_UVFound(t *testing.T) {
 	m := executor.NewMatchMock(uvOK())
@@ -110,8 +106,6 @@ func TestAvailable_HintUnknown(t *testing.T) {
 		t.Errorf("Available() = (%v, %v), want (false, nil)", ok, err)
 	}
 }
-
-// ── Install ───────────────────────────────────────────────────────────────────
 
 func TestInstall_UV(t *testing.T) {
 	m := executor.NewMatchMock(
@@ -180,8 +174,6 @@ func TestInstall_Pip3ExternallyManagedPython(t *testing.T) {
 	}
 }
 
-// ── Uninstall ─────────────────────────────────────────────────────────────────
-
 func TestUninstall_UV(t *testing.T) {
 	m := executor.NewMatchMock(
 		uvOK(),
@@ -206,8 +198,6 @@ func TestUninstall_Pip3(t *testing.T) {
 	}
 	m.AssertCalled(t, "pip3 uninstall -y black")
 }
-
-// ── Upgrade ───────────────────────────────────────────────────────────────────
 
 func TestUpgrade_UV(t *testing.T) {
 	m := executor.NewMatchMock(
@@ -278,8 +268,6 @@ func TestUpgradeWithManager_Pip3ExternallyManagedPython(t *testing.T) {
 	}
 }
 
-// ── IsInstalled ───────────────────────────────────────────────────────────────
-
 const uvToolListOutput = "black v23.12.1\n  - black\nruff v0.1.0\n  - ruff\n"
 
 func TestIsInstalled_UV_Found(t *testing.T) {
@@ -338,8 +326,6 @@ func TestIsInstalled_Pip3_NotFound(t *testing.T) {
 	}
 }
 
-// ── ListInstalled ─────────────────────────────────────────────────────────────
-
 func TestListInstalled_UV(t *testing.T) {
 	m := executor.NewMatchMock(
 		uvOK(),
@@ -390,8 +376,6 @@ func TestListInstalled_Pip3_InvalidJSONReturnsError(t *testing.T) {
 		t.Fatal("expected invalid pip list JSON error, got nil")
 	}
 }
-
-// ── InstalledMap ──────────────────────────────────────────────────────────────
 
 func TestInstalledMap_UV(t *testing.T) {
 	m := executor.NewMatchMock(
@@ -467,8 +451,6 @@ func TestInstalledMap_PipUsesPythonOwnershipProbe(t *testing.T) {
 		t.Fatalf("python3 ownership probe called %d times, want 0", len(calls))
 	}
 }
-
-// ── OutdatedMap ───────────────────────────────────────────────────────────────
 
 func TestOutdatedMap_UV_Found(t *testing.T) {
 	m := executor.NewMatchMock(
@@ -665,8 +647,6 @@ func staticJSONClient(body string) *http.Client {
 	})}
 }
 
-// ── Describe ──────────────────────────────────────────────────────────────────
-
 func TestDescribe_Success(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		payload := map[string]any{"info": map[string]any{"summary": "The uncompromising code formatter."}}
@@ -731,8 +711,6 @@ func TestDescribe_HTTPError(t *testing.T) {
 	}
 }
 
-// ── ResolvedName ──────────────────────────────────────────────────────────────
-
 func TestResolvedName_UV(t *testing.T) {
 	m := executor.NewMatchMock(uvOK())
 	p := New(m, "uv")
@@ -769,8 +747,6 @@ func TestResolvedName_NoneFound(t *testing.T) {
 	}
 }
 
-// ── UninstallFrom ─────────────────────────────────────────────────────────────
-
 func TestUninstallFrom_UV(t *testing.T) {
 	m := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "uv tool uninstall black", Response: executor.MockCall{}},
@@ -796,13 +772,10 @@ func TestUninstallFrom_Pip3(t *testing.T) {
 func TestUninstallFrom_UnknownBinary(t *testing.T) {
 	m := executor.NewMatchMock()
 	p := New(m, "")
-	// Unknown binary is a no-op; should return nil.
 	if err := p.UninstallFrom(context.Background(), tool("black"), "cargo"); err != nil {
 		t.Fatalf("UninstallFrom unknown binary: expected nil, got %v", err)
 	}
 }
-
-// ── BulkDescribe ──────────────────────────────────────────────────────────────
 
 const pipShowMulti = "Name: black\nVersion: 23.12.1\nSummary: The uncompromising code formatter.\n---\nName: ruff\nVersion: 0.1.0\nSummary: An extremely fast Python linter.\n"
 
@@ -855,8 +828,6 @@ func TestBulkDescribe_Empty(t *testing.T) {
 		t.Errorf("BulkDescribe(nil) = (%v, %v), want (nil, nil)", got, err)
 	}
 }
-
-// ── CLIToolSet ────────────────────────────────────────────────────────────────
 
 func TestCLIToolSet_UV(t *testing.T) {
 	m := executor.NewMatchMock(
@@ -922,8 +893,6 @@ func TestCLIToolSet_PipUsesPythonInterpreter(t *testing.T) {
 	}
 }
 
-// ── InstalledByManager ────────────────────────────────────────────────────────
-
 func TestInstalledByManager_UvOnly(t *testing.T) {
 	uvList := "black v24.3.0\n  - black\nruff v0.4.0\n  - ruff\n"
 	m := executor.NewMatchMock(
@@ -967,10 +936,7 @@ func TestInstalledByManager_Pip3Only(t *testing.T) {
 	}
 }
 
-// TestInstalledByManager_EffectivePriority verifies that when both uv and pip3
-// are available and both report the same tool, the effective (configured) manager
-// is credited. Also verifies pip3-only tools are attributed to pip3 when uv is
-// the effective manager but doesn't own them.
+// The effective manager is credited for shared tools; tools only it lacks fall to the other backend.
 func TestInstalledByManager_EffectivePriority(t *testing.T) {
 	uvList := "black v24.3.0\n  - black\n"
 	pip3List := `[{"name":"black","version":"23.0.0"},{"name":"ruff","version":"0.4.0"}]`
@@ -987,22 +953,19 @@ func TestInstalledByManager_EffectivePriority(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InstalledByManager: %v", err)
 	}
-	// black: uv is effective and reports it first — uv wins
 	if e := got["black"]; e.ConcreteManager != "uv" {
 		t.Errorf("black.ConcreteManager = %q, want uv (effective priority)", e.ConcreteManager)
 	}
 	if e := got["black"]; e.Version != "24.3.0" {
 		t.Errorf("black.Version = %q, want 24.3.0", e.Version)
 	}
-	// ruff: only pip3 has it
 	if e := got["ruff"]; e.ConcreteManager != "pip3" {
 		t.Errorf("ruff.ConcreteManager = %q, want pip3 (only manager with it)", e.ConcreteManager)
 	}
 }
 
 func TestInstalledByManager_FillInBackendFailureTolerated(t *testing.T) {
-	// uv is effective and works; pip3 is available but its list fails. A broken
-	// fill-in backend must not abort detection for the effective backend.
+	// A fill-in backend whose list fails must not abort detection for the effective one.
 	uvList := "flux-local v1.0.0\n  - flux-local\n"
 	m := executor.NewMatchMock(
 		uvOK(),

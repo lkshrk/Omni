@@ -39,13 +39,10 @@ var dotsReminderIntervalChoices = []time.Duration{
 	7 * 24 * time.Hour,
 }
 
-// DefaultDotsReminderInterval is the interval used when no reminder interval
-// is specified.
 func DefaultDotsReminderInterval() time.Duration {
 	return defaultReminderInterval
 }
 
-// DotsReminderIntervalChoices returns preset intervals for reminder controls.
 func DotsReminderIntervalChoices() []time.Duration {
 	return append([]time.Duration(nil), dotsReminderIntervalChoices...)
 }
@@ -57,7 +54,6 @@ func DotsReminderInterval(service *DotsReminderService) time.Duration {
 	return DefaultDotsReminderInterval()
 }
 
-// DotsReminderReason explains one reason a reminder should be shown.
 type DotsReminderReason struct {
 	Kind    string   `json:"kind"`
 	Count   int      `json:"count,omitempty"`
@@ -65,8 +61,7 @@ type DotsReminderReason struct {
 	Message string   `json:"message"`
 }
 
-// DotsReminderResult is the app-level result for a one-shot dots reminder
-// check. Entries contains only entries that need attention.
+// DotsReminderResult — Entries contains only entries that need attention.
 type DotsReminderResult struct {
 	NeedsReminder   bool                 `json:"needs_reminder"`
 	Disabled        bool                 `json:"disabled,omitempty"`
@@ -76,8 +71,7 @@ type DotsReminderResult struct {
 	Reasons         []DotsReminderReason `json:"reasons,omitempty"`
 }
 
-// DotsReminder evaluates current dots status and returns whether the user should
-// be reminded to run a dots action. It does not mutate config, repo, or links.
+// DotsReminder — Does not mutate config, repo, or links.
 func (a *App) DotsReminder(ctx context.Context) (*DotsReminderResult, error) {
 	rootCfg, err := a.loadConfig()
 	if err != nil {
@@ -93,9 +87,7 @@ func (a *App) DotsReminder(ctx context.Context) (*DotsReminderResult, error) {
 	return AnalyzeDotsReminderStatus(status), nil
 }
 
-// AnalyzeDotsReminderStatus converts a dots status snapshot into reminder
-// reasons. It is separate from DotsReminder so tests can exercise the policy
-// without setting up a filesystem-backed dots repo.
+// AnalyzeDotsReminderStatus — Separate from DotsReminder so tests can exercise the policy without a filesystem-backed repo.
 func AnalyzeDotsReminderStatus(status *DotsStatusResult) *DotsReminderResult {
 	if status == nil {
 		return &DotsReminderResult{}
@@ -195,7 +187,6 @@ func joinLimited(names []string) string {
 	return strings.Join(names[:limit], ", ") + fmt.Sprintf(", +%d more", len(names)-limit)
 }
 
-// DotsReminderInstallOptions controls native reminder service installation.
 type DotsReminderInstallOptions struct {
 	Interval   time.Duration
 	Notify     bool
@@ -203,7 +194,6 @@ type DotsReminderInstallOptions struct {
 	Activate   bool
 }
 
-// DotsReminderService describes the native files used by the reminder service.
 type DotsReminderService struct {
 	Platform  string        `json:"platform"`
 	Interval  time.Duration `json:"interval"`
@@ -212,8 +202,6 @@ type DotsReminderService struct {
 	Installed bool          `json:"installed,omitempty"`
 }
 
-// InstallDotsReminderService writes and enables a user-level service that runs
-// "omni dots reminder run" periodically.
 func (a *App) InstallDotsReminderService(ctx context.Context, opts DotsReminderInstallOptions) (*DotsReminderService, error) {
 	if opts.Interval == 0 {
 		opts.Interval = defaultReminderInterval
@@ -255,8 +243,6 @@ func (a *App) InstallDotsReminderService(ctx context.Context, opts DotsReminderI
 	return info, nil
 }
 
-// UninstallDotsReminderService disables and removes the user-level reminder
-// service files for the current platform.
 func (a *App) UninstallDotsReminderService(ctx context.Context) (*DotsReminderService, error) {
 	service, err := a.dotsReminderServiceForPlatform(runtime.GOOS, "", defaultReminderInterval, true)
 	if err != nil {
@@ -273,7 +259,6 @@ func (a *App) UninstallDotsReminderService(ctx context.Context) (*DotsReminderSe
 	return service.info(), nil
 }
 
-// DotsReminderServiceStatus reports whether reminder service files exist.
 func (a *App) DotsReminderServiceStatus() (*DotsReminderService, error) {
 	service, err := a.dotsReminderServiceForPlatform(runtime.GOOS, "", defaultReminderInterval, true)
 	if err != nil {

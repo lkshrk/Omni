@@ -8,8 +8,6 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// MigrateHostOverrides folds tools.*.hosts install overrides into providers[] and
-// removes empty hosts maps.
 func (a *App) MigrateHostOverrides(ctx context.Context) (int, error) {
 	_ = ctx
 	changed := 0

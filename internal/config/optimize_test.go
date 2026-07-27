@@ -7,8 +7,7 @@ import (
 	"testing"
 )
 
-// writeOptimizeFixture writes main + fragments and returns the main path.
-// files maps relative path -> content; "settings.json" must be present.
+// files maps relative path to content and must include "settings.json".
 func writeOptimizeFixture(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -229,7 +228,6 @@ func TestOptimizeIncludeChainAppliesAndPreservesMergedConfig(t *testing.T) {
 	if string(beforeNorm) != string(afterNorm) {
 		t.Fatalf("merged config changed:\nbefore: %s\nafter:  %s", beforeNorm, afterNorm)
 	}
-	// Foreign key preserved.
 	data, err := os.ReadFile(main)
 	if err != nil {
 		t.Fatal(err)
@@ -280,18 +278,7 @@ func TestOptimizeIncludeChainNoopLeavesFilesUntouched(t *testing.T) {
 	}
 }
 
-// TestOptimizeIncludeChainEmptyBaseGroupIsSafe covers a group with an
-// empty/missing "name" appearing in both the main file and a fragment.
-// dedupeDots matches groups by base name, so two empty-base groups in
-// different files match each other and dedupeDots will plan to remove the
-// main file's "git" dot (believing the fragment's later definition wins).
-// But mergeGroups (config_merge.go) skips any src group whose BaseName() is
-// empty entirely - it never merges into an existing group and never gets
-// appended - so the fragment's empty-base group is dropped outright during
-// a real merge. Removing "git" from main's empty-base group would therefore
-// silently lose it from the merged config. The equivalence check (reload +
-// normalize compare) is the safety net: it must catch this and abort with
-// files restored byte-for-byte, rather than silently corrupt the config.
+// Two empty-base groups match for dedupe but mergeGroups drops empty-base src groups, so only the equivalence check prevents silently losing an entry.
 func TestOptimizeIncludeChainEmptyBaseGroupIsSafe(t *testing.T) {
 	main := writeOptimizeFixture(t, map[string]string{
 		"settings.json": `{
@@ -314,8 +301,7 @@ func TestOptimizeIncludeChainEmptyBaseGroupIsSafe(t *testing.T) {
 
 	report, err := OptimizeIncludeChain(main, false)
 
-	// Current, verified-safe behavior: the equivalence check catches the
-	// would-be change and aborts with an error, restoring files untouched.
+	// The equivalence check catches the would-be change and aborts, restoring files untouched.
 	if err == nil {
 		t.Fatalf("expected an abort error for empty-base group mismatch, got report=%+v", report)
 	}

@@ -9,17 +9,11 @@ import (
 	"github.com/lkshrk/omni/internal/dots"
 )
 
-// ─── unlinkEntry: directory symlink pointing elsewhere ────────────────────────
-
-// TestUnlinkEntry_DirSymlinkPointsElsewhere verifies that when the target is a
-// directory symlink pointing to a path other than SourcePath, unlinkEntry
-// returns OpUnlinkSkip and leaves the symlink intact.
 func TestUnlinkEntry_DirSymlinkPointsElsewhere(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// SourcePath = repo/nvim/.config/nvim (exists in repo)
 	srcDir := filepath.Join(repo, "nvim", ".config", "nvim")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -28,7 +22,6 @@ func TestUnlinkEntry_DirSymlinkPointsElsewhere(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// TargetPath = home/.config/nvim; create it as a symlink pointing ELSEWHERE.
 	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -55,16 +48,11 @@ func TestUnlinkEntry_DirSymlinkPointsElsewhere(t *testing.T) {
 	if ops[0].Kind != dots.OpUnlinkSkip {
 		t.Errorf("op kind = %v, want OpUnlinkSkip (symlink points elsewhere)", ops[0].Kind)
 	}
-	// The foreign symlink must be left intact.
 	if _, err := os.Lstat(dstLink); err != nil {
 		t.Errorf("foreign symlink was removed: %v", err)
 	}
 }
 
-// ─── unlinkEntry: source missing ─────────────────────────────────────────────
-
-// TestUnlinkEntry_SourceMissing verifies that when SourcePath does not exist in
-// the repo, unlinkEntry returns an empty op slice (nothing to do).
 func TestUnlinkEntry_SourceMissing(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
@@ -247,19 +235,12 @@ func TestUnlinkEntry_RemoveLocalBacksUpBrokenManagedSymlink(t *testing.T) {
 	}
 }
 
-// ─── unlinkEntry: file-level walk with ignored files ─────────────────────────
-
-// TestUnlinkEntry_WalkIgnoresPatterns verifies that files matching per-entry
-// ignore patterns are skipped during the file-level walk inside unlinkEntry.
 func TestUnlinkEntry_WalkIgnoresPatterns(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Source is a file, not a directory, so the file-level path is triggered
-	// when TargetPath is an existing directory (no dir-level symlink exists).
-	// To hit the walk branch, SourcePath must be a directory.
-	// Layout: repo/cfg/.config/ (dir), home/.config/ (real dir, not symlink)
+	// The walk branch needs SourcePath to be a directory and TargetPath a real dir, not a symlink.
 	srcDir := filepath.Join(repo, "cfg", ".config")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -267,12 +248,10 @@ func TestUnlinkEntry_WalkIgnoresPatterns(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcDir, "keep.conf"), []byte("keep"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// This file matches the ignore pattern "*.log" — should be skipped.
 	if err := os.WriteFile(filepath.Join(srcDir, "debug.log"), []byte("log"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Ensure TargetPath (.config) is a real dir so TargetPath itself is NOT a symlink.
 	dstDir := filepath.Join(home, ".config")
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -285,12 +264,10 @@ func TestUnlinkEntry_WalkIgnoresPatterns(t *testing.T) {
 		t.Fatalf("dots.New: %v", err)
 	}
 
-	// UnlinkAll on a real-dir target with non-symlink files → OpUnlinkSkip for each.
 	ops, err := m.UnlinkAll(dots.UnlinkOptions{})
 	if err != nil {
 		t.Fatalf("UnlinkAll: %v", err)
 	}
-	// Only "keep.conf" should be visited; "debug.log" is ignored.
 	for _, op := range ops {
 		if op.File == "debug.log" {
 			t.Errorf("ignored file debug.log appeared in ops: %v", ops)
@@ -298,18 +275,11 @@ func TestUnlinkEntry_WalkIgnoresPatterns(t *testing.T) {
 	}
 }
 
-// ─── copyDir ─────────────────────────────────────────────────────────────────
-
-// TestCopyDir_CopiesTreeViaUnlinkAll exercises copyDir indirectly through
-// the stow-managed directory-symlink unlink path. When the target IS a
-// stow-managed directory symlink and opts.ConflictOverwrite would have the
-// symlink removed + source tree copied, copyDir is called.
 func TestCopyDir_CopiesTree(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Source tree: repo/nvim/.config/nvim/{init.lua, lua/user.lua}
 	srcDir := filepath.Join(repo, "nvim", ".config", "nvim")
 	if err := os.MkdirAll(filepath.Join(srcDir, "lua"), 0o755); err != nil {
 		t.Fatal(err)
@@ -321,7 +291,6 @@ func TestCopyDir_CopiesTree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a stow-managed directory symlink at TargetPath pointing to SourcePath.
 	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +314,6 @@ func TestCopyDir_CopiesTree(t *testing.T) {
 		t.Fatalf("got ops %v, want [OpUnlink]", ops)
 	}
 
-	// The symlink must have been replaced by a real directory tree.
 	fi, err := os.Lstat(dstLink)
 	if err != nil {
 		t.Fatalf("Lstat %q: %v", dstLink, err)
@@ -353,7 +321,6 @@ func TestCopyDir_CopiesTree(t *testing.T) {
 	if fi.Mode()&os.ModeSymlink != 0 {
 		t.Error("dstLink is still a symlink after UnlinkAll")
 	}
-	// Files from the source tree must exist in the copy.
 	if _, err := os.Stat(filepath.Join(dstLink, "init.lua")); err != nil {
 		t.Errorf("init.lua missing from copy: %v", err)
 	}
@@ -362,20 +329,14 @@ func TestCopyDir_CopiesTree(t *testing.T) {
 	}
 }
 
-// ─── unlinkFile: wrong symlink (points to different src) ─────────────────────
-
-// TestUnlinkFile_WrongSymlink verifies that when a file-level symlink points to
-// a path other than the expected src, it is skipped (OpUnlinkSkip).
 func TestUnlinkFile_WrongSymlink(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// SourcePath = repo/zsh/.zshrc (a file)
 	src := filepath.Join(repo, "zsh", ".zshrc")
 	writeFile(t, src, "# zsh")
 
-	// The symlink at dst points to some other file, not src.
 	otherFile := filepath.Join(t.TempDir(), "other.txt")
 	writeFile(t, otherFile, "# other")
 
@@ -401,17 +362,11 @@ func TestUnlinkFile_WrongSymlink(t *testing.T) {
 	if ops[0].Kind != dots.OpUnlinkSkip {
 		t.Errorf("op kind = %v, want OpUnlinkSkip for wrong symlink", ops[0].Kind)
 	}
-	// The wrong symlink must remain.
 	if _, err := os.Lstat(dst); err != nil {
 		t.Errorf("wrong symlink was removed: %v", err)
 	}
 }
 
-// ─── unlinkFile: managed symlink replaced with real copy ─────────────────────
-
-// TestUnlinkFile_ManagedSymlinkReplaced verifies the stow-style file link path:
-// when src and dst are files (not dirs), and dst is a relative symlink pointing
-// to src, UnlinkAll replaces it with a real copy and returns OpUnlink.
 func TestUnlinkFile_ManagedSymlinkReplaced(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
@@ -446,7 +401,6 @@ func TestUnlinkFile_ManagedSymlinkReplaced(t *testing.T) {
 		t.Fatalf("got ops %v, want [OpUnlink]", ops)
 	}
 
-	// dst should now be a real file with the same content.
 	fi, err := os.Lstat(dst)
 	if err != nil {
 		t.Fatalf("Lstat dst: %v", err)
@@ -460,16 +414,11 @@ func TestUnlinkFile_ManagedSymlinkReplaced(t *testing.T) {
 	}
 }
 
-// ─── dots.New: path not under home dir ───────────────────────────────────────
-
-// TestNew_PathNotUnderHome verifies that dots.New returns an error when an
-// entry path is not under the home directory (covering the rel error branch).
 func TestNew_PathNotUnderHome(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// Use an absolute path outside home.
 	outsidePath := t.TempDir() // guaranteed different from home
 	_, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "outside", Path: outsidePath},

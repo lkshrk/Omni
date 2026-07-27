@@ -1,7 +1,5 @@
 package tui
 
-// Tests for doClaim, scoped ignore/provider actions, doInstallAndAdd, and doMigrateProvider.
-
 import (
 	"context"
 	"errors"
@@ -16,10 +14,7 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// redirectToReadOnlyConfig redirects a's ConfigPath to a freshly created
-// read-only directory so that any subsequent saveConfig call fails (atomicWrite
-// cannot create temp files in the locked directory).  The open DB handle is
-// unaffected.  Returns a cleanup func that restores directory permissions.
+// Redirects ConfigPath to a read-only directory so any later saveConfig fails (atomicWrite cannot create temp files there); the open DB handle is unaffected.
 func redirectToReadOnlyConfig(t *testing.T, a *app.App) {
 	t.Helper()
 	parent := t.TempDir()
@@ -37,8 +32,6 @@ func redirectToReadOnlyConfig(t *testing.T, a *app.App) {
 	t.Cleanup(func() { _ = os.Chmod(cfgDir, 0o755) })
 	a.ConfigPath = roConfig
 }
-
-// ── doClaim ───────────────────────────────────────────────────────────────────
 
 func TestDoClaim_Success(t *testing.T) {
 	t.Parallel()
@@ -181,12 +174,7 @@ func TestDoClaim_AddError(t *testing.T) {
 	}
 }
 
-// ── doClaim — ecosystem tool coverage ────────────────────────────────────────
-
-// TestDoClaim_NodeToolWritesConcreteProvider verifies that claiming an orphan
-// node tool (Provider=bun, InstalledWith=bun) writes the concrete "bun" provider
-// to config — never the "node" family — and that the resulting config validates
-// clean. This mirrors the assertion in the bulk TestSyncAll_ClaimNodeToolWritesConcreteNotFamily.
+// Claiming an orphan node tool must write the concrete "bun" provider, never the "node" family, and the resulting config must validate clean.
 func TestDoClaim_NodeToolWritesConcreteProvider(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	bun := &okProvider{name: "bun"}
@@ -230,10 +218,7 @@ func TestDoClaim_NodeToolWritesConcreteProvider(t *testing.T) {
 	}
 }
 
-// TestDoClaim_NodeToolMatchesBulkPath confirms that a single TUI claim for a
-// node ecosystem orphan produces identical config shape as the bulk SyncAll path
-// tested in TestSyncAll_ClaimNodeToolWritesConcreteNotFamily: provider="bun",
-// no install_with pin (bun==bun so ClaimInstallWith returns ""), valid config.
+// A single TUI claim must produce the same config shape as the bulk SyncAll path: provider="bun" and no install_with pin.
 func TestDoClaim_NodeToolMatchesBulkPath(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	bun := &okProvider{name: "bun"}
@@ -271,8 +256,7 @@ func TestDoClaim_NodeToolMatchesBulkPath(t *testing.T) {
 	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "bun" {
 		t.Fatalf("tsx spec providers = %+v, want [{Provider:bun}]", spec.Providers)
 	}
-	// When configProvider==installedWith (both "bun"), ClaimInstallWith returns ""
-	// — no explicit install_with pin is needed.
+	// configProvider == installedWith (both "bun"), so ClaimInstallWith returns "" and no explicit pin is needed.
 	if spec.Providers[0].InstallWith != "" {
 		t.Fatalf("tsx spec install_with = %q, want empty (bun==bun, no pin needed)", spec.Providers[0].InstallWith)
 	}
@@ -280,7 +264,6 @@ func TestDoClaim_NodeToolMatchesBulkPath(t *testing.T) {
 	if errs := config.ValidateRoot(cfg, config.ProviderValidation{}); len(errs) > 0 {
 		t.Fatalf("config did not validate clean after single claim: %v", errs)
 	}
-	// Tool appears in the requested group.
 	var found bool
 	for _, g := range cfg.Groups {
 		for _, tool := range g.Tools {
@@ -294,9 +277,7 @@ func TestDoClaim_NodeToolMatchesBulkPath(t *testing.T) {
 	}
 }
 
-// TestDoClaim_PythonToolWritesConcreteProvider exercises the pip ecosystem:
-// an orphan installed via pip is claimed as provider="pip" and must not be
-// written as the "python" family.
+// An orphan installed via pip is claimed as provider="pip", not as the "python" family.
 func TestDoClaim_PythonToolWritesConcreteProvider(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	pip := &okProvider{name: "pip"}
@@ -437,8 +418,6 @@ func TestHandleOpCompleteMsg_ProviderPinsRefreshBeforeFiltering(t *testing.T) {
 	}
 }
 
-// ── doSetProviderScope ────────────────────────────────────────────────────────
-
 func TestDoSetProviderScope_ToolSuccess(t *testing.T) {
 	t.Parallel()
 	prov := &okProvider{name: "brew"}
@@ -510,8 +489,6 @@ func TestDoSetProviderScope_Error(t *testing.T) {
 	}
 }
 
-// ── doMigrateProvider ─────────────────────────────────────────────────────────
-
 type describingOKProvider struct {
 	okProvider
 	desc string
@@ -525,11 +502,7 @@ func TestDoMigrateProvider_Success(t *testing.T) {
 	t.Parallel()
 	brew := &okProvider{name: "brew"}
 	pip := &describingOKProvider{okProvider: okProvider{name: "pip"}, desc: "Python package installer"}
-	// Real-world scenario: config already declares "pip" as the intended provider
-	// (configProv), but the tool is physically installed via "brew" (installedWith).
-	// MigrateInstallation detects that "brew" is a registered-but-different provider,
-	// so it calls migrateWrongProvider: install via pip, uninstall from brew, config
-	// entry stays unchanged (already "pip").
+	// Config declares "pip" but the tool is installed via "brew", so MigrateInstallation calls migrateWrongProvider: install via pip, uninstall from brew, config entry unchanged.
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
@@ -548,7 +521,6 @@ func TestDoMigrateProvider_Success(t *testing.T) {
 	t.Cleanup(func() { _ = a.Close() })
 
 	m := modelForCmds(a)
-	// configProv="pip" (config-declared provider), installedWith="brew" (wrong provider).
 	msg := m.doMigrateProvider("black", "pip", "brew")()
 	got, ok := msg.(migrateProviderDoneMsg)
 	if !ok {

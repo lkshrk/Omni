@@ -1,9 +1,6 @@
 package config
 
-// agentDotsManagedPaths is the historical v14 migration snapshot of
-// home-relative paths that Omni removes from dotfiles tracking. It is migration
-// policy, not the live Agent Target catalog. ".agents" is intentionally narrowed
-// to the skills store because other files directly under ".agents" are user-owned.
+// A frozen v14 migration snapshot, not the live Agent Target catalog: ".agents" is narrowed to the skills store because sibling files are user-owned.
 var agentDotsManagedPaths = []string{
 	".aider-desk",
 	".config/agents",

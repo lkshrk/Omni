@@ -23,17 +23,12 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// stubGitHubServer serves a minimal fake GitHub API + asset + checksums.
-// Each test configures its own asset content and expected behaviour.
 type stubGitHubServer struct {
-	assetName    string
-	assetContent []byte
-	// checksumOverride: when set, served instead of real digest (triggers mismatch)
+	assetName        string
+	assetContent     []byte
 	checksumOverride string
-	// omitChecksums: serve no checksums asset in the release
-	omitChecksums bool
-	// assetStatusCode: non-zero overrides the asset download response code
-	assetStatusCode int
+	omitChecksums    bool
+	assetStatusCode  int
 }
 
 func (s *stubGitHubServer) serve(t *testing.T) *httptest.Server {
@@ -47,18 +42,17 @@ func (s *stubGitHubServer) serve(t *testing.T) *httptest.Server {
 
 	checkAssetName := "checksums.txt"
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/releases/tags/v1.0.0"):
-			// Release by tag — used by checksum fetcher.
 			assets := []map[string]any{
-				{"id": 1, "name": s.assetName, "browser_download_url": "http://" + r.Host + "/asset/" + s.assetName},
+				{"id": 1, "name": s.assetName, "browser_download_url": "https://" + r.Host + "/asset/" + s.assetName},
 			}
 			if !s.omitChecksums {
 				assets = append(assets, map[string]any{
 					"id":                   2,
 					"name":                 checkAssetName,
-					"browser_download_url": "http://" + r.Host + "/checksums",
+					"browser_download_url": "https://" + r.Host + "/checksums",
 				})
 			}
 			writeJSON(w, map[string]any{
@@ -68,9 +62,8 @@ func (s *stubGitHubServer) serve(t *testing.T) *httptest.Server {
 			})
 
 		case strings.HasSuffix(r.URL.Path, "/releases/latest"):
-			// Latest release — used by SaveToolFallbackFromGitHub resolver.
 			assets := []map[string]any{
-				{"id": 1, "name": s.assetName, "browser_download_url": "http://" + r.Host + "/asset/" + s.assetName},
+				{"id": 1, "name": s.assetName, "browser_download_url": "https://" + r.Host + "/asset/" + s.assetName},
 			}
 			writeJSON(w, map[string]any{
 				"id":           1,
@@ -109,7 +102,6 @@ func sha256Hex(b []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// buildTarGz builds an in-memory tar.gz archive containing one file.
 func buildTarGz(t *testing.T, entryName string, content []byte) []byte {
 	t.Helper()
 	var buf strings.Builder
@@ -122,7 +114,6 @@ func buildTarGz(t *testing.T, entryName string, content []byte) []byte {
 	return []byte(buf.String())
 }
 
-// buildTarXz builds an in-memory tar.xz archive containing one file.
 func buildTarXz(t *testing.T, entryName string, content []byte) []byte {
 	t.Helper()
 	pr, pw := io.Pipe()
@@ -152,7 +143,6 @@ func buildTarXz(t *testing.T, entryName string, content []byte) []byte {
 	return b
 }
 
-// buildZip builds an in-memory zip archive containing one file.
 func buildZip(t *testing.T, entryName string, content []byte) []byte {
 	t.Helper()
 	var sw stringWriter
@@ -173,11 +163,8 @@ func (sw *stringWriter) Write(p []byte) (int, error) { return sw.buf.Write(p) }
 func newStringWriter() *stringWriter { return &stringWriter{buf: &strings.Builder{}} }
 
 func init() {
-	// Ensure the zero value is usable by tests that use buildTarGz/buildZip directly.
 	_ = newStringWriter
 }
-
-// --- full pipeline tests ---
 
 func TestNativeInstallPipeline_TarGz(t *testing.T) {
 	t.Parallel()
@@ -347,7 +334,6 @@ func TestNativeInstallPipeline_ChecksumMatch_Persisted(t *testing.T) {
 		t.Fatalf("InstallToolFallback: %v", err)
 	}
 
-	// Verify the checksum was persisted into the recipe.
 	got, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -394,7 +380,6 @@ func TestNativeInstallPipeline_ChecksumMismatch_HardFail(t *testing.T) {
 		t.Errorf("error %q does not mention checksum mismatch", err)
 	}
 
-	// Status must be recorded as failed.
 	assertFallbackStatusFailed(t, cfgPath, "mytool")
 }
 
@@ -425,7 +410,6 @@ func TestNativeInstallPipeline_ChecksumsAbsent_Proceeds(t *testing.T) {
 		t.Fatalf("saveAppConfig: %v", err)
 	}
 
-	// Must succeed even without a checksums asset (best-effort).
 	if err := a.InstallToolFallback(context.Background(), "mytool"); err != nil {
 		t.Fatalf("InstallToolFallback without checksums: %v", err)
 	}
@@ -478,7 +462,6 @@ func TestNativeInstallPipeline_NativeUninstall(t *testing.T) {
 	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
 
 	fallbackSpec := githubReleaseAssetFallback(srv.URL, "tool_darwin_arm64.tar.gz", "mytool")
-	// No explicit Uninstall command — native path should be used.
 	fallbackSpec.Commands.Uninstall = ""
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
@@ -495,7 +478,6 @@ func TestNativeInstallPipeline_NativeUninstall(t *testing.T) {
 		t.Fatalf("InstallToolFallback: %v", err)
 	}
 
-	// Confirm the binary exists before uninstall.
 	cacheDir, _ := a.FallbackCacheDir()
 	binDir := filepath.Join(cacheDir, "bin")
 	binPath := filepath.Join(binDir, "mytool")
@@ -512,27 +494,23 @@ func TestNativeInstallPipeline_NativeUninstall(t *testing.T) {
 	}
 }
 
-// TestNativeInstallPipeline_TransientFailureRetried verifies the download retry
-// path: the stub returns 503 on the first asset request and 200 on the second.
-// The install must succeed — the retry absorbed the transient failure.
 func TestNativeInstallPipeline_TransientFailureRetried(t *testing.T) {
 	t.Parallel()
 	binaryContent := []byte("#!/bin/sh\nexit 0\n")
 	assetContent := buildTarGz(t, "mytool", binaryContent)
 
 	var attempts int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/releases/tags/v1.0.0"),
 			strings.HasSuffix(r.URL.Path, "/releases/latest"):
 			writeJSON(w, map[string]any{
 				"id": 1, "tag_name": "v1.0.0", "published_at": "2026-06-01T00:00:00Z",
 				"assets": []map[string]any{
-					{"id": 1, "name": "tool.tar.gz", "browser_download_url": "http://" + r.Host + "/asset/tool.tar.gz"},
+					{"id": 1, "name": "tool.tar.gz", "browser_download_url": "https://" + r.Host + "/asset/tool.tar.gz"},
 				},
 			})
 		case strings.HasPrefix(r.URL.Path, "/asset/"):
-			// First call returns 503 (transient); subsequent calls succeed.
 			attempts++
 			if attempts == 1 {
 				http.Error(w, "service unavailable", http.StatusServiceUnavailable)
@@ -572,19 +550,17 @@ func TestNativeInstallPipeline_TransientFailureRetried(t *testing.T) {
 	assertFallbackStatusVerified(t, cfgPath, "mytool")
 }
 
-// TestNativeInstallPipeline_NonRetriable404NeverRetried verifies that a 404
-// response is not retried — the endpoint must be called exactly once.
 func TestNativeInstallPipeline_NonRetriable404NeverRetried(t *testing.T) {
 	t.Parallel()
 	var attempts int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/releases/tags/v1.0.0"),
 			strings.HasSuffix(r.URL.Path, "/releases/latest"):
 			writeJSON(w, map[string]any{
 				"id": 1, "tag_name": "v1.0.0", "published_at": "2026-06-01T00:00:00Z",
 				"assets": []map[string]any{
-					{"id": 1, "name": "tool.tar.gz", "browser_download_url": "http://" + r.Host + "/asset/tool.tar.gz"},
+					{"id": 1, "name": "tool.tar.gz", "browser_download_url": "https://" + r.Host + "/asset/tool.tar.gz"},
 				},
 			})
 		case strings.HasPrefix(r.URL.Path, "/asset/"):
@@ -622,10 +598,6 @@ func TestNativeInstallPipeline_NonRetriable404NeverRetried(t *testing.T) {
 	assertFallbackStatusFailed(t, cfgPath, "mytool")
 }
 
-// --- helpers ---
-
-// githubReleaseAssetFallback builds a minimal FallbackSpec for a GitHub
-// release asset recipe pointing at srvURL.
 func githubReleaseAssetFallback(srvURL, assetName, binary string) config.FallbackSpec {
 	return config.FallbackSpec{
 		Source: config.FallbackSource{
@@ -646,7 +618,6 @@ func githubReleaseAssetFallback(srvURL, assetName, binary string) config.Fallbac
 			AssetDownloadURL: fmt.Sprintf("%s/asset/%s", srvURL, assetName),
 		},
 		Commands: config.FallbackCommands{
-			// Check uses native path (test-overridable); schema requires a non-empty Check.
 			Check: `test -x {{bin_dir}}/{{binary}}`,
 		},
 	}
@@ -719,7 +690,6 @@ func TestInstallToolFallback_PersistsInstalledVersion(t *testing.T) {
 	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
 
 	fallbackSpec := githubReleaseAssetFallback(srv.URL, "tool_v1.0_darwin_arm64.tar.gz", "mytool")
-	// TagName is set to v1.0.0 so it gets persisted as InstalledVersion.
 	fallbackSpec.Recipe.TagName = "v1.0.0"
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
@@ -762,7 +732,7 @@ func TestInstallToolFallback_NoTagName_InstalledVersionEmpty(t *testing.T) {
 	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
 
 	fallbackSpec := githubReleaseAssetFallback(srv.URL, "tool_v1.0_darwin_arm64.tar.gz", "mytool")
-	fallbackSpec.Recipe.TagName = "" // no tag → InstalledVersion stays empty
+	fallbackSpec.Recipe.TagName = ""
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"mytool": {

@@ -11,10 +11,7 @@ import (
 	"strings"
 )
 
-// Canonical settings.d fragment layout produced by ExtractIncludeFragments.
-// Order matters: fragments merge after the parent in $include order, and
-// dots.json must merge after groups.json so its dots-only group projections
-// land in the groups declared there.
+// Order matters: dots.json must merge after groups.json so its dots-only projections land in the groups declared there.
 var extractFragments = []string{
 	"settings.d/agents.json",
 	"settings.d/tools.json",
@@ -22,22 +19,13 @@ var extractFragments = []string{
 	"settings.d/dots.json",
 }
 
-// ExtractReport describes what ExtractIncludeFragments moved.
 type ExtractReport struct {
-	// Moved maps fragment path (relative to the config dir) to the top-level
-	// keys or projections now owned by it.
-	Moved map[string]string
-	// Unchanged is true when the config already matched the extracted layout.
+	// Moved keys are fragment paths relative to the config directory.
+	Moved     map[string]string
 	Unchanged bool
 }
 
-// ExtractIncludeFragments decomposes the effective config into the canonical
-// settings.d fragment layout: agents.json (agents), tools.json (tools),
-// groups.json (groups without dots), dots.json (dots-only group projections).
-// The moved keys are removed from the main settings.json and $include is
-// updated. Duplicate definitions across parent and fragments collapse to the
-// effective merged value, so running this also repairs divergent copies.
-// The function is idempotent.
+// ExtractIncludeFragments — Idempotent: duplicate definitions across parent and fragments collapse to the effective merged value, so this also repairs divergent copies.
 func ExtractIncludeFragments(path string) (*ExtractReport, error) {
 	cfg, err := Load(path)
 	if err != nil {
@@ -53,6 +41,10 @@ func ExtractIncludeFragments(path string) (*ExtractReport, error) {
 	if data, err := os.ReadFile(writePath); err == nil {
 		if err := unmarshalJSONObject(data, &mainRaw); err != nil {
 			return nil, fmt.Errorf("parsing config %q: %w", writePath, err)
+		}
+		// Strip against the shape PatchRaw will write: it migrates on the way out, and a migration introducing "agents" would leave the key behind.
+		if err := migrateRawVersion(mainRaw); err != nil {
+			return nil, err
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("reading config %q: %w", writePath, err)
@@ -123,8 +115,7 @@ func ExtractIncludeFragments(path string) (*ExtractReport, error) {
 		report.Moved[fragment] = fragmentKeys[fragment]
 	}
 
-	// Rebuild $include: keep foreign includes in place, then the canonical
-	// fragments (that exist) in canonical order at the end so they win merges.
+	// Canonical fragments go last so they win merges; foreign includes keep their place.
 	var includes []string
 	if includeRaw := mainRaw["$include"]; len(includeRaw) > 0 {
 		if err := json.Unmarshal(includeRaw, &includes); err != nil {
@@ -171,8 +162,6 @@ func ExtractIncludeFragments(path string) (*ExtractReport, error) {
 	return report, nil
 }
 
-// splitGroupsAndDots projects groups into a dots-free copy plus dots-only
-// counterparts for groups that carry dot entries.
 func splitGroupsAndDots(groups []*GroupConfig) (sansDots, dotsOnly []*GroupConfig) {
 	for _, group := range groups {
 		if group == nil {

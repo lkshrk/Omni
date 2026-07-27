@@ -59,7 +59,7 @@ func (m *Model) doToggleAgents() tea.Cmd {
 		return nil
 	}
 	a, ctx := m.app, m.ctx
-	disable := m.agentsEnabled // currently enabled → disable, and vice versa
+	disable := m.agentsEnabled
 	return func() tea.Msg {
 		err := a.SaveAgentsDisabled(ctx, disable)
 		return agentsToggledMsg{enabled: !disable, err: err}
@@ -108,17 +108,27 @@ func (m *Model) doUpdateSkills() tea.Cmd {
 	}
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		_, _, err := a.UpdateSkills(ctx, app.UpdateSkillsOptions{})
-		return skillsUpdatedMsg{err: err}
+		output, _, err := a.UpdateSkills(ctx, app.UpdateSkillsOptions{})
+		return skillsUpdatedMsg{updated: output != "", err: err}
 	}
 }
 
 func (m *Model) loadSkillsManifestCmd() tea.Cmd {
+	return m.loadSkillsManifest(false)
+}
+
+// Only the explicit refresh key probes each package's source: a routine reload must stay offline and render the recorded verdict.
+func (m *Model) loadSkillsManifest(recheckOutdated bool) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	if a == nil {
 		return nil
 	}
 	return func() tea.Msg {
+		if recheckOutdated {
+			if _, err := a.RefreshSkillOutdated(ctx, true); err != nil {
+				return skillsManifestLoadedMsg{err: err}
+			}
+		}
 		rows, unmanaged, err := a.SkillPackageRowState(ctx)
 		if err != nil {
 			return skillsManifestLoadedMsg{err: err}
@@ -133,7 +143,7 @@ func (m *Model) doFindSkills(query string) tea.Cmd {
 	}
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		results, err := a.FindSkillPackages(ctx, query)
+		results, err := a.FindSkillPackages(ctx, query, "")
 		return skillsFoundMsg{results: results, err: err}
 	}
 }
@@ -144,16 +154,12 @@ func (m *Model) doAddSkillPackage(source string) tea.Cmd {
 	}
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		_, err := a.AddSkillPackage(ctx, source)
-		return skillAddedMsg{err: err}
+		_, warnings, err := a.AddSkillPackage(ctx, source)
+		return skillAddedMsg{err: err, warning: skillWarningsText(warnings)}
 	}
 }
 
-// doAdoptSkillPackageWithGroup adopts an orphan skill package then assigns it
-// to group in one command, so the manifest reload skillAddedMsg triggers
-// already reflects the chosen group membership. Skipped (group left at its
-// adopt-time default) if the group-assignment step fails after a successful
-// adopt, since the package is still correctly in the manifest at that point.
+// Assigns the group in the same command so the manifest reload already reflects it; a failed group step leaves the adopt in place, since the package is correctly in the manifest by then.
 func (m *Model) doAdoptSkillPackageWithGroup(source, group string, createdGroups []string, activeHost string) tea.Cmd {
 	if m.app == nil {
 		return nil
@@ -210,6 +216,85 @@ func (m *Model) doSetSkillGroupMemberships(source string, after, createdGroups [
 	}
 }
 
+type agentsBulkResolveDoneMsg struct {
+	result app.BulkDriftResolution
+	err    error
+}
+
+// Settles every drifted item with one side so a fleet of drift left by sync does not need one resolve per item.
+func (m *Model) doAgentsBulkResolve(useManaged bool) tea.Cmd {
+	if m.app == nil {
+		return nil
+	}
+	a, ctx := m.app, m.ctx
+	return func() tea.Msg {
+		result, err := a.ResolveAllDrift(ctx, app.ResolveAllDriftOptions{UseManaged: useManaged})
+		return agentsBulkResolveDoneMsg{result: result, err: err}
+	}
+}
+
+type skillDriftResolvedMsg struct {
+	res app.SkillDriftResolution
+	err error
+}
+
+// The row is package-level, so the resolution settles every agent it drifted on.
+func (m *Model) doResolveSkillDrift(source string, useLocal bool) tea.Cmd {
+	if m.app == nil {
+		return nil
+	}
+	a, ctx := m.app, m.ctx
+	strategy := app.SkillDriftUseManaged
+	if useLocal {
+		strategy = app.SkillDriftUseLocal
+	}
+	return func() tea.Msg {
+		res, err := a.ResolveSkillDrift(ctx, app.ResolveSkillDriftOptions{Source: source, Strategy: strategy})
+		return skillDriftResolvedMsg{res: res, err: err}
+	}
+}
+
+type mcpDriftResolvedMsg struct {
+	warnings []string
+	err      error
+}
+
+// The row names the server, so the resolution is server-level across every agent it drifted on.
+func (m *Model) doResolveMcpDrift(name string, useLocal bool) tea.Cmd {
+	if m.app == nil {
+		return nil
+	}
+	a, ctx := m.app, m.ctx
+	strategy := app.McpDriftUseManaged
+	if useLocal {
+		strategy = app.McpDriftUseLocal
+	}
+	return func() tea.Msg {
+		res, err := a.ResolveMcpDrift(ctx, app.ResolveMcpDriftOptions{Name: name, Strategy: strategy})
+		return mcpDriftResolvedMsg{warnings: res.Warnings, err: err}
+	}
+}
+
+type pluginDriftResolvedMsg struct {
+	warnings []string
+	err      error
+}
+
+func (m *Model) doResolvePluginDrift(name string, useLocal bool) tea.Cmd {
+	if m.app == nil {
+		return nil
+	}
+	a, ctx := m.app, m.ctx
+	strategy := app.PluginDriftUseManaged
+	if useLocal {
+		strategy = app.PluginDriftUseLocal
+	}
+	return func() tea.Msg {
+		res, err := a.ResolvePluginDrift(ctx, app.ResolvePluginDriftOptions{Name: name, Strategy: strategy})
+		return pluginDriftResolvedMsg{warnings: res.Warnings, err: err}
+	}
+}
+
 type skillRemovedMsg struct{ err error }
 
 func (m *Model) doRemoveSkillPackage(source string) tea.Cmd {
@@ -241,7 +326,6 @@ type agentsIgnoreToggledMsg struct {
 	err        error
 }
 
-// doToggleAgentsIgnore toggles name's membership in feature's ignore list.
 func (m *Model) doToggleAgentsIgnore(feature agentsSection, name string) tea.Cmd {
 	if m.app == nil {
 		return nil
@@ -267,8 +351,6 @@ func agentsIgnoreFeatureName(feature agentsSection) string {
 	}
 }
 
-// doReloadAgentsIgnore reloads the manifest's ignore lists into m.agentsIgnore,
-// the source agentsIgnoreSets reads from throughout the agents tab.
 func (m *Model) doReloadAgentsIgnore() tea.Cmd {
 	if m.app == nil {
 		return nil

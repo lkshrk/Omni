@@ -33,7 +33,7 @@ func (m *Model) handleStowInstallKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		action := m.stowInstallAction
 		m.stowInstallPrompt = false
 		m.stowInstallAction = stowInstallNone
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		startOp(m, "Installing stow...")
 		cmds = append(cmds, m.spinner.Tick, m.doInstallStow(action))
 	case "n", "esc":
@@ -114,7 +114,7 @@ func (m *Model) resumeStowInstallAction(action stowInstallAction) []tea.Cmd {
 	case stowInstallSetupDotsRepo:
 		path := m.stowInstallPath
 		m.stowInstallPath = ""
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		startOp(m, "Saving...")
 		cmds = append(cmds, m.spinner.Tick, m.doSetupDotsRepo(path))
 	case stowInstallDotVariant:
@@ -127,7 +127,7 @@ func (m *Model) resumeStowInstallAction(action stowInstallAction) []tea.Cmd {
 		m.beginDotsVariantOperation(req)
 		cmds = append(cmds, m.spinner.Tick, m.doDotsVariantChange(req))
 	case stowInstallDotsWatch:
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		startOp(m, "Enabling dotfile watch…")
 		cmds = append(cmds, m.spinner.Tick, m.doToggleDotsWatchService(true))
 	default:

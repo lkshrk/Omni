@@ -232,7 +232,7 @@ func TestAgentsAll_KeyDispatch_DeleteConfirmScopedToRowFeature(t *testing.T) {
 	}
 }
 
-func TestAgentsAll_KeyDispatch_SkillsSearchOnlyOnSkillsRow(t *testing.T) {
+func TestAgentsAll_KeyDispatch_SearchActivatesOnAnyRow(t *testing.T) {
 	t.Parallel()
 	base := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "skill-a", Source: "a/a", Installed: true}},
@@ -258,14 +258,14 @@ func TestAgentsAll_KeyDispatch_SkillsSearchOnlyOnSkillsRow(t *testing.T) {
 	onSkills.agentsAllCursor = skillsCursorIdx
 	got := drive(onSkills, pressRune('/'))
 	if !got.skillsSearchActive {
-		t.Fatal("pressing '/' with cursor on a skills row should activate skills search")
+		t.Fatal("pressing '/' with cursor on a skills row should activate the agents search")
 	}
 
 	onMcp := base
 	onMcp.agentsAllCursor = mcpCursorIdx
 	got2 := drive(onMcp, pressRune('/'))
-	if got2.skillsSearchActive {
-		t.Fatal("pressing '/' with cursor on an mcp row should NOT activate skills search")
+	if !got2.skillsSearchActive {
+		t.Fatal("pressing '/' with cursor on an mcp row should activate the agents search too")
 	}
 }
 
@@ -439,8 +439,8 @@ func TestAgentsAll_EmptyStateCTAsPerChip(t *testing.T) {
 		if !strings.Contains(out, "No agent skills tracked yet.") {
 			t.Fatalf("expected skills-specific empty text, got:\n%s", out)
 		}
-		if !strings.Contains(out, "[i] import") || !strings.Contains(out, "[r] restore") {
-			t.Fatalf("expected import/restore hints, got:\n%s", out)
+		if !strings.Contains(out, "[i] import") || !strings.Contains(out, "[r] sync") {
+			t.Fatalf("expected import/sync hints, got:\n%s", out)
 		}
 	})
 }
@@ -551,8 +551,6 @@ func TestAgentsAll_ClampAfterRowCountShrink(t *testing.T) {
 	}
 }
 
-// firstRowCursor returns the agentsAllCursor index of the first flattened row
-// matching feature, or -1 if none.
 func firstRowCursor(m Model, feature agentsSection) int {
 	for i, r := range agentsAllRowsList(m) {
 		if r.feature == feature {
@@ -576,11 +574,7 @@ func TestAgentsAll_KeyDispatch_IgnoreTogglesFromRow(t *testing.T) {
 	m.agentsAllCursor = cursor
 
 	got := drive(m, pressRune('x'))
-	// doToggleAgentsIgnore/doReloadAgentsIgnore are fired as cmds (not executed
-	// here since m.app is nil in tests); this asserts the key was intercepted
-	// by the agents-all row handler rather than falling through to
-	// handleSkillsKeyMsg (which has no 'x' case and would leave cursor/mode
-	// untouched either way, so the meaningful assertion is no panic + mode intact).
+	// m.app is nil so the cmds do not execute; the meaningful assertion is that the key was intercepted by the agents-all row handler rather than falling through.
 	if got.mode != viewSkills {
 		t.Fatalf("expected mode to remain viewSkills after 'x', got %v", got.mode)
 	}
@@ -790,10 +784,7 @@ func TestAgentsAll_Expansion_AgentUnavailablePairingSkipped(t *testing.T) {
 	}
 }
 
-// TestAgentsAll_SkillsRowIsPackageLevelRegardlessOfEnabledAgents pins the
-// canonical-store model: a skills row exists per package (installed on disk
-// per the lockfile), independent of m.enabledAgents/PerAgentStatus, and
-// rendering never panics even when there is no linked agent to report.
+// A skills row exists per package, independent of enabledAgents/PerAgentStatus, and rendering never panics with no linked agent.
 func TestAgentsAll_SkillsRowIsPackageLevelRegardlessOfEnabledAgents(t *testing.T) {
 	t.Parallel()
 	m := agentsAllModel(
@@ -855,9 +846,7 @@ func TestAgentsAllRowsList_IgnoredFindResultRendersUnderIgnoredNotAvailable(t *t
 
 func TestAgentsAll_PinDimming_IgnoredOutdatedPluginRowUsesIgnoredStyleNotMissingOrOutdated(t *testing.T) {
 	t.Parallel(
-	// Pins commit 44338c6: an ignored+outdated row must render entirely via
-	// styleIgnored, never leaking styleMissing/styleOutdated/styleProvider
-	// coloring into the mark/name/version/group cells.
+	// An ignored+outdated row must render entirely via styleIgnored, never leaking styleMissing/styleOutdated/styleProvider into any cell.
 	)
 
 	m := agentsAllModel(nil, nil, nil)
@@ -901,10 +890,7 @@ func TestAgentsAll_PinDimming_IgnoredOutdatedPluginRowUsesIgnoredStyleNotMissing
 		}
 	}
 
-	// Prove the dimming distinction is real: the same row rendered as
-	// ordinary (non-ignored, outdated) DOES carry one of the forbidden
-	// style codes, so the ignored-row assertion above isn't vacuously
-	// passing against a palette where those styles are never applied.
+	// The same row rendered as ordinary (non-ignored, outdated) DOES carry a forbidden style code, so the assertion above is not vacuously passing.
 	ordinaryHasForbidden := false
 	for _, cell := range append(append([]rowCell{}, oLeft...), oRight...) {
 		for _, bad := range forbidden {
@@ -935,9 +921,7 @@ func TestAgentsAll_ShaDriftRendering_UsesShaShortArrowFormat(t *testing.T) {
 	}
 }
 
-// ansiCodePrefix extracts the leading ANSI escape sequence rendered around
-// "x" by a style, so callers can check whether a differently-styled cell
-// carries the same color code without depending on exact reset sequences.
+// Lets callers compare colour codes without depending on exact reset sequences.
 func ansiCodePrefix(rendered string) string {
 	idx := strings.Index(rendered, "x")
 	if idx <= 0 {
@@ -946,13 +930,7 @@ func ansiCodePrefix(rendered string) string {
 	return rendered[:idx]
 }
 
-// TestAgentsBoot_InitDoesNotFireSectionLoadsBeforeSnapshot is a regression
-// test for the boot-load race: Model.New seeds agentsEnabled/skillsEnabled/
-// mcpEnabled/pluginsEnabled to true optimistically, before the startup
-// snapshot (toolsLoadedMsg) can correct them. Feeding every cmd resolved by
-// Init()'s batch into Update (simulating tea.Batch's concurrent dispatch)
-// must not flip the loaded flags — those loads must wait for
-// handleToolsLoadedMsg to run with the real snapshot flags.
+// Model.New seeds the section flags true optimistically, so Init()'s batch must not flip the loaded flags before handleToolsLoadedMsg runs with the real snapshot.
 func TestAgentsBoot_InitDoesNotFireSectionLoadsBeforeSnapshot(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -977,8 +955,7 @@ func TestAgentsBoot_InitDoesNotFireSectionLoadsBeforeSnapshot(t *testing.T) {
 		if c == nil {
 			continue
 		}
-		// Other Init cmds (e.g. loadTools) dereference m.app, which is nil in
-		// this white-box unit test; panics from unrelated cmds are not failures.
+		// Other Init cmds dereference m.app, which is nil here; panics from unrelated cmds are not failures.
 		func() {
 			defer func() { recover() }()
 			resolved := c()
@@ -1468,9 +1445,7 @@ func TestAgentsAll_ZeroRows_LoadingLineVsOnboardingEmptyState(t *testing.T) {
 	})
 }
 
-// TestAgentsRowsMsgs_ErrorKeepsPreviouslySeededRows pins that an errored row
-// reload no longer wipes the rows on screen: the previous (cache-seeded or
-// live) rows stay put and only the section's err field is set.
+// An errored row reload keeps the rows on screen and only sets the section's err field.
 func TestAgentsRowsMsgs_ErrorKeepsPreviouslySeededRows(t *testing.T) {
 	t.Parallel()
 	m := agentsAllModel(

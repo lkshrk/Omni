@@ -1,104 +1,5 @@
 package tui
 
-// flows_test.go — comprehensive flow tests covering every user-facing use case in
-// the TUI. Tests drive the model via key presses and messages, then assert on
-// model state (mode, cursor, flags, status) rather than rendered string content.
-//
-// Enumerated use cases (40+):
-//
-// LIST VIEW — Navigation
-//  UC-01  j moves cursor down; clamps at last item
-//  UC-02  k moves cursor up; clamps at 0
-//  UC-03  home jumps to top; G jumps to bottom
-//  UC-04  ctrl+d half-page down; ctrl+u half-page up
-//  UC-05  ctrl+f full-page down; ctrl+b full-page up
-//  UC-06  Navigation on empty list stays at 0
-//
-// LIST VIEW — Filtering / Search
-//  UC-07  / enters viewSearch; Esc exits viewSearch
-//  UC-08  Typing in viewSearch live-filters allTools
-//  UC-09  Enter in viewSearch blurs input (stays viewSearch)
-//  UC-10  ] / [ cycle provider filter pills
-//  UC-11  Esc in viewList clears group/provider filter
-//
-// LIST VIEW — Tool actions
-//  UC-12  Enter on uninstalled tool sets loading
-//  UC-13  Enter on installed tool is no-op
-//  UC-14  i key installs uninstalled tool (sets loading)
-//  UC-15  d key deletes installed tool (sets loading)
-//  UC-16  u key upgrades outdated tool (sets upgradingKeys)
-//  UC-17  U key upgrade-all with updates (sets wildcard key)
-//  UC-18  U key upgrade-all no-op when no updates
-//  UC-19  s key triggers sync (sets loading + progress channel)
-//  UC-20  R key re-scans providers (populates scanningProviders)
-//  UC-21  g key opens group picker; Esc returns to list
-//  UC-22  c key opens group picker for orphan tool (claim)
-//  UC-23  x key toggles ignore on tool (sets loading)
-//  UC-24  o key pins provider for syncWrongProv tool (sets loading)
-//  UC-25  r key reinstalls provider for syncWrongProv tool (sets loading + migrating)
-//
-// GLOBAL
-//  UC-26  ? toggles help overlay; Esc/second ? closes it
-//  UC-27  q sets confirmQuit; second q quits; other key resets
-//  UC-28  Keys ignored while loading=true
-//  UC-29  : opens command palette; Esc closes it
-//  UC-30  Tab cycles tabs: list→dots→status→hosts→settings→list
-//  UC-31  Tab blocked in hostRequired state
-//
-// SETUP WIZARD
-//  UC-32  Setup step 0: y starts config creation (loading=true)
-//  UC-33  Setup step 0: n/esc quits
-//  UC-34  Setup step 1: space toggles provider; Enter submits (loading=true)
-//  UC-35  Setup step 3: empty name triggers exit confirm
-//  UC-36  toolsLoadedMsg noConfig sets viewSetup
-//  UC-37  toolsLoadedMsg from viewSetup step 0 advances to step 1
-//  UC-38  toolsLoadedMsg noHost sets viewSetup step 2
-//
-// SETTINGS TAB
-//  UC-39  j/k navigate settingsCursor; clamps at bounds
-//  UC-40  Space/Enter toggles AutoImport on row 0
-//  UC-41  Enter on row 7 opens file picker
-//  UC-42  Maintenance row 11/12 enter sets dangerConfirmRow
-//  UC-43  Esc cancels dangerConfirmRow
-//  UC-44  Dots disable keep-local choice: y/n/enter/esc
-//  UC-45  Priority editor: j/k/J/K navigation and discard on Esc
-//
-// PROFILES TAB
-//  UC-46  j/k navigate hostCursor; Down enters groupSection
-//  UC-47  Esc returns to list (when not hostRequired)
-//  UC-48  n opens new-host text input; Esc cancels
-//  UC-49  Host delete confirm (D → Enter / Esc)
-//  UC-50  Group rename mode (r → type → Enter/Esc)
-//  UC-51  Group create mode (n → type → Enter)
-//  UC-52  Group delete confirm (D → Enter/Esc in section 1)
-//
-// GROUP PICKER
-//  UC-53  j/k navigate; Enter on real group sets loading
-//  UC-54  Esc from picker returns to list
-//  UC-55  Sentinel "+ new group…" opens text input; Esc cancels
-//
-// DOTS TAB
-//  UC-56  j/k navigate dotsCursor; clamps at bounds
-//  UC-57  d arms delete confirm; Esc cancels
-//  UC-58  d twice fires doDotsDelete (loading=true)
-//  UC-59  s triggers dots sync (dotsLoading=true)
-//  UC-60  Enter on conflict entry arms overwrite; Esc cancels
-//
-// MESSAGE HANDLERS
-//  UC-61  toolsLoadedMsg success populates tools
-//  UC-62  opCompleteMsg success sets ✓ status; error sets ✗
-//  UC-63  progressDoneMsg clears loading; suppressed when migrating
-//  UC-64  providerScannedMsg removes provider from scanningProviders
-//  UC-65  allProvidersDoneMsg refreshes tools; suppresses status clear when migrating
-//  UC-66  groupChangedMsg success/error updates state
-//  UC-67  dangerOpDoneMsg reload=true starts loadTools
-//  UC-68  claimDoneMsg removes tool from discoveredTools
-//  UC-69  ignoreDoneMsg toggles ignoreSet
-//  UC-70  migrateProviderDoneMsg clears loading+migrating
-//  UC-71  dotsLoadedMsg/dotsSyncedMsg/dotsPulledMsg/dotsPushedMsg
-//  UC-72  dotsDeletedMsg clamps cursor
-//  UC-73  dotsFixedMsg clears overwriteIdx
-
 import (
 	"context"
 	"errors"
@@ -116,24 +17,22 @@ import (
 	"github.com/lkshrk/omni/internal/dots"
 )
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-// oneInstalledOutdated returns a single installed+outdated tool.
 func oneInstalledOutdated() []*app.ToolView {
 	return []*app.ToolView{{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true, Tracked: true}}
 }
 
-// oneInstalled returns a single installed tool.
+func oneInstalledOutdatedUnknown() []*app.ToolView {
+	return []*app.ToolView{{Name: "actionlint", Provider: "script", Installed: true, OutdatedUnknown: true, Tracked: true}}
+}
+
 func oneInstalled() []*app.ToolView {
 	return []*app.ToolView{{Name: "ripgrep", Provider: "brew", Installed: true, Tracked: true}}
 }
 
-// oneMissing returns a single tracked-but-not-installed tool.
 func oneMissing() []*app.ToolView {
 	return []*app.ToolView{{Name: "curl", Provider: "brew", Installed: false, Tracked: true}}
 }
 
-// manyTools returns n distinct tools for pagination tests.
 func manyTools(n int) []*app.ToolView {
 	out := make([]*app.ToolView, n)
 	for i := range out {
@@ -142,13 +41,11 @@ func manyTools(n int) []*app.ToolView {
 	return out
 }
 
-// toSettings returns the key sequence that navigates from list to settings tab.
 func toSettings() []tea.Msg {
 	// Tab order: Tools→Dots→Agents→Groups→Settings; fourth tab lands on settings.
 	return []tea.Msg{pressTab(), pressTab(), pressTab(), pressTab(), pressRune('j')}
 }
 
-// nj returns n 'j' presses.
 func nj(n int) []tea.Msg {
 	msgs := make([]tea.Msg, n)
 	for i := range msgs {
@@ -176,7 +73,6 @@ func openSettingsDotsSyncChoice(t *testing.T) Model {
 	return drive(settingsDotsSyncReadyModel(t), pressEnter())
 }
 
-// setupStep1Model builds a model stuck at setup step 1 with two provider rows.
 func setupStep1Model() Model {
 	m := Model{
 		keys:          DefaultKeyMap(),
@@ -194,8 +90,6 @@ func setupStep1Model() Model {
 	}
 	return m
 }
-
-// ── UC-01 Cursor navigation j/k ──────────────────────────────────────────────
 
 func TestFlow_UC01_CursorNavigation(t *testing.T) {
 	t.Parallel()
@@ -230,8 +124,6 @@ func TestFlow_UC01_CursorNavigation(t *testing.T) {
 	})
 }
 
-// ── UC-02 Top/Bottom home/G ───────────────────────────────────────────────────
-
 func TestFlow_UC02_TopBottom(t *testing.T) {
 	t.Parallel()
 	m := baseModel(threeTools())
@@ -250,8 +142,6 @@ func TestFlow_UC02_TopBottom(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-03 Page navigation ─────────────────────────────────────────────────────
 
 func TestFlow_UC03_PageNavigation(t *testing.T) {
 	t.Parallel()
@@ -288,8 +178,6 @@ func TestFlow_UC03_PageNavigation(t *testing.T) {
 	})
 }
 
-// ── UC-04 Empty list navigation ───────────────────────────────────────────────
-
 func TestFlow_UC04_EmptyListNavigation(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -299,8 +187,6 @@ func TestFlow_UC04_EmptyListNavigation(t *testing.T) {
 		t.Errorf("cursor = %d on empty list, want 0", got.cursor)
 	}
 }
-
-// ── UC-05 Search mode enter/exit ─────────────────────────────────────────────
 
 func TestFlow_UC05_SearchMode(t *testing.T) {
 	t.Parallel()
@@ -355,8 +241,6 @@ func TestFlow_UC05_SearchMode(t *testing.T) {
 	})
 }
 
-// ── UC-06 Typing in viewSearch live-filters ──────────────────────────────────
-
 func TestFlow_UC06_LiveFilter(t *testing.T) {
 	t.Parallel(
 	// 'g' matches only "git" among [git/brew, node/npm, python/pip].
@@ -370,8 +254,6 @@ func TestFlow_UC06_LiveFilter(t *testing.T) {
 		t.Errorf("visibleTools[0] = %q, want git", got.visibleTools[0].Name)
 	}
 }
-
-// ── UC-07 Provider filter pills ──────────────────────────────────────────────
 
 func TestFlow_UC07_ProviderFilterPills(t *testing.T) {
 	t.Parallel()
@@ -405,8 +287,6 @@ func TestFlow_UC07_ProviderFilterPills(t *testing.T) {
 	})
 }
 
-// ── UC-08 Esc in viewList clears filters ─────────────────────────────────────
-
 func TestFlow_UC08_EscClearsFilter(t *testing.T) {
 	t.Parallel()
 	t.Run("Esc clears provider filter", func(t *testing.T) {
@@ -432,8 +312,6 @@ func TestFlow_UC08_EscClearsFilter(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-09 Enter on tool (install / no-op) ────────────────────────────────────
 
 func TestFlow_UC09_EnterOnTool(t *testing.T) {
 	t.Parallel()
@@ -462,8 +340,6 @@ func TestFlow_UC09_EnterOnTool(t *testing.T) {
 	})
 }
 
-// ── UC-10 i key install ───────────────────────────────────────────────────────
-
 func TestFlow_UC10_InstallKey(t *testing.T) {
 	t.Parallel()
 	t.Run("i on uninstalled tracked tool sets loading", func(t *testing.T) {
@@ -486,8 +362,6 @@ func TestFlow_UC10_InstallKey(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-11 d key delete ─────────────────────────────────────────────────────
 
 func TestFlow_UC11_DeleteKey(t *testing.T) {
 	t.Parallel()
@@ -522,8 +396,6 @@ func TestFlow_UC11_DeleteKey(t *testing.T) {
 	})
 }
 
-// ── UC-12 u key upgrade ───────────────────────────────────────────────────────
-
 func TestFlow_UC12_UpgradeKey(t *testing.T) {
 	t.Parallel()
 	t.Run("u on outdated tool sets upgradingKeys", func(t *testing.T) {
@@ -543,9 +415,25 @@ func TestFlow_UC12_UpgradeKey(t *testing.T) {
 			t.Error("upgradingKeys should remain empty for non-outdated tool")
 		}
 	})
-}
 
-// ── UC-13 U key upgrade-all ───────────────────────────────────────────────────
+	t.Run("u on unknown-outdated tool upgrades and offers the hint", func(t *testing.T) {
+		m := baseModel(oneInstalledOutdatedUnknown())
+		m.upgradingKeys = make(map[string]bool)
+		got := drive(m, pressRune('u'))
+		if !got.upgradingKeys["actionlint\x00script"] {
+			t.Error("expected upgradingKeys entry for a tool whose outdated state is unknown")
+		}
+		var offered bool
+		for _, hint := range toolInlineHints(got, oneInstalledOutdatedUnknown()[0]) {
+			if hint.desc == "upgrade" {
+				offered = true
+			}
+		}
+		if !offered {
+			t.Error("expected the upgrade hint for a tool whose outdated state is unknown")
+		}
+	})
+}
 
 func TestFlow_UC13_UpgradeAllKey(t *testing.T) {
 	t.Parallel()
@@ -567,8 +455,6 @@ func TestFlow_UC13_UpgradeAllKey(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-14 S key sync all ─────────────────────────────────────────────────────
 
 func TestFlow_UC14_SyncKey(t *testing.T) {
 	t.Parallel()
@@ -605,8 +491,6 @@ func TestFlow_UC14_LowercaseSyncNoopOnTools(t *testing.T) {
 	}
 }
 
-// ── UC-15 R key refresh scan ─────────────────────────────────────────────────
-
 func TestFlow_UC15_RefreshKey(t *testing.T) {
 	t.Parallel()
 	m := baseModel(oneInstalled())
@@ -623,8 +507,6 @@ func TestFlow_UC15_RefreshKey(t *testing.T) {
 		t.Error("progressText should be visible immediately after R")
 	}
 }
-
-// ── UC-16 g key opens group membership picker ────────────────────────────────
 
 func TestFlow_UC16_GroupPickerOpen(t *testing.T) {
 	t.Parallel()
@@ -653,12 +535,8 @@ func TestFlow_UC16_GroupPickerOpen(t *testing.T) {
 	})
 }
 
-// ── UC-17 c key claim orphan ─────────────────────────────────────────────────
-
 func TestFlow_UC17_ClaimOrphan(t *testing.T) {
-	t.Parallel(
-	// Build a model with one orphan tool (Tracked=false = discoveredTool).
-	)
+	t.Parallel()
 
 	orphan := &app.ToolView{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
 	m := baseModel(nil)
@@ -675,8 +553,6 @@ func TestFlow_UC17_ClaimOrphan(t *testing.T) {
 		t.Error("pickerPurposeClaim should be true when claiming orphan")
 	}
 }
-
-// ── UC-18 x key ignore/un-ignore ─────────────────────────────────────────────
 
 func TestFlow_UC18_IgnoreKey(t *testing.T) {
 	t.Parallel()
@@ -708,8 +584,6 @@ func TestFlow_UC18_IgnoreKey(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-19 p/r key pin/reinstall provider ─────────────────────────────────────
 
 func TestFlow_UC19_PinMigrateProvider(t *testing.T) {
 	t.Parallel()
@@ -759,8 +633,6 @@ func TestFlow_UC19_PinMigrateProvider(t *testing.T) {
 	})
 }
 
-// ── UC-20 Help overlay ───────────────────────────────────────────────────────
-
 func TestFlow_UC20_HelpOverlay(t *testing.T) {
 	t.Parallel()
 	t.Run("? opens help overlay", func(t *testing.T) {
@@ -784,8 +656,6 @@ func TestFlow_UC20_HelpOverlay(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-21 Confirm quit ────────────────────────────────────────────────────────
 
 func TestFlow_UC21_ConfirmQuit(t *testing.T) {
 	t.Parallel()
@@ -813,8 +683,6 @@ func TestFlow_UC21_ConfirmQuit(t *testing.T) {
 	})
 }
 
-// ── UC-22 Keys ignored while loading ─────────────────────────────────────────
-
 func TestFlow_UC22_KeysIgnoredWhileLoading(t *testing.T) {
 	t.Parallel()
 	m := Model{
@@ -831,8 +699,6 @@ func TestFlow_UC22_KeysIgnoredWhileLoading(t *testing.T) {
 		t.Errorf("mode should not change while loading, got %v", got.mode)
 	}
 }
-
-// ── UC-23 Command palette open/close ─────────────────────────────────────────
 
 func TestFlow_UC23_CommandPalette(t *testing.T) {
 	t.Parallel()
@@ -857,8 +723,6 @@ func TestFlow_UC23_CommandPalette(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-24 Tab cycles main tabs ───────────────────────────────────────────────
 
 func TestFlow_UC24_TabCycle(t *testing.T) {
 	t.Run("dashboard → list", func(t *testing.T) {
@@ -1068,21 +932,16 @@ func TestDotsEmptyStateEnterDoesNotStartOnboarding(t *testing.T) {
 	}
 }
 
-// ── UC-25 Tab blocked when hostRequired ────────────────────────────────────
-
 func TestFlow_UC25_TabBlockedWhenHostRequired(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.hostRequired = true
 	got := drive(m, pressTab())
-	// Tab should not advance past hosts when host is required.
 	if got.mode != viewGroups {
 		t.Errorf("mode = %v, want viewGroups (tab blocked)", got.mode)
 	}
 }
-
-// ── UC-26 Setup step 0: create config ────────────────────────────────────────
 
 func TestFlow_UC26_SetupStep0(t *testing.T) {
 	t.Parallel()
@@ -1134,8 +993,6 @@ func TestFlow_UC26_SetupStep0(t *testing.T) {
 	})
 }
 
-// ── UC-27 Setup step 1: provider selection ────────────────────────────────────
-
 func TestFlow_UC27_SetupStep1(t *testing.T) {
 	t.Parallel()
 	t.Run("space toggles first provider off", func(t *testing.T) {
@@ -1170,11 +1027,7 @@ func TestFlow_UC27_SetupStep1(t *testing.T) {
 	})
 }
 
-// ── Setup step 4 (agents onboarding) ────────────────────────────────────────
-//
-// setupAgentsStepModel builds a model past step-3 provider priority, ready to
-// enter (or skip) step 4. groupNames is non-empty so startSetupGroupSelection
-// lands on step 9 instead of falling through to finishSetupWithReload.
+// groupNames is non-empty so startSetupGroupSelection lands on step 9 instead of falling through to finishSetupWithReload.
 func setupAgentsStepModel() Model {
 	return Model{
 		keys:                DefaultKeyMap(),
@@ -1205,9 +1058,7 @@ func TestSetupAgentsStep_SkipsWhenAgentsDisabled(t *testing.T) {
 }
 
 func TestSetupAgentsStep_SkipsWhenNoAgentsDetected(t *testing.T) {
-	// testguard isolates HOME package-wide, but pin an empty temp dir here too
-	// so this test's "no agents installed" branch is deterministic regardless
-	// of what other tests in this file do with HOME.
+	// testguard isolates HOME package-wide, but pin an empty temp dir here too so this test's "no agents installed" branch stays deterministic.
 	t.Setenv("HOME", t.TempDir())
 	m := setupAgentsStepModel()
 	var cmds []tea.Cmd
@@ -1373,8 +1224,6 @@ func TestSetupAgentsStep_BackgroundModePreservedAcrossImportDone(t *testing.T) {
 	}
 }
 
-// ── UC-29 toolsLoadedMsg state transitions ────────────────────────────────────
-
 func TestFlow_UC29_ToolsLoadedMsg(t *testing.T) {
 	t.Parallel()
 	loadingModel := func() Model {
@@ -1466,8 +1315,6 @@ func TestFlow_UC29_ToolsLoadedMsg(t *testing.T) {
 	})
 }
 
-// ── UC-30 Settings tab: j/k navigation ──────────────────────────────────────
-
 func TestFlow_UC30_SettingsNavigation(t *testing.T) {
 	t.Parallel()
 	t.Run("j moves settingsCursor down", func(t *testing.T) {
@@ -1495,8 +1342,6 @@ func TestFlow_UC30_SettingsNavigation(t *testing.T) {
 	})
 }
 
-// ── UC-31 Settings tab: toggle AutoImport row 0 ──────────────────────────────
-
 func TestFlow_UC31_SettingsToggleAutoImport(t *testing.T) {
 	t.Parallel()
 	t.Run("space toggles AutoImport on", func(t *testing.T) {
@@ -1516,8 +1361,6 @@ func TestFlow_UC31_SettingsToggleAutoImport(t *testing.T) {
 	})
 }
 
-// ── UC-32 Settings tab: row 7 opens file picker ──────────────────────────────
-
 func TestFlow_UC32_SettingsOpenFilePicker(t *testing.T) {
 	t.Parallel()
 	msgs := append(toSettings(), nj(settingsRowDotsRepo)...)
@@ -1527,8 +1370,6 @@ func TestFlow_UC32_SettingsOpenFilePicker(t *testing.T) {
 		t.Errorf("showFilePicker should be true after enter on dots repo row (row %d)", settingsRowDotsRepo)
 	}
 }
-
-// ── UC-33 Settings tab: Esc from file picker closes it ───────────────────────
 
 func TestFlow_UC33_FilePickerEscCloses(t *testing.T) {
 	t.Parallel()
@@ -1544,8 +1385,6 @@ func TestFlow_UC33_FilePickerEscCloses(t *testing.T) {
 		t.Errorf("DotsRepo changed to %q, want unchanged", got.settings.DotsRepo)
 	}
 }
-
-// ── UC-34 Maintenance: dangerConfirmRow set/cancelled ────────────────────────
 
 func TestFlow_UC34_DangerZoneConfirm(t *testing.T) {
 	t.Run("reset settings Enter sets dangerConfirmRow", func(t *testing.T) {
@@ -1667,8 +1506,6 @@ func TestFlow_UC34_DangerZoneConfirm(t *testing.T) {
 	})
 }
 
-// ── UC-35 Maintenance: dots disable keep-local choice ─────────────────────────
-
 func TestFlow_UC35_DangerDotsDisableKeepLocalChoice(t *testing.T) {
 	openChoice := func() Model {
 		return openSettingsDotsSyncChoice(t)
@@ -1706,12 +1543,8 @@ func TestFlow_UC35_DangerDotsDisableKeepLocalChoice(t *testing.T) {
 	})
 }
 
-// ── UC-36 Priority editor ─────────────────────────────────────────────────────
-
 func TestFlow_UC36_PriorityEditor(t *testing.T) {
-	t.Parallel(
-	// Navigate to settings and to the provider-order row.
-	)
+	t.Parallel()
 
 	toPriority := func() []tea.Msg {
 		return append(toSettings(), nj(settingsRowProviderPriority)...)
@@ -1762,7 +1595,6 @@ func TestFlow_UC36_PriorityEditor(t *testing.T) {
 	})
 
 	t.Run("Enter saves reordered priority", func(t *testing.T) {
-		// Reorder via grab+j+drop: [brew, apt, apk, ...] → [apt, brew, apk, ...], then confirm.
 		msgs := append(toPriority(), pressEnter(), pressRune(' '), pressRune('j'), pressRune(' '), pressEnter())
 		got := drive(baseModel(nil), msgs...)
 		if got.editingPriority {
@@ -1774,8 +1606,6 @@ func TestFlow_UC36_PriorityEditor(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-37 Hosts tab navigation ────────────────────────────────────────────
 
 func TestFlow_UC37_GroupsNavigation(t *testing.T) {
 	t.Parallel()
@@ -1799,14 +1629,11 @@ func TestFlow_UC37_GroupsNavigation(t *testing.T) {
 		// First j after tab switch reveals cursor; second j navigates.
 		msgs := append(toHosts(), pressRune('j'), pressRune('j'))
 		got := drive(m, msgs...)
-		// hostCursor advances OR assignmentSection advances.
 		if got.hostCursor < 1 && got.assignmentSection < 1 {
 			t.Error("j in hosts tab should move cursor or section")
 		}
 	})
 }
-
-// ── UC-38 Host creation is onboarding/CLI only ────────────────────────────────
 
 func TestFlow_UC38_NewHostRemovedFromHostsTab(t *testing.T) {
 	t.Parallel()
@@ -1826,8 +1653,6 @@ func TestFlow_UC38_NewHostRemovedFromHostsTab(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-39 Host delete confirm ─────────────────────────────────────────────
 
 func TestFlow_UC39_HostDeleteConfirm(t *testing.T) {
 	t.Parallel()
@@ -1852,8 +1677,6 @@ func TestFlow_UC39_HostDeleteConfirm(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-40 Group picker: j/k/Enter/Esc ────────────────────────────────────────
 
 func TestFlow_UC40_GroupPickerNav(t *testing.T) {
 	t.Parallel()
@@ -1895,8 +1718,6 @@ func TestFlow_UC40_GroupPickerNav(t *testing.T) {
 	})
 }
 
-// ── UC-41 Group picker: sentinel "+ new group…" ──────────────────────────────
-
 func TestFlow_UC41_GroupPickerSentinel(t *testing.T) {
 	t.Parallel()
 	m := baseModel(threeTools())
@@ -1906,7 +1727,6 @@ func TestFlow_UC41_GroupPickerSentinel(t *testing.T) {
 	m.upgradingKeys = make(map[string]bool)
 
 	t.Run("Enter on sentinel opens text input", func(t *testing.T) {
-		// Move to sentinel (index 1) then Enter.
 		got := drive(m, pressRune('j'), pressEnter())
 		if !got.pickerCreatingGroup {
 			t.Error("pickerCreatingGroup should be true after selecting sentinel")
@@ -1923,8 +1743,6 @@ func TestFlow_UC41_GroupPickerSentinel(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-42 Dots tab: navigation ───────────────────────────────────────────────
 
 func TestFlow_UC42_DotsNavigation(t *testing.T) {
 	t.Parallel()
@@ -1960,8 +1778,6 @@ func TestFlow_UC42_DotsNavigation(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-43 Dots tab: delete confirm ───────────────────────────────────────────
 
 func TestFlow_UC43_DotsDeleteConfirm(t *testing.T) {
 	t.Parallel()
@@ -2011,8 +1827,6 @@ func TestFlow_UC43_DotsDeleteConfirm(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-44 Dots tab: s syncs dots ─────────────────────────────────────────────
 
 func TestFlow_UC44_DotsSyncKey(t *testing.T) {
 	t.Parallel()
@@ -2141,8 +1955,6 @@ func TestRender_DotsHintsUseCachedDotsAvailability(t *testing.T) {
 	}
 }
 
-// ── UC-45 Dots tab: explicit conflict choice ──────────────────────────────────
-
 func TestFlow_UC45_DotsConflictOverwrite(t *testing.T) {
 	t.Parallel()
 	conflictModel := func() Model {
@@ -2230,8 +2042,7 @@ func TestFlow_UC45_DotsConflictOverwrite(t *testing.T) {
 
 func TestFlow_DotsSynthesizedIgnoredChildUnignore(t *testing.T) {
 	t.Parallel(
-	// Merged ignored-child entries with Children expand instead of toggling
-	// the whole entry; individual children can then be unignored.
+	// Merged ignored-child entries with Children expand instead of toggling the whole entry; individual children can then be unignored.
 	)
 
 	m := baseModel(nil)
@@ -2300,10 +2111,8 @@ func TestFlow_DotsMergedIgnoredExpandCollapse(t *testing.T) {
 		},
 	}
 
-	// Cursor starts on first entry (synced nvim). Move to ignored nvim.
 	toIgnored := drive(m, pressRune('j'))
 
-	// Space expands the merged ignored entry.
 	expanded := drive(toIgnored, pressRune(' '))
 	if expanded.dotsExpandedName != "nvim" {
 		t.Fatalf("dotsExpandedName = %q, want nvim after space on merged ignored entry", expanded.dotsExpandedName)
@@ -2313,7 +2122,6 @@ func TestFlow_DotsMergedIgnoredExpandCollapse(t *testing.T) {
 		t.Fatalf("visible rows = %d, want 4 (synced + ignored parent + 2 children)", len(rows))
 	}
 
-	// Space again collapses.
 	collapsed := drive(expanded, pressRune(' '))
 	if collapsed.dotsExpandedName != "" {
 		t.Fatalf("dotsExpandedName = %q, want empty after collapsing", collapsed.dotsExpandedName)
@@ -2325,9 +2133,7 @@ func TestFlow_DotsMergedIgnoredExpandCollapse(t *testing.T) {
 
 func TestFlow_DotsExpandIgnoredDoesNotExpandSyncedSameName(t *testing.T) {
 	t.Parallel(
-	// Regression: expanding an ignored entry must not also expand a synced entry
-	// with the same name. The fix introduced dotsExpandedState to scope expansion
-	// to the correct section (dots.StateSynced vs dots.StateIgnored).
+	// Expanding an ignored entry must not also expand a synced entry with the same name; dotsExpandedState scopes expansion to the section.
 	)
 
 	m := baseModel(nil)
@@ -2354,13 +2160,10 @@ func TestFlow_DotsExpandIgnoredDoesNotExpandSyncedSameName(t *testing.T) {
 	}
 	m.dotsEntries = []app.DotStatus{syncedEntry, ignoredEntry}
 
-	// Cursor starts on synced nvim (index 0). Move down to ignored nvim.
 	m = drive(m, pressRune('j'))
 
-	// Expand the ignored nvim with space.
 	m = drive(m, pressRune(' '))
 
-	// 1. dotsExpandedState must be dots.StateIgnored.
 	if m.dotsExpandedState != dots.StateIgnored {
 		t.Fatalf("dotsExpandedState = %v, want dots.StateIgnored", m.dotsExpandedState)
 	}
@@ -2400,7 +2203,6 @@ func TestFlow_DotsMergedIgnoredNestedExpand(t *testing.T) {
 		},
 	}}
 
-	// Expand top-level entry.
 	expanded := drive(m, pressRune(' '))
 	if expanded.dotsExpandedName != "nvim" {
 		t.Fatalf("dotsExpandedName = %q, want nvim", expanded.dotsExpandedName)
@@ -2410,7 +2212,6 @@ func TestFlow_DotsMergedIgnoredNestedExpand(t *testing.T) {
 		t.Fatalf("visible rows = %d, want 3", len(rows))
 	}
 
-	// Move to lua child and expand it.
 	down := drive(expanded, pressRune('j'))
 	nestedExpanded := drive(down, pressRune(' '))
 	rows = dotsVisibleRows(nestedExpanded)
@@ -2462,7 +2263,6 @@ func TestFlow_DotsMergedIgnoredChildUnignoreDispatch(t *testing.T) {
 		},
 	}}
 
-	// j moves to child row, x opens confirmation.
 	got := drive(m, pressRune('j'), pressRune('x'))
 	if got.dotsIgnoreIdx != 1 {
 		t.Fatalf("dotsIgnoreIdx = %d, want 1 (child row confirmation)", got.dotsIgnoreIdx)
@@ -2670,8 +2470,6 @@ func TestFlow_DotsSubdirectoryCanExpand(t *testing.T) {
 	}
 }
 
-// ── UC-46 opCompleteMsg ───────────────────────────────────────────────────────
-
 func TestFlow_UC46_OpCompleteMsg(t *testing.T) {
 	t.Parallel()
 	t.Run("success sets ✓ status and clears loading", func(t *testing.T) {
@@ -2751,8 +2549,6 @@ func TestFlow_UC46_OpCompleteMsg(t *testing.T) {
 	})
 }
 
-// ── UC-47 progressDoneMsg ─────────────────────────────────────────────────────
-
 func TestFlow_UC47_ProgressDoneMsg(t *testing.T) {
 	t.Parallel()
 	t.Run("clears loading when not migrating", func(t *testing.T) {
@@ -2789,8 +2585,6 @@ func TestFlow_UC47_ProgressDoneMsg(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-48 providerScannedMsg / allProvidersDoneMsg ───────────────────────────
 
 func TestFlow_UC48_ProviderScanMsgs(t *testing.T) {
 	t.Parallel()
@@ -2890,8 +2684,6 @@ func TestFlow_UC48_ProviderScanMsgs(t *testing.T) {
 	})
 }
 
-// ── UC-49 groupChangedMsg ─────────────────────────────────────────────────────
-
 func TestFlow_UC49_GroupChangedMsg(t *testing.T) {
 	t.Parallel()
 	t.Run("success sets status and clears loading", func(t *testing.T) {
@@ -2913,8 +2705,6 @@ func TestFlow_UC49_GroupChangedMsg(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-50 dangerOpDoneMsg ─────────────────────────────────────────────────────
 
 func TestFlow_UC50_DangerOpDoneMsg(t *testing.T) {
 	t.Parallel()
@@ -2967,8 +2757,6 @@ func TestFlow_UC50_DangerOpDoneMsg(t *testing.T) {
 	})
 }
 
-// ── UC-51 claimDoneMsg ────────────────────────────────────────────────────────
-
 func TestFlow_UC51_ClaimDoneMsg(t *testing.T) {
 	t.Parallel()
 	orphan := &app.ToolView{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
@@ -3003,8 +2791,6 @@ func TestFlow_UC51_ClaimDoneMsg(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-52 ignoreDoneMsg ───────────────────────────────────────────────────────
 
 func TestFlow_UC52_IgnoreDoneMsg(t *testing.T) {
 	t.Parallel()
@@ -3082,8 +2868,6 @@ func TestFlow_SyncAllDoneRemovesClaimedDiscovered(t *testing.T) {
 	}
 }
 
-// ── UC-53 migrateProviderDoneMsg ─────────────────────────────────────────────
-
 func TestFlow_UC53_MigrateProviderDoneMsg(t *testing.T) {
 	t.Parallel()
 	t.Run("success clears loading+migrating and shows status", func(t *testing.T) {
@@ -3129,8 +2913,6 @@ func TestFlow_UC53_MigrateProviderDoneMsg(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-54 dots tab message handlers ──────────────────────────────────────────
 
 func TestFlow_UC54_DotsMsgs(t *testing.T) {
 	t.Parallel()
@@ -3259,8 +3041,6 @@ func TestFlow_UC54_DotsMsgs(t *testing.T) {
 	})
 }
 
-// ── UC-55 dotsDeletedMsg cursor clamp ────────────────────────────────────────
-
 func TestFlow_UC55_DotsDeletedMsg(t *testing.T) {
 	t.Parallel()
 	t.Run("cursor clamped after remove", func(t *testing.T) {
@@ -3279,8 +3059,6 @@ func TestFlow_UC55_DotsDeletedMsg(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-56 dotsFixedMsg ────────────────────────────────────────────────────────
 
 func TestFlow_UC56_DotsFixedMsg(t *testing.T) {
 	t.Parallel()
@@ -3304,8 +3082,6 @@ func TestFlow_UC56_DotsFixedMsg(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-57 Migration race guards ───────────────────────────────────────────────
 
 func TestFlow_UC57_MigrationRaceGuards(t *testing.T) {
 	t.Parallel(
@@ -3344,8 +3120,6 @@ func TestFlow_UC57_MigrationRaceGuards(t *testing.T) {
 	})
 }
 
-// ── UC-58 settingsSavedMsg ────────────────────────────────────────────────────
-
 func TestFlow_UC58_SettingsSavedMsg(t *testing.T) {
 	t.Parallel()
 	t.Run("success sets ✓ settings saved", func(t *testing.T) {
@@ -3362,8 +3136,6 @@ func TestFlow_UC58_SettingsSavedMsg(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-59 progressMsg ─────────────────────────────────────────────────────────
 
 func TestFlow_UC59_ProgressMsg(t *testing.T) {
 	t.Parallel()
@@ -3394,8 +3166,6 @@ func TestFlow_UC59_ProgressMsg(t *testing.T) {
 	})
 }
 
-// ── UC-60 clearStatusMsg ──────────────────────────────────────────────────────
-
 func TestFlow_UC60_ClearStatusMsg(t *testing.T) {
 	t.Parallel()
 	t.Run("matching gen clears statusMsg", func(t *testing.T) {
@@ -3418,8 +3188,6 @@ func TestFlow_UC60_ClearStatusMsg(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-61 Command palette execution ──────────────────────────────────────────
 
 func TestFlow_UC61_PaletteExecution(t *testing.T) {
 	t.Parallel()
@@ -3455,11 +3223,11 @@ func TestFlow_UC61_PaletteExecution(t *testing.T) {
 			filter:        textinput.New(),
 			commandInput:  textinput.New(),
 			mode:          viewCommand,
+			commandOrigin: viewList,
 			commandCursor: -1,
 			upgradingKeys: make(map[string]bool),
 		}
 		m.commandInput.Focus()
-		// Type "zzz" (matches no command) then Enter.
 		got := drive(m,
 			tea.KeyPressMsg{Code: 'z', Text: "z"},
 			tea.KeyPressMsg{Code: 'z', Text: "z"},
@@ -3474,8 +3242,6 @@ func TestFlow_UC61_PaletteExecution(t *testing.T) {
 		}
 	})
 }
-
-// ── UC-62 discoveredRefreshedMsg ─────────────────────────────────────────────
 
 func TestFlow_UC62_DiscoveredRefreshedMsg(t *testing.T) {
 	t.Parallel()
@@ -3524,8 +3290,6 @@ func TestFlow_UC62_DiscoveredRefreshedMsg(t *testing.T) {
 	})
 }
 
-// ── UC-63 descRefreshDoneMsg ──────────────────────────────────────────────────
-
 func TestFlow_UC63_DescRefreshDoneMsg(t *testing.T) {
 	t.Parallel()
 	refreshedDiscovered := []*app.ToolView{{
@@ -3565,8 +3329,6 @@ func TestFlow_UC63_DescRefreshDoneMsg(t *testing.T) {
 		t.Fatalf("status = %q err=%v, want description refresh failure", got.statusMsg, got.statusIsErr)
 	}
 }
-
-// ── UC-64 Mouse wheel scrolling ──────────────────────────────────────────────
 
 func TestFlow_UC64_MouseWheelScroll(t *testing.T) {
 	t.Parallel()
@@ -3684,8 +3446,6 @@ func TestFlow_UC64_MouseWheelScroll(t *testing.T) {
 	})
 }
 
-// ── UC-65 WindowSizeMsg updates dimensions ────────────────────────────────────
-
 func TestFlow_UC65_WindowSize(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -3698,12 +3458,7 @@ func TestFlow_UC65_WindowSize(t *testing.T) {
 	}
 }
 
-// ── UC-66 Dots tab: g on child row opens extract picker ───────────────────────
-
-// dotsModelWithChild builds a dots model whose first entry has an expanded
-// directory child so tests can position dotsCursor on a child row.
-// It does NOT wire up a real app.App — use dotsModelWithChildAndApp for
-// tests that drive through the full key handler (which requires m.app != nil).
+// Does NOT wire a real app.App — use dotsModelWithChildAndApp for tests driving the full key handler, which requires m.app != nil.
 func dotsModelWithChild(childRelPath string, childIgnored bool) Model {
 	m := baseModel(nil)
 	m.mode = viewDots
@@ -3727,14 +3482,12 @@ func dotsModelWithChild(childRelPath string, childIgnored bool) Model {
 			},
 		},
 	}
-	// Expand the parent so child rows are visible.
 	m.dotsExpandedName = "config"
 	m.dotsExpandedState = app.DotStatusState(m.dotsEntries[0])
 	return m
 }
 
-// dotsModelWithChildAndApp is like dotsModelWithChild but also wires a real
-// (in-memory) app.App so the full MoveGroup key handler path can run.
+// Wires a real in-memory app.App so the full MoveGroup key handler path can run.
 func dotsModelWithChildAndApp(t *testing.T, childRelPath string, childIgnored bool) Model {
 	t.Helper()
 	appModel, repoDir := newDotsModelForCmds(t)
@@ -3750,12 +3503,10 @@ func dotsModelWithChildAndApp(t *testing.T, childRelPath string, childIgnored bo
 }
 
 func TestFlow_UC66_DotChildExtractPickerOpens(t *testing.T) {
-	// openDotGroupMembershipPicker requires m.app != nil; use the app-backed helper
-	// so the full g → openDotGroupMembershipPicker → openDotChildExtractPicker path runs.
+	// openDotGroupMembershipPicker requires m.app != nil, so use the app-backed helper.
 	t.Run("g on extractable child opens group membership picker in extract mode", func(t *testing.T) {
 		m := dotsModelWithChildAndApp(t, "nvim", false)
 		visible := dotsVisibleRows(m)
-		// Find the child row index (parent at 0, child at 1).
 		childIdx := -1
 		for i, row := range visible {
 			if row.isChild {
@@ -3788,8 +3539,7 @@ func TestFlow_UC66_DotChildExtractPickerOpens(t *testing.T) {
 		}
 	})
 
-	// Call openDotChildExtractPicker directly (white-box) to verify the seeded
-	// state without needing a real app for the child-path branch.
+	// Called directly (white-box) to verify the seeded state without needing a real app for the child-path branch.
 	t.Run("openDotChildExtractPicker seeds extract context directly", func(t *testing.T) {
 		m := dotsModelWithChild("nvim", false)
 		visible := dotsVisibleRows(m)
@@ -3834,12 +3584,10 @@ func TestFlow_UC66_DotChildExtractPickerOpens(t *testing.T) {
 	t.Run("g on non-child (top-level) entry with no memberships is a no-op", func(t *testing.T) {
 		m := dotsModelWithChildAndApp(t, "nvim", false)
 		m.dotsCursor = 0 // top-level "config" row
-		// Ensure cursor is indeed on the top-level row.
 		visible := dotsVisibleRows(m)
 		if visible[0].isChild {
 			t.Fatal("expected cursor on top-level row at index 0")
 		}
-		// Top-level entry has no dotMemberships set, so g should be a no-op.
 		got := drive(m, pressRune('g'))
 		if got.mode == viewGroupMembership {
 			t.Error("group picker should not open for top-level entry with no memberships")
@@ -3919,10 +3667,7 @@ func TestFlow_UC66_DotsChildExtractable(t *testing.T) {
 }
 
 func TestFlow_UC66_DotChildExtractPickerCancelClears(t *testing.T) {
-	t.Parallel(
-	// Drive through openDotChildExtractPicker directly (no real app needed for the
-	// cancel/finish path — finishGroupMembershipPicker has no app dependency).
-	)
+	t.Parallel()
 
 	t.Run("esc from extract picker clears extract context and phantom membership", func(t *testing.T) {
 		m := dotsModelWithChild("nvim", false)
@@ -3949,7 +3694,6 @@ func TestFlow_UC66_DotChildExtractPickerCancelClears(t *testing.T) {
 			t.Fatalf("phantom membership %q not seeded before cancel", childName)
 		}
 
-		// Cancel via the key handler (Esc → closeGroupMembershipPicker → finishGroupMembershipPicker).
 		cancelled := drive(m, pressEsc())
 
 		if cancelled.mode != viewDots {
@@ -3967,10 +3711,6 @@ func TestFlow_UC66_DotChildExtractPickerCancelClears(t *testing.T) {
 	})
 }
 
-// ── UC-67 Dots tab: bulk force-resolve all conflicts ─────────────────────────
-
-// conflictDotsModel returns a baseModel on viewDots with the given DotStatus
-// entries already loaded and dots availability set to enabled.
 // baseModel initialises the -1 sentinel fields correctly via New().
 func conflictDotsModel(entries []app.DotStatus) Model {
 	m := baseModel(nil)
@@ -3988,9 +3728,7 @@ func twoConflictEntries() []app.DotStatus {
 	}
 }
 
-// newDotsModelForCmdsReady wraps newDotsModelForCmds and initialises the
-// -1 sentinel fields that modelForCmds omits (dotsOverwriteIdx etc.), so
-// the model behaves like one built via New() rather than a raw struct literal.
+// Initialises the -1 sentinel fields modelForCmds omits (dotsOverwriteIdx etc.) so the model behaves like one built via New().
 func newDotsModelForCmdsReady(t *testing.T) (Model, string) {
 	t.Helper()
 	m, repoDir := newDotsModelForCmds(t)
@@ -4022,9 +3760,7 @@ func TestFlow_UC67_DotForceResolveAll_SecondPressFiresUseRepo(t *testing.T) {
 	m, _ := newDotsModelForCmdsReady(t)
 	m.dotsEntries = twoConflictEntries()
 
-	// First press: arm
 	m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseRepo)
-	// Second press: should clear arm and return run cmds
 	cmds := m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseRepo)
 	if m.dotsForceResolve != "" {
 		t.Errorf("dotsForceResolve = %q, want %q after second press", m.dotsForceResolve, "")
@@ -4051,12 +3787,10 @@ func TestFlow_UC67_DotForceResolveAll_SwitchStrategyCancelsAndRearms(t *testing.
 	m, _ := newDotsModelForCmdsReady(t)
 	m.dotsEntries = twoConflictEntries()
 
-	// Arm use_local first
 	m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseLocal)
 	if m.dotsForceResolve != "use_local" {
 		t.Fatalf("setup: dotsForceResolve = %q, want use_local", m.dotsForceResolve)
 	}
-	// Now press U (use_repo) — should re-arm to use_repo, not fire
 	cmds := m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseRepo)
 	if m.dotsForceResolve != "use_repo" {
 		t.Errorf("dotsForceResolve = %q, want use_repo after switching strategy", m.dotsForceResolve)
@@ -4152,8 +3886,7 @@ func TestFlow_UC67_DotsConflictHints_BulkKeysHiddenWithNoConflicts(t *testing.T)
 	m := conflictDotsModel([]app.DotStatus{
 		{Name: "nvim", Health: app.HealthOK, State: dots.StateSynced},
 	})
-	// dotsConflictHintItems is only shown for conflict rows, but dotsConflictCount
-	// guards the bulk hints; verify they don't appear even if called directly.
+	// dotsConflictCount guards the bulk hints, so verify they do not appear even when dotsConflictHintItems is called directly.
 	hints := dotsConflictHintItems(m)
 
 	repoAllKey := m.keys.DotUseRepoAll.Help().Key
@@ -4179,7 +3912,6 @@ func TestFlow_UC67_DotForceResolveAll_AppNilIsNoop(t *testing.T) {
 	m.dotsLoaded = true
 	setDotsRepoForTest(&m, "/repo")
 	m.dotsEntries = twoConflictEntries()
-	// app is nil on baseModel
 	cmds := m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseRepo)
 	if cmds != nil {
 		t.Errorf("expected nil cmds when m.app == nil, got %v", cmds)
@@ -4187,7 +3919,6 @@ func TestFlow_UC67_DotForceResolveAll_AppNilIsNoop(t *testing.T) {
 }
 
 func TestFlow_UC67_DotForceResolveAll_KeyDispatch_UArmsViaUpdate(t *testing.T) {
-	// Drive through the real Update() dispatch with an app-backed model.
 	m, _ := newDotsModelForCmdsReady(t)
 	m.dotsEntries = twoConflictEntries()
 
@@ -4254,7 +3985,6 @@ func TestFlow_UC67_DotForceResolveAll_DotsConflictCount(t *testing.T) {
 }
 
 func TestFlow_UC67_DotForceResolveAll_KeyDispatch_SwitchRearms(t *testing.T) {
-	// Press L (arm use_local), then U (should re-arm use_repo, not fire).
 	m, _ := newDotsModelForCmdsReady(t)
 	m.dotsEntries = twoConflictEntries()
 
@@ -4272,7 +4002,6 @@ func TestFlow_UC67_DotForceResolveAll_KeyDispatch_SwitchRearms(t *testing.T) {
 }
 
 func TestFlow_UC67_DotForceResolveAll_KeyDispatch_U_NoConflicts(t *testing.T) {
-	// Pressing U when there are no conflicts is a no-op even through real Update().
 	m, _ := newDotsModelForCmdsReady(t)
 	m.dotsEntries = []app.DotStatus{
 		{Name: "nvim", Health: app.HealthOK, State: dots.StateSynced},
@@ -4286,8 +4015,6 @@ func TestFlow_UC67_DotForceResolveAll_KeyDispatch_U_NoConflicts(t *testing.T) {
 		t.Error("dotsLoading should be false when no conflicts")
 	}
 }
-
-// ── UC-66 (existing) ──────────────────────────────────────────────────────────
 
 func TestFlow_UC66_DotChildExtractHintVisible(t *testing.T) {
 	t.Parallel()

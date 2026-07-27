@@ -11,10 +11,7 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// testHostInfoForHost builds a *app.HostInfo whose active host is host,
-// assigned the given reusable groups. currentMachineGroupName() must resolve
-// to host for the active-host filter to admit host itself — callers set
-// OMNI_HOSTNAME accordingly.
+// currentMachineGroupName() must resolve to host for the active-host filter to admit host itself, so callers set OMNI_HOSTNAME accordingly.
 func testHostInfoForHost(host string, reusableGroups ...string) *app.HostInfo {
 	return &app.HostInfo{
 		Active: host,
@@ -45,13 +42,7 @@ func TestRenderGroupPills_HostFirstAndCollapse(t *testing.T) {
 	}
 }
 
-// TestRenderGroupPills_HostPillStyledDistinctly guards the spec requirement
-// (documented in renderGroupPills's doc comment) that the host group pill
-// is rendered in "a visually distinct style" from reusable-group pills. It
-// deliberately does not strip ANSI: it locates the escape sequence
-// immediately preceding each pill's bracketed text in the raw, styled
-// output and asserts the host pill's escape code differs from the reusable
-// pill's escape code.
+// Deliberately does not strip ANSI: it locates the escape sequence preceding each pill's bracketed text and asserts the host pill's code differs from the reusable pill's.
 func TestRenderGroupPills_HostPillStyledDistinctly(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "laptop")
 
@@ -72,8 +63,6 @@ func TestRenderGroupPills_HostPillStyledDistinctly(t *testing.T) {
 	}
 }
 
-// ansiEscapeBefore returns the ANSI escape sequence (e.g. "\x1b[38;5;2m")
-// that immediately precedes the given bracketed substring in s.
 func ansiEscapeBefore(t *testing.T, s, bracketed string) string {
 	t.Helper()
 	re := regexp.MustCompile(`(\x1b\[[0-9;]*m)+` + regexp.QuoteMeta(bracketed))
@@ -92,10 +81,7 @@ func TestRenderGroupPills_Empty(t *testing.T) {
 	}
 }
 
-// TestRenderGroupPills_EmphasisApplied guards that a row's emphasis transform
-// (e.g. bold when selected, muted when ignored) reaches every pill — the
-// regression fixed after the multi-group pill rollout, where selected/ignored
-// rows lost their group-pill emphasis.
+// A row's emphasis transform must reach every pill; selected and ignored rows lost their group-pill emphasis after the multi-group rollout.
 func TestRenderGroupPills_EmphasisApplied(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "laptop")
 	p := defaultPalette()
@@ -109,9 +95,7 @@ func TestRenderGroupPills_EmphasisApplied(t *testing.T) {
 	if bold == plain {
 		t.Fatalf("bold emphasis should change pill styling, got identical output %q", plain)
 	}
-	// lipgloss merges the bold attribute (SGR 1) into each pill's combined
-	// escape sequence, e.g. "\x1b[1;38;2;...m"; assert the bold parameter reached
-	// the host pill rather than expecting a standalone "\x1b[1m".
+	// lipgloss merges bold (SGR 1) into each pill's combined escape sequence, so assert the bold parameter reached the host pill rather than expecting a standalone bold escape.
 	if !regexp.MustCompile(`\x1b\[1;[0-9;]*m\[laptop\]`).MatchString(bold) {
 		t.Fatalf("bold emphasis should apply the bold SGR to the pill, got %q", bold)
 	}

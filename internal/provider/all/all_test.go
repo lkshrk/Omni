@@ -8,17 +8,12 @@ import (
 	_ "github.com/lkshrk/omni/internal/provider/all"
 )
 
-// wantConcrete is the set of built-in concrete providers that self-register a
-// factory and are linked by package all. The node/python named managers
-// (bun/pnpm/npm/uv) are parameterized and wired explicitly in internal/app, so
-// they are intentionally absent here.
+// The node/python named managers are parameterized and wired in internal/app, so they are absent here.
 var wantConcrete = []string{
 	"apk", "apt", "apt_repo", "brew", "cargo", "dnf", "pacman", "pip", "script", "zypper",
 }
 
-// TestConcreteFactoriesLinked guards the registration seam against drift: a new
-// concrete provider must both register a factory (its init) and be linked by
-// package all (its blank import). If either is missing, this list diverges.
+// A new provider must both register a factory and be blank-imported by package all, or this list diverges.
 func TestConcreteFactoriesLinked(t *testing.T) {
 	got := provider.RegisteredConcreteNames() // sorted
 	if len(got) != len(wantConcrete) {
@@ -31,8 +26,7 @@ func TestConcreteFactoriesLinked(t *testing.T) {
 	}
 }
 
-// TestEachConcreteHasCatalogMetadata ensures every self-registered provider is
-// also described in the catalog (the third edit adding a provider requires).
+// The catalog entry is the third edit adding a provider requires.
 func TestEachConcreteHasCatalogMetadata(t *testing.T) {
 	for _, name := range provider.RegisteredConcreteNames() {
 		if meta := provider.BuiltinMetadata(name); meta.Kind != provider.ProviderKindConcrete {
@@ -41,8 +35,6 @@ func TestEachConcreteHasCatalogMetadata(t *testing.T) {
 	}
 }
 
-// TestBuildConcreteProvidersConstructsAll checks every factory builds a
-// non-nil provider whose Name matches its registration key.
 func TestBuildConcreteProvidersConstructsAll(t *testing.T) {
 	built := provider.BuildConcreteProviders(executor.New())
 	for _, name := range provider.RegisteredConcreteNames() {
