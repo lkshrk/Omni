@@ -1125,6 +1125,68 @@ func TestDoUpgradeAll_PrivilegedUpgradesOpenAdminTerminalQueue(t *testing.T) {
 	}
 }
 
+func TestDoUpgradeAll_PrivilegedQueueContinuesAfterFinishedPopup(t *testing.T) {
+	t.Parallel()
+	prov := &privilegedOKProvider{
+		okProvider: okProvider{name: "apt"},
+		plan:       provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "apt upgrade package"},
+	}
+	a, _ := newCmdApp(t, prov, nil)
+	tools := []*app.ToolView{
+		{Name: "bat", Provider: "apt", Package: "bat", Installed: true, Outdated: true, Tracked: true},
+		{Name: "vim", Provider: "apt", Package: "vim", Installed: true, Outdated: true, Tracked: true},
+	}
+	for _, tool := range tools {
+		if err := a.DB().Upsert(context.Background(), &database.ToolCache{Name: tool.Name, Provider: tool.Provider, Package: tool.Package, Installed: tool.Installed, Outdated: tool.Outdated, Tracked: tool.Tracked}); err != nil {
+			t.Fatalf("seed cache: %v", err)
+		}
+	}
+	m := modelForCmds(a)
+	m.allTools = tools
+	m.applyFilter()
+	ch, gen := m.beginProgressStream()
+
+	done := m.doUpgradeAll(ch, gen)().(progressDoneMsg)
+	m = drive(m, done)
+	if m.adminTerminal == nil || len(m.adminTerminalQueue) != 1 {
+		t.Fatalf("initial admin queue = current:%v remaining:%d, want one current and one remaining", m.adminTerminal != nil, len(m.adminTerminalQueue))
+	}
+	firstName := m.adminTerminal.name
+	if cmd := m.startAdminTerminalSession(); cmd == nil {
+		t.Fatal("starting first admin terminal returned nil command")
+	}
+	m = drive(m, adminTerminalDoneMsg{
+		id:    m.adminTerminal.id,
+		state: m.adminTerminal.completionState(),
+	})
+	if m.adminTerminal == nil || !m.adminTerminal.finished {
+		t.Fatal("successful terminal completion should remain open until dismissed")
+	}
+	cmds := m.handleAdminTerminalKeyMsg(pressEnter().(tea.KeyPressMsg))
+	if len(cmds) != 1 {
+		t.Fatalf("dismiss finished popup returned %d commands, want completion command", len(cmds))
+	}
+	completionMsg := cmds[0]()
+	complete, ok := completionMsg.(opCompleteMsg)
+	if !ok {
+		t.Fatalf("completion command returned %T, want opCompleteMsg", completionMsg)
+	}
+	if complete.err != nil {
+		t.Fatalf("completion command for %s failed: %v", firstName, complete.err)
+	}
+
+	m = drive(m, complete)
+	if m.mode != viewAdminTerminal || m.adminTerminal == nil {
+		t.Fatalf("mode=%v adminTerminal=%v, want next queued admin terminal", m.mode, m.adminTerminal != nil)
+	}
+	if m.adminTerminal.name == firstName {
+		t.Fatalf("next admin terminal target = %q, want the other queued tool", m.adminTerminal.name)
+	}
+	if len(m.adminTerminalQueue) != 0 {
+		t.Fatalf("remaining admin queue = %d, want 0 after opening second prompt", len(m.adminTerminalQueue))
+	}
+}
+
 func TestUpgradeAllProgressText_DeduplicatesBulkVerb(t *testing.T) {
 	t.Parallel()
 	tool := provider.Tool{Name: "bat", Provider: "brew"}

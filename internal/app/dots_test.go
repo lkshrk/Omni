@@ -129,7 +129,7 @@ func TestDiscoverDotsEntries_CombinesRepoLocalConfigAndOutliers(t *testing.T) {
 	}
 }
 
-func TestDiscoverDotsEntries_DiscoversAgentsSkillLockFile(t *testing.T) {
+func TestDiscoverDotsEntries_IgnoresAgentsSkillLockFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repoDir := t.TempDir()
@@ -146,69 +146,19 @@ func TestDiscoverDotsEntries_DiscoversAgentsSkillLockFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DiscoverDotsEntries: %v", err)
 	}
-	byName := make(map[string]string, len(got))
-	for _, entry := range got {
-		byName[entry.Name] = entry.Path
-	}
-	wantPath := "~/.agents/.skill-lock.json"
-	if p, ok := byName["agents-skill-lock"]; !ok || p != wantPath {
-		t.Fatalf("agents-skill-lock entry = %q (ok=%v), want %q", p, ok, wantPath)
-	}
-}
-
-func TestDiscoverDotsEntries_SkipsAgentsSkillLockWhenMissing(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	repoDir := t.TempDir()
-
-	got, err := app.DiscoverDotsEntries(repoDir)
-	if err != nil {
-		t.Fatalf("DiscoverDotsEntries: %v", err)
-	}
 	for _, entry := range got {
 		if entry.Name == "agents-skill-lock" {
-			t.Fatalf("agents-skill-lock should not be discovered when file missing, got: %#v", entry)
+			t.Fatalf("agent-managed skill lock should not be proposed as a dot: %#v", entry)
 		}
 	}
 }
 
-func TestDiscoverDotsEntries_InfersAgentsSkillLockFromMisnamedRepoPackage(t *testing.T) {
+func TestDiscoverDotsEntries_IgnoresLegacySkillLockRepoPackages(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repoDir := t.TempDir()
-	pkgDir := filepath.Join(dotsContentDir(repoDir), "skill-lock.json", ".agents")
-	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(pkgDir, ".skill-lock.json"), []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := app.DiscoverDotsEntries(repoDir)
-	if err != nil {
-		t.Fatalf("DiscoverDotsEntries: %v", err)
-	}
-	byName := make(map[string]string, len(got))
-	for _, entry := range got {
-		byName[entry.Name] = entry.Path
-	}
-	wantPath := "~/.agents/.skill-lock.json"
-	if path, ok := byName["agents-skill-lock"]; !ok || path != wantPath {
-		t.Fatalf("agents-skill-lock entry = %q (ok=%v), want %q", path, ok, wantPath)
-	}
-	if path, ok := byName["skill-lock.json"]; ok && path == "~/.config/skill-lock.json" {
-		t.Fatalf("misnamed package should not map to ~/.config/skill-lock.json, got %#v", got)
-	}
-}
-
-func TestDiscoverDotsStatus_SkipsMisnamedAgentsSkillLockWhenTracked(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	a, cfgDir, repoDir := newDotsApp(t)
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	for _, pkg := range []string{"agents-skill-lock", "skill-lock.json"} {
-		pkgDir := filepath.Join(dotsContentDir(repoDir), pkg, ".agents")
+	for _, name := range []string{"agents-skill-lock", "skill-lock.json"} {
+		pkgDir := filepath.Join(dotsContentDir(repoDir), name, ".agents")
 		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -216,25 +166,14 @@ func TestDiscoverDotsStatus_SkipsMisnamedAgentsSkillLockWhenTracked(t *testing.T
 			t.Fatal(err)
 		}
 	}
-	agentsDir := filepath.Join(home, ".agents")
-	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	target := filepath.Join(agentsDir, ".skill-lock.json")
-	if err := os.Symlink(filepath.Join(dotsContentDir(repoDir), "agents-skill-lock", ".agents", ".skill-lock.json"), target); err != nil {
-		t.Fatal(err)
-	}
-	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
-		{Name: "agents-skill-lock", Path: "~/.agents/.skill-lock.json"},
-	}, home)
 
-	result, err := a.DiscoverDotsStatus(context.Background())
+	got, err := app.DiscoverDotsEntries(repoDir)
 	if err != nil {
-		t.Fatalf("DiscoverDotsStatus: %v", err)
+		t.Fatalf("DiscoverDotsEntries: %v", err)
 	}
-	for _, entry := range result.Entries {
-		if entry.Name == "skill-lock.json" || (entry.Name == "agents-skill-lock" && entry.Group == "" && entry.State == dots.StateNoSource) {
-			t.Fatalf("tracked agents-skill-lock should suppress misnamed repo package candidate, got %#v", entry)
+	for _, entry := range got {
+		if entry.Name == "agents-skill-lock" || entry.Name == "skill-lock.json" {
+			t.Fatalf("legacy skill-lock package should not be proposed as a dot: %#v", entry)
 		}
 	}
 }
@@ -265,9 +204,6 @@ func TestDiscoverDotsEntries_AddsClaudeAllowlistIgnores(t *testing.T) {
 		"*",
 		"!/settings.json",
 		"!/CLAUDE.md",
-		"!/mcp.json",
-		"!/plugins",
-		"!/plugins/installed_plugins.json",
 		"!/agents/",
 		"!/hooks/",
 		"!/scripts/",
@@ -277,6 +213,17 @@ func TestDiscoverDotsEntries_AddsClaudeAllowlistIgnores(t *testing.T) {
 	} {
 		if !testContainsString(claude.Ignore, want) {
 			t.Fatalf("claude ignore = %v, missing %q", claude.Ignore, want)
+		}
+	}
+	for _, managed := range []string{
+		"!/mcp.json",
+		"!/plugins",
+		"!/plugins/installed_plugins.json",
+		"!/plugins/configured_plugins.json",
+		"!/skills/",
+	} {
+		if testContainsString(claude.Ignore, managed) {
+			t.Fatalf("claude ignore = %v, should not track agent-managed path %q", claude.Ignore, managed)
 		}
 	}
 	for _, duplicateGlobal := range []string{"*.log", ".DS_Store", "cache"} {
@@ -311,7 +258,6 @@ func TestDiscoverDotsEntries_AddsCodexAllowlistIgnores(t *testing.T) {
 	for _, want := range []string{
 		"*",
 		"!/config.toml",
-		"!/mcp.json",
 		"!/AGENTS.md",
 		"!/RTK.md",
 		"!/rules/",
@@ -319,6 +265,9 @@ func TestDiscoverDotsEntries_AddsCodexAllowlistIgnores(t *testing.T) {
 		if !testContainsString(codex.Ignore, want) {
 			t.Fatalf("codex ignore = %v, missing %q", codex.Ignore, want)
 		}
+	}
+	if testContainsString(codex.Ignore, "!/mcp.json") {
+		t.Fatalf("codex ignore = %v, should not track agent-managed mcp.json", codex.Ignore)
 	}
 	for _, duplicateGlobal := range []string{"*.log", ".DS_Store", "cache"} {
 		if testContainsString(codex.Ignore, duplicateGlobal) {
@@ -355,13 +304,15 @@ func TestDiscoverDotsEntries_AddsGrokAllowlistIgnores(t *testing.T) {
 	for _, want := range []string{
 		"*",
 		"!/config.toml",
-		"!/skills/",
 		"!/commands/",
 		"!/hooks/",
 	} {
 		if !testContainsString(grok.Ignore, want) {
 			t.Fatalf("grok ignore = %v, missing %q", grok.Ignore, want)
 		}
+	}
+	if testContainsString(grok.Ignore, "!/skills/") {
+		t.Fatalf("grok ignore = %v, should not track agent-managed skills", grok.Ignore)
 	}
 	for _, duplicateGlobal := range []string{"*.log", ".DS_Store", "cache"} {
 		if testContainsString(grok.Ignore, duplicateGlobal) {
@@ -4329,20 +4280,21 @@ func TestDotsList_ClaudeAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *tes
 		}
 	}
 	files := map[string]string{
-		filepath.Join(srcDir, "settings.json"):                     "{}",
-		filepath.Join(srcDir, "CLAUDE.md"):                         "# Claude",
-		filepath.Join(srcDir, "mcp.json"):                          "{}",
-		filepath.Join(srcDir, "plugins", "installed_plugins.json"): "[]",
-		filepath.Join(srcDir, "skills", "example", "SKILL.md"):     "# skill",
-		filepath.Join(srcDir, "agents", "review.md"):               "# agent",
-		filepath.Join(srcDir, "hooks", "pre.sh"):                   "#!/bin/sh\n",
-		filepath.Join(srcDir, "scripts", "status.sh"):              "#!/bin/sh\n",
-		filepath.Join(srcDir, ".omc-config.json"):                  "{}",
-		filepath.Join(srcDir, "keybindings.json"):                  "{}",
-		filepath.Join(srcDir, "statusline-command.sh"):             "#!/bin/sh\n",
-		filepath.Join(srcDir, "history.jsonl"):                     "{}",
-		filepath.Join(srcDir, "projects", "session.json"):          "{}",
-		filepath.Join(srcDir, "plugins", "cache.json"):             "{}",
+		filepath.Join(srcDir, "settings.json"):                      "{}",
+		filepath.Join(srcDir, "CLAUDE.md"):                          "# Claude",
+		filepath.Join(srcDir, "mcp.json"):                           "{}",
+		filepath.Join(srcDir, "plugins", "installed_plugins.json"):  "[]",
+		filepath.Join(srcDir, "plugins", "configured_plugins.json"): "[]",
+		filepath.Join(srcDir, "skills", "example", "SKILL.md"):      "# skill",
+		filepath.Join(srcDir, "agents", "review.md"):                "# agent",
+		filepath.Join(srcDir, "hooks", "pre.sh"):                    "#!/bin/sh\n",
+		filepath.Join(srcDir, "scripts", "status.sh"):               "#!/bin/sh\n",
+		filepath.Join(srcDir, ".omc-config.json"):                   "{}",
+		filepath.Join(srcDir, "keybindings.json"):                   "{}",
+		filepath.Join(srcDir, "statusline-command.sh"):              "#!/bin/sh\n",
+		filepath.Join(srcDir, "history.jsonl"):                      "{}",
+		filepath.Join(srcDir, "projects", "session.json"):           "{}",
+		filepath.Join(srcDir, "plugins", "cache.json"):              "{}",
 	}
 	for path, body := range files {
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -4389,8 +4341,8 @@ func TestDotsList_ClaudeAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *tes
 	if len(statuses) != 1 {
 		t.Fatalf("statuses = %#v, want one claude entry", statuses)
 	}
-	if statuses[0].FileCount != 10 {
-		t.Fatalf("file count = %d, want the ten default Claude proposal files", statuses[0].FileCount)
+	if statuses[0].FileCount != 8 {
+		t.Fatalf("file count = %d, want the eight user-authored Claude proposal files", statuses[0].FileCount)
 	}
 	childIgnored := make(map[string]bool, len(statuses[0].Children))
 	for _, child := range statuses[0].Children {
@@ -4399,8 +4351,6 @@ func TestDotsList_ClaudeAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *tes
 	for _, rel := range []string{
 		"settings.json",
 		"CLAUDE.md",
-		"mcp.json",
-		"plugins",
 		"agents",
 		"hooks",
 		"scripts",
@@ -4413,7 +4363,7 @@ func TestDotsList_ClaudeAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *tes
 			t.Fatalf("%s should be included in Claude default proposal: %#v", rel, statuses[0].Children)
 		}
 	}
-	for _, rel := range []string{"history.jsonl", "projects", "skills"} {
+	for _, rel := range []string{"history.jsonl", "projects", "skills", "mcp.json", "plugins"} {
 		ignored, ok := childIgnored[rel]
 		if !ok || !ignored {
 			t.Fatalf("%s should remain in the full Claude child tree as ignored: %#v", rel, statuses[0].Children)
@@ -4507,8 +4457,8 @@ func TestDotsList_CodexAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *test
 	if len(statuses) != 1 {
 		t.Fatalf("statuses = %#v, want one codex entry", statuses)
 	}
-	if statuses[0].FileCount != 6 {
-		t.Fatalf("file count = %d, want the six default Codex proposal files", statuses[0].FileCount)
+	if statuses[0].FileCount != 5 {
+		t.Fatalf("file count = %d, want the five user-authored Codex proposal files", statuses[0].FileCount)
 	}
 	childIgnored := make(map[string]bool, len(statuses[0].Children))
 	for _, child := range statuses[0].Children {
@@ -4516,7 +4466,6 @@ func TestDotsList_CodexAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *test
 	}
 	for _, rel := range []string{
 		"config.toml",
-		"mcp.json",
 		"AGENTS.md",
 		"RTK.md",
 		"rules",
@@ -4526,7 +4475,7 @@ func TestDotsList_CodexAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *test
 			t.Fatalf("%s should be included in Codex default proposal: %#v", rel, statuses[0].Children)
 		}
 	}
-	for _, rel := range []string{"history.jsonl", "sessions", "tmp.json", "skills"} {
+	for _, rel := range []string{"history.jsonl", "sessions", "tmp.json", "skills", "mcp.json"} {
 		ignored, ok := childIgnored[rel]
 		if !ok || !ignored {
 			t.Fatalf("%s should remain in the full Codex child tree as ignored: %#v", rel, statuses[0].Children)

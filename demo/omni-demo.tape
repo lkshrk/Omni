@@ -31,7 +31,7 @@ Show
 Sleep 1.5s
 
 Hide
-Sleep 22s
+Sleep 30s
 
 Show
 Sleep 3s
@@ -39,6 +39,8 @@ Sleep 3s
 Type "j"
 Sleep 2.5s
 
+Type "j"
+Type "j"
 Type "j"
 Type "j"
 Sleep 3s
@@ -61,7 +63,12 @@ Sleep 500ms
 
 Tab
 Sleep 800ms
-Sleep 3s
+Type "j"
+Sleep 500ms
+Space
+Sleep 500ms
+Down
+Sleep 3.5s
 
 Tab
 Sleep 1s
@@ -70,7 +77,16 @@ Sleep 3.5s
 Right
 Sleep 500ms
 Sleep 3.5s
+Right
+Sleep 500ms
+Sleep 3.5s
 
 Tab
 Sleep 800ms
+Type "j"
+Sleep 500ms
+Sleep 3s
+
+Type "g"
+Sleep 500ms
 Sleep 3.5s
