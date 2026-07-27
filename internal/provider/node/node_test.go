@@ -28,8 +28,6 @@ func listOutput(pkgs ...string) string {
 	return out
 }
 
-// --- Available / auto-detect ---
-
 func TestAvailable_BunPreferred(t *testing.T) {
 	m := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "bun --version", Response: executor.MockCall{Stdout: "1.1.0"}},
@@ -84,7 +82,6 @@ func TestAvailable_HintPinnedToNpm(t *testing.T) {
 	if err != nil || !ok {
 		t.Errorf("Available() = (%v, %v), want (true, nil)", ok, err)
 	}
-	// pnpm should not have been called.
 	if len(m.CallsMatching("pnpm")) > 0 {
 		t.Error("should not have probed pnpm when hint=npm")
 	}
@@ -100,8 +97,6 @@ func TestAvailable_HintMissing(t *testing.T) {
 		t.Errorf("Available() = (%v, %v), want (false, nil)", ok, err)
 	}
 }
-
-// --- Install ---
 
 func TestInstall_UsesPnpm(t *testing.T) {
 	m := executor.NewMatchMock(
@@ -150,8 +145,6 @@ func TestInstall_HintedNpmUsesNpmArgs(t *testing.T) {
 	m.AssertCalled(t, "npm install -g prettier")
 }
 
-// --- Uninstall ---
-
 func TestUninstall_PnpmArgs(t *testing.T) {
 	m := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "pnpm --version", Response: executor.MockCall{Stdout: "8.0.0"}},
@@ -177,8 +170,6 @@ func TestUninstallFrom_UsesInstalledManager(t *testing.T) {
 		t.Fatal("should not uninstall through active pnpm manager when installed manager is npm")
 	}
 }
-
-// --- IsInstalled ---
 
 func TestIsInstalled_Found(t *testing.T) {
 	out := listOutput("typescript@5.3.3")
@@ -218,8 +209,6 @@ func TestIsInstalled_BunScansFullList(t *testing.T) {
 		t.Errorf("IsInstalled() = (%v, %q, %v), want (true, 5.3.3, nil)", ok, ver, err)
 	}
 }
-
-// --- ListInstalled ---
 
 func TestListInstalled_Multiple(t *testing.T) {
 	out := listOutput("typescript@5.3.3", "prettier@3.1.1", "ts-node@10.9.2")
@@ -326,8 +315,6 @@ func TestListInstalled_ProviderIsNode(t *testing.T) {
 	}
 }
 
-// --- Name / Description ---
-
 func TestName(t *testing.T) {
 	p := node.New(executor.NewMatchMock(), "")
 	if got := p.Name(); got != "node" {
@@ -341,8 +328,6 @@ func TestDescription_NonEmpty(t *testing.T) {
 		t.Error("Description() is empty")
 	}
 }
-
-// --- Upgrade ---
 
 func TestUpgrade_PnpmArgs(t *testing.T) {
 	m := executor.NewMatchMock(
@@ -417,8 +402,6 @@ func TestUpgradeWithManager_UsesInstalledManager(t *testing.T) {
 	}
 }
 
-// --- InstalledMap ---
-
 func TestInstalledMap_Pnpm(t *testing.T) {
 	out := listOutput("typescript@5.3.3", "prettier@3.1.1")
 	m := executor.NewMatchMock(
@@ -464,10 +447,7 @@ func TestInstalledMap_PnpmEmptyGlobalTolerated(t *testing.T) {
 	}
 }
 
-// --- InstalledByManager ---
-
 func TestInstalledByManager_EffectiveManagerFirst(t *testing.T) {
-	// pnpm is effective; npm also installed with some packages.
 	// pnpm package wins when same name exists in both.
 	pnpmOut := listOutput("typescript@5.3.3", "prettier@3.1.1")
 	npmOut := listOutput("typescript@5.0.0", "yaml-lint@1.7.0") // old typescript should lose
@@ -530,9 +510,7 @@ func TestInstalledByManager_AvailableManagerListFailureReturnsError(t *testing.T
 }
 
 func TestInstalledByManager_FillInManagerFailureTolerated(t *testing.T) {
-	// bun is effective and works; pnpm is available but its global list fails
-	// (e.g. pnpm global bin dir not in PATH → exit 1). A broken fill-in manager
-	// must not abort detection for the effective manager and other backends.
+	// A fill-in manager whose global list fails must not abort detection for the others.
 	bunOut := listOutput("context-mode@1.0.0")
 	npmOut := listOutput("yaml-lint@1.7.0")
 	m := executor.NewMatchMock(
@@ -557,8 +535,7 @@ func TestInstalledByManager_FillInManagerFailureTolerated(t *testing.T) {
 }
 
 func TestInstalledByManager_BunEmptyGlobalTolerated(t *testing.T) {
-	// bun exits non-zero when the global install dir is empty (fresh workspace).
-	// That must not abort the sync — treat it as "no globals", not a fatal error.
+	// bun exits non-zero on an empty global dir; that means "no globals", not a failure.
 	m := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "bun --version", Response: executor.MockCall{Stdout: "1.3.8"}},
 		executor.MatchRule{Pattern: "bun pm ls -g", Response: executor.MockCall{Err: errors.New("exit status 1")}},
@@ -589,8 +566,6 @@ func TestInstalledMap_BunEmptyGlobalTolerated(t *testing.T) {
 		t.Errorf("got %d entries, want 0", len(got))
 	}
 }
-
-// --- OutdatedMap ---
 
 func TestOutdatedMap_Empty(t *testing.T) {
 	m := executor.NewMatchMock(
@@ -809,8 +784,6 @@ func TestOutdatedMap_BrokenFillInManagerReturnsError(t *testing.T) {
 		t.Fatal("expected available fill-in manager failure to abort the scan")
 	}
 }
-
-// --- ResolvedName ---
 
 func TestResolvedName_Bun(t *testing.T) {
 	m := executor.NewMatchMock(

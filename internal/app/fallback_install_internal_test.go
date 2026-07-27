@@ -25,8 +25,6 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// --- isChecksumAsset ---
-
 func TestIsChecksumAsset(t *testing.T) {
 	t.Parallel()
 	yes := []string{
@@ -60,8 +58,6 @@ func TestIsChecksumAsset(t *testing.T) {
 		}
 	}
 }
-
-// --- extractChecksumForFile ---
 
 func TestExtractChecksumForFile_MatchesFilename(t *testing.T) {
 	t.Parallel()
@@ -141,15 +137,15 @@ func TestFetchReleaseChecksum_TriesEveryRecognizedAsset(t *testing.T) {
 	t.Parallel()
 	want := strings.Repeat("b", sha256.Size*2)
 	var checksumRequests atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/repos/owner/repo/releases/tags/v1":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id": 1,
 				"assets": []map[string]any{
-					{"id": 2, "name": "first.sha256sum", "browser_download_url": "http://" + r.Host + "/unavailable"},
-					{"id": 3, "name": "checksums.txt", "browser_download_url": "http://" + r.Host + "/other"},
-					{"id": 4, "name": "release-checksums.txt", "browser_download_url": "http://" + r.Host + "/matching"},
+					{"id": 2, "name": "first.sha256sum", "browser_download_url": "https://" + r.Host + "/unavailable"},
+					{"id": 3, "name": "checksums.txt", "browser_download_url": "https://" + r.Host + "/other"},
+					{"id": 4, "name": "release-checksums.txt", "browser_download_url": "https://" + r.Host + "/matching"},
 				},
 			})
 		case "/unavailable":
@@ -183,14 +179,14 @@ func TestFetchReleaseChecksum_TriesEveryRecognizedAsset(t *testing.T) {
 
 func TestFetchReleaseChecksum_AllRecognizedAssetsFail(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/repos/owner/repo/releases/tags/v1":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id": 1,
 				"assets": []map[string]any{
-					{"id": 2, "name": "first.sha256sum", "browser_download_url": "http://" + r.Host + "/unavailable"},
-					{"id": 3, "name": "checksums.txt", "browser_download_url": "http://" + r.Host + "/other"},
+					{"id": 2, "name": "first.sha256sum", "browser_download_url": "https://" + r.Host + "/unavailable"},
+					{"id": 3, "name": "checksums.txt", "browser_download_url": "https://" + r.Host + "/other"},
 				},
 			})
 		case "/unavailable":
@@ -213,14 +209,14 @@ func TestFetchReleaseChecksum_AllRecognizedAssetsFail(t *testing.T) {
 
 func TestVerifyFallbackChecksum_NonContextFailuresRemainBestEffort(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/repos/owner/repo/releases/tags/v1":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id": 1,
 				"assets": []map[string]any{
-					{"id": 2, "name": "first.sha256sum", "browser_download_url": "http://" + r.Host + "/unavailable"},
-					{"id": 3, "name": "checksums.txt", "browser_download_url": "http://" + r.Host + "/malformed"},
+					{"id": 2, "name": "first.sha256sum", "browser_download_url": "https://" + r.Host + "/unavailable"},
+					{"id": 3, "name": "checksums.txt", "browser_download_url": "https://" + r.Host + "/malformed"},
 				},
 			})
 		case "/unavailable":
@@ -282,8 +278,6 @@ func TestVerifyFallbackChecksum_PropagatesContextErrors(t *testing.T) {
 	}
 }
 
-// --- verifyFileChecksum ---
-
 func TestVerifyFileChecksum_Match(t *testing.T) {
 	t.Parallel()
 	content := []byte("hello world")
@@ -324,15 +318,12 @@ func TestVerifyFileChecksum_Mismatch(t *testing.T) {
 	}
 }
 
-// --- extractAndInstall: zip ---
-
 func TestExtractAndInstall_Zip(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	content := []byte("#!/bin/sh\nexit 0\n")
 	archivePath := filepath.Join(dir, "tool_v1.0_darwin_arm64.zip")
 
-	// Build a zip with a nested path.
 	zf, err := os.Create(archivePath)
 	if err != nil {
 		t.Fatal(err)
@@ -380,10 +371,8 @@ func TestExtractAndInstall_ZipExactPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	zw := zip.NewWriter(zf)
-	// Write a file with the same base name but different path.
 	w1, _ := zw.Create("other/mytool")
 	w1.Write(wrong) //nolint:errcheck
-	// Write the exact binaryPath target.
 	w2, _ := zw.Create("exact/path/mytool")
 	w2.Write(content) //nolint:errcheck
 	zw.Close()
@@ -542,8 +531,6 @@ func TestExtractAndInstall_ZipSpecialOnlyPreservesDestination(t *testing.T) {
 	}
 }
 
-// --- extractAndInstall: tar.gz ---
-
 func TestExtractAndInstall_TarGz(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -568,8 +555,6 @@ func TestExtractAndInstall_TarGz(t *testing.T) {
 	}
 	assertNoTarBuffers(t, dir)
 }
-
-// --- extractAndInstall: tar.xz ---
 
 func TestExtractAndInstall_TarXz(t *testing.T) {
 	t.Parallel()
@@ -755,8 +740,6 @@ func TestExtractAndInstall_EmptyArchiveMemberPreservesDestination(t *testing.T) 
 	}
 }
 
-// --- extractAndInstall: raw binary ---
-
 func TestExtractAndInstall_RawBinary(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -783,8 +766,6 @@ func TestExtractAndInstall_RawBinary(t *testing.T) {
 	}
 }
 
-// --- tar exact-path match (parity with zip) ---
-
 func TestExtractAndInstall_TarGzExactPath(t *testing.T) {
 	t.Parallel()
 	for _, compression := range []string{"gz", "xz"} {
@@ -796,7 +777,6 @@ func TestExtractAndInstall_TarGzExactPath(t *testing.T) {
 			ext := ".tar." + compression
 			archivePath := filepath.Join(dir, "archive"+ext)
 
-			// Write two entries with the same base name; exact path wins.
 			writeTarMulti(t, archivePath, compression, []tarEntry{
 				{name: "other/mytool", typeflag: tar.TypeReg, content: wrong},
 				{name: "exact/path/mytool", typeflag: tar.TypeReg, content: correct},
@@ -839,8 +819,6 @@ func TestExtractAndInstall_TarBinaryNotFound(t *testing.T) {
 	}
 }
 
-// --- symlink edge: symlink with matching name must not be selected ---
-
 func TestExtractAndInstall_TarSymlinkSkipped(t *testing.T) {
 	t.Parallel()
 	for _, compression := range []string{"gz", "xz"} {
@@ -851,8 +829,6 @@ func TestExtractAndInstall_TarSymlinkSkipped(t *testing.T) {
 			ext := ".tar." + compression
 			archivePath := filepath.Join(dir, "archive"+ext)
 
-			// Symlink entry appears first with the target name; real regular
-			// file appears second — the symlink must be skipped.
 			writeTarMulti(t, archivePath, compression, []tarEntry{
 				{name: "mytool", typeflag: tar.TypeSymlink, content: nil},
 				{name: "dir/mytool", typeflag: tar.TypeReg, content: real},
@@ -873,24 +849,13 @@ func TestExtractAndInstall_TarSymlinkSkipped(t *testing.T) {
 	}
 }
 
-// --- size cap: oversized download and tar entry are rejected ---
-
 func TestDownloadToFile_OversizedBodyRejected(t *testing.T) {
-	t.Parallel(
-	// Override the cap via a tiny limit so the test stays fast.
-	)
+	t.Parallel()
 
 	const testLimit = 16
 	origMax := maxDownloadBytes
-	// Can't change the constant at runtime; test via a crafted response body
-	// that is exactly testLimit+1 bytes and verify the production limit works
-	// by feeding maxDownloadBytes+1 bytes into a real downloadToFile call.
-	_ = origMax // constant, can't reassign — test the real cap via a pipe
+	_ = origMax
 
-	// Pipe maxDownloadBytes+1 bytes through downloadToFile by serving them
-	// from a local handler and verifying the error.
-	// To keep the test fast we serve only 1 byte over the cap, which triggers
-	// the limit check (n > maxDownloadBytes).
 	importHTTP := &countingHandler{limit: maxDownloadBytes + 1}
 	srv := newSingleUseServer(t, importHTTP)
 
@@ -900,7 +865,6 @@ func TestDownloadToFile_OversizedBodyRejected(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "limit") {
 		t.Fatalf("oversized download: want limit error, got %v", err)
 	}
-	// destPath must not exist (temp file cleaned up on error).
 	if _, statErr := os.Stat(destPath); !os.IsNotExist(statErr) {
 		t.Error("partial download file left behind after size-cap error")
 	}
@@ -1028,8 +992,6 @@ func TestExtractAndInstall_TarOversizedEntryRejected(t *testing.T) {
 	dir := t.TempDir()
 	archivePath := filepath.Join(dir, "big.tar.gz")
 
-	// Write a tar entry that is maxEntryBytes+1 bytes — the header claims the
-	// right size so the writer succeeds; the reader hits the limit check.
 	const bigSize = maxEntryBytes + 1
 	f, err := os.Create(archivePath)
 	if err != nil {
@@ -1041,8 +1003,7 @@ func TestExtractAndInstall_TarOversizedEntryRejected(t *testing.T) {
 	if err := tw.WriteHeader(hdr); err != nil {
 		t.Fatal(err)
 	}
-	// Write bigSize zero bytes without buffering them all in memory.
-	chunk := make([]byte, 1<<20) // 1 MiB chunks
+	chunk := make([]byte, 1<<20)
 	remaining := int64(bigSize)
 	for remaining > 0 {
 		n := int64(len(chunk))
@@ -1068,19 +1029,15 @@ func TestExtractAndInstall_TarOversizedEntryRejected(t *testing.T) {
 	}
 }
 
-// --- atomic install: no partial file on write failure ---
-
 func TestWriteExecutable_AtomicNoBinaryOnFailure(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	destPath := filepath.Join(dir, "mytool")
 
-	// errReader always returns an error on Read, simulating a mid-stream failure.
 	err := writeExecutable(errReader{}, destPath)
 	if err == nil {
 		t.Fatal("expected write error, got nil")
 	}
-	// The destination must not exist — the temp file was cleaned up.
 	if _, statErr := os.Stat(destPath); !os.IsNotExist(statErr) {
 		t.Error("partial binary exists at destPath after failed writeExecutable")
 	}
@@ -1104,15 +1061,12 @@ func TestWriteExecutable_Mode0755(t *testing.T) {
 	}
 }
 
-// --- helpers ---
-
 type tarEntry struct {
 	name     string
 	typeflag byte
 	content  []byte
 }
 
-// writeTarMulti writes a tar archive (gz or xz compressed) with the given entries.
 func writeTarMulti(t *testing.T, path, compression string, entries []tarEntry) {
 	t.Helper()
 	f, err := os.Create(path)
@@ -1159,15 +1113,12 @@ func writeTarMulti(t *testing.T, path, compression string, entries []tarEntry) {
 	}
 }
 
-// errReader returns an error on every Read call.
 type errReader struct{}
 
 func (errReader) Read(_ []byte) (int, error) {
 	return 0, fmt.Errorf("injected read error")
 }
 
-// countingHandler serves exactly n bytes of zero data (one byte over the cap
-// triggers the limit check in downloadToFile).
 type countingHandler struct{ limit int64 }
 
 func (h *countingHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
@@ -1190,8 +1141,6 @@ func newSingleUseServer(t *testing.T, h http.Handler) *httptest.Server {
 	t.Cleanup(srv.Close)
 	return srv
 }
-
-// --- helpers ---
 
 func assertNoTarBuffers(t *testing.T, dir string) {
 	t.Helper()
@@ -1255,8 +1204,6 @@ func writeTarXz(t *testing.T, path, entryName string, content []byte) {
 	}
 }
 
-// --- path traversal guard ---
-
 func TestNativeGitHubInstallPipeline_RejectsTraversalAssetName(t *testing.T) {
 	t.Parallel()
 	traversalCases := []string{
@@ -1267,7 +1214,6 @@ func TestNativeGitHubInstallPipeline_RejectsTraversalAssetName(t *testing.T) {
 	for _, assetName := range traversalCases {
 		t.Run(assetName, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Should never be reached; the guard must reject before download.
 				http.NotFound(w, r)
 			}))
 			t.Cleanup(srv.Close)
@@ -1289,7 +1235,6 @@ func TestNativeGitHubInstallPipeline_RejectsTraversalAssetName(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error for asset_name %q, got nil", assetName)
 			}
-			// The resolved path must not exist outside the cache dir.
 			cacheDir := filepath.Join(cfgDir, "fallback")
 			entries, _ := filepath.Glob(cacheDir + "/../*")
 			for _, e := range entries {
@@ -1302,10 +1247,7 @@ func TestNativeGitHubInstallPipeline_RejectsTraversalAssetName(t *testing.T) {
 }
 
 func TestNativeGitHubInstallPipeline_RejectsTraversalBinary(t *testing.T) {
-	t.Parallel(
-	// Build a minimal tar.gz so the download phase would succeed if the binary
-	// guard were absent. The guard must reject before extraction.
-	)
+	t.Parallel()
 
 	content := []byte("#!/bin/sh\necho hi")
 	tmpDir := t.TempDir()
@@ -1362,15 +1304,9 @@ func TestNativeGitHubInstallPipeline_RejectsTraversalBinary(t *testing.T) {
 	}
 }
 
-// --- redirect token stripping ---
-
-// TestGitHubHTTPClient_RedirectStripsAuthorizationHeader verifies that the
-// Authorization header is not forwarded when a download URL redirects to a
-// non-GitHub host. A leak here would hand GITHUB_TOKEN to an arbitrary server.
 func TestGitHubHTTPClient_RedirectStripsAuthorizationHeader(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "secret-token")
 
-	// Second-hop server: records whether it received an Authorization header.
 	var receivedAuth string
 	hop2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedAuth = r.Header.Get("Authorization")
@@ -1378,7 +1314,6 @@ func TestGitHubHTTPClient_RedirectStripsAuthorizationHeader(t *testing.T) {
 	}))
 	t.Cleanup(hop2.Close)
 
-	// First-hop server: redirects to the non-GitHub hop2 server.
 	hop1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, hop2.URL+"/resource", http.StatusFound)
 	}))

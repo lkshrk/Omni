@@ -84,21 +84,6 @@ func TestWithConfigPersistsPackagesAndGroupRefs(t *testing.T) {
 	}
 }
 
-func TestSkillPackageAddArgs(t *testing.T) {
-	t.Parallel()
-	pkg := config.SkillPackage{Source: "o/r", Ref: "main"}
-	got := skillPackageAddArgs(pkg, []string{"claude-code", "codex"})
-	want := []string{"skills", "add", "o/r#main", "-g", "-a", "claude-code", "-a", "codex", "-y"}
-	if len(got) != len(want) {
-		t.Fatalf("args = %v want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("args = %v want %v", got, want)
-		}
-	}
-}
-
 func TestSkillLockSourceIndex(t *testing.T) {
 	t.Parallel()
 	lock := &config.SkillLockFile{Skills: map[string]config.SkillLockEntry{
@@ -106,14 +91,15 @@ func TestSkillLockSourceIndex(t *testing.T) {
 		"bar": {Source: "o/r", UpdatedAt: "2026-06-12T00:00:00Z"},
 		"baz": {Source: "x/y", UpdatedAt: "2026-05-01T00:00:00Z"},
 	}}
-	installed, updated := packageLockStatus(lock, "o/r")
+	a := &App{ConfigPath: filepath.Join(t.TempDir(), "settings.json")}
+	installed, updated := a.packageLockStatus(lock, "o/r")
 	if !installed {
 		t.Fatal("o/r should be installed")
 	}
 	if updated != "2026-06-12" {
 		t.Errorf("updated = %q, want latest 2026-06-12", updated)
 	}
-	if in, _ := packageLockStatus(lock, "absent/pkg"); in {
+	if in, _ := a.packageLockStatus(lock, "absent/pkg"); in {
 		t.Error("absent package should not be installed")
 	}
 }
@@ -125,11 +111,12 @@ func TestPackageSkills(t *testing.T) {
 		"alpha": {Source: "o/r"},
 		"other": {Source: "x/y"},
 	}}
-	got := packageSkills(lock, "o/r")
+	a := &App{ConfigPath: filepath.Join(t.TempDir(), "settings.json")}
+	got := a.packageSkills(lock, "o/r")
 	if len(got) != 2 || got[0] != "alpha" || got[1] != "beta" {
 		t.Fatalf("packageSkills = %v, want [alpha beta] (sorted)", got)
 	}
-	if len(packageSkills(lock, "absent/pkg")) != 0 {
+	if len(a.packageSkills(lock, "absent/pkg")) != 0 {
 		t.Error("absent package should have no skills")
 	}
 }
@@ -163,7 +150,8 @@ func TestSetSkillGroupsInConfig(t *testing.T) {
 			{Name: "home"},
 		},
 	}
-	setSkillGroupsInConfig(cfg, "o/r", map[string]struct{}{"home": {}})
+	a := &App{ConfigPath: filepath.Join(t.TempDir(), "settings.json")}
+	a.setSkillGroupsInConfig(cfg, "o/r", map[string]struct{}{"home": {}})
 	work := findGroupInConfig(cfg, "work")
 	home := findGroupInConfig(cfg, "home")
 	if len(work.Skills) != 0 {
@@ -189,7 +177,8 @@ func TestResolveSkillPackages(t *testing.T) {
 		},
 		Hosts: map[string][]string{"box": {"work"}},
 	}
-	got := resolveSkillPackages(cfg, "box")
+	a := &App{ConfigPath: filepath.Join(t.TempDir(), "settings.json")}
+	got := a.resolveSkillPackages(cfg, "box")
 	srcs := make([]string, len(got))
 	for i, r := range got {
 		srcs[i] = r.Source
@@ -202,5 +191,28 @@ func TestResolveSkillPackages(t *testing.T) {
 		if !want[s] {
 			t.Errorf("unexpected resolved package %q", s)
 		}
+	}
+}
+
+func TestResolveSkillPackagesNormalizesAndMergesDuplicateSources(t *testing.T) {
+	t.Parallel()
+	cfg := &config.RootConfig{
+		Agents: config.AgentsConfig{Packages: []config.SkillPackage{
+			{Source: "https://github.com/acme/skills.git@alpha"},
+			{Source: "acme/skills@beta"},
+			{Source: "acme/skills", Ref: "main"},
+		}},
+	}
+
+	a := &App{ConfigPath: filepath.Join(t.TempDir(), "settings.json")}
+	got := a.resolveSkillPackages(cfg, "box")
+	if len(got) != 1 {
+		t.Fatalf("resolved = %+v, want one normalized package", got)
+	}
+	if got[0].Source != "acme/skills" || got[0].Ref != "main" {
+		t.Fatalf("package = %+v, want normalized source and latest ref", got[0])
+	}
+	if got[0].Skills != nil {
+		t.Fatalf("selectorless duplicate should reset to all skills, got %v", got[0].Skills)
 	}
 }

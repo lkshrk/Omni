@@ -1,15 +1,4 @@
-// gen-schema writes the JSON Schema for omni's settings.json to the current
-// versioned schema path and spec/omni.settings.schema.json (relative to the
-// repository root).
-//
-// Usage:
-//
-//	go run ./scripts/gen-schema          # writes the canonical and latest schemas
-//	go run ./scripts/gen-schema [path]   # writes to a custom path
-//
-// Run via make:
-//
-//	make gen-schema
+// gen-schema writes the current versioned and latest settings schemas; pass a path to write only a custom output.
 package main
 
 import (
@@ -30,38 +19,29 @@ const (
 	latestSchemaID = "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.schema.json"
 )
 
-// schema is a minimal JSON Schema 2020-12 node. Fields with zero values are omitted.
-// Field order here is the serialisation order — matches the conventional layout:
-// meta → annotations → type/validation → object → array → $defs last.
+// schema is a minimal JSON Schema 2020-12 node whose field order preserves conventional serialization.
 type schema struct {
-	// Meta (root only)
 	Schema string `json:"$schema,omitempty"`
 	ID     string `json:"$id,omitempty"`
 
-	// Core ref
 	Ref string `json:"$ref,omitempty"`
 
-	// Annotations
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
 	Default     any    `json:"default,omitempty"`
 	Examples    []any  `json:"examples,omitempty"`
 
-	// Type / value constraints
 	Type      any   `json:"type,omitempty"` // string or []string
 	Const     any   `json:"const,omitempty"`
 	Enum      []any `json:"enum,omitempty"`
 	MinLength int   `json:"minLength,omitempty"`
 
-	// Object constraints
 	Properties           map[string]*schema `json:"properties,omitempty"`
 	Required             []string           `json:"required,omitempty"`
 	AdditionalProperties any                `json:"additionalProperties,omitempty"` // bool or *schema
 
-	// Array constraints
 	Items *schema `json:"items,omitempty"`
 
-	// Definitions (conventionally last)
 	Defs map[string]*schema `json:"$defs,omitempty"`
 }
 
@@ -163,109 +143,15 @@ func buildWithID(id string) *schema {
 		AdditionalProperties: false,
 		Defs: map[string]*schema{
 			"Settings": {
-				Description: "User-configurable options stored in settings.json.",
-				Type:        "object",
-				Properties: map[string]*schema{
-					"auto_import": {
-						Description: "Add newly discovered installed tools to the config on every sync.",
-						Type:        "boolean",
-						Default:     false,
-					},
-					"ecosystems": {
-						Description: "Legacy provider-family settings for system, node, and python. New config should prefer provider_priority and tool providers[].",
-						Type:        "object",
-						Properties: map[string]*schema{
-							provider.EcosystemSystem: ref("#/$defs/EcosystemSettings"),
-							provider.EcosystemNode:   ref("#/$defs/EcosystemSettings"),
-							provider.EcosystemPython: ref("#/$defs/EcosystemSettings"),
-						},
-						AdditionalProperties: ref("#/$defs/EcosystemSettings"),
-						Examples: []any{map[string]any{
-							provider.EcosystemSystem: map[string]any{"priority": systemPriority},
-							provider.EcosystemNode:   map[string]any{"manager": firstString(provider.BuiltinManagerNames(provider.EcosystemNode))},
-							provider.EcosystemPython: map[string]any{"manager": firstString(provider.BuiltinManagerNames(provider.EcosystemPython))},
-						}},
-					},
-					"fallback_bin_dir": {
-						Description: "Default directory for fallback-installed binaries. Omni warns when this directory is not on PATH.",
-						Type:        "string",
-						Examples:    []any{"~/.local/share/omni/fallback/bin"},
-					},
-					"dots_repo": {
-						Description: "Per-machine path to the dotfiles git repository (~ is expanded).",
-						Type:        "string",
-						Examples:    []any{"~/Dev/dotfiles", "~/.dotfiles"},
-					},
-					"dots_disabled": {
-						Description: "Disable dotfile sync for this settings scope.",
-						Type:        "boolean",
-					},
-					"agents_disabled": {
-						Description: "Master switch: disable the agent skills/mcp/plugins features for this settings scope.",
-						Type:        "boolean",
-					},
-					"skills_disabled": {
-						Description: "Disable the agent skills feature for this settings scope.",
-						Type:        "boolean",
-					},
-					"mcp_disabled": {
-						Description: "Disable the agent mcp feature for this settings scope.",
-						Type:        "boolean",
-					},
-					"plugins_disabled": {
-						Description: "Disable the agent plugins feature for this settings scope.",
-						Type:        "boolean",
-					},
-					"dots_git": ref("#/$defs/DotsGitConfig"),
-				},
+				Description:          "User-configurable options stored in settings.json.",
+				Type:                 "object",
+				Properties:           settingsProperties(false, ecosystemNames, systemPriority),
 				AdditionalProperties: false,
 			},
 			"HostSettings": {
-				Description: "Per-host setting overrides.",
-				Type:        "object",
-				Properties: map[string]*schema{
-					"ecosystems": {
-						Description: "Legacy host-specific provider-family manager and priority overrides.",
-						Type:        "object",
-						Properties: map[string]*schema{
-							provider.EcosystemSystem: ref("#/$defs/EcosystemSettings"),
-							provider.EcosystemNode:   ref("#/$defs/EcosystemSettings"),
-							provider.EcosystemPython: ref("#/$defs/EcosystemSettings"),
-						},
-						AdditionalProperties: ref("#/$defs/EcosystemSettings"),
-					},
-					"dots_repo": {
-						Description: "Host-specific path to the dotfiles git repository.",
-						Type:        "string",
-						Examples:    []any{"~/Dev/dotfiles", "~/.dotfiles"},
-					},
-					"dots_disabled": {
-						Description: "Whether dotfile sync is disabled on this host.",
-						Type:        "boolean",
-					},
-					"agents_disabled": {
-						Description: "Master switch: whether the agent skills/mcp/plugins features are disabled on this host.",
-						Type:        "boolean",
-					},
-					"skills_disabled": {
-						Description: "Whether the agent skills feature is disabled on this host.",
-						Type:        "boolean",
-					},
-					"mcp_disabled": {
-						Description: "Whether the agent mcp feature is disabled on this host.",
-						Type:        "boolean",
-					},
-					"plugins_disabled": {
-						Description: "Whether the agent plugins feature is disabled on this host.",
-						Type:        "boolean",
-					},
-					"disabled_providers": {
-						Description: "Provider family names disabled on this host.",
-						Type:        "array",
-						Items:       &schema{Type: "string", MinLength: 1},
-						Examples:    []any{ecosystemNames},
-					},
-				},
+				Description:          "Per-host setting overrides.",
+				Type:                 "object",
+				Properties:           settingsProperties(true, ecosystemNames, systemPriority),
 				AdditionalProperties: false,
 			},
 			"EcosystemSettings": {
@@ -367,6 +253,11 @@ func buildWithID(id string) *schema {
 				Description: "A logical tool spec. Providers define concrete install candidates; legacy provider, variants, and hosts fields are migrated on load.",
 				Type:        "object",
 				Properties: map[string]*schema{
+					"quarantine": {
+						Description: "Per-tool update_quarantine override. Defers updates until the reported availability timestamp is older than this duration.",
+						Type:        "string",
+						Examples:    []any{"2d", "12h"},
+					},
 					"providers": {
 						Description: "Concrete provider candidates for this logical tool, in priority order.",
 						Type:        "array",
@@ -461,6 +352,12 @@ func buildWithID(id string) *schema {
 						MinLength:   1,
 						Examples:    []any{"ripgrep", "typescript"},
 					},
+					"bin": {
+						Description: "Executable name this candidate installs, when it differs from the logical tool name.",
+						Type:        "string",
+						MinLength:   1,
+						Examples:    []any{"rg"},
+					},
 					"options": {
 						Description:          "Provider-specific install options (key-value pairs).",
 						Type:                 "object",
@@ -477,6 +374,52 @@ func buildWithID(id string) *schema {
 					"bin_dir": {
 						Description: "Optional binary directory override for recipe-backed script installs.",
 						Type:        "string",
+					},
+				},
+				AdditionalProperties: false,
+			},
+			"ProviderEntry": {
+				Description: "A provider installed during bootstrap, before the rest of a sync.",
+				Type:        "object",
+				Required:    []string{"name", "provider"},
+				Properties: map[string]*schema{
+					"name": {
+						Description: "Provider or manager being bootstrapped.",
+						Type:        "string",
+						MinLength:   1,
+						Examples:    []any{"brew"},
+					},
+					"provider": {
+						Description: "Concrete provider or manager used to install it.",
+						Type:        "string",
+						Enum:        providerNames,
+						Examples:    []any{"script"},
+					},
+					"package": {
+						Description: "Package identifier passed to the provider. Defaults to the entry name.",
+						Type:        "string",
+						MinLength:   1,
+					},
+					"install_with": {
+						Description: "Legacy concrete provider or manager pin accepted for migration.",
+						Type:        "string",
+						Enum:        installWithNames,
+						Examples:    firstNAny(installWithExamples, 1),
+					},
+					"options": {
+						Description:          "Provider-specific install options (key-value pairs).",
+						Type:                 "object",
+						AdditionalProperties: &schema{Type: "string"},
+					},
+					"variants": {
+						Description: "Alternate install candidates tried in config order when the default provider is unavailable.",
+						Type:        "array",
+						Items:       ref("#/$defs/ToolInstallSpec"),
+					},
+					"hosts": {
+						Description:          "Strict hostname-specific install overrides keyed by full or short hostname.",
+						Type:                 "object",
+						AdditionalProperties: ref("#/$defs/ToolInstallSpec"),
 					},
 				},
 				AdditionalProperties: false,
@@ -598,10 +541,38 @@ func buildWithID(id string) *schema {
 						Description: "Checksum to verify the matched release asset when confidently known.",
 						Type:        "string",
 					},
+					"checksum_asset_id": {
+						Description: "Release asset the recorded checksum was taken from. A rotated asset re-verifies from the release checksums file.",
+						Type:        "string",
+					},
+					"release_id": {
+						Description: "Resolved GitHub release identifier recorded at install time.",
+						Type:        "string",
+					},
 					"tag_name": {
 						Description: "Pinned GitHub release tag (e.g. v0.62.2). Omit to use latest.",
 						Type:        "string",
 						Examples:    []any{"v0.62.2"},
+					},
+					"published_at": {
+						Description: "Publication timestamp of the resolved release, recorded at install time.",
+						Type:        "string",
+					},
+					"asset_id": {
+						Description: "Resolved release asset identifier recorded at install time.",
+						Type:        "string",
+					},
+					"asset_name": {
+						Description: "Resolved release asset filename recorded at install time.",
+						Type:        "string",
+					},
+					"asset_download_url": {
+						Description: "Resolved release asset download URL recorded at install time.",
+						Type:        "string",
+					},
+					"installed_version": {
+						Description: "Normalized version recorded at install time. Upgrade detection uses it rather than published_at alone.",
+						Type:        "string",
 					},
 				},
 				AdditionalProperties: false,
@@ -701,6 +672,12 @@ func buildWithID(id string) *schema {
 						Items:       &schema{Type: "string", MinLength: 1},
 						Examples:    []any{[]any{"*.local", "secrets/"}},
 					},
+					"on_conflict": {
+						Description: "How sync resolves a conflict between the repo copy and local content. Omit for manual resolution (sync errors on conflict).",
+						Type:        "string",
+						Enum:        []any{"use_repo", "use_local"},
+						Examples:    []any{"use_repo"},
+					},
 				},
 				AdditionalProperties: false,
 			},
@@ -709,7 +686,7 @@ func buildWithID(id string) *schema {
 				Type:        "object",
 				Properties: map[string]*schema{
 					"packages": {
-						Description: "Skill package sources restored via the upstream skills CLI.",
+						Description: "Skill package sources restored by Omni.",
 						Type:        "array",
 						Items:       ref("#/$defs/SkillPackage"),
 					},
@@ -728,17 +705,53 @@ func buildWithID(id string) *schema {
 						Type:        "array",
 						Items:       ref("#/$defs/Plugin"),
 					},
+					"skills": {
+						Description: "Legacy per-skill manifest. Accepted for one-time migration into packages and never written back.",
+						Type:        "array",
+						Items:       ref("#/$defs/ManifestSkill"),
+					},
 					"ignore": ref("#/$defs/AgentsIgnore"),
 				},
 				AdditionalProperties: false,
 			},
+			"ManifestSkill": {
+				Description: "Legacy single-skill manifest entry, migrated into agents.packages on load.",
+				Type:        "object",
+				Required:    []string{"name", "source"},
+				Properties: map[string]*schema{
+					"name": {
+						Description: "Skill name.",
+						Type:        "string",
+						MinLength:   1,
+					},
+					"source": {
+						Description: "Git repository, well-known HTTP catalog, or local directory locator.",
+						Type:        "string",
+						MinLength:   1,
+					},
+					"ref": {
+						Description: "Git ref (branch, tag, or commit) to install from.",
+						Type:        "string",
+					},
+					"skill_path": {
+						Description: "Path to the skill directory inside the source.",
+						Type:        "string",
+					},
+					"agents": {
+						Description: "Target agent IDs for this skill. Empty means all configured agents.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
+					},
+				},
+				AdditionalProperties: false,
+			},
 			"SkillPackage": {
-				Description: "A source repo of agent skills, tracked as one unit.",
+				Description: "A source of one or more agent skills.",
 				Type:        "object",
 				Required:    []string{"source"},
 				Properties: map[string]*schema{
 					"source": {
-						Description: "Skill package repository source (owner/repo or URL).",
+						Description: "Git repository, well-known HTTP catalog, or local directory locator.",
 						Type:        "string",
 						MinLength:   1,
 						Examples:    []any{"vercel-labs/agent-skills"},
@@ -746,6 +759,12 @@ func buildWithID(id string) *schema {
 					"ref": {
 						Description: "Git ref (branch, tag, or commit) to install from. Defaults to the package's default branch.",
 						Type:        "string",
+					},
+					"skills": {
+						Description: "Skill names selected from this source. Omitted means every discovered skill.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
+						Examples:    []any{[]any{"review", "test"}},
 					},
 					"agents": {
 						Description: "Target agent IDs for this package. Empty means all configured agents.",
@@ -890,6 +909,142 @@ func buildWithID(id string) *schema {
 				},
 				AdditionalProperties: false,
 			},
+		},
+	}
+}
+
+// Global settings and host_settings share config.Settings keys but use scope-specific descriptions.
+func settingsProperties(host bool, ecosystemNames, systemPriority []any) map[string]*schema {
+	scoped := func(global, perHost string) string {
+		if host {
+			return perHost
+		}
+		return global
+	}
+	ecosystems := &schema{
+		Description: scoped(
+			"Legacy provider-family settings for system, node, and python. New config should prefer provider_priority and tool providers[].",
+			"Legacy host-specific provider-family manager and priority overrides.",
+		),
+		Type: "object",
+		Properties: map[string]*schema{
+			provider.EcosystemSystem: ref("#/$defs/EcosystemSettings"),
+			provider.EcosystemNode:   ref("#/$defs/EcosystemSettings"),
+			provider.EcosystemPython: ref("#/$defs/EcosystemSettings"),
+		},
+		AdditionalProperties: ref("#/$defs/EcosystemSettings"),
+	}
+	if !host {
+		ecosystems.Examples = []any{map[string]any{
+			provider.EcosystemSystem: map[string]any{"priority": systemPriority},
+			provider.EcosystemNode:   map[string]any{"manager": firstString(provider.BuiltinManagerNames(provider.EcosystemNode))},
+			provider.EcosystemPython: map[string]any{"manager": firstString(provider.BuiltinManagerNames(provider.EcosystemPython))},
+		}}
+	}
+	return map[string]*schema{
+		"auto_import": {
+			Description: scoped(
+				"Add newly discovered installed tools to the config on every sync.",
+				"Ignored per host: auto-import is resolved from the global settings scope only.",
+			),
+			Type:    "boolean",
+			Default: false,
+		},
+		"update_quarantine": {
+			Description: "Defer updates until the reported availability timestamp is older than this duration.",
+			Type:        "string",
+			Examples:    []any{"2d", "12h"},
+		},
+		"provider_update_quarantine": {
+			Description:          "Per-provider update_quarantine overrides keyed by provider or manager name. Concrete names win over provider families.",
+			Type:                 "object",
+			AdditionalProperties: &schema{Type: "string"},
+			Examples:             []any{map[string]any{"brew": "7d", "npm": "0"}},
+		},
+		"ecosystems": ecosystems,
+		"fallback_bin_dir": {
+			Description: scoped(
+				"Default directory for fallback-installed binaries. Omni warns when this directory is not on PATH.",
+				"Host-specific directory for fallback-installed binaries.",
+			),
+			Type:     "string",
+			Examples: []any{"~/.local/share/omni/fallback/bin"},
+		},
+		"dots_repo": {
+			Description: scoped(
+				"Per-machine path to the dotfiles git repository (~ is expanded).",
+				"Host-specific path to the dotfiles git repository.",
+			),
+			Type:     "string",
+			Examples: []any{"~/Dev/dotfiles", "~/.dotfiles"},
+		},
+		"dots_disabled": {
+			Description: scoped(
+				"Disable dotfile sync for this settings scope.",
+				"Whether dotfile sync is disabled on this host.",
+			),
+			Type: "boolean",
+		},
+		"agents_disabled": {
+			Description: scoped(
+				"Master switch: disable the agent skills/mcp/plugins features for this settings scope.",
+				"Master switch: whether the agent skills/mcp/plugins features are disabled on this host.",
+			),
+			Type: "boolean",
+		},
+		"skills_disabled": {
+			Description: scoped(
+				"Disable the agent skills feature for this settings scope.",
+				"Whether the agent skills feature is disabled on this host.",
+			),
+			Type: "boolean",
+		},
+		"mcp_disabled": {
+			Description: scoped(
+				"Disable the agent mcp feature for this settings scope.",
+				"Whether the agent mcp feature is disabled on this host.",
+			),
+			Type: "boolean",
+		},
+		"plugins_disabled": {
+			Description: scoped(
+				"Disable the agent plugins feature for this settings scope.",
+				"Whether the agent plugins feature is disabled on this host.",
+			),
+			Type: "boolean",
+		},
+		"agents_use": {
+			Description: scoped(
+				"Agent identifiers omni manages. Omit to manage every detected agent.",
+				"Agent identifiers managed on this host. Omit to inherit the global list; an explicit empty list disables all agents here.",
+			),
+			Type:     "array",
+			Items:    &schema{Type: "string", MinLength: 1},
+			Examples: []any{[]any{"claude-code", "codex"}},
+		},
+		"dots_git": ref("#/$defs/DotsGitConfig"),
+		"disabled_providers": {
+			Description: scoped(
+				"Provider family names disabled for this settings scope.",
+				"Provider family names disabled on this host.",
+			),
+			Type:     "array",
+			Items:    &schema{Type: "string", MinLength: 1},
+			Examples: []any{ecosystemNames},
+		},
+		"provider_priority": {
+			Description: scoped(
+				"Ordered concrete provider/manager priority applied when a tool does not pin one.",
+				"Host-specific ordered concrete provider/manager priority.",
+			),
+			Type:     "array",
+			Items:    &schema{Type: "string", MinLength: 1},
+			Examples: []any{systemPriority},
+		},
+		"providers": {
+			Description: "Bootstrap providers installed before the rest of a sync, in list order.",
+			Type:        "array",
+			Items:       ref("#/$defs/ProviderEntry"),
 		},
 	}
 }

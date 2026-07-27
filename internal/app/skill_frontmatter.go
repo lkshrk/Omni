@@ -6,8 +6,7 @@ import (
 	"strings"
 )
 
-// skillDescription reads the description field from a skill's SKILL.md YAML
-// frontmatter. Returns "" on any read or parse failure.
+// Returns an empty string on any read or parse failure.
 func skillDescription(home, skillName string) string {
 	path := filepath.Join(home, ".agents", "skills", skillName, "SKILL.md")
 	data, err := os.ReadFile(path)
@@ -17,10 +16,7 @@ func skillDescription(home, skillName string) string {
 	return parseFrontmatterDescription(string(data))
 }
 
-// parseFrontmatterDescription extracts the "description:" value from YAML
-// frontmatter delimited by "---" lines at the start of content. Supports two
-// shapes: a block scalar ("description: |", followed by indented lines) and
-// a single-line quoted or bare scalar.
+// Supports a block scalar and a single-line quoted or bare scalar.
 func parseFrontmatterDescription(content string) string {
 	lines := strings.Split(content, "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
@@ -61,10 +57,7 @@ func parseFrontmatterDescription(content string) string {
 	return ""
 }
 
-// parseBlockScalar collects the indented lines following a "description: |"
-// key (at frontmatterIdx within the frontmatter slice, indented keyIndent
-// spaces), joining them with spaces until a line at or below keyIndent ends
-// the block.
+// Collects indented lines until one at or below keyIndent ends the block.
 func parseBlockScalar(frontmatter []string, keyLineIdx, keyIndent int) string {
 	var parts []string
 	for i := keyLineIdx + 1; i < len(frontmatter); i++ {

@@ -3,19 +3,20 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/provider"
 )
 
-// doInstall installs a single tool.
 func (m *Model) doInstall(name, prov string, ch chan progressUpdate, gen int) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	ctx = withLiveOutput(ctx, ch, gen)
-	return func() tea.Msg {
+	return m.stampGate(func() tea.Msg {
 		if ch != nil {
 			defer close(ch)
 		}
@@ -32,7 +33,7 @@ func (m *Model) doInstall(name, prov string, ch chan progressUpdate, gen int) te
 			toolMemberships:      result.State.ToolMemberships,
 			hostInfo:             result.State.HostInfo,
 		}
-	}
+	})
 }
 
 func installToolWithState(ctx context.Context, a *app.App, name, prov string) (*app.ToolGroupMutationState, error) {
@@ -46,10 +47,9 @@ func installToolWithState(ctx context.Context, a *app.App, name, prov string) (*
 	return result, err
 }
 
-// doDelete deletes a single tool.
 func (m *Model) doDelete(name, prov string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
-	return func() tea.Msg {
+	return m.stampGate(func() tea.Msg {
 		result, err := a.UninstallWithState(ctx, name, prov)
 		if err != nil {
 			return opCompleteMsg{err: err}
@@ -64,14 +64,13 @@ func (m *Model) doDelete(name, prov string) tea.Cmd {
 			toolMemberships:      result.State.ToolMemberships,
 			hostInfo:             result.State.HostInfo,
 		}
-	}
+	})
 }
 
-// doDeleteFromConfig deletes a missing tool from settings.json without
-// calling a package manager.
+// Deletes from settings.json without calling a package manager.
 func (m *Model) doDeleteFromConfig(name, prov string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
-	return func() tea.Msg {
+	return m.stampGate(func() tea.Msg {
 		result, err := a.RemoveToolFromConfigWithState(ctx, name, prov)
 		if err != nil {
 			return opCompleteMsg{err: err}
@@ -84,15 +83,14 @@ func (m *Model) doDeleteFromConfig(name, prov string) tea.Cmd {
 			toolMemberships: result.State.ToolMemberships,
 			hostInfo:        result.State.HostInfo,
 		}
-	}
+	})
 }
 
-// doUpgrade upgrades a single tool.
 func (m *Model) doUpgrade(name, prov string, ch chan progressUpdate, gen int) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	ctx = withLiveOutput(ctx, ch, gen)
 	uk := toolKey(name, prov)
-	return func() tea.Msg {
+	return m.stampGate(func() tea.Msg {
 		if ch != nil {
 			defer close(ch)
 		}
@@ -109,12 +107,10 @@ func (m *Model) doUpgrade(name, prov string, ch chan progressUpdate, gen int) te
 			toolMemberships: result.State.ToolMemberships,
 			hostInfo:        result.State.HostInfo,
 		}
-	}
+	})
 }
 
-// cancelSearch cancels any in-flight provider search HTTP request.
-// Callers are responsible for incrementing searchGen to invalidate pending
-// debounced messages.
+// Callers must increment searchGen to invalidate pending debounced messages.
 func (m *Model) cancelSearch() {
 	if m.searchCancel != nil {
 		m.searchCancel()
@@ -122,9 +118,7 @@ func (m *Model) cancelSearch() {
 	}
 }
 
-// startSearch cancels any in-flight search, increments the generation counter,
-// sets the searching flag, and returns the commands needed to run doSearch.
-// It is the single entry point for triggering a provider search.
+// The single entry point for triggering a provider search.
 func (m *Model) startSearch(query string) []tea.Cmd {
 	if m.searchCancel != nil {
 		m.searchCancel()
@@ -136,9 +130,7 @@ func (m *Model) startSearch(query string) []tea.Cmd {
 	return []tea.Cmd{m.spinner.Tick, m.doSearch(ctx, query, m.searchGen)}
 }
 
-// debounceSearch returns a command that sleeps for the debounce delay and then
-// emits debouncedSearchMsg. When the user types faster than the delay, the
-// generation counter will have advanced and the stale message is dropped.
+// When the user types faster than the delay, the generation counter has advanced and the stale message is dropped.
 func debounceSearch(query string, gen int) tea.Cmd {
 	return func() tea.Msg {
 		time.Sleep(300 * time.Millisecond)
@@ -146,20 +138,26 @@ func debounceSearch(query string, gen int) tea.Cmd {
 	}
 }
 
-// doSearch runs a provider search within ctx and returns searchResultsMsg.
-// If ctx is cancelled before the search completes, nil is returned so that
-// Bubbletea dispatches no message and the spinner is cleared by the next
-// startSearch call instead.
+// Returns nil if ctx is cancelled first, so Bubbletea dispatches no message and the next startSearch clears the spinner.
 func (m *Model) doSearch(ctx context.Context, query string, gen int) tea.Cmd {
 	a := m.app
-	// Pass the active provider pill as a filter so the network call is scoped
-	// to the selected provider rather than fanning out to all providers.
+	// Scope the network call to the selected provider rather than fanning out to all providers.
 	providerFilter := m.currentSearchProviderFilter()
 	return func() tea.Msg {
-		results, err := a.SearchForDisplay(ctx, query, providerFilter)
+		found := make(chan []provider.SearchResult, 1)
+		err := runBounded(ctx, searchTimeout, nil, func(searchCtx context.Context) error {
+			hits, err := a.SearchForDisplay(searchCtx, query, providerFilter)
+			found <- hits
+			return err
+		})
 		if ctx.Err() != nil {
 			return nil // cancelled — next search (or Esc) owns the searching flag
 		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			// Unlike cancellation there is no successor search to clear the spinner, so a timeout must report itself.
+			return searchResultsMsg{gen: gen, query: query, providerFilter: providerFilter, err: fmt.Errorf("search timed out after %s", searchTimeout)}
+		}
+		results := <-found
 		tools := make([]*app.ToolView, 0, len(results))
 		for _, r := range results {
 			t := &app.ToolView{

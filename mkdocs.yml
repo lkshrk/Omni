@@ -35,6 +35,10 @@ theme:
         icon: material/weather-sunny
         name: Switch to light mode
 
+validation:
+  anchors: warn
+  unrecognized_links: warn
+
 plugins:
   - search
 
@@ -66,6 +70,7 @@ nav:
       - Providers: providers.md
       - Tools: tools.md
       - Dotfiles: dotfiles.md
+      - Upgrading From CLI-Managed Skills: migrating-skills.md
       - TUI: tui.md
   - Reference:
       - CLI Reference: cli.md

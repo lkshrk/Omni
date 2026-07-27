@@ -1,10 +1,6 @@
 package database_test
 
-// ─── Error-path coverage ──────────────────────────────────────────────────────
-//
-// These tests exercise the error-return branches of DB methods by closing the
-// underlying connection before calling the method. A closed SQLite connection
-// causes every statement to return an error, hitting the fmt.Errorf return paths.
+// Error-return branches are reached by closing the connection first: every statement then fails.
 
 import (
 	"context"
@@ -14,13 +10,10 @@ import (
 	"github.com/lkshrk/omni/internal/database"
 )
 
-// zeroCutoff returns a zero time.Time value for use as a PruneDiscovered cutoff.
 func zeroCutoff() time.Time {
 	return time.Time{}
 }
 
-// closedDB returns a DB whose underlying connection is already closed.
-// All operations on it will return an error, which exercises error-return paths.
 func closedDB(t *testing.T) *database.DB {
 	t.Helper()
 	db, err := database.Open(":memory:")
@@ -30,7 +23,6 @@ func closedDB(t *testing.T) *database.DB {
 	if err := db.Migrate(context.Background()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	// Close the connection — subsequent calls will fail.
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}

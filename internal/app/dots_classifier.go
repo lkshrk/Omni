@@ -128,9 +128,7 @@ func DotStatusVariantEligible(status DotStatus) bool {
 	}
 	switch state {
 	case dots.StateInactive, dots.StateDisabled:
-		// Inactive/disabled entries belong to another host or are turned off, so
-		// a "this host" variant is contradictory. Ignored entries are still
-		// configured and can carry a host variant.
+		// Inactive or disabled entries belong to another host; ignored entries are still configured and can carry a variant.
 		return false
 	default:
 		return true

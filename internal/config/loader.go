@@ -13,14 +13,9 @@ import (
 	"github.com/lkshrk/omni/internal/testguard"
 )
 
-// atomicWrite writes data to path using a unique temp file + rename so partial
-// writes never corrupt an existing config. Each call gets its own temp name,
-// so concurrent callers for the same path do not collide on the temp file.
+// Each call gets its own temp name so concurrent callers for the same path do not collide.
 func atomicWrite(path string, data []byte) error {
-	// Skip the write when the on-disk content already matches. Every launch
-	// re-normalizes and routes the config; without this, a byte-identical
-	// result would still rename a fresh temp file over the target, bumping its
-	// mtime each time and churning downstream dotfile sync.
+	// Every launch re-normalizes the config; renaming an identical result would churn mtime and downstream dotfile sync.
 	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, data) {
 		return nil
 	}
@@ -28,8 +23,7 @@ func atomicWrite(path string, data []byte) error {
 		return err
 	}
 	dir := filepath.Dir(path)
-	// 0o700: settings.json holds host mappings and per-tool install pins;
-	// no need for other local users to read this on shared machines.
+	// 0o700: settings.json holds host mappings and install pins other local users need not read.
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
@@ -99,21 +93,12 @@ func resolveConfigWritePath(path string) (string, error) {
 
 const schemaBaseURL = "https://raw.githubusercontent.com/lkshrk/omni/main/spec"
 
-// SchemaURL is the canonical URL to the published JSON Schema for the current
-// settings.json format. It is injected as "$schema" on every write so editors
-// can provide validation and auto-complete without any additional setup.
 var SchemaURL = SchemaURLForVersion(CurrentVersion)
 
-// SchemaURLForVersion returns the canonical JSON Schema URL for a settings.json
-// format version.
 func SchemaURLForVersion(version int) string {
 	return fmt.Sprintf("%s/omni.settings.v%d.schema.json", schemaBaseURL, version)
 }
 
-// DefaultConfigPath returns the path to settings.json using this priority:
-//  1. $OMNI_CONFIG — explicit override (full file path)
-//  2. $XDG_CONFIG_HOME/omni/settings.json — XDG base dir spec
-//  3. $HOME/.config/omni/settings.json — fallback
 func DefaultConfigPath() (string, error) {
 	if p := os.Getenv("OMNI_CONFIG"); p != "" {
 		if err := testguard.RequireTempPath("OMNI_CONFIG", p); err != nil {
@@ -136,12 +121,7 @@ func DefaultConfigPath() (string, error) {
 	return path, nil
 }
 
-// DefaultCacheDir returns the omni cache directory using this priority:
-//  1. $OMNI_CACHE_DIR — explicit override
-//  2. $XDG_CACHE_HOME/omni — XDG base dir spec
-//  3. $HOME/.cache/omni — fallback
-//
-// The SQLite database and other derived/transient state live here.
+// DefaultCacheDir — The SQLite database and other derived/transient state live here.
 func DefaultCacheDir() (string, error) {
 	if dir := os.Getenv("OMNI_CACHE_DIR"); dir != "" {
 		if err := testguard.RequireTempPath("OMNI_CACHE_DIR", dir); err != nil {
@@ -164,8 +144,7 @@ func DefaultCacheDir() (string, error) {
 	return path, nil
 }
 
-// Load reads, parses, and normalizes settings.json at path.
-// Returns an empty RootConfig (no error) when the file does not exist.
+// Load — Returns an empty RootConfig and no error when the file does not exist.
 func Load(path string) (*RootConfig, error) {
 	cfg, _, err := load(path, true)
 	return cfg, err
@@ -201,9 +180,7 @@ func load(path string, normalize bool) (*RootConfig, bool, error) {
 	return &cfg, migrated, nil
 }
 
-// Migrate updates cfg in place from older settings.json formats to the current
-// in-memory representation. Future versions are rejected so older binaries do
-// not accidentally rewrite configs they cannot understand.
+// Migrate — Future versions are rejected so older binaries never rewrite configs they cannot understand.
 func Migrate(cfg *RootConfig) (bool, error) {
 	if cfg == nil {
 		return false, nil
@@ -273,6 +250,7 @@ var configMigrations = []configMigration{
 	{from: 16, to: 17, apply: migrateConfigV16ToV17, applyRaw: migrateRawConfigV16ToV17},
 	{from: 17, to: 18, apply: migrateConfigV17ToV18, applyRaw: migrateRawConfigV17ToV18},
 	{from: 18, to: 19, apply: migrateConfigV18ToV19, applyRaw: migrateRawConfigV18ToV19},
+	{from: 19, to: 20, apply: migrateConfigV19ToV20, applyRaw: migrateRawConfigV19ToV20},
 }
 
 func configMigrationFrom(version int) (configMigration, bool) {
@@ -460,15 +438,11 @@ func normalizeConcreteProvider(provider string) string {
 	}
 }
 
-// NormalizeConcreteProvider canonicalizes a concrete provider/manager name for
-// persisted config: meta-provider families ("system"/"node"/"python") and empty
-// strings return "", and "pip3" collapses to "pip". Other names pass through.
+// NormalizeConcreteProvider — Meta-provider families and empty strings canonicalize to ""; "pip3" collapses to "pip"; other names pass through.
 func NormalizeConcreteProvider(provider string) string {
 	return normalizeConcreteProvider(provider)
 }
 
-// Normalize sorts order-insensitive config collections in place.
-// Returns true when it changed cfg.
 func Normalize(cfg *RootConfig) bool {
 	if cfg == nil {
 		return false
@@ -493,8 +467,7 @@ func Normalize(cfg *RootConfig) bool {
 	return changed
 }
 
-// NormalizeFile normalizes the persisted config when it exists.
-// Unknown top-level keys are preserved.
+// NormalizeFile — An explicit repair action, never a load step: calling it on a read path makes reporting commands rewrite the config they report on.
 func NormalizeFile(path string) (bool, error) {
 	cfg, migrated, err := load(path, false)
 	if err != nil {
@@ -538,23 +511,7 @@ func groupBaseName(g *GroupConfig) string {
 	return g.BaseName()
 }
 
-// Patch reads the JSON at path, merges the top-level keys from patch
-// into it, and writes the result back atomically.
-//
-// patch must be a value that marshals to a JSON object (struct or map).
-// Only the top-level keys present in the marshaled patch are updated;
-// every other key already in the file is preserved unchanged.
-//
-// This is useful when you want to update a single section (e.g. "settings")
-// without touching unrelated sections (e.g. "groups").
-//
-// If the file does not exist, Patch creates it with only the patch keys.
-// A patch entry whose value is JSON null deletes that top-level key.
-//
-// Patch is include-blind: it writes into path only, so a key that lives in an
-// $include fragment is duplicated into the main file and resurrects on the next
-// load. Prefer WriteConfig (or PatchRouted) for any real settings edit; Patch
-// remains only for single-file callers and test fixtures.
+// Patch — Merges top-level keys only (a JSON null value deletes a key) and is include-blind, so keys owned by an $include fragment get duplicated into path — prefer WriteConfig or PatchRouted for real edits.
 func Patch(path string, patch interface{}) error {
 	patchData, err := json.Marshal(patch)
 	if err != nil {
@@ -567,12 +524,7 @@ func Patch(path string, patch interface{}) error {
 	return PatchRaw(path, patchMap)
 }
 
-// PatchRouted is the routed form of Patch: it merges the top-level keys from
-// patch into path, but writes each key to the file that owns it across the
-// $include chain instead of inlining everything into the main file. Use this
-// whenever the patch value is a full merged section (for example the groups
-// list after loading includes), so included fragments are not resurrected into
-// the parent settings.json. With no $include chain it behaves exactly like Patch.
+// PatchRouted — Routed form of Patch: each top-level key is written to the file that owns it across the $include chain, so fragments are not resurrected into the parent.
 func PatchRouted(path string, patch interface{}) error {
 	patchData, err := json.Marshal(patch)
 	if err != nil {
@@ -585,8 +537,7 @@ func PatchRouted(path string, patch interface{}) error {
 	return PatchRawRouted(path, patchMap)
 }
 
-// PatchRaw is the lower-level form of Patch that accepts an already-decoded
-// top-level key map. A value of JSON null deletes that key from the file.
+// PatchRaw — Lower-level Patch taking an already-decoded key map; a JSON null value deletes that key.
 func PatchRaw(path string, patch map[string]json.RawMessage) error {
 	if err := testguard.RequireTempPath("config patch", path); err != nil {
 		return err
@@ -650,9 +601,7 @@ func PatchRaw(path string, patch map[string]json.RawMessage) error {
 	return atomicWrite(path, buf.Bytes())
 }
 
-// ToolSource returns the file whose tool definition wins after resolving
-// $include entries. Included files are merged after their parent, so the last
-// matching definition is the effective one.
+// ToolSource — Included files merge after their parent, so the last matching definition is the effective one.
 func ToolSource(path, name string) (string, error) {
 	if strings.TrimSpace(name) == "" {
 		return "", fmt.Errorf("tool name is required")
@@ -717,8 +666,7 @@ func toolSource(path, name string, stack *includePathStack) (string, bool, error
 	return source, found, nil
 }
 
-// PatchTool updates exactly one tool definition in the file that owns it,
-// preserving sibling tool definitions and include layout.
+// PatchTool — Writes into the file that owns the tool, preserving sibling definitions and include layout.
 func PatchTool(path, name string, mutate func(*ToolSpec) error) error {
 	source, err := ToolSource(path, name)
 	if err != nil {
@@ -810,15 +758,7 @@ func unmarshalJSONObject(data []byte, dst any) error {
 	return json.Unmarshal(data, dst)
 }
 
-// Save marshals cfg to JSON and writes it atomically to path.
-// Creates parent directories if they do not exist.
-//
-// Save is a whole-file, include-blind replace: it emits the entire RootConfig
-// into path and does not honor the $include chain. Use it only to materialize a
-// fresh file (init) or overwrite one wholesale (import). To edit settings in
-// place, use WriteConfig, which routes each changed key to its owning fragment.
-// Output is indented for human readability.
-// The "$schema" field is always stamped with SchemaURL on write.
+// Save — Whole-file, include-blind replace: use it only to materialize a fresh file (init) or overwrite one wholesale (import), never to edit settings in place.
 func Save(path string, cfg *RootConfig) error {
 	// Stamp schema URL without mutating the caller's struct.
 	stamped := normalizedCopy(cfg)
@@ -833,7 +773,7 @@ func Save(path string, cfg *RootConfig) error {
 	if err != nil {
 		return fmt.Errorf("encoding config: %w", err)
 	}
-	data = append(data, '\n') // trailing newline
+	data = append(data, '\n')
 	return atomicWrite(path, data)
 }
 
@@ -863,6 +803,7 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 	out.Settings = cloneSettings(cfg.Settings)
 	out.Agents.Packages = append([]SkillPackage(nil), cfg.Agents.Packages...)
 	for i := range out.Agents.Packages {
+		out.Agents.Packages[i].Skills = append([]string(nil), out.Agents.Packages[i].Skills...)
 		out.Agents.Packages[i].Agents = append([]string(nil), out.Agents.Packages[i].Agents...)
 	}
 	out.Groups = make([]*GroupConfig, 0, len(cfg.Groups))
@@ -1039,10 +980,7 @@ func migrateRawConfigV12ToV13(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// migrateConfigV14ToV15 is a no-op data migration: v15 only adds
-// GroupConfig.Marketplaces (a new omitempty field with no prior form to
-// convert), matching how v11->v12 handled the field addition in the same
-// commit that also raised CurrentVersion.
+// No-op: v15 only adds GroupConfig.Marketplaces, an omitempty field with no prior form to convert.
 func migrateConfigV14ToV15(cfg *RootConfig) error {
 	cfg.Version = 15
 	return nil
@@ -1053,10 +991,7 @@ func migrateRawConfigV14ToV15(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// migrateConfigV15ToV16 is a no-op data migration: v16 only adds
-// AgentsIgnore.Marketplaces (a new omitempty field with no prior form to
-// convert), matching how v14->v15 handled the field addition in the same
-// commit that also raised CurrentVersion.
+// No-op: v16 only adds AgentsIgnore.Marketplaces, an omitempty field with no prior form to convert.
 func migrateConfigV15ToV16(cfg *RootConfig) error {
 	cfg.Version = 16
 	return nil
@@ -1067,8 +1002,7 @@ func migrateRawConfigV15ToV16(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// migrateConfigV16ToV17 is a no-op data migration: v17 only adds optional
-// ToolInstallSpec source/recipe/bin_dir fields and $include support.
+// No-op: v17 only adds optional ToolInstallSpec source/recipe/bin_dir fields and $include support.
 func migrateConfigV16ToV17(cfg *RootConfig) error {
 	cfg.Version = 17
 	return nil
@@ -1079,8 +1013,7 @@ func migrateRawConfigV16ToV17(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// migrateConfigV17ToV18 is a no-op data migration: v18 adds cargo to the
-// provider enums without changing persisted config shape.
+// No-op: v18 adds cargo to the provider enums without changing persisted config shape.
 func migrateConfigV17ToV18(cfg *RootConfig) error {
 	cfg.Version = 18
 	return nil
@@ -1091,8 +1024,7 @@ func migrateRawConfigV17ToV18(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// migrateConfigV18ToV19 is a no-op data migration: v19 adds optional
-// McpServer headers for remote transports.
+// No-op: v19 adds optional McpServer headers for remote transports.
 func migrateConfigV18ToV19(cfg *RootConfig) error {
 	cfg.Version = 19
 	return nil
@@ -1100,6 +1032,17 @@ func migrateConfigV18ToV19(cfg *RootConfig) error {
 
 func migrateRawConfigV18ToV19(raw map[string]json.RawMessage) error {
 	raw["version"] = json.RawMessage(`19`)
+	return nil
+}
+
+// No-op: v20 adds optional skill selectors to agents.packages; missing selectors keep the all-skills behavior.
+func migrateConfigV19ToV20(cfg *RootConfig) error {
+	cfg.Version = 20
+	return nil
+}
+
+func migrateRawConfigV19ToV20(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`20`)
 	return nil
 }
 

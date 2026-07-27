@@ -5,10 +5,6 @@ import (
 	"strings"
 )
 
-// CommitMessageFromStatus generates a short commit message from the output of
-// "git status --short". It extracts unique top-level path segments (e.g.
-// "nvim", "zshrc") and formats them as "dots: update nvim, zshrc" or
-// "dots: update nvim, zshrc + N more".
 func CommitMessageFromStatus(status string) string {
 	if strings.TrimSpace(status) == "" {
 		return "dots: update"
@@ -24,7 +20,6 @@ func CommitMessageFromStatus(status string) string {
 		if idx := strings.Index(path, " -> "); idx >= 0 {
 			path = path[idx+4:]
 		}
-		// Take only the first path segment.
 		seg := strings.SplitN(path, "/", 2)[0]
 		seg = strings.TrimPrefix(seg, ".")
 		if seg == "" || seen[seg] {

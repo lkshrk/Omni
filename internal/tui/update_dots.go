@@ -455,8 +455,7 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 
 func dotsVariantEligible(row dotsVisibleRow) bool {
 	if row.isChild {
-		// A tracked child sub-path becomes a variant by first being extracted
-		// into its own entry, so variant eligibility mirrors extractability.
+		// A tracked child sub-path becomes a variant by first being extracted into its own entry, so variant eligibility mirrors extractability.
 		return dotsChildExtractable(row)
 	}
 	return app.DotStatusVariantEligible(row.entry)
@@ -472,8 +471,7 @@ func (m *Model) handleDotsVariantKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
 		return cmds
 	}
 	mode := dotsVariantCreate
-	// Child rows always create: they extract a fresh entry that cannot yet have
-	// an existing host variant, so skip the parent-entry active-variant probe.
+	// Child rows extract a fresh entry that cannot yet have an existing host variant, so skip the parent-entry active-variant probe.
 	if !row.isChild && !app.DotStatusTransientCandidate(row.entry) {
 		hasActiveVariant, err := m.app.DotsHasActiveHostVariant(row.entry.Name)
 		if err != nil {
@@ -627,9 +625,7 @@ func (m *Model) openDotGroupMembershipPicker(visible []dotsVisibleRow) {
 	m.pickerOriginalGroups = append([]string(nil), m.dotMemberships[name]...)
 }
 
-// openDotChildExtractPicker opens the same group popup for a child sub-path row.
-// Confirming extracts the subtree into a new entry assigned to the picked
-// groups, letting a subdir live in a different group than its parent.
+// Confirming extracts the subtree into a new entry, letting a subdir live in a different group than its parent.
 func (m *Model) openDotChildExtractPicker(row dotsVisibleRow) {
 	if !dotsChildExtractable(row) {
 		return
@@ -651,8 +647,6 @@ func (m *Model) openDotChildExtractPicker(row dotsVisibleRow) {
 	m.dotMemberships[childName] = nil
 }
 
-// dotsChildExtractable reports whether a child row names a real managed subpath
-// that can be split into its own entry.
 func dotsChildExtractable(row dotsVisibleRow) bool {
 	if !row.isChild || row.child.Ignored {
 		return false
@@ -855,8 +849,7 @@ func dotsRowIsResolvableChild(row dotsVisibleRow) bool {
 	return row.isChild && !row.child.Ignored && strings.TrimSpace(row.child.RelPath) != "" && len(row.child.Children) == 0
 }
 
-// handleDotsForceResolveAllKeyMsg arms (first press) then runs (second press) a
-// force-resolve of every conflicting entry with the given strategy.
+// Arms on the first press, runs on the second.
 func (m *Model) handleDotsForceResolveAllKeyMsg(strategy app.DotsResolveStrategy) []tea.Cmd {
 	if m.app == nil || dotsConflictCount(*m) == 0 {
 		return nil
@@ -880,7 +873,6 @@ func (m *Model) handleDotsForceResolveAllKeyMsg(strategy app.DotsResolveStrategy
 	return []tea.Cmd{m.armConfirmationTimeout()}
 }
 
-// dotsConflictCount reports how many tracked entries are in a conflict state.
 func dotsConflictCount(m Model) int {
 	n := 0
 	for _, e := range m.dotsEntries {
@@ -948,8 +940,7 @@ func (m *Model) confirmDotsDeleteLocal(entry app.DotStatus) []tea.Cmd {
 	return []tea.Cmd{m.spinner.Tick, m.doDotsDeleteLocal(entry)}
 }
 
-// dotsChildOutOfSync reports whether a child row's effective state needs
-// attention, making parent-level repair actions meaningful from that row.
+// Makes parent-level repair actions meaningful from a child row.
 func dotsChildOutOfSync(row dotsVisibleRow) bool {
 	if !row.isChild || row.child.Ignored {
 		return false
@@ -991,8 +982,7 @@ func (m *Model) handleDotsIgnoreActionKeyMsg(visible []dotsVisibleRow) []tea.Cmd
 			cmds = append(cmds, m.spinner.Tick, m.doDotsIgnore(row.entry.Name, pattern, false))
 		} else if !row.isChild && app.DotStatusIgnored(row.entry) {
 			if len(row.entry.Children) > 0 {
-				// Merged ignored-child tree: expand to show individual children
-				// instead of toggling the entire entry.
+				// Merged ignored-child tree: expand to show individual children instead of toggling the entire entry.
 				m.dotsIgnoreIdx = -1
 				m.dotsConfirmIdx = -1
 				m.dotsOverwriteIdx = -1

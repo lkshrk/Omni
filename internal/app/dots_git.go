@@ -22,9 +22,7 @@ func (a *App) DotsPull(ctx context.Context) (ops []dots.Op, err error) {
 	return a.DotsSyncContext(suppressDotsHistory(ctx), dots.SyncOptions{})
 }
 
-// DotsPush stages all changes in the dots repo, commits, and pushes.
-// When message is empty the commit message is auto-generated from the git
-// status of the repo (e.g. "dots: update nvim, zshrc").
+// DotsPush — An empty message is auto-generated from the repo's git status.
 func (a *App) DotsPush(ctx context.Context, message string) (err error) {
 	pf, err := a.dotService().preflight()
 	if err != nil {
@@ -45,9 +43,7 @@ func (a *App) DotsPush(ctx context.Context, message string) (err error) {
 	return g.Push(ctx, message)
 }
 
-// DotsCommit stages and commits all changes in the dots repo without pushing.
-// When message is empty the commit message is auto-generated from the git
-// status of the repo (e.g. "dots: update nvim, zshrc").
+// DotsCommit — An empty message is auto-generated from the repo's git status.
 func (a *App) DotsCommit(ctx context.Context, message string) (err error) {
 	pf, err := a.dotService().preflight()
 	if err != nil {

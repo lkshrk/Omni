@@ -5,8 +5,7 @@ import (
 	"strings"
 )
 
-// MergeRootConfig deep-merges src into dst. Later fragments win on scalar and
-// map fields; groups append and dedupe by name; agent arrays merge by identity.
+// MergeRootConfig — Later fragments win on scalar and map fields; groups append and dedupe by name, agent arrays merge by identity.
 func MergeRootConfig(dst, src *RootConfig) {
 	if dst == nil || src == nil {
 		return
@@ -203,6 +202,14 @@ func mergeSkillPackages(dst, src []SkillPackage) []SkillPackage {
 			if strings.TrimSpace(dst[i].Ref) == "" {
 				dst[i].Ref = pkg.Ref
 			}
+			// An omitted selector states no opinion, so it must not silently widen an inherited one to "all skills".
+			if len(pkg.Skills) > 0 {
+				if len(dst[i].Skills) == 0 {
+					dst[i].Skills = append([]string(nil), pkg.Skills...)
+				} else {
+					dst[i].Skills = appendUniqueStrings(dst[i].Skills, pkg.Skills...)
+				}
+			}
 			dst[i].Agents = appendUniqueStrings(dst[i].Agents, pkg.Agents...)
 			continue
 		}
@@ -353,8 +360,7 @@ func appendUniqueDotEntries(dst, values []DotEntry) []DotEntry {
 	if len(values) == 0 {
 		return dst
 	}
-	// Included fragments merge after their parent, so a same-name entry from a
-	// later fragment replaces the earlier one instead of being dropped.
+	// Fragments merge after their parent, so a same-name entry replaces the earlier one instead of being dropped.
 	seen := make(map[string]int, len(dst))
 	for i, value := range dst {
 		seen[value.Name] = i
@@ -373,9 +379,7 @@ func appendUniqueDotEntries(dst, values []DotEntry) []DotEntry {
 	return dst
 }
 
-// includeMergeNotices reports duplicate definitions between dst and an
-// include fragment about to be merged, so lint can surface that the
-// fragment's definition silently wins over the parent's.
+// Lets lint surface that a fragment's definition silently wins over the parent's.
 func includeMergeNotices(dst, src *RootConfig, includeName string) []string {
 	if dst == nil || src == nil {
 		return nil

@@ -12,7 +12,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// stubExecutor implements executor.Executor with caller-controlled outputs.
 type stubExecutor struct {
 	stdout string
 	stderr string
@@ -64,7 +63,6 @@ func TestRunCmd_ErrorIncludesLabelAndStderr(t *testing.T) {
 	if !strings.Contains(msg, "package not found") {
 		t.Errorf("missing trimmed stderr: %q", msg)
 	}
-	// stderr should be TrimSpace'd — no leading/trailing whitespace in the rendered message.
 	if strings.Contains(msg, "stderr:   package") || strings.Contains(msg, "stderr: package not found\n") {
 		t.Errorf("stderr not trimmed: %q", msg)
 	}
@@ -139,7 +137,6 @@ func TestFetchJSON_InvalidJSONReturnsError(t *testing.T) {
 }
 
 func TestFetchJSON_NetworkErrorReturnsZeroStatus(t *testing.T) {
-	// Closed server → connection refused.
 	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
 	srv.Close()
 

@@ -1,14 +1,7 @@
 #!/usr/bin/env bash
 # release.sh — tag a new omni release and push branch+tag for CI-gated release.
-#
-# Usage:
-#   ./scripts/release.sh major       # bump major, reset minor+patch
-#   ./scripts/release.sh minor       # bump minor, reset patch
-#   ./scripts/release.sh patch       # bump patch
-#   ./scripts/release.sh v1.2.3      # explicit version (with or without leading v)
-#
-# Pushes the current branch and a vX.Y.Z tag. CI runs for the branch push.
-# If CI passes and the tested commit has the tag, the release workflow runs.
+# Usage: ./scripts/release.sh major|minor|patch|v1.2.3
+# The release workflow publishes the pushed tag only after CI passes its commit.
 set -euo pipefail
 
 usage() {
@@ -109,28 +102,22 @@ amend_demo_gif() {
   esac
 }
 
-# Pull or verify origin before any local release commits/amends. This prevents
-# demo GIF generation from rewriting an already-published origin HEAD.
+# Verify origin before local commits so demo generation cannot rewrite a published HEAD.
 ensure_release_branch_current
 
-# Commit optional release-prep changes before the demo GIF so the generated
-# asset can be amended into that commit instead of becoming a separate commit.
+# Commit release prep before generating the demo so the asset can join that commit.
 commit_remaining_changes
 amend_demo_gif
 
-# Require an intentional clean working tree.
 ensure_clean_worktree
 
-# Re-check origin before creating a local tag so a concurrent branch update
-# fails before leaving behind a tag that cannot be pushed with the branch.
+# Re-check origin before tagging so concurrent updates fail without leaving an unpushable tag.
 verify_release_branch_still_current
 
-# Resolve current version from latest tag (default v0.0.0 if no tags yet).
 CURRENT=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 CURRENT_CLEAN="${CURRENT#v}"
 IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_CLEAN"
 
-# Compute next version.
 VERSION=""
 case "$INPUT" in
   major)

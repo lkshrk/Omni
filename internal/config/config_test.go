@@ -13,8 +13,6 @@ import (
 	"github.com/lkshrk/omni/internal/testguard"
 )
 
-// ─── Load / Save ──────────────────────────────────────────────────────────────
-
 func TestLoad_MissingFile(t *testing.T) {
 	cfg, err := config.Load(filepath.Join(t.TempDir(), "missing", "settings.json"))
 	if err != nil {
@@ -359,10 +357,7 @@ func TestNormalizeFile_RoutesIncludedGroupsBackToFragment(t *testing.T) {
 
 func TestNormalizeFile_SecondPassDoesNotRewriteMainFile(t *testing.T) {
 	dir := t.TempDir()
-	// A fragment group sorts before a main group, so the merged sort order can
-	// never be represented within either file. Normalize keeps reporting the
-	// order as unsorted, but the routed per-file content is already stable, so
-	// the second pass must not rewrite (rename) the main settings.json.
+	// A merged sort order unrepresentable in either file keeps Normalize reporting unsorted, but stable per-file content must still not trigger a rewrite.
 	path := writeRoutedFixture(t, dir, map[string]string{
 		"settings.json": `{
   "version": ` + strconv.Itoa(config.CurrentVersion) + `,
@@ -412,9 +407,7 @@ func TestNormalizeFile_SecondPassDoesNotRewriteMainFile(t *testing.T) {
 
 func TestNormalizeFile_RoutesFieldSplitGroupsAndFragmentHosts(t *testing.T) {
 	dir := t.TempDir()
-	// The "web" group is split across files: the main file owns its tools, the
-	// fragment owns its dots. Hosts live only in the fragment. Unsorted hosts
-	// force a normalize write. Each file must keep exactly its own contribution.
+	// The "web" group is split across files, so each must keep exactly its own contribution through a normalize write.
 	path := writeRoutedFixture(t, dir, map[string]string{
 		"settings.json": `{
   "version": ` + strconv.Itoa(config.CurrentVersion) + `,
@@ -469,7 +462,6 @@ func TestNormalizeFile_RoutesFieldSplitGroupsAndFragmentHosts(t *testing.T) {
 		t.Fatalf("fragment hosts should be sorted [app web]: %s", got)
 	}
 
-	// The merged, reloaded view must reunite the split group and sort everything.
 	cfg, err := config.Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -615,10 +607,7 @@ func TestSave_InjectsSchemaAndVersion(t *testing.T) {
 	if !strings.Contains(content, `"version": `+strconv.Itoa(config.CurrentVersion)) {
 		t.Error("Save did not inject current config version")
 	}
-	// $schema must be the very first key so editors pick it up immediately.
-	// encoding/json serialises struct fields in declaration order (Go spec §reflect),
-	// and Schema is declared first in RootConfig — so this check is stable.
-	// If Schema is ever moved from position 0, this test will catch it.
+	// $schema must be the very first key for editors to pick it up; encoding/json emits fields in declaration order, so this check is stable.
 	if !strings.HasPrefix(strings.TrimSpace(content), `{`+"\n"+`  "$schema"`) {
 		t.Errorf("$schema is not the first key; got:\n%s", content[:min(len(content), 80)])
 	}
@@ -647,9 +636,7 @@ func TestPatch_InjectsSchemaAndVersion(t *testing.T) {
 	if !strings.Contains(content, `"version": `+strconv.Itoa(config.CurrentVersion)) {
 		t.Error("Patch did not inject current config version")
 	}
-	// Patch explicitly reconstructs output with $schema first (map iteration order
-	// is non-deterministic, so a naive MarshalIndent on the raw map would not
-	// guarantee position). Verify the contract holds.
+	// Patch reconstructs output with $schema first because map iteration order would not guarantee its position.
 	if !strings.HasPrefix(strings.TrimSpace(content), `{`+"\n"+`  "$schema"`) {
 		t.Errorf("$schema is not the first key after Patch; got:\n%s", content[:min(len(content), 80)])
 	}
@@ -738,7 +725,6 @@ func TestRoundTrip(t *testing.T) {
 		}
 	}
 
-	// Modify, save again, reload.
 	loaded.Tools["jq"] = config.ToolSpec{Providers: []config.ToolInstallSpec{{Provider: "brew"}}}
 	loaded.Groups[0].Tools = append(loaded.Groups[0].Tools, config.ToolEntry{Name: "jq"})
 	if err := config.Save(path, loaded); err != nil {
@@ -752,8 +738,6 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("after append: got %d tools, want 4", len(reloaded.Groups[0].Tools))
 	}
 }
-
-// ─── EffectivePackage ─────────────────────────────────────────────────────────
 
 func TestEffectivePackage_DefaultsToName(t *testing.T) {
 	e := config.ToolEntry{Name: "ripgrep", Provider: "brew"}
@@ -769,8 +753,6 @@ func TestEffectivePackage_UsesPackageWhenSet(t *testing.T) {
 	}
 }
 
-// ─── GroupConfig methods ──────────────────────────────────────────────────────
-
 func TestGroupConfig_NamedGroup(t *testing.T) {
 	g := &config.GroupConfig{Name: "work"}
 	if g.GroupName() != "work" {
@@ -780,8 +762,6 @@ func TestGroupConfig_NamedGroup(t *testing.T) {
 		t.Errorf("BaseName = %q, want work", g.BaseName())
 	}
 }
-
-// ─── Host round-trip ──────────────────────────────────────────────────────────
 
 func TestRootConfig_HostRoundTrip(t *testing.T) {
 	dir := t.TempDir()
@@ -848,8 +828,6 @@ func TestGlobalIgnore_EmptyOmittedFromJSON(t *testing.T) {
 		t.Errorf("empty ignore should round-trip as an empty object: %s", data)
 	}
 }
-
-// ─── DotEntry ─────────────────────────────────────────────────────────────────
 
 func TestAgentsIgnore_Roundtrip(t *testing.T) {
 	dir := t.TempDir()
@@ -950,8 +928,6 @@ func TestGroupConfig_WithDotEntries_RoundTrip(t *testing.T) {
 		t.Errorf("zshrc.Ignore = %v, want [*.zwc]", zshrc.Ignore)
 	}
 }
-
-// ─── Settings round-trip ──────────────────────────────────────────────────────
 
 func TestSettings_DotsRepo_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
@@ -1092,13 +1068,10 @@ func TestSettings_JSONTagsRemainStableAcrossUILabelRenames(t *testing.T) {
 	}
 }
 
-// ─── Patch ────────────────────────────────────────────────────────────────────
-
 func TestPatch_UpdatesTargetKey(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
 
-	// Write an initial file with both settings and groups.
 	initialSettings := config.Settings{DotsRepo: "~/dotfiles"}
 	initialSettings.ProviderPriority = append([]string{"bun"}, initialSettings.ProviderPriority...)
 	initial := &config.RootConfig{
@@ -1109,7 +1082,6 @@ func TestPatch_UpdatesTargetKey(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	// Patch only the settings key.
 	type settingsPatch struct {
 		Settings config.Settings `json:"settings"`
 	}
@@ -1124,7 +1096,6 @@ func TestPatch_UpdatesTargetKey(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	// Settings must be updated.
 	if loaded.Settings.DotsRepo != "~/newdots" {
 		t.Errorf("DotsRepo = %q, want ~/newdots", loaded.Settings.DotsRepo)
 	}
@@ -1132,7 +1103,6 @@ func TestPatch_UpdatesTargetKey(t *testing.T) {
 		t.Errorf("provider_priority = %v, want pnpm first (node manager)", got)
 	}
 
-	// Groups must be preserved unchanged.
 	if len(loaded.Groups) != 1 || len(loaded.Groups[0].Tools) != 1 {
 		t.Fatalf("Groups changed unexpectedly: %+v", loaded.Groups)
 	}
@@ -1241,7 +1211,6 @@ func TestPatch_PreservesUnknownKeys(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
 
-	// Write a file with an extra key that RootConfig doesn't know about.
 	raw := []byte(`{"settings":{},"_custom_field":"preserved","groups":[]}` + "\n")
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatal(err)
@@ -1272,7 +1241,6 @@ func TestPatch_MultiKeyFilePreservesAllKeys(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
 
-	// File with four top-level keys beyond $schema.
 	initial := []byte(`{
   "$schema": "http://example.com/schema.json",
   "alpha": "a",
@@ -1285,7 +1253,6 @@ func TestPatch_MultiKeyFilePreservesAllKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Patch only settings.
 	type settingsPatch struct {
 		Settings config.Settings `json:"settings"`
 	}
@@ -1301,14 +1268,12 @@ func TestPatch_MultiKeyFilePreservesAllKeys(t *testing.T) {
 	}
 	content := string(data)
 
-	// All original keys must be preserved.
 	for _, key := range []string{`"alpha"`, `"beta"`, `"gamma"`, `"settings"`} {
 		if !strings.Contains(content, key) {
 			t.Errorf("Patch removed key %s from output", key)
 		}
 	}
 
-	// $schema must remain the first key.
 	if !strings.HasPrefix(strings.TrimSpace(content), `{`+"\n"+`  "$schema"`) {
 		t.Errorf("$schema is not first key after multi-key patch; got:\n%s", content[:min(len(content), 120)])
 	}
@@ -1318,7 +1283,6 @@ func TestPatch_SchemaFirstAfterManyKeys(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
 
-	// Write a full config with many keys.
 	initialSettings := config.Settings{DotsRepo: "~/dots"}
 	initialSettings.ProviderPriority = append([]string{"bun"}, initialSettings.ProviderPriority...)
 	initial := &config.RootConfig{
@@ -1334,7 +1298,6 @@ func TestPatch_SchemaFirstAfterManyKeys(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	// Patch settings only.
 	type settingsPatch struct {
 		Settings config.Settings `json:"settings"`
 	}
@@ -1347,21 +1310,16 @@ func TestPatch_SchemaFirstAfterManyKeys(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	content := string(data)
 
-	// $schema must be the first non-whitespace key regardless of how many keys exist.
 	if !strings.HasPrefix(strings.TrimSpace(content), `{`+"\n"+`  "$schema"`) {
 		t.Errorf("$schema is not first key after patch with many keys; got:\n%s", content[:min(len(content), 120)])
 	}
-	// Groups must be preserved.
 	if !strings.Contains(content, `"ripgrep"`) {
 		t.Error("groups key lost after patch")
 	}
-	// Updated value must be present.
 	if !strings.Contains(content, `"pnpm"`) {
 		t.Error("patched node manager value not found")
 	}
 }
-
-// ─── DefaultCacheDir ──────────────────────────────────────────────────────────
 
 func TestDefaultCacheDir_OmniCacheDirOverride(t *testing.T) {
 	dir := t.TempDir()
@@ -1403,8 +1361,6 @@ func TestDefaultCacheDir_FallsBackToHomeCache(t *testing.T) {
 		t.Errorf("dir %q does not contain .cache/omni", got)
 	}
 }
-
-// ─── DefaultConfigPath ────────────────────────────────────────────────────────
 
 func TestDefaultConfigPath_OmniConfigOverride(t *testing.T) {
 	want := filepath.Join(t.TempDir(), "settings.json")
@@ -1458,8 +1414,6 @@ func TestDefaultConfigPath_FallsBackToHomeConfig(t *testing.T) {
 		t.Errorf("path %q does not contain .config/omni/settings.json", p)
 	}
 }
-
-// ─── DotEntry ─────────────────────────────────────────────────────────────────
 
 func TestDotEntry_Path_RoundTrips(t *testing.T) {
 	dir := t.TempDir()

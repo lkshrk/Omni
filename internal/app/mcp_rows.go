@@ -7,22 +7,21 @@ import (
 	"github.com/lkshrk/omni/internal/agent"
 )
 
-// McpStatus is the per-adapter install state of a manifest server.
 type McpStatus string
 
 const (
 	McpStatusInstalled        McpStatus = "installed"
 	McpStatusMissing          McpStatus = "missing"
 	McpStatusAgentUnavailable McpStatus = "agent-unavailable"
-	// McpStatusShadowed means the server is absent from the agent's own
-	// config but an installed plugin of the same name provides it (plugins
-	// are plugin-scoped and never appear in an agent's user-scope config —
-	// see installedPluginNames), so it is not a real gap and must render and
-	// restore differently than McpStatusMissing.
+	// Plugin-provided servers never appear in an agent's user-scope config, so this is not a real gap.
 	McpStatusShadowed McpStatus = "shadowed"
+	// Restore leaves it alone, so it needs an explicit decision rather than another converge pass.
+	McpStatusDrifted McpStatus = "drifted"
 )
 
-// McpServerRow is a display row for the TUI mcp tab and CLI list.
+// Carried by every mcp drift report so the verb that settles it travels with the finding.
+const mcpDriftRemedy = `"omni agents mcp resolve" (--use-managed / --use-local)`
+
 type McpServerRow struct {
 	Name           string
 	Transport      string
@@ -32,20 +31,16 @@ type McpServerRow struct {
 	Groups         []string
 	Agents         []string
 	PerAgentStatus map[string]McpStatus
-	// ShadowedByPlugin is true when an installed plugin of the same name
-	// provides this server on at least one adapter (see PerAgentStatus's
-	// McpStatusShadowed). The manifest entry is kept, not hidden — it's
-	// declared intent — but RestoreMcpServers skips installing it.
+	// Kept, not hidden, because it is declared intent; RestoreMcpServers skips installing it.
 	ShadowedByPlugin bool
+	Drifted          bool
+	// So a report can say what diverged instead of only that something did.
+	DriftFields map[string][]string
+	// Adopting the live side otherwise asks the user to accept a value they cannot see.
+	DriftLive map[string]InstalledMcpServer
 }
 
-// McpServerRows returns managed rows (from manifest) with per-adapter status,
-// and unmanaged entries (from List()) not present in the manifest, keyed by
-// agent ID. Unmanaged entries whose name matches an installed plugin on that
-// agent are suppressed (see installedPluginNames) — the plugin manages them,
-// so offering to claim them into the manifest would create a duplicate.
-// Manifest entries shadowed by a plugin are kept but flagged via
-// ShadowedByPlugin/McpStatusShadowed rather than hidden.
+// McpServerRows — Unmanaged entries matching an installed plugin are suppressed; manifest entries are flagged instead of hidden.
 func (a *App) McpServerRows(ctx context.Context) (managed []McpServerRow, unmanaged map[string][]InstalledMcpServer, err error) {
 	cfg, loadErr := a.loadConfig()
 	if loadErr != nil {
@@ -83,12 +78,27 @@ func (a *App) McpServerRows(ctx context.Context) (managed []McpServerRow, unmana
 			PerAgentStatus: make(map[string]McpStatus),
 		}
 		for _, adapter := range a.mcpAdapters() {
+			// Restore and "mcp resolve" both ignore untargeted adapters, so reporting drift there would be a finding no verb can clear.
+			if !serverTargetsAdapter(s, adapter.ID()) {
+				continue
+			}
 			if !adapter.Available() {
 				row.PerAgentStatus[adapter.ID()] = McpStatusAgentUnavailable
 				continue
 			}
 			byName, ok := installedByAgent[adapter.ID()]
-			if _, found := byName[s.Name]; ok && found {
+			if live, found := byName[s.Name]; ok && found {
+				if fields := mcpIdentityDrift(s, live); len(fields) > 0 {
+					row.PerAgentStatus[adapter.ID()] = McpStatusDrifted
+					row.Drifted = true
+					if row.DriftFields == nil {
+						row.DriftFields = make(map[string][]string)
+						row.DriftLive = make(map[string]InstalledMcpServer)
+					}
+					row.DriftFields[adapter.ID()] = fields
+					row.DriftLive[adapter.ID()] = live
+					continue
+				}
 				row.PerAgentStatus[adapter.ID()] = McpStatusInstalled
 				continue
 			}

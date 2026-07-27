@@ -9,7 +9,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider/system"
 )
 
-// fakeProvider is a minimal provider.Provider for testing.
 type fakeProvider struct {
 	name      string
 	available bool
@@ -38,8 +37,6 @@ func (f *fakeProvider) IsInstalled(_ context.Context, _ provider.Tool) (bool, st
 func (f *fakeProvider) ListInstalled(_ context.Context) ([]provider.InstalledTool, error) {
 	return nil, nil
 }
-
-// --- Available ---
 
 func TestAvailable_FirstDelegate(t *testing.T) {
 	p := system.New(&fakeProvider{name: "apt", available: true})
@@ -87,8 +84,6 @@ func TestAvailable_DelegateError(t *testing.T) {
 	}
 }
 
-// --- Install ---
-
 func TestInstall_Delegates(t *testing.T) {
 	var calledProvider string
 	p := system.New(
@@ -116,8 +111,6 @@ func TestInstall_NoDelegate_Error(t *testing.T) {
 	}
 }
 
-// --- IsInstalled ---
-
 func TestIsInstalled_Delegates(t *testing.T) {
 	p := system.New(&fakeProvider{name: "apt", available: true, installed: true, version: "14.1.1"})
 	ok, ver, err := p.IsInstalled(context.Background(), provider.Tool{Name: "ripgrep"})
@@ -125,8 +118,6 @@ func TestIsInstalled_Delegates(t *testing.T) {
 		t.Errorf("IsInstalled() = (%v, %q, %v), want (true, 14.1.1, nil)", ok, ver, err)
 	}
 }
-
-// --- Uninstall ---
 
 func TestUninstall_Delegates(t *testing.T) {
 	p := system.New(&fakeProvider{name: "apt", available: true})
@@ -143,8 +134,6 @@ func TestUninstall_NoDelegate_Error(t *testing.T) {
 	}
 }
 
-// --- Upgrade ---
-
 func TestUpgrade_Delegates(t *testing.T) {
 	p := system.New(&fakeProvider{name: "apt", available: true})
 	if err := p.Upgrade(context.Background(), provider.Tool{Name: "ripgrep"}); err != nil {
@@ -158,8 +147,6 @@ func TestUpgrade_NoDelegate_Error(t *testing.T) {
 		t.Fatal("expected error when no PM available")
 	}
 }
-
-// --- ListInstalled ---
 
 func TestListInstalled_Delegates(t *testing.T) {
 	p := system.New(&fakeProvider{name: "apt", available: true})
@@ -177,9 +164,6 @@ func TestListInstalled_NoDelegate_Error(t *testing.T) {
 	}
 }
 
-// --- InstalledMap ---
-
-// fakeBulkProvider embeds fakeProvider and also implements provider.BulkChecker.
 type fakeBulkProvider struct {
 	fakeProvider
 	bulkMap map[string]string
@@ -208,7 +192,6 @@ func TestInstalledMap_DelegatesBulk(t *testing.T) {
 }
 
 func TestInstalledMap_DelegateNoBulk_Error(t *testing.T) {
-	// fakeProvider does not implement BulkChecker — InstalledMap should error.
 	p := system.New(&fakeProvider{name: "apt", available: true})
 	if _, err := p.InstalledMap(context.Background()); err == nil {
 		t.Fatal("expected error when delegate does not implement BulkChecker")
@@ -221,8 +204,6 @@ func TestInstalledMap_NoDelegate_Error(t *testing.T) {
 		t.Fatal("expected error when no PM available")
 	}
 }
-
-// --- Name / Description ---
 
 func TestName(t *testing.T) {
 	p := system.New()
@@ -237,8 +218,6 @@ func TestDescription(t *testing.T) {
 		t.Error("Description() should not be empty")
 	}
 }
-
-// --- ResolvedName ---
 
 func TestResolvedName_FirstDelegate(t *testing.T) {
 	first := &fakeProvider{name: "apt", available: true}

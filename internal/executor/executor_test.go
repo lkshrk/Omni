@@ -9,8 +9,6 @@ import (
 	"github.com/lkshrk/omni/internal/executor"
 )
 
-// ─── MockExecutor ─────────────────────────────────────────────────────────────
-
 func TestMockExecutor_RecordsCallsAndReturnsResponses(t *testing.T) {
 	wantErr := errors.New("fail")
 	m := &executor.MockExecutor{
@@ -60,15 +58,12 @@ func TestMockExecutor_Reset(t *testing.T) {
 	if len(m.Calls) != 0 {
 		t.Errorf("Calls after Reset = %d, want 0", len(m.Calls))
 	}
-	// After reset the response index is back to 0 — re-add responses manually.
 	m.Responses = []executor.MockCall{{Stdout: "second"}}
 	stdout, _, _ := m.Run(context.Background(), "cmd2")
 	if stdout != "second" {
 		t.Errorf("after Reset got %q, want second", stdout)
 	}
 }
-
-// ─── MatchMockExecutor ────────────────────────────────────────────────────────
 
 func TestMatchMock_MatchesByPrefix(t *testing.T) {
 	m := executor.NewMatchMock(
@@ -122,7 +117,6 @@ func TestMatchMock_AssertCalled(t *testing.T) {
 	m := executor.NewMatchMock()
 	m.Run(context.Background(), "brew", "install", "git")
 
-	// Should not report failure — just verifying no panic.
 	m.AssertCalled(t, "brew install")
 }
 
@@ -136,7 +130,6 @@ func TestMatchMock_MustHaveCalledN(t *testing.T) {
 
 func TestMatchMock_AssertCalled_FailsWhenNotCalled(t *testing.T) {
 	m := executor.NewMatchMock()
-	// No calls recorded.
 	ft := &fakeT{}
 	m.AssertCalled(ft, "brew install")
 	if len(ft.errs) != 1 {
@@ -149,16 +142,13 @@ func TestMatchMock_MustHaveCalledN_FailsOnWrongCount(t *testing.T) {
 	m.Run(context.Background(), "brew", "install", "git")
 
 	ft := &fakeT{}
-	m.MustHaveCalledN(ft, "brew install", 2) // called 1 time, want 2
+	m.MustHaveCalledN(ft, "brew install", 2)
 	if len(ft.errs) != 1 {
 		t.Errorf("expected 1 error, got %d", len(ft.errs))
 	}
 }
 
-// ─── fakeT ────────────────────────────────────────────────────────────────────
-
 // fakeT records Errorf calls without failing the actual test.
-// Used to test the failure paths of assertion helpers.
 type fakeT struct{ errs []string }
 
 func (f *fakeT) Errorf(format string, args ...any) {

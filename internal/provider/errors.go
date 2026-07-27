@@ -6,16 +6,13 @@ import (
 	"strings"
 )
 
-// ErrorCode identifies an actionable provider failure class.
 type ErrorCode string
 
 const (
-	// ErrorExternallyManagedPython is returned when pip refuses to mutate a
-	// Python installation marked by PEP 668 as externally managed.
+	// pip refused to mutate a Python installation PEP 668 marks externally managed.
 	ErrorExternallyManagedPython ErrorCode = "externally_managed_python"
 )
 
-// ErrorSolutionAction identifies an operation that can apply an ErrorSolution.
 type ErrorSolutionAction string
 
 const (
@@ -23,7 +20,6 @@ const (
 	ErrorSolutionActionSwitchProvider ErrorSolutionAction = "switch_provider"
 )
 
-// ErrorSolution describes one user-facing remedy for an ActionError.
 type ErrorSolution struct {
 	Label   string
 	Command string
@@ -33,8 +29,7 @@ type ErrorSolution struct {
 	TargetProvider string
 }
 
-// ActionError is a provider failure with stable classification and remediation
-// metadata. Error returns Summary so existing CLI/TUI/status paths stay concise.
+// ActionError — Error returns Summary so CLI/TUI/status paths stay concise.
 type ActionError struct {
 	Code      ErrorCode
 	Provider  string
@@ -47,7 +42,6 @@ type ActionError struct {
 	Cause     error
 }
 
-// Error returns the concise user-facing summary for the provider failure.
 func (e *ActionError) Error() string {
 	if e == nil {
 		return ""
@@ -64,7 +58,6 @@ func (e *ActionError) Error() string {
 	return "provider action failed"
 }
 
-// Unwrap returns the underlying command failure, if one exists.
 func (e *ActionError) Unwrap() error {
 	if e == nil {
 		return nil
@@ -72,7 +65,6 @@ func (e *ActionError) Unwrap() error {
 	return e.Cause
 }
 
-// ActionErrorFrom extracts an ActionError from err when one is present.
 func ActionErrorFrom(err error) (*ActionError, bool) {
 	if err == nil {
 		return nil, false
@@ -84,7 +76,6 @@ func ActionErrorFrom(err error) (*ActionError, bool) {
 	return nil, false
 }
 
-// HasErrorCode reports whether err contains an ActionError with code.
 func HasErrorCode(err error, code ErrorCode) bool {
 	actionErr, ok := ActionErrorFrom(err)
 	return ok && actionErr.Code == code
@@ -95,7 +86,6 @@ func IsExternallyManagedPythonOutput(stderr string) bool {
 	return strings.Contains(strings.ToLower(stderr), "externally-managed-environment")
 }
 
-// NewExternallyManagedPythonError builds the standard PEP 668 action error.
 func NewExternallyManagedPythonError(manager, action string, tool Tool, cause error, stderr string, solutions []ErrorSolution) error {
 	if manager == "" {
 		manager = "pip"

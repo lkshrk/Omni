@@ -173,7 +173,6 @@ func TestPluginRow_UpdateDisplay(t *testing.T) {
 			if got.Current != tc.current || got.Latest != tc.latest {
 				t.Fatalf("Update() pair = (%q,%q), want (%q,%q)", got.Current, got.Latest, tc.current, tc.latest)
 			}
-			// The status verdict and the display verdict must agree on outdated-ness.
 			if outdated := got.Kind != app.PluginUpToDate; outdated != tc.row.Outdated() && got.Kind != app.PluginShaDrift {
 				t.Fatalf("Update() outdated=%v disagrees with Outdated()=%v", outdated, tc.row.Outdated())
 			}
@@ -181,11 +180,6 @@ func TestPluginRow_UpdateDisplay(t *testing.T) {
 	}
 }
 
-// TestPluginRows_PathOutdatedMergedFromAdapter confirms PluginRows copies a
-// versionless plugin's PathOutdated signal from InstalledPlugin into the row
-// — this is the actual update-all bug: without it, plugins with no manifest
-// version (the common case) never show as outdated regardless of adapter
-// signal, so "U" silently has nothing to update.
 func TestPluginRows_PathOutdatedMergedFromAdapter(t *testing.T) {
 	t.Parallel()
 	claude := &stubPluginAdapter{

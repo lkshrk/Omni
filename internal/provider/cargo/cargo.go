@@ -1,4 +1,3 @@
-// Package cargo implements the Cargo provider for Rust binary crates.
 package cargo
 
 import (
@@ -10,7 +9,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// Provider installs Rust binary crates with Cargo.
 type Provider struct {
 	exec executor.Executor
 }
@@ -96,8 +94,7 @@ type installedCrate struct {
 	version string
 }
 
-// Cargo has no machine-readable installed-list format. Package headers are the
-// unindented "name vVERSION:" lines; indented binary names are ignored.
+// No machine-readable list format: package headers are unindented "name vVERSION:" lines.
 func parseInstalled(output string) []installedCrate {
 	var crates []installedCrate
 	for _, line := range strings.Split(output, "\n") {

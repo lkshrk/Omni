@@ -7,11 +7,9 @@ import (
 	"strings"
 )
 
-// State is the entry-level state for a dots entry. It is the source of truth
-// for CLI/TUI actions; DotHealth is only derived for current renderers.
+// State — Source of truth for CLI/TUI actions; DotHealth is only derived for current renderers.
 type State string
 
-// State values enumerate the possible lifecycle states of a dots entry.
 const (
 	StateSynced            State = "synced"
 	StateMissing           State = "missing"
@@ -29,10 +27,8 @@ const (
 	StateAmbiguous         State = "ambiguous"
 )
 
-// Action is a durable action that can be exposed consistently by CLI/TUI.
 type Action string
 
-// Action values enumerate the actions a dots entry may expose.
 const (
 	ActionSync     Action = "sync"
 	ActionUseRepo  Action = "use-repo"
@@ -44,10 +40,8 @@ const (
 	ActionEnable   Action = "enable"
 )
 
-// LocalKind classifies the on-disk shape of a dots entry's target path.
 type LocalKind int
 
-// LocalKind values describe how the local target relates to the repo source.
 const (
 	LocalMissing LocalKind = iota
 	LocalExpectedLink
@@ -58,13 +52,10 @@ const (
 	LocalAllIgnored
 )
 
-// LocalState is the inspected local state of a dots entry's target path.
 type LocalState struct {
 	Kind LocalKind
 }
 
-// ClassifyEntry derives the entry-level State and available Actions for a
-// resolved dots entry by inspecting its repo source and local target.
 func ClassifyEntry(e ResolvedEntry) (State, []Action) {
 	if e.Ignored {
 		return StateIgnored, []Action{ActionUnignore, ActionRemove}
@@ -137,9 +128,7 @@ func InspectDotLocal(e ResolvedEntry) LocalState {
 	return LocalState{Kind: LocalBrokenLink}
 }
 
-// InspectManagedDotDirectory classifies a directory-shaped entry whose repo
-// source and local target are both real directories, by walking the source
-// tree and comparing each managed path against the local target.
+// InspectManagedDotDirectory — Both repo source and local target must already be real directories.
 func InspectManagedDotDirectory(e ResolvedEntry) LocalKind {
 	kind := LocalExpectedLink
 	rootMatches := SameResolvedPath(e.TargetPath, e.SourcePath)
@@ -259,8 +248,6 @@ func InspectManagedDotDirectory(e ResolvedEntry) LocalKind {
 	return kind
 }
 
-// LocalFileIsNewer reports whether the local target regular file has a newer
-// modification time than the repo source regular file.
 func LocalFileIsNewer(sourceInfo, targetInfo os.FileInfo) bool {
 	return sourceInfo.Mode().IsRegular() &&
 		targetInfo.Mode().IsRegular() &&
@@ -277,8 +264,7 @@ func sameCleanPath(a, b string) bool {
 	return filepath.Clean(a) == filepath.Clean(b)
 }
 
-// SameResolvedPath reports whether two paths refer to the same file, comparing
-// cleaned paths first and falling back to fully resolved symlink targets.
+// SameResolvedPath — Compares cleaned paths first, then falls back to fully resolved symlink targets.
 func SameResolvedPath(a, b string) bool {
 	if sameCleanPath(a, b) {
 		return true
@@ -304,8 +290,7 @@ func noSourceDotActions() []Action {
 	return []Action{ActionRemove, ActionIgnore}
 }
 
-// IsFoldedDotDirectory reports whether a directory entry's target is itself a
-// symlink that resolves to the repo source directory (a stow-folded directory).
+// IsFoldedDotDirectory — A stow-folded directory: the target is itself a symlink to the repo source directory.
 func IsFoldedDotDirectory(entry ResolvedEntry) bool {
 	sourceInfo, err := os.Lstat(entry.SourcePath)
 	if err != nil || !sourceInfo.IsDir() || sourceInfo.Mode()&os.ModeSymlink != 0 {
@@ -318,13 +303,7 @@ func IsFoldedDotDirectory(entry ResolvedEntry) bool {
 	return SameResolvedPath(entry.TargetPath, entry.SourcePath)
 }
 
-// SelfHealDotEntryLinkShape rewrites existing target symlinks that already
-// resolve to the correct repo file but aren't shaped the way GNU Stow itself
-// would write them (e.g. absolute instead of relative, or a differently
-// computed relative path). Stow refuses to touch such links ("not owned by
-// stow"), aborting the whole package's restow even though the link's target
-// is already correct. Only links resolving to the entry's own source are
-// touched; anything else is left for the normal conflict/broken-link flow.
+// SelfHealDotEntryLinkShape — Stow aborts a whole package on links it did not shape, so reshape correct-but-foreign links to its own form.
 func SelfHealDotEntryLinkShape(entry ResolvedEntry) error {
 	srcInfo, err := os.Lstat(entry.SourcePath)
 	if err != nil {
@@ -358,9 +337,7 @@ func SelfHealDotEntryLinkShape(entry ResolvedEntry) error {
 	return healDotLinkShapeAt(entry.TargetPath, entry.SourcePath)
 }
 
-// healDotLinkShapeAt rewrites the symlink at linkPath to stow-relative shape
-// when it already resolves to sourcePath. Non-symlinks and links resolving
-// to a different file are left untouched.
+// Non-symlinks and links resolving elsewhere are left untouched.
 func healDotLinkShapeAt(linkPath, sourcePath string) error {
 	info, err := os.Lstat(linkPath)
 	if err != nil || info.Mode()&os.ModeSymlink == 0 {
@@ -387,15 +364,10 @@ func healDotLinkShapeAt(linkPath, sourcePath string) error {
 	return WriteStowShapedSymlink(linkPath, sourcePath)
 }
 
-// ConflictIsManagedStowLink reports whether an entry currently in a conflict
-// state is actually a stow-managed link (or tree of links) pointing within the
-// stow root, meaning it can be safely repaired by a restow.
+// ConflictIsManagedStowLink — A conflict that is really a stow link into the stow root can be repaired by a restow.
 func ConflictIsManagedStowLink(entry ResolvedEntry, stowPath string) bool {
 	local := InspectDotLocal(entry).Kind
-	// Accept LocalContent for directories: InspectManagedDotDirectory may
-	// classify a fully wrong-linked directory as content when no paths point
-	// to the current source. The walk below still correctly identifies stow
-	// links, so we let it make the final determination.
+	// LocalContent is accepted for directories because the walk below makes the final call.
 	if local != LocalWrongLink && local != LocalContent {
 		return false
 	}
@@ -481,8 +453,6 @@ func pathWithinDir(path, dir string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-// LstatEntryOp inspects the local target after a stow operation and returns the
-// Op describing the resulting link state (or a conflict when it is not linked).
 func LstatEntryOp(entry ResolvedEntry, dryRun bool) Op {
 	local := InspectDotLocal(entry)
 	switch local.Kind {
@@ -508,9 +478,6 @@ func LstatEntryOp(entry ResolvedEntry, dryRun bool) Op {
 	}
 }
 
-// WalkLocalOnlyDotFiles walks the local target tree looking for managed files
-// that exist locally but not in the repo source. When addOne is non-nil it is
-// invoked for each such file; it returns whether any were found.
 func WalkLocalOnlyDotFiles(entry ResolvedEntry, addOne func(sourcePath, targetPath string) error) (bool, error) {
 	sourceInfo, sourceErr := os.Lstat(entry.SourcePath)
 	if sourceErr != nil {
@@ -584,14 +551,11 @@ func WalkLocalOnlyDotFiles(entry ResolvedEntry, addOne func(sourcePath, targetPa
 	return found, nil
 }
 
-// CombinedIgnores returns the default ignore patterns combined with the given
-// per-entry ignore patterns.
 func CombinedIgnores(ignores []string) []string {
 	return append(DefaultIgnores(), ignores...)
 }
 
-// ShouldIgnoreDotPath reports whether a path (relative to root) should be
-// ignored, matching both the raw relative path and a root-prefixed variant.
+// ShouldIgnoreDotPath — Matches both the raw relative path and a root-prefixed variant.
 func ShouldIgnoreDotPath(root, relPath, basename string, ignores []string) bool {
 	matcher, err := CompileIgnores(ignores)
 	if err != nil {
@@ -600,18 +564,14 @@ func ShouldIgnoreDotPath(root, relPath, basename string, ignores []string) bool 
 	return matcher.IgnoredDotPath(root, relPath, basename)
 }
 
-// IgnoredDotPath reports whether a path (relative to root) should be ignored,
-// matching both the raw relative path and a root-prefixed variant.
+// IgnoredDotPath — Matches both the raw relative path and a root-prefixed variant.
 func (m *IgnoreMatcher) IgnoredDotPath(root, relPath, basename string) bool {
-	// Plain concat instead of filepath.Join: the matcher cleans every
-	// candidate itself, and Join's extra Clean is measurable on large walks.
+	// Plain concat, not filepath.Join: the matcher cleans candidates and Join's extra Clean shows up on large walks.
 	rooted := filepath.Base(root) + "/" + relPath
 	matched, _ := m.MatchAnyPath([]string{relPath, rooted}, basename)
 	return matched
 }
 
-// DotDirHasIncludedDescendant reports whether an ignored directory contains a
-// descendant re-included by a negated ignore pattern.
 func (m *IgnoreMatcher) DotDirHasIncludedDescendant(root, relPath string) bool {
 	if !m.hasIncluded {
 		return false
@@ -623,8 +583,6 @@ func (m *IgnoreMatcher) DotDirHasIncludedDescendant(root, relPath string) bool {
 	return m.HasIncludedDescendant(rooted)
 }
 
-// IgnoredDotDirHasIncludedDescendant reports whether an ignored directory
-// contains a descendant re-included by a negated ignore pattern.
 func IgnoredDotDirHasIncludedDescendant(root, relPath string, ignores []string) bool {
 	matcher, err := CompileIgnores(ignores)
 	if err != nil {
@@ -633,8 +591,7 @@ func IgnoredDotDirHasIncludedDescendant(root, relPath string, ignores []string) 
 	return matcher.DotDirHasIncludedDescendant(root, relPath)
 }
 
-// IsManagedDotFile reports whether a file mode is one dots manages (a regular
-// file or a symlink).
+// IsManagedDotFile — dots manages regular files and symlinks only.
 func IsManagedDotFile(mode os.FileMode) bool {
 	return mode.IsRegular() || mode&os.ModeSymlink != 0
 }

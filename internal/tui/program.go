@@ -7,10 +7,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 )
 
-// ProgramOptions returns Bubble Tea options for the interactive TUI.
-// omni is only launched as an interactive program, so use the terminal
-// environment profile directly instead of relying on stdout probing. That keeps
-// colors available in PTY wrappers and recorders that proxy stdout.
+// ProgramOptions — Uses the terminal environment profile directly instead of stdout probing, keeping colors available in PTY wrappers and recorders; bubbletea v2 writes modifyOtherKeys=2 and the Kitty protocol regardless of options, so key matching has to tolerate those encodings instead — see normalizeKeyPress.
 func ProgramOptions() []tea.ProgramOption {
 	return []tea.ProgramOption{
 		tea.WithColorProfile(colorprofile.Env(os.Environ())),

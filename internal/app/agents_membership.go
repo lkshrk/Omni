@@ -9,36 +9,44 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-func setSkillGroupsInConfig(cfg *config.RootConfig, source string, groups map[string]struct{}) {
+// source must be the manifest's own spelling so a group entry and its package entry stay textually aligned.
+func (a *App) setSkillGroupsInConfig(cfg *config.RootConfig, source string, groups map[string]struct{}) {
+	identity := a.skillSourceIdentity(source)
+	matches := func(s string) bool { return a.skillSourceIdentity(s) == identity }
 	for _, group := range cfg.Groups {
 		if group == nil {
 			continue
 		}
 		if _, keep := groups[group.BaseName()]; !keep {
-			group.Skills = slices.DeleteFunc(group.Skills, func(s string) bool { return s == source })
+			group.Skills = slices.DeleteFunc(group.Skills, matches)
 			continue
 		}
-		if !slices.Contains(group.Skills, source) {
+		if !slices.ContainsFunc(group.Skills, matches) {
 			group.Skills = append(group.Skills, source)
 		}
 	}
 }
 
-// SetSkillGroups persists group membership for a package source. createdGroups
-// names brand-new groups to create first; activeHost auto-assigns new groups to
-// the current host (mirrors SetToolGroups).
 func (a *App) SetSkillGroups(source string, groups, createdGroups []string, activeHost string) error {
-	source = strings.TrimSpace(source)
-	if source == "" {
-		return fmt.Errorf("package source is required")
+	pkg, err := a.parseSkillPackage(strings.TrimSpace(source))
+	if err != nil {
+		return err
 	}
+	identity := a.skillSourceIdentity(pkg.Source)
 	targets := membershipGroupSet(groups)
 	return a.withConfig(func(cfg *config.RootConfig) error {
 		if err := a.requireSkillsEnabled(cfg); err != nil {
 			return err
 		}
-		if !slices.ContainsFunc(cfg.Agents.Packages, func(p config.SkillPackage) bool { return p.Source == source }) {
-			return fmt.Errorf("skill package %q not found", source)
+		storedSource := ""
+		for _, p := range cfg.Agents.Packages {
+			if a.skillSourceIdentity(p.Source) == identity {
+				storedSource = normalizeConfiguredSkillPackage(p).Source
+				break
+			}
+		}
+		if storedSource == "" {
+			return fmt.Errorf("skill package %q not found", pkg.Source)
 		}
 		if err := createSelectedGroupsInConfig(cfg, createdGroups, targets); err != nil {
 			return err
@@ -49,12 +57,11 @@ func (a *App) SetSkillGroups(source string, groups, createdGroups []string, acti
 		if err := ensureMembershipGroupsOnHostInConfig(cfg, activeHost, targets); err != nil {
 			return err
 		}
-		setSkillGroupsInConfig(cfg, source, targets)
+		a.setSkillGroupsInConfig(cfg, storedSource, targets)
 		return nil
 	})
 }
 
-// SetSkillGroupsWithState wraps SetSkillGroups and returns refreshed rows.
 func (a *App) SetSkillGroupsWithState(ctx context.Context, source string, groups, createdGroups []string, activeHost string) ([]SkillPackageRow, error) {
 	if err := a.SetSkillGroups(source, groups, createdGroups, activeHost); err != nil {
 		return nil, err
@@ -62,17 +69,16 @@ func (a *App) SetSkillGroupsWithState(ctx context.Context, source string, groups
 	return a.SkillPackageRows(ctx)
 }
 
-// SetSkillAgents sets the per-package target agents (the skills-CLI -a install
-// targets) for a package source. An empty list clears them (the package then
-// falls back to the host agents_use default on restore).
+// SetSkillAgents — An empty list clears them; the package then falls back to the host agents_use default.
 func (a *App) SetSkillAgents(source string, agents []string) error {
-	source = strings.TrimSpace(source)
-	if source == "" {
-		return fmt.Errorf("package source is required")
+	pkg, err := a.parseSkillPackage(strings.TrimSpace(source))
+	if err != nil {
+		return err
 	}
+	identity := a.skillSourceIdentity(pkg.Source)
 	return a.withConfig(func(cfg *config.RootConfig) error {
 		for i := range cfg.Agents.Packages {
-			if cfg.Agents.Packages[i].Source != source {
+			if a.skillSourceIdentity(cfg.Agents.Packages[i].Source) != identity {
 				continue
 			}
 			if len(agents) == 0 {
@@ -82,11 +88,10 @@ func (a *App) SetSkillAgents(source string, agents []string) error {
 			}
 			return nil
 		}
-		return fmt.Errorf("skill package %q not found", source)
+		return fmt.Errorf("skill package %q not found", pkg.Source)
 	})
 }
 
-// SetSkillAgentsWithState wraps SetSkillAgents and returns refreshed rows.
 func (a *App) SetSkillAgentsWithState(ctx context.Context, source string, agents []string) ([]SkillPackageRow, error) {
 	if err := a.SetSkillAgents(source, agents); err != nil {
 		return nil, err
@@ -94,10 +99,6 @@ func (a *App) SetSkillAgentsWithState(ctx context.Context, source string, agents
 	return a.SkillPackageRows(ctx)
 }
 
-// mcpGroupsForName returns the names of every group whose McpServers list
-// contains name, i.e. the reverse of setMcpGroupsInConfig's per-group write —
-// so McpServerRows can join group membership back onto a row the same way
-// resolveSkillPackages does for skill packages.
 func mcpGroupsForName(cfg *config.RootConfig, name string) []string {
 	var groups []string
 	for _, group := range cfg.Groups {
@@ -111,7 +112,6 @@ func mcpGroupsForName(cfg *config.RootConfig, name string) []string {
 	return groups
 }
 
-// pluginGroupsForName is mcpGroupsForName's plugin twin, for PluginRows.
 func pluginGroupsForName(cfg *config.RootConfig, name string) []string {
 	var groups []string
 	for _, group := range cfg.Groups {
@@ -125,7 +125,6 @@ func pluginGroupsForName(cfg *config.RootConfig, name string) []string {
 	return groups
 }
 
-// marketplaceGroupsForName is mcpGroupsForName's marketplace twin, for MarketplaceRows.
 func marketplaceGroupsForName(cfg *config.RootConfig, name string) []string {
 	var groups []string
 	for _, group := range cfg.Groups {
@@ -154,8 +153,6 @@ func setMcpGroupsInConfig(cfg *config.RootConfig, name string, groups map[string
 	}
 }
 
-// SetMcpGroups persists group membership for an MCP server, creating missing
-// target groups like the other membership setters.
 func (a *App) SetMcpGroups(ctx context.Context, name string, groups []string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -192,8 +189,6 @@ func setPluginGroupsInConfig(cfg *config.RootConfig, name string, groups map[str
 	}
 }
 
-// SetPluginGroups persists group membership for a plugin, creating missing
-// target groups like the other membership setters.
 func (a *App) SetPluginGroups(ctx context.Context, name string, groups []string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -230,8 +225,6 @@ func setMarketplaceGroupsInConfig(cfg *config.RootConfig, name string, groups ma
 	}
 }
 
-// SetMarketplaceGroups persists group membership for a marketplace, creating
-// missing target groups like the other membership setters.
 func (a *App) SetMarketplaceGroups(ctx context.Context, name string, groups []string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {

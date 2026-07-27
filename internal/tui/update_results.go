@@ -15,6 +15,7 @@ func (m *Model) handleDescRefreshDoneMsg(msg descRefreshDoneMsg) tea.Cmd {
 		return nil
 	}
 	m.descRefreshing = false
+	m.settleToolRefresh()
 	if msg.err != nil && (m.ctx == nil || !errors.Is(msg.err, m.ctx.Err())) {
 		m.finishSetupReloadIfIdle()
 		status := "description refresh failed: " + msg.err.Error()
@@ -150,14 +151,11 @@ func (m *Model) handleRefreshToolProgress(msg progressMsg) {
 	if m.refreshToolTotal > 0 && m.refreshToolDone > m.refreshToolTotal {
 		m.refreshToolDone = m.refreshToolTotal
 	}
-	active := strings.TrimSpace(msg.refreshToolName)
-	if active == "" {
-		active = app.RefreshProviderScanLabel(providerName, m.providerScanLabels)
-		if label := strings.TrimSpace(msg.refreshProviderLabel); label != "" && (label != providerName || active == providerName) {
-			active = label
-		}
+	label := app.RefreshProviderScanLabel(providerName, m.providerScanLabels)
+	if eventLabel := strings.TrimSpace(msg.refreshProviderLabel); eventLabel != "" && (eventLabel != providerName || label == providerName) {
+		label = eventLabel
 	}
-	m.progressText = app.RefreshToolProgressStatus(active, "", m.refreshToolDone, m.refreshToolTotal)
+	m.progressText = app.RefreshToolProgressStatus(label, msg.refreshToolName, m.refreshToolDone, m.refreshToolTotal)
 }
 
 func (m *Model) handleProgressStreamClosedMsg(msg progressStreamClosedMsg) {
@@ -175,7 +173,7 @@ func (m *Model) handleProgressDoneMsg(msg progressDoneMsg) []tea.Cmd {
 	m.finishCancellableAction()
 	m.progressGen++
 	if !m.migrating {
-		m.loading = false
+		m.endLoading(loadingOwnerProgressOp)
 	}
 	delete(m.upgradingKeys, msg.key)
 	m.progressText = ""
@@ -361,7 +359,9 @@ func (m *Model) removeSearchResultsByKeys(keys []string) bool {
 func (m *Model) handleOpCompleteMsg(msg opCompleteMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 	m.finishCancellableAction()
-	m.loading = false
+	if m.opCompleteOwnsGate(msg.loadingGen) {
+		m.releaseLoading()
+	}
 	rowErrKey := msg.key
 	if rowErrKey == "" {
 		rowErrKey = m.rowOpKey
@@ -693,9 +693,9 @@ func (m *Model) handleDangerOpDoneMsg(msg dangerOpDoneMsg) []tea.Cmd {
 		if msg.mode != viewStatus {
 			m.setupBackgroundMode = msg.mode
 		}
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		if msg.setupComplete && msg.err == nil {
-			m.setupReloading = true
+			cmds = append(cmds, m.beginSetupReload())
 			m.progressText = "Loading tools…"
 		}
 		cmds = append(cmds, m.spinner.Tick, loadTools(m.app, m.ctx))

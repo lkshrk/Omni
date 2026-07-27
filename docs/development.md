@@ -41,6 +41,11 @@ Do not run integration tests directly against the local machine. Dots and
 package-manager flows intentionally mutate files and package-manager state in
 their isolated environments.
 
+`make test-canary` runs the opt-in upstream contract canary — live checks of the
+skills.sh search API and the agent-skills discovery schema — which the `canary`
+build tag keeps out of every other test target and which CI runs only on its
+weekly schedule.
+
 ## Lint
 
 ```sh

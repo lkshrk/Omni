@@ -41,7 +41,6 @@ func scrollPopupMaxScroll(lines []string, bodyH int) int {
 	return max(len(lines)-bodyH, 0)
 }
 
-// scrollPopupVisibleLines replaces the first/last visible line with "..." when content is clipped above/below.
 func scrollPopupVisibleLines(p palette, lines []string, start, height int) []string {
 	if height <= 0 {
 		return nil

@@ -12,7 +12,6 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// ErrLintWarnings is returned by `omni settings lint` when advisory issues are found.
 var ErrLintWarnings = errors.New("settings lint found warnings")
 
 func newSettingsCmd(state *rootState) *cobra.Command {
@@ -99,7 +98,6 @@ func newSettingsSetCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
-	// complete the key (first arg); value (second arg) is freeform
 	cmd.ValidArgsFunction = func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) == 0 {
 			return completeSettingsKeys(state)(c, args, toComplete)

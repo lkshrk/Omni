@@ -183,3 +183,22 @@ func TestParseGrokMcpList_ReportsOmittedHeadersAsKnownEmpty(t *testing.T) {
 		t.Fatalf("server = %+v, want known empty headers", got)
 	}
 }
+
+// Add installs --transport sse, so reporting the server back as http made every sse server read as permanent drift on grok.
+func TestParseGrokMcpList_RoundTripsSseTransport(t *testing.T) {
+	t.Parallel()
+	got, err := parseGrokMcpList(`[
+	  {"name":"sse-typed","type":"sse","url":"https://a.example.com/mcp"},
+	  {"name":"sse-transport","transport":"SSE","url":"https://b.example.com/mcp"},
+	  {"name":"http-typed","type":"http","url":"https://c.example.com/mcp"},
+	  {"name":"unreported","url":"https://d.example.com/mcp"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"sse", "sse", "http", "http"} {
+		if got[i].Transport != want {
+			t.Fatalf("%s transport = %q, want %q", got[i].Name, got[i].Transport, want)
+		}
+	}
+}

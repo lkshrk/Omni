@@ -6,11 +6,8 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// palette holds all colours and pre-built lipgloss styles for one theme.
-// A palette value is stored on each Model so that two Model instances
-// (e.g. in parallel tests) never share mutable state.
+// A palette value is stored on each Model so two Model instances (e.g. in parallel tests) never share mutable state.
 type palette struct {
-	// Colour tokens.
 	colMuted          color.Color
 	colInstalled      color.Color
 	colMissing        color.Color
@@ -27,7 +24,6 @@ type palette struct {
 	colDanger         color.Color
 	colSurface        color.Color
 
-	// Pre-built styles.
 	styleTitle          lipgloss.Style
 	styleSep            lipgloss.Style
 	styleSelected       lipgloss.Style
@@ -55,8 +51,7 @@ type palette struct {
 	styleActiveText     lipgloss.Style
 }
 
-// buildPaletteFor constructs a palette for the given background luminance.
-// isDark=true → TokyoNight Night; isDark=false → TokyoNight Day.
+// isDark true is TokyoNight Night; false is TokyoNight Day.
 func buildPaletteFor(isDark bool) palette {
 	var p palette
 
@@ -81,7 +76,6 @@ func buildPaletteFor(isDark bool) palette {
 		p.styleSelected = lipgloss.NewStyle().Background(p.colSelected).Foreground(lipgloss.Color("#e3e9ff"))
 		p.styleIgnored = lipgloss.NewStyle().Foreground(lipgloss.Color("#4b557a"))
 	} else {
-		// TokyoNight Day
 		p.colMuted = lipgloss.Color("#8b93b8")
 		p.colInstalled = lipgloss.Color("#3f6b1f")
 		p.colMissing = lipgloss.Color("#c9214d")
@@ -103,7 +97,6 @@ func buildPaletteFor(isDark bool) palette {
 		p.styleIgnored = lipgloss.NewStyle().Foreground(lipgloss.Color("#b7bed4"))
 	}
 
-	// Rebuild all styles that reference the colour tokens.
 	p.styleTitle = lipgloss.NewStyle().Bold(true).Foreground(p.colTitle).PaddingLeft(1)
 	p.styleSep = lipgloss.NewStyle().Foreground(p.colMuted)
 
@@ -131,14 +124,11 @@ func buildPaletteFor(isDark bool) palette {
 	return p
 }
 
-// defaultPalette returns the dark (TokyoNight Night) palette used as the
-// initial value until the terminal replies with its background colour.
+// The dark palette used until the terminal replies with its background colour.
 func defaultPalette() palette {
 	return buildPaletteFor(true)
 }
 
-// applyTheme rebuilds m.palette to match the terminal background luminance.
-// Called once per model from the tea.BackgroundColorMsg handler.
 func (m *Model) applyTheme(isDark bool) {
 	m.palette = buildPaletteFor(isDark)
 }

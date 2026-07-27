@@ -9,7 +9,7 @@ import (
 func TestEffectiveSettings_ProvidersInheritedWhenHostNil(t *testing.T) {
 	root := &config.RootConfig{
 		Settings:     config.Settings{Providers: []config.ProviderEntry{{Name: "uv", Provider: "brew"}}},
-		HostSettings: map[string]config.Settings{"box": {}}, // Providers == nil
+		HostSettings: map[string]config.Settings{"box": {}},
 	}
 	got := root.EffectiveSettings("box")
 	if len(got.Providers) != 1 || got.Providers[0].Name != "uv" {

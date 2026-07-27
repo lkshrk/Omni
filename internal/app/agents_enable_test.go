@@ -112,12 +112,7 @@ func TestPluginsEnabledMatrix(t *testing.T) {
 	}
 }
 
-// newAgentPickerApp builds an App with claude-code and cursor detected on a
-// fake HOME. agentsUse == nil leaves the per-host agents_use unset (inherit
-// the nil-sentinel default). A non-nil slice (including empty) is written as
-// raw host-settings JSON: config.Settings.AgentsUse has `omitempty`, so
-// round-tripping an empty slice through the Go struct would silently turn it
-// back into nil and defeat the "explicit empty" test case.
+// An empty AgentsUse is written as raw JSON: omitempty would round-trip it back to nil.
 func newAgentPickerApp(t *testing.T, agentsUse []string) *App {
 	t.Helper()
 	home := t.TempDir()

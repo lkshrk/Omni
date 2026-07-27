@@ -19,8 +19,6 @@ import (
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
 
-// ─── brew JSON helpers ─────────────────────────────────────────────────────
-
 func brewInfoJSON(pkgs map[string]string) string {
 	out := `{"formulae":[`
 	first := true
@@ -91,8 +89,6 @@ func newBrewMatchMock(preInstalled map[string]string, rules ...executor.MatchRul
 	return executor.NewMatchMock(all...)
 }
 
-// ─── pip list helper ───────────────────────────────────────────────────────
-
 func pipListOutput(pkgs map[string]string) string {
 	out := "["
 	first := true
@@ -105,8 +101,6 @@ func pipListOutput(pkgs map[string]string) string {
 	}
 	return out + "]"
 }
-
-// ─── Syncer-level integration tests ───────────────────────────────────────
 
 func TestSync_InstallsMissingBrewTool(t *testing.T) {
 	mock := newBrewMatchMock(nil,
@@ -322,8 +316,6 @@ func TestSync_DoesNotRefreshOutdatedState(t *testing.T) {
 	}
 	mock.MustHaveCalledN(t, "brew outdated", 0)
 }
-
-// ─── App-level integration tests ──────────────────────────────────────────
 
 func newAppWithBrew(t *testing.T, mock executor.Executor) (*app.App, string) {
 	t.Helper()

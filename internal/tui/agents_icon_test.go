@@ -36,8 +36,6 @@ func TestAgentsMarkCell_IconAndStyleByState(t *testing.T) {
 	}
 }
 
-// agentsIconEndToEndCase describes one (state, feature) combination expected
-// to be reachable through agentsAllRowsList -> agentsRowCells in production.
 type agentsIconEndToEndCase struct {
 	name      string
 	feature   agentsSection
@@ -55,7 +53,7 @@ func agentsIconEndToEndCases() []agentsIconEndToEndCase {
 			wantStyle: "styleIgnored",
 			build: func() Model {
 				m := agentsAllModel([]app.SkillPackageRow{
-					{Name: "sk-ignored", Source: "o/sk-ignored", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+					{Name: "sk-ignored", Source: "o/sk-ignored", Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
 				}, nil, nil)
 				m.agentsIgnore.Skills = []string{"sk-ignored"}
 				return m
@@ -74,8 +72,7 @@ func agentsIconEndToEndCases() []agentsIconEndToEndCase {
 				return m
 			},
 		},
-		// skills/updatesAvailable: unreachable — skillPackageRowStatus (agents_status.go)
-		// only ever returns agentsStatusOutOfSync or agentsStatusInstalled.
+		// skills/updatesAvailable is unreachable: skillPackageRowStatus only returns agentsStatusOutOfSync or agentsStatusInstalled.
 		{
 			name:      "skills/missing",
 			feature:   agentsSectionSkills,
@@ -94,8 +91,23 @@ func agentsIconEndToEndCases() []agentsIconEndToEndCase {
 			wantStyle: "styleInstalled",
 			build: func() Model {
 				return agentsAllModel([]app.SkillPackageRow{
-					{Name: "sk-installed", Source: "o/sk-installed", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+					{Name: "sk-installed", Source: "o/sk-installed", Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
 				}, nil, nil)
+			},
+		},
+		{
+			name:      "skills/updatesAvailable",
+			feature:   agentsSectionSkills,
+			wantIcon:  iconOutdated,
+			wantStyle: "styleOutdated",
+			build: func() Model {
+				return agentsAllModel([]app.SkillPackageRow{{
+					Name:           "sk-outdated",
+					Source:         "o/sk-outdated",
+					Installed:      true,
+					Outdated:       app.SkillOutdatedBehind,
+					PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled},
+				}}, nil, nil)
 			},
 		},
 		{
@@ -124,8 +136,7 @@ func agentsIconEndToEndCases() []agentsIconEndToEndCase {
 				return m
 			},
 		},
-		// mcp/updatesAvailable: unreachable — mcpAgentRowStatus (agents_status.go)
-		// only ever returns agentsStatusOutOfSync or agentsStatusInstalled.
+		// mcp/updatesAvailable is unreachable: mcpAgentRowStatus only returns agentsStatusOutOfSync or agentsStatusInstalled.
 		{
 			name:      "mcp/missing",
 			feature:   agentsSectionMcp,
@@ -210,12 +221,7 @@ func agentsIconEndToEndCases() []agentsIconEndToEndCase {
 	}
 }
 
-// TestAgentsIconEndToEnd_StateFeatureMatrix exercises the real
-// agentsAllRowsList -> agentsRowCells pipeline for every reachable
-// (state, feature) combination and asserts the row's mark icon and style
-// match the expected mapping, catching regressions the isolated
-// agentsMarkCell unit test above cannot (e.g. a wrong status/mark computed
-// upstream in agentsAllRowsList never reaching agentsMarkCell as expected).
+// Exercises the real agentsAllRowsList to agentsRowCells pipeline, catching a wrong status/mark computed upstream that the isolated agentsMarkCell test cannot.
 func TestAgentsIconEndToEnd_StateFeatureMatrix(t *testing.T) {
 	t.Parallel()
 	pal := parityPalette()

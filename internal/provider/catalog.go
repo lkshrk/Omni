@@ -106,8 +106,7 @@ func BuiltinConcreteEcosystems() map[string]string {
 	return out
 }
 
-// BuiltinConcreteConfigNames returns concrete names accepted in tool config.
-// Script is appended separately by the schema because it has extra validation.
+// BuiltinConcreteConfigNames — Script is appended separately by the schema because it needs extra validation.
 func BuiltinConcreteConfigNames() []string {
 	return sortedMetadataNames(builtinMetadata, func(name string, meta Metadata) bool {
 		return meta.Kind == ProviderKindConcrete && name != "script"
@@ -207,10 +206,7 @@ func BuiltinSystemProviderPriorityNames() []string {
 	return append([]string(nil), systemProviderPriority...)
 }
 
-// BuiltinConcreteProviderPriorityNames returns every concrete package-manager
-// provider, ordered by DisplayOrder, suitable as the default host
-// provider-priority list. The special "script" provider and the "pip3" alias of
-// "pip" are excluded — they are not user-prioritizable package managers.
+// BuiltinConcreteProviderPriorityNames — Ordered by DisplayOrder; "script" and the "pip3" alias are excluded as not user-prioritizable.
 func BuiltinConcreteProviderPriorityNames() []string {
 	return sortedMetadataNames(builtinMetadata, func(name string, meta Metadata) bool {
 		if meta.Kind != ProviderKindConcrete {
@@ -223,10 +219,7 @@ func BuiltinConcreteProviderPriorityNames() []string {
 	})
 }
 
-// BuiltinConcreteProvidersForEcosystem returns the concrete providers belonging
-// to the given ecosystem family ("system"/"node"/"python"), ordered by
-// DisplayOrder. Used to expand a family-level disable into concrete providers.
-// The "pip3" alias is excluded in favour of "pip".
+// BuiltinConcreteProvidersForEcosystem — Expands a family-level disable into concrete providers; the "pip3" alias yields to "pip".
 func BuiltinConcreteProvidersForEcosystem(ecosystem string) []string {
 	if ecosystem == "" {
 		return nil

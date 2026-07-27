@@ -12,8 +12,6 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-// ─── dots reminder ───────────────────────────────────────────────────────────
-
 func newDotsReminderCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "reminder",
@@ -207,8 +205,6 @@ func notifyDotsReminder(ctx context.Context, a *app.App, result *app.DotsReminde
 	return nil
 }
 
-// ─── dots watch ──────────────────────────────────────────────────────────────
-
 func newDotsWatchCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "watch",
@@ -355,8 +351,6 @@ func printDotsWatchSyncResult(cmd *cobra.Command, result app.DotsWatchSyncResult
 		fmt.Fprintf(cmd.OutOrStdout(), "Checked dotfiles after %s; no changes.\n", event)
 	}
 }
-
-// ─── dots services ───────────────────────────────────────────────────────────
 
 func newDotsServicesCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{

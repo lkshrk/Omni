@@ -93,8 +93,7 @@ func (m *Model) handleSettingsPriorityKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	down := s == "j" || key.Matches(msg, m.keys.Down)
 	switch {
 	case up:
-		// While holding, movement carries the grabbed provider; otherwise it moves
-		// the cursor.
+		// While holding, movement carries the grabbed provider; otherwise it moves the cursor.
 		if m.priorityHolding {
 			if m.priorityCursor > 0 {
 				i := m.priorityCursor
@@ -140,8 +139,7 @@ func (m *Model) handleSettingsPriorityKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	return cmds
 }
 
-// priorityDisabledList returns the disabled providers from the editor draft in
-// the draft's order (deterministic for persistence and tests).
+// In the draft's own order, deterministic for persistence and tests.
 func (m Model) priorityDisabledList() []string {
 	out := make([]string, 0, len(m.priorityDisabled))
 	for _, name := range m.priorityDraft {
@@ -200,11 +198,11 @@ func (m *Model) handleSettingsDangerConfirmKeyMsg(msg tea.KeyPressMsg) []tea.Cmd
 		case settingsRowBootstrap:
 			m.startBootstrapSetup()
 		case settingsRowResetSettings:
-			m.loading = true
+			m.beginLoading(loadingOwnerLocalOp)
 			startOp(m, "Resetting settings…")
 			cmds = append(cmds, m.spinner.Tick, m.doResetSettings())
 		case settingsRowResetCache:
-			m.loading = true
+			m.beginLoading(loadingOwnerLocalOp)
 			startOp(m, "Resetting cache…")
 			cmds = append(cmds, m.spinner.Tick, m.doResetCache())
 		}
@@ -218,7 +216,7 @@ func (m *Model) handleSettingsDangerConfirmKeyMsg(msg tea.KeyPressMsg) []tea.Cmd
 func (m *Model) confirmSettingsDisableDots(keepLocal bool) []tea.Cmd {
 	m.cancelConfirmationTimeout()
 	m.dangerConfirmRow = -1
-	m.loading = true
+	m.beginLoading(loadingOwnerLocalOp)
 	startOp(m, "Disabling dots…")
 	return []tea.Cmd{m.spinner.Tick, m.doDisableDots(keepLocal)}
 }
@@ -354,8 +352,6 @@ func (m Model) providerPriorityDraft(priority []string) []string {
 	return m.app.ConcreteProviderPriorityDraft(priority)
 }
 
-// providerPriorityDisplay returns the enabled providers in priority order for the
-// collapsed settings row.
 func (m Model) providerPriorityDisplay() []string {
 	draft := m.providerPriorityDraft(m.settings.ProviderPriority)
 	disabled := make(map[string]bool, len(m.settings.DisabledProviders))
@@ -397,7 +393,7 @@ func (m *Model) applySettingsServiceDurationChoice(choices []settingsDurationCho
 	case settingsRowDotsReminderInterval:
 		m.dotsReminderInterval = choice.value
 		if m.dotsReminderService != nil && m.dotsReminderService.Installed {
-			m.loading = true
+			m.beginLoading(loadingOwnerLocalOp)
 			startOp(m, "Updating dotfile reminders…")
 			return []tea.Cmd{m.spinner.Tick, m.doToggleDotsReminderService(true)}
 		}
@@ -408,7 +404,7 @@ func (m *Model) applySettingsServiceDurationChoice(choices []settingsDurationCho
 			if m.promptForStowInstall(stowInstallDotsWatch) {
 				return nil
 			}
-			m.loading = true
+			m.beginLoading(loadingOwnerLocalOp)
 			startOp(m, "Updating dotfile watch…")
 			return []tea.Cmd{m.spinner.Tick, m.doToggleDotsWatchService(true)}
 		}
@@ -492,7 +488,7 @@ func (m *Model) handleSettingsDotsReminderAction(cmds *[]tea.Cmd) {
 		return
 	}
 	enable := m.dotsReminderService == nil || !m.dotsReminderService.Installed
-	m.loading = true
+	m.beginLoading(loadingOwnerLocalOp)
 	if enable {
 		startOp(m, "Enabling dotfile reminders…")
 	} else {
@@ -514,7 +510,7 @@ func (m *Model) handleSettingsDotsWatchAction(cmds *[]tea.Cmd) {
 	if enable && m.promptForStowInstall(stowInstallDotsWatch) {
 		return
 	}
-	m.loading = true
+	m.beginLoading(loadingOwnerLocalOp)
 	if enable {
 		startOp(m, "Enabling dotfile watch…")
 	} else {

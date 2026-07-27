@@ -1,3 +1,13 @@
+# CI runs the integration suite only after a push has already landed, and history
+# here is linear and direct-to-main, so this is the last gate that still sees the
+# exact tree being published. Feature branches stay fast; only main pays for it.
+pre-push:
+  commands:
+    integration:
+      only:
+        - ref: main
+      run: make test-integration
+
 pre-commit:
   commands:
     lint:

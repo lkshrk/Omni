@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
@@ -35,12 +36,9 @@ type agentsAllRow struct {
 	status   agentsRowStatus
 	mark     agentsSyncMark
 	sortName string
-	// synthetic marks a row manufactured for an ignore-list entry whose name
-	// matches no live row of its feature (e.g. a skill no longer detected as
-	// unmanaged, or an mcp server that's been uninstalled). It carries no
-	// localIdx into any per-feature row slice — every consumer must check
-	// this flag before touching localIdx. Renders name-only and supports
-	// exactly one action, unignore ('x').
+	// Kept beside status: status names only one condition and drift outranks an update, so a drifted package's pending upgrade would otherwise be invisible.
+	outdated bool
+	// Manufactured for an ignore-list entry with no live row; carries no valid localIdx, so every consumer must check this flag before touching localIdx. Renders name-only, supports only unignore ('x').
 	synthetic bool
 }
 
@@ -51,14 +49,7 @@ func skillExpandAgents(r app.SkillPackageRow, enabledAgents []string) []string {
 	return enabledAgents
 }
 
-// agentsAllRowsList flattens the skills, mcp, and plugin rows into a single
-// cursor-indexable list, expanding each managed item into one row per target
-// agent, then sorts by (status, feature, sortName, agentID) so the list
-// groups by status like the tools tab while keeping an item's agent rows
-// adjacent. The per-feature localIdx spaces are unchanged from the pre-sort
-// universe (multiple rows now share a localIdx, one per agent), so key
-// dispatch — which routes item-level actions by feature+localIdx and never
-// depends on which agent row triggered them — keeps working unmodified.
+// Multiple rows share a localIdx (one per agent); key dispatch routes by feature+localIdx and never depends on which agent row triggered it, so it is unaffected.
 func agentsAllRowsList(m Model) []agentsAllRow {
 	var out []agentsAllRow
 	skillsIgnore, mcpIgnore, pluginIgnore, marketplaceIgnore := agentsIgnoreSets(m.agentsIgnore)
@@ -84,8 +75,17 @@ func agentsAllRowsList(m Model) []agentsAllRow {
 			case skillsIgnore[r.Name] && !r.ShadowedByPlugin:
 				out = append(out, agentsAllRow{feature: agentsSectionSkills, localIdx: i, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: r.Name})
 			default:
-				status, mark := skillPackageRowStatus(r.Installed, r.ShadowedByPlugin)
-				out = append(out, agentsAllRow{feature: agentsSectionSkills, localIdx: i, status: status, mark: mark, sortName: r.Name})
+				drifted := len(skillDriftedAgents(r, m.enabledAgents)) > 0
+				packageShadowed := len(skillShadowedAgents(r, m.enabledAgents)) > 0 &&
+					len(skillMissingAgents(r, m.enabledAgents)) == 0
+				// Mirrors DashboardAgentsSummary: a drifted package is still installed and its upgrade real; a missing one has nothing to upgrade.
+				outdated := skillRowOutdated(r) && !r.ShadowedByPlugin && !packageShadowed && (r.Installed || drifted)
+				status, mark := skillPackageRowStatus(
+					r.Installed, r.ShadowedByPlugin, packageShadowed, drifted, outdated)
+				out = append(out, agentsAllRow{
+					feature: agentsSectionSkills, localIdx: i,
+					status: status, mark: mark, sortName: r.Name, outdated: outdated,
+				})
 			}
 		}
 		out = append(out, agentsOrphanedIgnoreRows(agentsSectionSkills, skillsIgnore, seen)...)
@@ -150,7 +150,10 @@ func agentsAllRowsList(m Model) []agentsAllRow {
 					continue
 				}
 				status, mark := pluginAgentRowStatus(row, agentID)
-				out = append(out, agentsAllRow{feature: agentsSectionPlugins, localIdx: i, agentID: agentID, status: status, mark: mark, sortName: row.Name})
+				out = append(out, agentsAllRow{
+					feature: agentsSectionPlugins, localIdx: i, agentID: agentID,
+					status: status, mark: mark, sortName: row.Name, outdated: row.Outdated(),
+				})
 			}
 		}
 		unmanagedFlat := pluginUnmanagedFlat(m.pluginUnmanaged)
@@ -217,6 +220,18 @@ func agentsAllRowsList(m Model) []agentsAllRow {
 		out = append(out, agentsOrphanedIgnoreRows(agentsSectionMarketplaces, marketplaceIgnore, seen)...)
 	}
 
+	if q := agentsFilterQuery(m); q != "" {
+		kept := out[:0]
+		for _, e := range out {
+			// Skills rows were already matched on source+name by skillsVisibleRows; every other section only has a name.
+			if e.feature != agentsSectionSkills && !strings.Contains(strings.ToLower(e.sortName), q) {
+				continue
+			}
+			kept = append(kept, e)
+		}
+		out = kept
+	}
+
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].status != out[j].status {
 			return out[i].status < out[j].status
@@ -232,11 +247,7 @@ func agentsAllRowsList(m Model) []agentsAllRow {
 	return out
 }
 
-// agentsOrphanedIgnoreRows manufactures a synthetic Ignored row for every name
-// in ignore that seen doesn't already cover, so an ignore-list entry whose
-// name matches no live row (e.g. a skill no longer detected as unmanaged, or
-// an uninstalled mcp server) still surfaces in the Ignored section instead of
-// being silently invisible with no way to unignore it from the UI.
+// Without this an ignore-list entry matching no live row stays invisible, with no way to unignore it from the UI.
 func agentsOrphanedIgnoreRows(feature agentsSection, ignore, seen map[string]bool) []agentsAllRow {
 	var out []agentsAllRow
 	for name := range ignore {
@@ -248,8 +259,6 @@ func agentsOrphanedIgnoreRows(feature agentsSection, ignore, seen map[string]boo
 	return out
 }
 
-// agentsAllEntryAt returns the full row entry at cursor, or ok=false if
-// cursor is out of range.
 func agentsAllEntryAt(m Model, cursor int) (agentsAllRow, bool) {
 	rows := agentsAllRowsList(m)
 	if cursor < 0 || cursor >= len(rows) {
@@ -282,9 +291,7 @@ func (m *Model) agentsChipMove(delta int) {
 	}
 }
 
-// agentsFilteredRowsList returns agentsAllRowsList filtered to feature,
-// the same per-agent-row flatten renderAgentsGroupedTab renders for a
-// non-"all" chip, so navigation and rendering always agree on row identity.
+// Same per-agent-row flatten renderAgentsGroupedTab renders, so navigation and rendering always agree on row identity.
 func agentsFilteredRowsList(m Model, feature agentsSection) []agentsAllRow {
 	var out []agentsAllRow
 	for _, e := range agentsAllRowsList(m) {
@@ -295,9 +302,7 @@ func agentsFilteredRowsList(m Model, feature agentsSection) []agentsAllRow {
 	return out
 }
 
-// agentsFeatureCursorAgentID returns the agentID disambiguator paired with
-// agentsFeatureCursor's localIdx, so a specific rendered row (not just its
-// item) can be pinned when an item expands into multiple per-agent rows.
+// Pairs with agentsFeatureCursor's localIdx so a specific rendered row can be pinned when an item expands into multiple per-agent rows.
 func agentsFeatureCursorAgentID(m Model, feature agentsSection) string {
 	switch feature {
 	case agentsSectionMcp:
@@ -311,10 +316,7 @@ func agentsFeatureCursorAgentID(m Model, feature agentsSection) string {
 	}
 }
 
-// agentsChipRowPosition returns the index within agentsFilteredRowsList(m,
-// feature) of the row matching (localIdx, agentID), or -1 if none matches
-// (e.g. skills, which never carries an agentID, or a stale position after
-// the row set changed).
+// -1 when nothing matches (e.g. skills, which never carries an agentID, or a stale position after the row set changed).
 func agentsChipRowPosition(rows []agentsAllRow, localIdx int, agentID string) int {
 	for i, e := range rows {
 		if e.localIdx == localIdx && e.agentID == agentID {
@@ -324,13 +326,7 @@ func agentsChipRowPosition(rows []agentsAllRow, localIdx int, agentID string) in
 	return -1
 }
 
-// agentsChipMoveRow moves the chip's cursor by delta positions within the
-// feature's filtered per-agent-row flatten, then writes the landed row's
-// (localIdx, agentID) back to the feature's cursor fields. When the current
-// cursor doesn't resolve to a row in the current flatten (e.g. after a
-// reload, or an explicit reset-to-first-row call with delta=0), lands
-// directly on row 0 instead of applying delta relative to an undefined
-// position.
+// When the cursor doesn't resolve to a row in the current flatten, lands on row 0 rather than applying delta from an undefined position.
 func (m *Model) agentsChipMoveRow(feature agentsSection, delta int) {
 	rows := agentsFilteredRowsList(*m, feature)
 	n := len(rows)
@@ -359,8 +355,7 @@ func (m *Model) agentsChipMoveRow(feature agentsSection, delta int) {
 	}
 }
 
-// agentsChipSection maps a chip constant to its agentsSection, or ok=false
-// for the "all" chip (which has no single section).
+// ok=false for the "all" chip, which has no single section.
 func agentsChipSection(chip int) (agentsSection, bool) {
 	switch chip {
 	case agentsChipSkills:
@@ -376,9 +371,7 @@ func agentsChipSection(chip int) (agentsSection, bool) {
 	}
 }
 
-// setAgentsChip switches the active chip and syncs the destination's cursor
-// from the source's, so a row stays selected across chip switches instead of
-// resetting. Shared by the keyboard ([/]) and mouse (pill click) entry points.
+// Syncs the destination cursor from the source's so a row stays selected across chip switches instead of resetting.
 func (m *Model) setAgentsChip(next int) {
 	from := m.skillTypeIdx
 	m.skillTypeIdx = next
@@ -427,8 +420,6 @@ func (m *Model) setAgentsChip(next int) {
 	m.resetAgentsChipCursor()
 }
 
-// agentFilterMove cycles skillAgentIdx (the agent-filter chip bar) by delta,
-// clamped to [0, len(agentIDs)] same as the skills handler's prior [/] logic.
 func (m *Model) agentFilterMove(delta int) {
 	if delta < 0 {
 		if m.skillAgentIdx > 0 {
@@ -465,15 +456,10 @@ func (m *Model) resetAgentsChipCursor() {
 	}
 }
 
-// agentsAllCursorMove moves m.agentsAllCursor by delta positions, wrapped
-// modulo the flattened all-view row list (matching the tools/dots main-tab
-// lists). Shared by keyboard up/down and mouse wheel scroll.
 func agentsAllCursorMove(m *Model, delta int) {
 	m.agentsAllCursor = cursorMove(m.agentsAllCursor, delta, len(agentsAllRowsList(*m)), true)
 }
 
-// clampAgentsAllCursor keeps m.agentsAllCursor within [0, total) for the
-// flattened all-view row list.
 func clampAgentsAllCursor(m *Model) {
 	total := len(agentsAllRowsList(*m))
 	if m.agentsAllCursor >= total {
@@ -484,28 +470,31 @@ func clampAgentsAllCursor(m *Model) {
 	}
 }
 
-// handleAgentsGlobalActionKeyMsg intercepts the agents tab's three
-// capital-key global bulk actions (U update all, S sync all, R refresh)
-// before per-chip dispatch, so they work identically from any chip
-// (all/skills/mcp/plugin), mirroring how tools' UpgradeAll/SyncAll/Refresh
-// work regardless of the active provider/group filter. Guarded against
-// re-trigger while an equivalent operation is already in flight, and against
-// firing during any row-level confirm (delete) so a stray capital letter
-// can't be misread mid-confirmation.
+const agentsBusyStatus = "⚠ agents busy — wait for the running operation to finish"
+
+func (m *Model) agentsOpInFlight() bool {
+	return m.skillsRunning || m.skillAddRunning || m.mcpRunning || m.pluginRunning || m.marketplaceRunning
+}
+
+// Runs before per-chip dispatch so the bulk keys work from any chip; guarded against re-trigger while an equivalent op is in flight and against firing mid-confirm.
 func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (handled bool, cmds []tea.Cmd) {
-	if m.agentsDeleteConfirm || m.agentsIgnoreConfirm || m.mcpDeleteConfirm || m.pluginDeleteConfirm || m.marketplaceDeleteConfirm {
+	if m.agentsDeleteConfirm || m.agentsIgnoreConfirm || m.agentsResolveConfirm || m.mcpDeleteConfirm || m.pluginDeleteConfirm || m.marketplaceDeleteConfirm {
 		return false, nil
 	}
-	agentsGlobalOpInFlight := m.skillsRunning || m.skillAddRunning || m.mcpRunning || m.pluginRunning || m.marketplaceRunning
+	if m.agentsSyncAllConfirm {
+		m.cancelConfirmationTimeout()
+		m.agentsSyncAllConfirm = false
+		if msg.String() == "S" && !m.agentsOpInFlight() {
+			return true, m.doAgentsSyncAll()
+		}
+	}
 	switch msg.String() {
 	case "U", "S", "R":
-		if agentsGlobalOpInFlight {
-			return true, nil
+		if m.agentsOpInFlight() {
+			return true, []tea.Cmd{setStatus(m, agentsBusyStatus, true)}
 		}
 	case "e":
-		// Falls through to the open-trace-log case below regardless of an
-		// in-flight bulk op: the log itself is a read-only view of past
-		// command output, unrelated to whatever bulk action is running.
+		// Falls through regardless of an in-flight bulk op: the trace log is a read-only view of past output.
 	default:
 		return false, nil
 	}
@@ -513,7 +502,8 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (handled boo
 	case "U":
 		return true, m.doAgentsUpdateAll()
 	case "S":
-		return true, m.doAgentsSyncAll()
+		m.agentsSyncAllConfirm = true
+		return true, []tea.Cmd{m.armConfirmationTimeout()}
 	case "e":
 		return true, []tea.Cmd{m.openTraceLog()}
 	default:
@@ -521,18 +511,7 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (handled boo
 	}
 }
 
-// doAgentsUpdateAll runs the agents tab's "U" global bulk action: skills
-// update, a marketplace refresh, an update for every outdated plugin, then an
-// install for every manifest plugin/mcp server still missing (so "U" also
-// picks up entries added to the manifest on another host, mirroring what "S"
-// does for those two sections — mcp has no update concept at all, only
-// add/remove, see McpAdapter, so install-missing is the only thing "U" can do
-// for it). Marketplaces must refresh BEFORE outdated plugins are computed: a
-// plugin's LatestVersion/LatestSha comes from the marketplace's local clone,
-// so the cached rows can't know about an update until the clone is pulled —
-// computing outdated from the cached rows first would never find anything to
-// update. The plugin update and the missing-plugin install both use their
-// PreRefreshed variant so that one refresh isn't repeated for each.
+// Marketplaces must refresh before outdated plugins are computed: LatestVersion/LatestSha come from the marketplace's local clone, so cached rows cannot know about an update until it is pulled.
 func (m *Model) doAgentsUpdateAll() []tea.Cmd {
 	runSkills := m.skillsSectionEnabled() && len(m.skillsRows) > 0
 	runPlugins := m.pluginsSectionEnabled()
@@ -611,10 +590,11 @@ func (m *Model) doAgentsUpdateAll() []tea.Cmd {
 	return []tea.Cmd{m.spinner.Tick, work, waitForProgress(ch, gen)}
 }
 
-// combineSkillErrors folds per-package install failures into the returned
-// error, mirroring combineMcpErrors/combinePluginErrors: RestoreSkills only
-// reports them via res.Failed, so a nil err alone does not mean every
-// package installed.
+func skillWarningsText(warnings []string) string {
+	return strings.Join(warnings, "; ")
+}
+
+// RestoreSkills only reports per-package failures via res.Failed, so a nil err alone does not mean every package installed.
 func combineSkillErrors(err error, res app.RestoreSkillsResult) error {
 	all := make([]error, 0, len(res.Failed)+1)
 	if err != nil {
@@ -626,10 +606,16 @@ func combineSkillErrors(err error, res app.RestoreSkillsResult) error {
 	return errors.Join(all...)
 }
 
-// doAgentsSyncAll runs the agents tab's "S" global bulk action: restore
-// skills, mcp, and plugins from their manifests, mirroring tools' SyncAll
-// (install missing / add discovered).
+// The claim step adopts on-disk directories, so the action is confirmed before it runs (see handleAgentsGlobalActionKeyMsg).
 func (m *Model) doAgentsSyncAll() []tea.Cmd {
+	return m.doAgentsComposedRun(true)
+}
+
+func (m *Model) doAgentsRestoreAll() []tea.Cmd {
+	return m.doAgentsComposedRun(false)
+}
+
+func (m *Model) doAgentsComposedRun(claim bool) []tea.Cmd {
 	runSkills := m.skillsSectionEnabled()
 	runMcp := m.mcpSectionEnabled()
 	runPlugins := m.pluginsSectionEnabled()
@@ -654,34 +640,43 @@ func (m *Model) doAgentsSyncAll() []tea.Cmd {
 	work := func() tea.Msg {
 		defer close(ch)
 		done := agentsProgressDoneMsg{gen: gen, skills: runSkills, mcp: runMcp, plugin: runPlugins}
+		var report app.AgentsSyncAllResult
 		if runSkills {
+			var importErr error
+			if claim {
+				sendProgress(ch, gen, "importing unmanaged skills…")
+				diff, err := a.ImportSkills(ctx, app.ImportSkillsOptions{})
+				importErr = err
+				report.AddSkillsImport(diff, err)
+			}
 			sendProgress(ch, gen, "restoring skills…")
 			res, _, err := a.RestoreSkills(ctx, app.RestoreSkillsOptions{})
-			done.skillsErr = combineSkillErrors(err, res)
+			report.AddSkills(res, nil, err)
+			done.skillsErr = errors.Join(importErr, combineSkillErrors(err, res))
 		}
 		if runMcp {
 			sendProgress(ch, gen, "restoring mcp servers…")
 			res, err := a.RestoreMcpServers(ctx, app.RestoreMcpOptions{})
+			report.AddMcp(res, err)
 			done.mcpErr = combineMcpErrors(err, res.Errors)
 		}
 		if runPlugins {
 			sendProgress(ch, gen, "restoring plugins…")
 			res, err := a.RestorePlugins(ctx, app.RestorePluginOptions{})
+			report.AddPlugins(res, err)
 			done.pluginErr = combinePluginErrors(err, res.Errors)
 		}
+		done.report = &report
 		return done
 	}
 	return []tea.Cmd{m.spinner.Tick, work, waitForProgress(ch, gen)}
 }
 
-// doAgentsRefreshAll runs the agents tab's "R" global bulk action: reload
-// all three row sets plus the dashboard agents summary, mirroring tools'
-// Refresh (rescan installed/outdated state).
 func (m *Model) doAgentsRefreshAll() []tea.Cmd {
 	var cmds []tea.Cmd
 	if m.skillsSectionEnabled() {
 		m.skillsLoaded = true
-		cmds = append(cmds, m.loadSkillsManifestCmd())
+		cmds = append(cmds, m.loadSkillsManifest(true))
 	}
 	if m.mcpSectionEnabled() {
 		m.mcpRunning = true
@@ -699,17 +694,16 @@ func (m *Model) doAgentsRefreshAll() []tea.Cmd {
 	return cmds
 }
 
-// handleAgentsAllKeyMsg dispatches keys for the all chip: up/down move the
-// single cursor across the flattened row list, left/right switch chips, and
-// any other key is routed to the section under the cursor's own key handler
-// (with that section's cursor synced first) so mutating actions (e.g. mcp
-// "n", plugin "d") work uniformly across the stacked view.
+// Other keys route to the section under the cursor with that section's cursor synced first, so mutating actions work uniformly across the stacked view.
 func (m *Model) handleAgentsAllKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	if m.agentsDeleteConfirm {
 		return m.handleAgentsDeleteConfirmKeyMsg(msg)
 	}
 	if m.agentsIgnoreConfirm {
 		return m.handleAgentsIgnoreConfirmKeyMsg(msg)
+	}
+	if m.agentsResolveConfirm {
+		return m.handleAgentsResolveConfirmKeyMsg(msg)
 	}
 	if m.pluginMarketplaceOfferConfirm {
 		return m.handlePluginMarketplaceOfferConfirmKeyMsg(msg)
@@ -724,9 +718,26 @@ func (m *Model) handleAgentsAllKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	case "left", "h":
 		m.agentsChipMove(-1)
 		return nil
-	case "right", "l":
+	case "right":
 		m.agentsChipMove(1)
 		return nil
+	case "l":
+		// A drifted skills row spends 'l' on use-local (dots' mnemonic); "right" still switches chips there.
+		if entry, ok := agentsAllEntryAt(*m, m.agentsAllCursor); !ok || !agentsResolveEligible(entry) {
+			m.agentsChipMove(1)
+			return nil
+		}
+	case "{":
+		m.agentFilterMove(-1)
+		clampAgentsAllCursor(m)
+		return nil
+	case "}":
+		m.agentFilterMove(1)
+		clampAgentsAllCursor(m)
+		return nil
+	case "/":
+		m.openAgentsSearch()
+		return []tea.Cmd{textinput.Blink}
 	}
 	if handled, cmds := m.handleAgentsAllRowActionKeyMsg(msg); handled {
 		clampAgentsAllCursor(m)

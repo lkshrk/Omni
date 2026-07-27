@@ -7,8 +7,6 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// tapResolverStub is a brew provider stub that also resolves tap-qualified
-// names for the BackfillBrewTaps heal.
 type tapResolverStub struct {
 	stubProvider
 	resolutions map[string][2]string // bare name -> [fullName, tap]
@@ -105,10 +103,7 @@ func TestBackfillBrewTaps_DryRunDoesNotWrite(t *testing.T) {
 }
 
 func TestBackfillBrewTaps_LeavesCoreFormulaeAndQualifiedAlone(t *testing.T) {
-	t.Parallel(
-	// wget is a core formula (ResolveTap returns false); terraform is already
-	// tap-qualified. Neither should be touched.
-	)
+	t.Parallel()
 
 	stub := newTapResolverStub(map[string][2]string{})
 	a, cfgPath := newImportApp(t, stub)

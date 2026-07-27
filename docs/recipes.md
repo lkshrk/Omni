@@ -87,7 +87,7 @@ On Linux, Omni skips unavailable `brew` and installs through the `script`
 candidate. Delete with the script owner when Omni sees grok as installed:
 
 ```sh
-omni tools delete grok --provider script
+omni tools remove --purge grok --provider script
 ```
 
 ## Move Python Tools To uv
@@ -121,13 +121,13 @@ omni settings set ecosystems.node.manager pnpm
 Preview migration off the system provider:
 
 ```sh
-omni consolidate --to pnpm --dry-run
+omni tools consolidate --to pnpm --dry-run
 ```
 
 Apply:
 
 ```sh
-omni consolidate --to pnpm
+omni tools consolidate --to pnpm
 omni tools refresh
 ```
 

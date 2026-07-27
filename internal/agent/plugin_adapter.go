@@ -8,10 +8,7 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// PluginAdapter manages plugins and marketplaces in one target agent by
-// delegating to that agent's own CLI. omni never edits agent config files
-// directly, and never removes a marketplace it did not add (see AddMarketplace
-// doc comment) — there is deliberately no RemoveMarketplace here.
+// PluginAdapter — Delegates to each agent's own CLI rather than editing its config files, and deliberately offers no RemoveMarketplace.
 type PluginAdapter interface {
 	ID() string
 	Available() bool
@@ -21,17 +18,11 @@ type PluginAdapter interface {
 	UpdatePlugin(ctx context.Context, name, marketplace string) error
 	ListMarketplaces(ctx context.Context) ([]InstalledMarketplace, error)
 	AddMarketplace(ctx context.Context, m config.Marketplace) error
-	// UpdateMarketplaces refreshes every configured marketplace from its
-	// source, so plugin installs/updates that follow see current metadata.
-	// Adapters with no such CLI operation return a descriptive error rather
-	// than silently no-op'ing (mirrors codexPluginAdapter.UpdatePlugin).
+	// Adapters whose CLI has no such operation return a descriptive error rather than silently no-op'ing.
 	UpdateMarketplaces(ctx context.Context) error
 }
 
-// dirModTime returns dir's modification time, or the zero time if dir is
-// empty or unreadable — a best-effort fallback, never an error, since a
-// marketplace's clone directory is not guaranteed to exist or be readable at
-// scan time (see InstalledMarketplace.UpdatedAt's doc comment).
+// Best-effort: a marketplace clone need not exist or be readable at scan time, so an unreadable dir yields the zero time.
 func dirModTime(dir string) time.Time {
 	if dir == "" {
 		return time.Time{}
@@ -43,10 +34,7 @@ func dirModTime(dir string) time.Time {
 	return info.ModTime()
 }
 
-// InstalledPlugin is one plugin as reported by an agent's list output.
-// Version is informational only — omni does not pin or reconcile versions.
-// LatestVersion feeds the Updates section; empty when the agent CLI does not
-// expose a comparable version for the marketplace's available entry.
+// InstalledPlugin — Version is informational only, since omni pins and reconciles nothing; LatestVersion is empty when the CLI exposes no comparable version.
 type InstalledPlugin struct {
 	Name          string
 	Marketplace   string
@@ -54,27 +42,11 @@ type InstalledPlugin struct {
 	LatestVersion string
 	Sha           string
 	LatestSha     string
-	// PathOutdated is a precise outdated signal for plugins with no usable
-	// Version/LatestVersion pair (the common case — see plugin_rows.go's
-	// Outdated doc comment for why the marketplace-repo-HEAD sha can't be
-	// compared directly). nil means the adapter could not determine it
-	// (e.g. no source path, no installed commit sha, git unavailable);
-	// non-nil is authoritative. Populated by comparing the plugin's own
-	// source path's last-touched commit at HEAD against the same query run
-	// at the installed commit — equal means nothing has changed since
-	// install, regardless of unrelated commits elsewhere in the repo.
+	// The precise signal when no usable Version/LatestVersion pair exists: nil means undeterminable, non-nil is authoritative.
 	PathOutdated *bool
 }
 
-// InstalledMarketplace is one marketplace as reported by an agent's list
-// output. Source is the real, re-addable source string when the agent CLI's
-// list output exposes one; it is empty when it does not, and omni must never
-// fabricate a replacement (see FindUndeclaredMarketplace's doc comment).
-// UpdatedAt is the marketplace's last-update time; zero means unknown. Neither
-// claude's nor codex's marketplace list JSON exposes a date field (unlike
-// their plugin list JSON, which carries installedAt/lastUpdated), so
-// UpdatedAt is derived from the mtime of the marketplace's on-disk clone
-// directory (installLocation/root in each CLI's list output) by the adapter.
+// InstalledMarketplace — Source is empty when the CLI exposes no re-addable string, and omni must never fabricate one; UpdatedAt comes from the clone directory's mtime because no CLI reports a date.
 type InstalledMarketplace struct {
 	Name      string
 	Source    string

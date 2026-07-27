@@ -8,9 +8,10 @@ import (
 	"strings"
 )
 
-// MaterializeInstallSpec expands a recipe-backed install candidate into concrete
-// provider options. When options.install is already set the spec is returned
-// unchanged.
+// CurlFetch blocks plaintext redirects because fetched bytes may be executed or trusted.
+const CurlFetch = `curl -fsSL --proto-redir =https`
+
+// MaterializeInstallSpec — A spec whose options.install is already set is returned unchanged.
 func MaterializeInstallSpec(logicalName string, spec ToolInstallSpec, fallbackBinDir string) (ToolInstallSpec, error) {
 	if spec.Options != nil && strings.TrimSpace(spec.Options["install"]) != "" {
 		return spec, nil
@@ -30,13 +31,24 @@ func MaterializeInstallSpec(logicalName string, spec ToolInstallSpec, fallbackBi
 	}
 }
 
-func materializeCurlInstallScript(logicalName string, spec ToolInstallSpec) (ToolInstallSpec, error) {
-	url := optionValue(spec.Options, "url")
-	if url == "" && spec.Source != nil {
-		url = strings.TrimSpace(spec.Source.URL)
+func curlInstallScriptURL(spec ToolInstallSpec) string {
+	if url := optionValue(spec.Options, "url"); url != "" {
+		return url
 	}
+	if spec.Source != nil {
+		return strings.TrimSpace(spec.Source.URL)
+	}
+	return ""
+}
+
+func materializeCurlInstallScript(logicalName string, spec ToolInstallSpec) (ToolInstallSpec, error) {
+	url := curlInstallScriptURL(spec)
 	if url == "" {
 		return spec, fmt.Errorf("curl_install_script for %q requires options.url or source.url", logicalName)
+	}
+	// Re-checked at the sink: materialization is reachable without ValidateRoot having run.
+	if !IsHTTPSURL(url) {
+		return spec, fmt.Errorf("curl_install_script for %q: %s", logicalName, errCurlInstallScriptURLScheme)
 	}
 	checkPath := optionValue(spec.Options, "check_path")
 	if checkPath == "" {
@@ -47,9 +59,8 @@ func materializeCurlInstallScript(logicalName string, spec ToolInstallSpec) (Too
 		checkPath = bin
 	}
 	envPrefix := curlInstallEnvPrefix(spec.Options)
-	// bash, not sh: upstream installers (bun, nvm) use bashisms like pipefail
-	// that dash rejects when piped, since the shebang never applies.
-	install := envPrefix + `curl -fsSL ` + shellSingleQuote(url) + ` | bash`
+	// bash, not sh: piping skips the shebang, and upstream installers use bashisms dash rejects.
+	install := envPrefix + CurlFetch + ` ` + shellSingleQuote(url) + ` | bash`
 	check := envPrefix + `command -v ` + shellSingleQuote(checkPath) + ` >/dev/null 2>&1`
 	if path := optionValue(spec.Options, "check_path"); path != "" && strings.Contains(path, "/") {
 		check = envPrefix + `test -x ` + shellSingleQuote(path)
@@ -62,6 +73,7 @@ func materializeCurlInstallScript(logicalName string, spec ToolInstallSpec) (Too
 	}
 	out.Options["install"] = install
 	out.Options["check"] = check
+	out.Options[OptionBin] = checkPath
 	if uninstall != "" {
 		out.Options["uninstall"] = uninstall
 	}
@@ -106,6 +118,10 @@ func materializeGitHubReleaseAsset(logicalName string, spec ToolInstallSpec, fal
 
 	var install string
 	if downloadURL := strings.TrimSpace(recipe.AssetDownloadURL); downloadURL != "" {
+		// Re-checked at the sink: materialization is reachable without ValidateRoot having run.
+		if !IsHTTPSURL(downloadURL) {
+			return spec, fmt.Errorf("github_release_asset for %q: %s", logicalName, errAssetDownloadURLScheme)
+		}
 		install = githubReleaseAssetInstallCommand(downloadURL, binary, binDir, cacheDir, binaryPath, extractDir, stripComponents)
 	} else if strings.Contains(pattern, "{arch}") || strings.Contains(pattern, "{os}") {
 		install = githubReleaseAssetArchAwareInstall(
@@ -136,12 +152,27 @@ func materializeGitHubReleaseAsset(logicalName string, spec ToolInstallSpec, fal
 	out.Options["check"] = check
 	out.Options["uninstall"] = uninstall
 	out.Options["upgrade"] = install
+	out.Options[OptionBin] = binary
+	if recorded := recipeRecordedVersion(recipe.InstalledVersion, tag); recorded != "" {
+		out.Options[OptionRecordedVersion] = recorded
+	}
 	return out, nil
 }
 
-// GitHubReleaseAssetName resolves a recipe's asset template for the current
-// platform and release tag. It uses the same architecture mapping as command
-// materialization, allowing callers to match the configured asset exactly.
+// OptionRecordedVersion names the literal installed version a recipe already knows, so providers need not probe the binary.
+const OptionRecordedVersion = "recorded_version"
+
+// OptionBin names the installed executable, which a recipe knows but the logical tool name may not match.
+const OptionBin = "bin"
+
+func recipeRecordedVersion(installedVersion, tag string) string {
+	if installed := strings.TrimSpace(installedVersion); installed != "" {
+		return strings.TrimPrefix(installed, "v")
+	}
+	return strings.TrimPrefix(strings.TrimSpace(tag), "v")
+}
+
+// GitHubReleaseAssetName — Uses the same architecture mapping as command materialization so callers match the configured asset exactly.
 func GitHubReleaseAssetName(logicalName string, spec ToolInstallSpec, tag string) (string, error) {
 	if spec.Recipe == nil || spec.Recipe.Type != FallbackRecipeGitHubReleaseAsset {
 		return "", fmt.Errorf("github release asset recipe is required for %q", logicalName)
@@ -246,7 +277,7 @@ func githubReleaseAssetArchAwareInstall(owner, repo, tag, version, pattern, bina
 			stripFlag = ` --strip-components=` + stripComponents
 		}
 		extract := fmt.Sprintf(
-			`tmp="$(mktemp -d)" && curl -fsSL %s/"$asset" -o %s/"$asset" && case "$asset" in *.zip) unzip -q %s/"$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf %s/"$asset" -C %s%s ;; *.tar.xz) tar -xJf %s/"$asset" -C %s%s ;; *) cp %s/"$asset" "$tmp/" ;; esac`,
+			`tmp="$(mktemp -d)" && `+CurlFetch+` %s/"$asset" -o %s/"$asset" && case "$asset" in *.zip) unzip -q %s/"$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf %s/"$asset" -C %s%s ;; *.tar.xz) tar -xJf %s/"$asset" -C %s%s ;; *) cp %s/"$asset" "$tmp/" ;; esac`,
 			shellSingleQuote(releaseBase), shellSingleQuote(cacheDir), shellSingleQuote(cacheDir),
 			shellSingleQuote(cacheDir), tarTarget, stripFlag,
 			shellSingleQuote(cacheDir), tarTarget, stripFlag,
@@ -265,7 +296,7 @@ func githubReleaseAssetArchAwareInstall(owner, repo, tag, version, pattern, bina
 		return prefix + ` && ` + extract + ` && ` + findClause
 	}
 	return prefix + fmt.Sprintf(
-		` && curl -fsSL %s/"$asset" -o %s/%s && chmod +x %s/%s`,
+		` && `+CurlFetch+` %s/"$asset" -o %s/%s && chmod +x %s/%s`,
 		shellSingleQuote(releaseBase), shellSingleQuote(binDir), shellSingleQuote(binary),
 		shellSingleQuote(binDir), shellSingleQuote(binary),
 	)
@@ -282,6 +313,10 @@ func materializeAptRepo(logicalName string, spec ToolInstallSpec) (ToolInstallSp
 	if keyURL == "" || signedBy == "" || sourcesFormat == "" || packages == "" {
 		return spec, fmt.Errorf("apt_repo for %q requires options key_url, signed_by, sources_format, and packages", logicalName)
 	}
+	// Re-checked at the sink: materialization is reachable without ValidateRoot having run.
+	if !IsHTTPSURL(keyURL) {
+		return spec, fmt.Errorf("apt_repo for %q: %s", logicalName, errAptRepoKeyURLScheme)
+	}
 	setup := strings.TrimSpace(spec.Options["setup"])
 	if setup == "" {
 		arch := runtime.GOARCH
@@ -291,13 +326,13 @@ func materializeAptRepo(logicalName string, spec ToolInstallSpec) (ToolInstallSp
 		if suite != "" {
 			sourcesLine := strings.ReplaceAll(format, "{suite}", suite)
 			setup = fmt.Sprintf(
-				`install -m 0755 -d /etc/apt/keyrings && curl -fsSL %s -o %s && chmod a+r %s && printf '%%s\n' %s > /etc/apt/sources.list.d/omni-%s.list && apt-get update`,
+				`install -m 0755 -d /etc/apt/keyrings && `+CurlFetch+` %s -o %s && chmod a+r %s && printf '%%s\n' %s > /etc/apt/sources.list.d/omni-%s.list && apt-get update`,
 				shellSingleQuote(keyURL), shellSingleQuote(signedBy), shellSingleQuote(signedBy),
 				shellSingleQuote(sourcesLine), shellSingleQuote(logicalName),
 			)
 		} else {
 			setup = fmt.Sprintf(
-				`install -m 0755 -d /etc/apt/keyrings && curl -fsSL %s -o %s && chmod a+r %s && suite=$({ . /etc/os-release; echo "${VERSION_CODENAME:-${UBUNTU_CODENAME:-stable}}"; }) && printf '%%s\n' %s | sed "s/{suite}/$suite/g" > /etc/apt/sources.list.d/omni-%s.list && apt-get update`,
+				`install -m 0755 -d /etc/apt/keyrings && `+CurlFetch+` %s -o %s && chmod a+r %s && suite=$({ . /etc/os-release; echo "${VERSION_CODENAME:-${UBUNTU_CODENAME:-stable}}"; }) && printf '%%s\n' %s | sed "s/{suite}/$suite/g" > /etc/apt/sources.list.d/omni-%s.list && apt-get update`,
 				shellSingleQuote(keyURL), shellSingleQuote(signedBy), shellSingleQuote(signedBy),
 				shellSingleQuote(format), shellSingleQuote(logicalName),
 			)
@@ -418,7 +453,7 @@ func githubReleaseAssetInstallCommand(downloadURL, binary, binDir, cacheDir, bin
 	}
 	if !isArchiveAssetPattern(assetName) {
 		return fmt.Sprintf(
-			`mkdir -p %s && curl -fsSL %s -o %s/%s && chmod +x %s/%s`,
+			`mkdir -p %s && `+CurlFetch+` %s -o %s/%s && chmod +x %s/%s`,
 			shellSingleQuote(binDir), shellSingleQuote(downloadURL),
 			shellSingleQuote(binDir), shellSingleQuote(binary),
 			shellSingleQuote(binDir), shellSingleQuote(binary),
@@ -437,7 +472,7 @@ func githubReleaseAssetInstallCommand(downloadURL, binary, binDir, cacheDir, bin
 	extract += ` | head -n 1)" && test -n "$found" && cp "$found" ` + shellSingleQuote(binDir) + `/` + shellSingleQuote(binary) + ` && chmod +x ` + shellSingleQuote(binDir) + `/` + shellSingleQuote(binary)
 	if extractDir != "" {
 		return fmt.Sprintf(
-			`mkdir -p %s %s && asset=%s/%s && curl -fsSL %s -o "$asset" && case "$asset" in *.zip) unzip -q "$asset" -d %s ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C %s%s ;; *.tar.xz) tar -xJf "$asset" -C %s%s ;; esac && test -x %s/%s`,
+			`mkdir -p %s %s && asset=%s/%s && `+CurlFetch+` %s -o "$asset" && case "$asset" in *.zip) unzip -q "$asset" -d %s ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C %s%s ;; *.tar.xz) tar -xJf "$asset" -C %s%s ;; esac && test -x %s/%s`,
 			shellSingleQuote(binDir), shellSingleQuote(cacheDir),
 			shellSingleQuote(cacheDir), shellSingleQuote(assetName),
 			shellSingleQuote(downloadURL), shellSingleQuote(extractDir),
@@ -447,7 +482,7 @@ func githubReleaseAssetInstallCommand(downloadURL, binary, binDir, cacheDir, bin
 		)
 	}
 	return fmt.Sprintf(
-		`mkdir -p %s %s && asset=%s/%s && curl -fsSL %s -o "$asset" && tmp="$(mktemp -d)" && case "$asset" in *.zip) unzip -q "$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C "$tmp" ;; *.tar.xz) tar -xJf "$asset" -C "$tmp" ;; *) cp "$asset" "$tmp/" ;; esac && %s`,
+		`mkdir -p %s %s && asset=%s/%s && `+CurlFetch+` %s -o "$asset" && tmp="$(mktemp -d)" && case "$asset" in *.zip) unzip -q "$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C "$tmp" ;; *.tar.xz) tar -xJf "$asset" -C "$tmp" ;; *) cp "$asset" "$tmp/" ;; esac && %s`,
 		shellSingleQuote(binDir), shellSingleQuote(cacheDir),
 		shellSingleQuote(cacheDir), shellSingleQuote(assetName),
 		shellSingleQuote(downloadURL), extract,

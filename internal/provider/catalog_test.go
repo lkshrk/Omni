@@ -17,7 +17,6 @@ func TestBuiltinConcreteProviderPriorityNames(t *testing.T) {
 			t.Fatalf("order[%d] = %q, want %q (full: %v)", i, got[i], want[i], got)
 		}
 	}
-	// script (special) and pip3 (alias of pip) must be excluded.
 	for _, n := range got {
 		if n == "script" || n == "pip3" {
 			t.Errorf("priority list must exclude %q", n)
@@ -26,9 +25,7 @@ func TestBuiltinConcreteProviderPriorityNames(t *testing.T) {
 }
 
 func TestBuiltinMetadata_RequiresPrivilege(t *testing.T) {
-	// The sudo-backed system package managers carry the flag; everything else
-	// (brew, ecosystems, python/node managers, script) does not. This is the
-	// single source of truth the privilege display marker reads.
+	// Single source of truth for the privilege display marker: only sudo-backed system PMs carry the flag.
 	privileged := map[string]bool{"apt": true, "apk": true, "dnf": true, "pacman": true, "zypper": true}
 	for _, name := range []string{"apt", "apk", "dnf", "pacman", "zypper", "brew", "system", "pip", "pip3", "uv", "npm", "bun", "cargo", "script", "unknown"} {
 		want := privileged[name]

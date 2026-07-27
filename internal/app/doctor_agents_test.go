@@ -99,15 +99,15 @@ func TestDoctorAgents_AdapterUnavailableWarns(t *testing.T) {
 	}
 }
 
-func TestDoctorAgents_NeverCallsAdapterList(t *testing.T) {
+func TestDoctorAgents_ReadsLiveMcpState(t *testing.T) {
 	t.Parallel()
 	stub := &stubMcpAdapter{id: "codex", available: true}
 	a := newFeatureGateApp(t, config.Settings{}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 	if _, err := a.Doctor(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if stub.listCalls != 0 {
-		t.Errorf("listCalls = %d, want 0 (doctor must not probe List)", stub.listCalls)
+	if stub.listCalls == 0 {
+		t.Error("listCalls = 0, want doctor to read the live server list")
 	}
 }
 
@@ -142,18 +142,20 @@ func TestDoctorAgents_SkillsMissingWarn(t *testing.T) {
 	}
 }
 
-func TestDoctorAgents_SkillsRunnerNotFoundWarn(t *testing.T) {
+func TestDoctorAgents_SkillsGitNotFoundWarn(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	mcpStub := &stubMcpAdapter{id: "claude-code", available: true}
 	pluginStub := &stubPluginAdapter{id: "claude-code", available: true}
-	a := newDoctorAgentsApp(t, config.AgentsConfig{}, app.WithMcpAdapters([]app.McpAdapter{mcpStub}), app.WithPluginAdapters([]app.PluginAdapter{pluginStub}))
+	a := newDoctorAgentsApp(t, config.AgentsConfig{
+		Packages: []config.SkillPackage{{Source: "owner/repo"}},
+	}, app.WithMcpAdapters([]app.McpAdapter{mcpStub}), app.WithPluginAdapters([]app.PluginAdapter{pluginStub}))
 	result, err := a.Doctor(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	check := doctorCheck(result, "agents")
 	if check.Status != app.DoctorStatusWarn {
-		t.Errorf("status = %s, want warn for missing runner", check.Status)
+		t.Errorf("status = %s, want warn for missing git", check.Status)
 	}
 	g := doctorAgentsGroup(check, "skills")
 	if g == nil {
@@ -161,13 +163,34 @@ func TestDoctorAgents_SkillsRunnerNotFoundWarn(t *testing.T) {
 	}
 	found := false
 	for _, item := range g.Items {
-		if strings.Contains(item, "runner npx: not found on PATH") {
+		if strings.Contains(item, "git: not found on PATH") {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("skills items = %+v, want 'runner npx: not found on PATH'", g.Items)
+		t.Errorf("skills items = %+v, want 'git: not found on PATH'", g.Items)
 	}
+}
+
+func TestDoctorAgents_LocalRefRequiresGit(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	a := newDoctorAgentsApp(t, config.AgentsConfig{
+		Packages: []config.SkillPackage{{Source: "./local-repo", Ref: "main"}},
+	})
+	result, err := a.Doctor(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := doctorAgentsGroup(doctorCheck(result, "agents"), "skills")
+	if group == nil {
+		t.Fatal("skills group missing")
+	}
+	for _, item := range group.Items {
+		if strings.Contains(item, "git: not found on PATH") {
+			return
+		}
+	}
+	t.Fatalf("skills items = %+v, want git requirement", group.Items)
 }
 
 func TestDoctorAgents_PluginsUnavailableWarn(t *testing.T) {
@@ -352,7 +375,7 @@ func TestDoctorAgents_PluginShaSourceSkippedWithoutClaude(t *testing.T) {
 	}
 }
 
-func TestDoctorAgents_SkillPackageRowsErrorWarns(t *testing.T) {
+func TestDoctorAgents_LegacyLockCorruptionDoesNotAffectManagedRows(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", "")
@@ -371,20 +394,43 @@ func TestDoctorAgents_SkillPackageRowsErrorWarns(t *testing.T) {
 		t.Fatal(err)
 	}
 	check := doctorCheck(result, "agents")
-	if check.Status != app.DoctorStatusWarn {
-		t.Errorf("status = %s, want warn for SkillPackageRows error", check.Status)
+	if check.Status != app.DoctorStatusOK {
+		t.Errorf("status = %s, want ok; native inventory must ignore legacy lock", check.Status)
 	}
 	g := doctorAgentsGroup(check, "skills")
 	if g == nil {
 		t.Fatal("skills group missing")
 	}
-	found := false
 	for _, item := range g.Items {
 		if strings.Contains(item, "packages:") && !strings.Contains(item, "in manifest") {
-			found = true
+			t.Errorf("skills items = %+v, legacy lock parse error leaked into managed rows", g.Items)
 		}
 	}
-	if !found {
-		t.Errorf("skills items = %+v, want a 'packages: <err>' line", g.Items)
+}
+
+func TestDoctorAgents_UnknownAgentTargetWarns(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+	a := newDoctorAgentsApp(t, config.AgentsConfig{
+		Packages: []config.SkillPackage{{Source: "o/r", Agents: []string{"clode-code"}}},
+	})
+	result, err := a.Doctor(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
+	check := doctorCheck(result, "agents")
+	if check.Status != app.DoctorStatusWarn {
+		t.Errorf("status = %s, want warn for unknown agent target", check.Status)
+	}
+	g := doctorAgentsGroup(check, "skills")
+	if g == nil {
+		t.Fatal("skills group missing")
+	}
+	for _, item := range g.Items {
+		if strings.Contains(item, "clode-code") && strings.Contains(item, "agents.packages") {
+			return
+		}
+	}
+	t.Errorf("skills items = %+v, want an unknown-target item naming clode-code and the fix", g.Items)
 }

@@ -1,0 +1,6 @@
+# Dry-run reports semantic native filesystem/network intent.
+exec omni --config settings.json agents skills sync --dry-run
+stdout '^install o/r at ref main skills x for targets claude-code$'
+
+-- settings.json --
+{"version":1,"agents":{"skills":[{"name":"x","source":"o/r","ref":"main","agents":["claude-code"]}]}}

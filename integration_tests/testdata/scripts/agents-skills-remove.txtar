@@ -5,9 +5,9 @@ exec omni --config settings.json agents skills remove o/r
 stdout 'removed o/r from manifest'
 
 # Manifest no longer plans the removed package, the other entry survives.
-exec omni --config settings.json agents skills restore --dry-run
-! stdout 'skills add o/r '
-stdout 'npx skills add keep/me -g -a codex -y'
+exec omni --config settings.json agents skills sync --dry-run
+! stdout 'install o/r '
+stdout 'install keep/me skills keep for targets codex'
 
 # Removing a source that is not in the manifest fails.
 ! exec omni --config settings.json agents skills remove nope/nope

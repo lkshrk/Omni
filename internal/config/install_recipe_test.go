@@ -69,6 +69,29 @@ func TestMaterializeInstallSpec_GitHubReleaseAssetArchAware(t *testing.T) {
 	}
 }
 
+func TestMaterializeInstallSpec_AptRepoRejectsInsecureKeyURL(t *testing.T) {
+	spec := config.ToolInstallSpec{
+		Provider: "script",
+		Options: map[string]string{
+			"key_url":        "http://example.com/key.asc",
+			"signed_by":      "/etc/apt/keyrings/example.asc",
+			"sources_format": "deb [arch={arch} signed-by={signed_by}] https://example.com/debian {suite} stable",
+			"packages":       "example-cli",
+		},
+		Recipe: &config.FallbackRecipe{Type: config.FallbackRecipeAptRepo},
+	}
+	got, err := config.MaterializeInstallSpec("example-cli", spec, "")
+	if err == nil {
+		t.Fatalf("MaterializeInstallSpec = %+v, want an error for a plain-http key_url", got)
+	}
+	if !strings.Contains(err.Error(), "key_url must use https") {
+		t.Fatalf("err = %v, want an https key_url error", err)
+	}
+	if strings.Contains(got.Options["setup"], "http://example.com/key.asc") {
+		t.Fatalf("setup = %q, want no materialized command for a rejected key_url", got.Options["setup"])
+	}
+}
+
 func TestMaterializeInstallSpec_AptRepo(t *testing.T) {
 	spec := config.ToolInstallSpec{
 		Provider: "script",
@@ -122,6 +145,49 @@ func TestMaterializeInstallSpec_GitHubReleaseAssetPinnedTag(t *testing.T) {
 	}
 	if !strings.Contains(got.Options["install"], "releases/download/v0.62.2") {
 		t.Fatalf("install = %q, want pinned tag URL", got.Options["install"])
+	}
+	if got.Options[config.OptionRecordedVersion] != "0.62.2" {
+		t.Fatalf("recorded version = %q, want %q", got.Options[config.OptionRecordedVersion], "0.62.2")
+	}
+}
+
+func TestMaterializeInstallSpec_GitHubReleaseAssetRecordsInstalledVersionOverTag(t *testing.T) {
+	spec := config.ToolInstallSpec{
+		Provider: "script",
+		Source:   &config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "rhysd", Repo: "actionlint"},
+		Recipe: &config.FallbackRecipe{
+			Type:             config.FallbackRecipeGitHubReleaseAsset,
+			AssetPattern:     "actionlint_{version}_linux_amd64.tar.gz",
+			TagName:          "v1.7.12",
+			InstalledVersion: "v1.7.11",
+		},
+		Bin: "actionlint",
+	}
+	got, err := config.MaterializeInstallSpec("actionlint", spec, "~/.local/bin")
+	if err != nil {
+		t.Fatalf("MaterializeInstallSpec: %v", err)
+	}
+	if got.Options[config.OptionRecordedVersion] != "1.7.11" {
+		t.Fatalf("recorded version = %q, want %q", got.Options[config.OptionRecordedVersion], "1.7.11")
+	}
+}
+
+func TestMaterializeInstallSpec_GitHubReleaseAssetWithoutPinRecordsNoVersion(t *testing.T) {
+	spec := config.ToolInstallSpec{
+		Provider: "script",
+		Source:   &config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "rhysd", Repo: "actionlint"},
+		Recipe: &config.FallbackRecipe{
+			Type:         config.FallbackRecipeGitHubReleaseAsset,
+			AssetPattern: "actionlint_{version}_linux_amd64.tar.gz",
+		},
+		Bin: "actionlint",
+	}
+	got, err := config.MaterializeInstallSpec("actionlint", spec, "~/.local/bin")
+	if err != nil {
+		t.Fatalf("MaterializeInstallSpec: %v", err)
+	}
+	if _, ok := got.Options[config.OptionRecordedVersion]; ok {
+		t.Fatalf("recorded version = %q, want unset for an unpinned recipe", got.Options[config.OptionRecordedVersion])
 	}
 }
 

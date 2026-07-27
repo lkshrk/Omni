@@ -23,16 +23,14 @@ func (m *Model) handleProviderScannedMsg(msg providerScannedMsg) []tea.Cmd {
 	if msg.err != nil {
 		status := app.ProviderScanFailureStatus(msg.provider, msg.err)
 		if !m.collectLaunchBatchError(status) {
-			// Accumulate rather than flashing each failure (which overwrite each
-			// other); a single aggregated message is shown when the scan settles.
+			// Accumulate rather than flashing each failure over the last; one aggregated message is shown when the scan settles.
 			m.refreshScanErrors = append(m.refreshScanErrors, status)
 		}
 	}
 	if len(m.scanningProviders) > 0 && (msg.err == nil || m.launchBatchActive) {
 		setActivityStatus(m, m.toolRefreshStatus(m.refreshToolDone, m.refreshToolTotal))
 	}
-	// When the last provider finishes: fetch one consistent snapshot now that
-	// all upserts are done, and kick off the orphan scan in parallel.
+	// Last provider finished: fetch one consistent snapshot now that all upserts are done, and start the orphan scan in parallel.
 	if len(m.scanningProviders) == 0 {
 		outdatedProviders := app.RefreshProviderScanProviderNames(m.providerScanToolCounts)
 		if len(outdatedProviders) == 0 && msg.provider != "" {
@@ -41,15 +39,10 @@ func (m *Model) handleProviderScannedMsg(msg providerScannedMsg) []tea.Cmd {
 		m.discoveryGen++
 		m.providerSnapshotRefreshing = true
 		m.discoveryRefreshing = true
-		m.providerScanToolCounts = nil
 		m.providerScanToolDone = nil
-		m.providerScanLabels = nil
 		m.refreshToolDone = 0
 		m.refreshToolTotal = 0
-		// Close only the scan's own progress stream. m.progressCh may already
-		// belong to a newer stream begun by an unrelated operation while the
-		// scan was still running (e.g. agents update all); closing that channel
-		// here would crash its worker goroutine on sendProgress/its own close.
+		// Close only the scan's own stream: m.progressCh may already belong to a newer stream from an unrelated operation, and closing that would crash its worker goroutine.
 		if m.scanProgressCh != nil {
 			close(m.scanProgressCh)
 			if m.progressCh == m.scanProgressCh {
@@ -58,17 +51,13 @@ func (m *Model) handleProviderScannedMsg(msg providerScannedMsg) []tea.Cmd {
 			}
 			m.scanProgressCh = nil
 		}
-		// The discovered refresh takes over the shared status stream only when
-		// no other operation owns it. If a foreign stream is active (m.progressCh
-		// survived the block above), beginning a new stream here would bump
-		// progressGen and silently drop that operation's remaining progress
-		// updates — so the refresh runs without progress reporting instead
-		// (doRefreshDiscovered and sendProgress both accept a nil channel).
+		// Take over the shared stream only when no other operation owns it; beginning one here would bump progressGen and drop that operation's remaining updates, so the refresh runs without progress reporting instead.
 		var ch chan progressUpdate
 		var progressGen int
 		if m.progressCh == nil {
 			setActivityStatus(m, "Finding local tools…")
 			ch, progressGen = m.beginProgressStream()
+			m.discoveryProgressCh = ch
 			cmds = append(cmds, waitForProgress(ch, progressGen))
 		}
 		cmds = append(cmds, m.doFetchFinalTools(msg.gen), m.doRefreshDiscovered(m.discoveryGen, ch, progressGen))
@@ -85,9 +74,7 @@ func (m *Model) handleProviderScannedMsg(msg providerScannedMsg) []tea.Cmd {
 	return cmds
 }
 
-// aggregateRefreshErrors combines per-provider scan failures into a single
-// readable status so multiple failures don't overwrite each other as transient
-// flashes.
+// Combines per-provider scan failures into one readable status so multiple failures do not overwrite each other as transient flashes.
 func aggregateRefreshErrors(errs []string) string {
 	if len(errs) == 1 {
 		return errs[0]
@@ -109,8 +96,10 @@ func (m *Model) startProviderOutdatedChecks(providers []string, gen int) []tea.C
 		cmds = append(cmds, m.doCheckProviderOutdated(providerName, gen))
 	}
 	if len(m.outdatedProviders) == 0 {
+		m.outdatedTotal = 0
 		return nil
 	}
+	m.outdatedTotal = len(m.outdatedProviders)
 	return cmds
 }
 
@@ -141,6 +130,7 @@ func (m *Model) handleAllProvidersDoneMsg(msg allProvidersDoneMsg) tea.Cmd {
 		return nil
 	}
 	m.providerSnapshotRefreshing = false
+	m.settleToolRefresh()
 	if msg.err != nil {
 		m.finishSetupReloadIfIdle()
 		status := "refresh failed: " + msg.err.Error()
@@ -179,7 +169,7 @@ func (m *Model) handleProviderOutdatedCheckedMsg(msg providerOutdatedCheckedMsg)
 	}
 	if len(m.outdatedProviders) > 0 {
 		if !m.providerSnapshotRefreshing && !m.discoveryRefreshing {
-			setActivityStatus(m, "Checking updates…")
+			setActivityStatus(m, m.outdatedCheckStatus())
 		}
 		return cmds
 	}
@@ -194,6 +184,11 @@ func (m *Model) handleOutdatedProvidersDoneMsg(msg outdatedProvidersDoneMsg) tea
 		return nil
 	}
 	m.outdatedSnapshotRefreshing = false
+	m.settleToolRefresh()
+	// The scan labels and counts outlive the installed phase so the update check can name its providers too; this is where they stop being needed.
+	m.providerScanLabels = nil
+	m.providerScanToolCounts = nil
+	m.outdatedTotal = 0
 	if msg.err != nil {
 		return setStatus(m, "update check failed: "+msg.err.Error(), true)
 	}
@@ -213,6 +208,8 @@ func (m *Model) handleDiscoveredRefreshedMsg(msg discoveredRefreshedMsg) tea.Cmd
 		return nil
 	}
 	m.discoveryRefreshing = false
+	m.settleToolRefresh()
+	m.releaseDiscoveryProgressStream()
 	if msg.err != nil {
 		m.finishSetupReloadIfIdle()
 		status := "orphan scan failed: " + msg.err.Error()
@@ -221,8 +218,7 @@ func (m *Model) handleDiscoveredRefreshedMsg(msg discoveredRefreshedMsg) tea.Cmd
 		}
 		return setStatus(m, status, true)
 	}
-	// A successful scan can legitimately prune the last discovered row, leaving
-	// msg.discovered nil; still overwrite so pruned rows don't linger in the UI.
+	// A successful scan can legitimately prune the last discovered row, so still overwrite or pruned rows linger in the UI.
 	m.discoveredTools = msg.discovered
 	m.rebuildDiscoveredKeys()
 	m.applyFilter()
@@ -238,9 +234,38 @@ func (m *Model) handleDiscoveredRefreshedMsg(msg discoveredRefreshedMsg) tea.Cmd
 	return nil
 }
 
+// The orphan scan closes its channel before discoveredRefreshedMsg is delivered, so by here the stream is already dead; dropping it now lets the description phase open its own instead of running silently until progressStreamClosedMsg happens to arrive.
+func (m *Model) releaseDiscoveryProgressStream() {
+	if m.discoveryProgressCh == nil {
+		return
+	}
+	if m.progressCh == m.discoveryProgressCh {
+		m.progressCh = nil
+		m.progressGen++
+	}
+	m.discoveryProgressCh = nil
+}
+
 func (m *Model) clearActivityStatusIfIdle() {
 	if m.launchBatchActive || m.setupReloading || m.launchBatchPending() {
 		return
 	}
 	m.progressText = ""
+}
+
+func (m Model) toolRefreshPending() bool {
+	return len(m.scanningProviders) > 0 ||
+		len(m.outdatedProviders) > 0 ||
+		m.providerSnapshotRefreshing ||
+		m.outdatedSnapshotRefreshing ||
+		m.discoveryRefreshing ||
+		m.descRefreshing
+}
+
+// endLoading clears the refresh gate after its final leg, including errors, but never a gate owned by another operation.
+func (m *Model) settleToolRefresh() {
+	if m.migrating || m.toolRefreshPending() {
+		return
+	}
+	m.endLoading(loadingOwnerToolRefresh)
 }

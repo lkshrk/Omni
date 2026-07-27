@@ -17,17 +17,23 @@ func newToolsCmd(state *rootState) *cobra.Command {
 		Use:   "tools",
 		Short: "Manage logical tool specs",
 	}
+	remove := newToolsRemoveCmd(state)
 	cmd.AddCommand(
 		newToolsSetCmd(state),
 		newToolsFallbackCmd(state),
 		newToolsDeleteSpecCmd(state),
 		newToolsNormalizeCmd(state),
 		newToolsHealTapsCmd(state),
+		newToolsBaselineCmd(state),
 		newToolsIgnoreCmd(state),
 		newToolsUnignoreCmd(state),
-		// moved from root:
 		newAddCmd(state),
-		newDeleteCmd(state),
+		remove,
+		deprecatedAliasNamed(remove, "delete <tool>", "tools remove --purge", func() {
+			if !remove.Flags().Changed("purge") {
+				_ = remove.Flags().Set("purge", "true")
+			}
+		}),
 		newInstallCmd(state),
 		newUpgradeCmd(state),
 		newSyncCmd(state),
@@ -158,27 +164,6 @@ func newToolsSetCmd(state *rootState) *cobra.Command {
 	return cmd
 }
 
-func newToolsDeleteSpecCmd(state *rootState) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "delete-spec <name>",
-		Short: actions.MustDescription(actions.ToolDeleteSpec),
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ok, err := confirmAction(cmd, state, fmt.Sprintf("Delete logical tool %q and all group memberships?", args[0]))
-			if err != nil || !ok {
-				return err
-			}
-			if err := state.app.RemoveLogicalTool(cmd.Context(), args[0]); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmdOut(cmd), "Deleted logical tool %q.\n", args[0])
-			return nil
-		},
-	}
-	cmd.ValidArgsFunction = completeToolNames(state)
-	return cmd
-}
-
 func newToolsNormalizeCmd(state *rootState) *cobra.Command {
 	var defaultOverrides bool
 	var dryRun bool
@@ -279,6 +264,66 @@ func newToolsHealTapsCmd(state *rootState) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show packages that would be healed without writing config")
 	return cmd
+}
+
+func newToolsBaselineCmd(state *rootState) *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "baseline",
+		Short: actions.MustDescription(actions.ToolBaselineSystemInventory),
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			out := cmdOut(cmd)
+			preview, err := state.app.RebaselineSystemInventory(cmd.Context(), true)
+			if err != nil {
+				return err
+			}
+			count := preview.AbsorbedCount()
+			if count == 0 {
+				fmt.Fprintln(out, "No system packages to absorb; the baseline already covers everything installed.")
+				return nil
+			}
+			verb := "Will absorb"
+			if dryRun {
+				verb = "Would absorb"
+			}
+			fmt.Fprintf(out, "%s %s into the system inventory baseline:\n", verb, textutil.PluralCount(count, "package", "packages"))
+			printSystemInventoryAbsorptions(out, preview)
+			if dryRun {
+				return nil
+			}
+			ok, err := confirmAction(cmd, state, fmt.Sprintf("Permanently stop reporting these %d system packages as discovered on this host?", count))
+			if err != nil || !ok {
+				return err
+			}
+			applied, err := state.app.RebaselineSystemInventory(cmd.Context(), false)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "Absorbed %s into the system inventory baseline.\n", textutil.PluralCount(applied.AbsorbedCount(), "package", "packages"))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show packages that would be absorbed without writing the baseline")
+	return cmd
+}
+
+// Sampled rather than listed in full: a fresh container image can push this into the hundreds.
+func printSystemInventoryAbsorptions(out io.Writer, rebaseline appcore.SystemInventoryRebaseline) {
+	const sample = 15
+	for _, p := range rebaseline.Providers {
+		fmt.Fprintf(out, "  %s: %s\n", p.Provider, textutil.PluralCount(len(p.Absorbed), "package", "packages"))
+		shown := p.Absorbed
+		if len(shown) > sample {
+			shown = shown[:sample]
+		}
+		for _, name := range shown {
+			fmt.Fprintf(out, "    %s\n", name)
+		}
+		if rest := len(p.Absorbed) - len(shown); rest > 0 {
+			fmt.Fprintf(out, "    … and %d more\n", rest)
+		}
+	}
 }
 
 func printBrewTapBackfills(out io.Writer, backfilled []appcore.BrewTapBackfill) {

@@ -38,7 +38,6 @@ type ToolClassificationContext struct {
 	EffectivePythonManager string
 	EffectiveNodeManager   string
 
-	// NvmManaged marks system-provider tools whose active binary resolves via nvm.
 	NvmManaged map[string]bool
 }
 
@@ -58,11 +57,7 @@ type ToolProviderDisplay struct {
 	Override bool
 }
 
-// Label renders the provider for display: the concrete package manager when one
-// is resolved (e.g. "bun"), falling back to the ecosystem name only when the
-// tool is unresolved (e.g. "node"). The meta(concrete) wrapper and the override
-// "!" marker are intentionally omitted — wrong-provider state is conveyed by the
-// Out-of-sync section and the expanded candidate detail, not the column.
+// Label — The meta(concrete) wrapper and the "!" marker are omitted: wrong-provider state belongs to the Out-of-sync section.
 func (d ToolProviderDisplay) Label() string {
 	if d.Concrete != "" {
 		return d.Concrete
@@ -191,6 +186,14 @@ func BuildToolViewList(options ToolViewListOptions) ToolViewList {
 	return ToolViewList{Tools: visible, Counts: counts}
 }
 
+// ToolOffersUpgrade — An unknown outdated state still offers upgrade; a provider that cannot report versions would otherwise never be upgradable from the UI.
+func ToolOffersUpgrade(tool *ToolView) bool {
+	if tool == nil || !tool.Installed || tool.UpdateBlocked == UpdateBlockSelfUpdates {
+		return false
+	}
+	return tool.Outdated || tool.OutdatedUnknown
+}
+
 func ToolSyncStatusForTool(tool *ToolView, context ToolClassificationContext) ToolSyncStatus {
 	if tool == nil {
 		return ToolSyncOK
@@ -205,8 +208,7 @@ func ToolSyncStatusForTool(tool *ToolView, context ToolClassificationContext) To
 	if desired != "" && tool.InstalledWith != "" && tool.InstalledWith != desired {
 		return ToolSyncWrongProvider
 	}
-	// Only apply nvm-managed detection for tools without an explicit pin.
-	// If pinned (to bun etc), respect the pin even if the provider looks system.
+	// A pin is respected even when the provider looks system.
 	if context.ToolProviderPins[tool.Name] == "" &&
 		IsSystemProvider(tool.Provider) && tool.Installed &&
 		context.NvmManaged != nil && context.NvmManaged[tool.Name] {
@@ -234,9 +236,7 @@ func DesiredConcreteProviderForTool(tool *ToolView, context ToolClassificationCo
 	}
 }
 
-// ExpectedConcreteProviderForTool returns the concrete manager omni expects for a
-// tracked tool: ecosystem defaults/pins for node/system/python, otherwise the
-// configured route provider for multi-concrete tools (e.g. brew vs bun).
+// ExpectedConcreteProviderForTool — Ecosystem defaults or pins for node, system and python, otherwise the configured route provider.
 func ExpectedConcreteProviderForTool(tool *ToolView, context ToolClassificationContext) (string, string) {
 	desired, source := DesiredConcreteProviderForTool(tool, context)
 	if desired != "" || tool == nil {
@@ -322,8 +322,7 @@ func toolViewSection(tool *ToolView, context ToolClassificationContext, syncStat
 		return ToolViewSectionIgnored
 	}
 	if tool.Installed && tool.Outdated && tool.UpdateBlocked == UpdateBlockSelfUpdates {
-		// self-updating casks read as a normal update (the version is behind),
-		// just marked and non-actionable — not a deferred quarantine.
+		// Self-updating casks read as a normal update, just marked and non-actionable.
 		return ToolViewSectionUpdates
 	}
 	if tool.Installed && tool.Outdated && tool.UpdateBlocked != "" {
@@ -380,8 +379,7 @@ func ToolProviderEcosystem(raw string) string {
 	return raw
 }
 
-// IsSystemProvider reports whether raw names a concrete system package manager
-// (brew, apt, dnf, pacman, zypper, apk) or the system ecosystem alias.
+// IsSystemProvider — brew, apt, dnf, pacman, zypper, apk, or the system ecosystem alias.
 func IsSystemProvider(raw string) bool {
 	return ToolProviderEcosystem(raw) == provider.EcosystemSystem
 }

@@ -1,0 +1,51 @@
+# A marketplace mismatch is drift even when the installed plugin name matches.
+chmod 0755 $WORK/bin/claude
+env PATH=$WORK/bin:$PATH
+env HOME=$WORK/home
+
+exec omni --config settings.json agents plugins list
+stdout 'helper\s+declared\s+claude-code\(drift\)'
+
+exec omni --config settings.json agents plugins import
+! stdout 'helper'
+
+exec omni --config settings.json doctor --format json
+stdout 'helper: drifted on claude-code \(installed from other, manifest declares declared\)'
+stdout 'omni agents plugins resolve'
+
+exec omni --config settings.json agents plugins resolve helper --use-managed --dry-run
+stdout 'would reinstall helper on claude-code from declared'
+! grep 'plugins uninstall' $WORK/.omni-cache/claude-calls.log
+
+exec omni --yes --config settings.json agents plugins resolve helper --use-managed
+grep 'plugins uninstall helper@other' $WORK/.omni-cache/claude-calls.log
+grep 'plugins install helper@declared' $WORK/.omni-cache/claude-calls.log
+
+exec omni --config settings.json agents plugins resolve helper --use-local
+stdout 'repoint helper in the manifest from declared to other'
+grep '"marketplace": "other"' settings.json
+
+! exec omni --config undeclared.json agents plugins resolve helper --use-local
+! stdout 'repoint'
+stderr 'not declared'
+
+-- settings.json --
+{"version":20,"agents":{"plugins":[{"name":"helper","marketplace":"declared","agents":["claude-code"]}],"marketplaces":[{"name":"declared","source":"o/declared"},{"name":"other","source":"o/other"}]}}
+
+-- undeclared.json --
+{"version":20,"agents":{"plugins":[{"name":"helper","marketplace":"declared","agents":["claude-code"]}],"marketplaces":[{"name":"declared","source":"o/declared"}]}}
+
+-- bin/claude --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/claude-calls.log"
+if [ "$1" = "plugins" ] && [ "$2" = "list" ] && [ "$3" = "--json" ] && [ "$4" = "--available" ]; then
+  printf '{"installed":[{"id":"helper@other","version":"1.0.0","scope":"user","enabled":true}],"available":[]}\n'
+  exit 0
+fi
+if [ "$1" = "plugins" ] && [ "$2" = "marketplace" ] && [ "$3" = "list" ] && [ "$4" = "--json" ]; then
+  printf '[{"name":"declared","source":"github","repo":"o/declared"},{"name":"other","source":"github","repo":"o/other"}]\n'
+  exit 0
+fi
+exit 0

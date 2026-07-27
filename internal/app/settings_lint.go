@@ -7,7 +7,6 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// SettingsLintIssue is one advisory settings problem.
 type SettingsLintIssue struct {
 	Path    string
 	Message string
@@ -20,7 +19,6 @@ func (i SettingsLintIssue) String() string {
 	return i.Path + ": " + i.Message
 }
 
-// LintSettings inspects cfg for common settings hygiene problems.
 func (a *App) LintSettings(cfg *config.RootConfig) []SettingsLintIssue {
 	return lintSettings(cfg)
 }

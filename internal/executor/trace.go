@@ -20,7 +20,6 @@ const (
 
 type traceReasonKey struct{}
 
-// TraceRecord is the executor-level command event stored by app-owned sinks.
 type TraceRecord struct {
 	StartedAt  time.Time
 	FinishedAt time.Time
@@ -33,26 +32,21 @@ type TraceRecord struct {
 	Stderr     string
 }
 
-// TraceSink persists command traces. Implementations must be best-effort from
-// the executor's perspective; tracing failures never change command behavior.
+// TraceSink — Sinks must be best-effort: a tracing failure never changes command behavior.
 type TraceSink interface {
 	RecordCommandTrace(ctx context.Context, trace TraceRecord) error
 }
 
-// TracingExecutor records every command it delegates to Next.
 type TracingExecutor struct {
 	Next Executor
 	Sink TraceSink
 	Now  func() time.Time
 }
 
-// NewTracing wraps next with command tracing.
 func NewTracing(next Executor, sink TraceSink) *TracingExecutor {
 	return &TracingExecutor{Next: next, Sink: sink}
 }
 
-// WithTraceReason annotates command executions below ctx with a user-visible
-// reason, for example "upgrading bam (brew/cask)".
 func WithTraceReason(ctx context.Context, reason string) context.Context {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
@@ -61,7 +55,6 @@ func WithTraceReason(ctx context.Context, reason string) context.Context {
 	return context.WithValue(ctx, traceReasonKey{}, reason)
 }
 
-// TraceReason returns the command trace reason attached to ctx.
 func TraceReason(ctx context.Context) string {
 	if ctx == nil {
 		return ""
@@ -70,7 +63,6 @@ func TraceReason(ctx context.Context) string {
 	return strings.TrimSpace(reason)
 }
 
-// Run delegates to the wrapped executor and records a compact trace event.
 func (t *TracingExecutor) Run(ctx context.Context, name string, args ...string) (string, string, error) {
 	if t == nil || t.Next == nil {
 		return "", "", errors.New("tracing executor missing wrapped executor")
@@ -145,10 +137,7 @@ func errorString(err error) string {
 	return err.Error()
 }
 
-// SanitizeTraceRecord neutralizes every textual trace field and applies trace
-// redaction before the record reaches a sink. It is safe for direct trace
-// producers and sinks to call repeatedly. Commands should be built with
-// RenderCommand so flag/value pairs are redacted before shell quoting.
+// SanitizeTraceRecord — Idempotent, so producers and sinks may both call it.
 func SanitizeTraceRecord(trace TraceRecord) TraceRecord {
 	trace.Reason = redactTraceText(trace.Reason)
 	trace.Command = redactTraceText(trace.Command)
@@ -226,9 +215,7 @@ func redactTraceText(s string) string {
 	return envAssignmentPattern.ReplaceAllString(s, "$1=[redacted]")
 }
 
-// sanitizeTraceText neutralizes terminal control input before a trace crosses
-// the persistence boundary. Newlines and tabs remain readable; carriage
-// returns become newlines so they cannot overwrite already-rendered content.
+// Carriage returns become newlines so stored traces cannot overwrite rendered content.
 func sanitizeTraceText(s string) string {
 	if s == "" {
 		return ""

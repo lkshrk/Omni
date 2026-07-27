@@ -8,17 +8,11 @@ import (
 	"github.com/lkshrk/omni/internal/dots"
 )
 
-// DotsSync creates or repairs all symlinks for all dots entries across active
-// groups. When the current host has assigned groups, only the host group and
-// assigned reusable groups are synced. Falls back to all groups when no active
-// host is configured.
-// All entries are managed via GNU Stow.
+// DotsSync — Falls back to all groups when no active host is configured.
 func (a *App) DotsSync(opts dots.SyncOptions) ([]dots.Op, error) {
 	return a.DotsSyncContext(context.Background(), opts)
 }
 
-// DotsSyncContext creates or repairs all symlinks like DotsSync, honoring ctx
-// for provider/stow commands.
 func (a *App) DotsSyncContext(ctx context.Context, opts dots.SyncOptions) (ops []dots.Op, err error) {
 	pf, err := a.dotService().preflight()
 	if err != nil {
@@ -45,8 +39,7 @@ func (a *App) DotsSyncContext(ctx context.Context, opts dots.SyncOptions) (ops [
 	return engine.Sync(ctx, opts)
 }
 
-// DotsSyncEntry syncs one configured dots entry when the classifier reports a
-// single safe action. Choice-based conflicts are reported but not resolved.
+// DotsSyncEntry — Choice-based conflicts are reported but not resolved.
 func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOptions) (ops []dots.Op, err error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, fmt.Errorf("dots sync: entry name is required")
@@ -67,8 +60,7 @@ func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOpti
 	if err != nil {
 		return nil, err
 	}
-	// Match the historical control flow: an unknown entry is reported without
-	// requiring stow; stow is only required once the target entry is found.
+	// An unknown entry is reported without requiring stow; stow is only required once the entry is found.
 	if !engineHasEntry(engine, name) {
 		return nil, fmt.Errorf("dots entry %q not found", name)
 	}

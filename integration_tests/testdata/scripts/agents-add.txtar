@@ -1,16 +1,8 @@
-# agents add validates source and respects the agents_disabled gate.
-#
-# The success path (runner invocation) is not exercised here because there is
-# no fake npx/bunx binary registered in the test harness. These two error
-# paths fire before the runner is ever called and together cover:
-#   1. source normalisation rejects malformed input
-#   2. requireAgentsEnabled rejects when agents_disabled=true for this host
+# Native success is covered by agents-add-native.txtar; these errors occur before source acquisition.
 
-# 1. invalid source — normalizeSkillSource returns an error
 ! exec omni --config settings.json agents add 'not-a-valid-source'
-stderr 'cannot parse skill source'
+stderr 'invalid GitHub skill source'
 
-# 2. agents disabled gate fires before the runner is called
 ! exec omni --config disabled.json agents add owner/repo
 stderr 'agent skills are disabled'
 

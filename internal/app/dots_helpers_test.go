@@ -138,7 +138,6 @@ func TestDotConflictIsManagedStowLink(t *testing.T) {
 					t.Fatal(err)
 				}
 				targetPath := filepath.Join(tmp, "target")
-				// correct link: target → source (not a wrong link)
 				if err := os.Symlink(sourceDir, targetPath); err != nil {
 					t.Fatal(err)
 				}
@@ -176,11 +175,9 @@ func TestDotConflictIsManagedStowLink(t *testing.T) {
 				if err := os.MkdirAll(targetDir, 0o755); err != nil {
 					t.Fatal(err)
 				}
-				// correctly linked to source (alphabetically first → visited before wrong link)
 				if err := os.Symlink(filepath.Join(sourceDir, "correct.txt"), filepath.Join(targetDir, "correct.txt")); err != nil {
 					t.Fatal(err)
 				}
-				// wrong-linked to old stow location
 				if err := os.Symlink(filepath.Join(stowPkg, "file.txt"), filepath.Join(targetDir, "wrong.txt")); err != nil {
 					t.Fatal(err)
 				}
@@ -211,7 +208,6 @@ func TestDotConflictIsManagedStowLink(t *testing.T) {
 				if err := os.MkdirAll(targetDir, 0o755); err != nil {
 					t.Fatal(err)
 				}
-				// all links point to old stow — zero correct links to source
 				if err := os.Symlink(filepath.Join(stowPkg, "file.txt"), filepath.Join(targetDir, "file.txt")); err != nil {
 					t.Fatal(err)
 				}

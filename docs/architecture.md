@@ -11,6 +11,7 @@ the same operation.
 | CLI | `cmd/omni`, `internal/cli` | Cobra commands, flags, confirmation prompts, shell completion. |
 | TUI | `internal/tui` | Bubble Tea models, views, key handling, modal flows, admin terminal UX. |
 | App boundary | `internal/app` | High-level use cases used by both CLI and TUI. |
+| Agent targets | `internal/agent` | Compiled target registry, native skill acquisition/inventory, MCP adapters, and plugin adapters. |
 | Config | `internal/config` | JSON schema types, migrations, normalization, validation, patch writes. |
 | Cache | `internal/database` | SQLite persistence for discovered tool and dotfile state. |
 | Providers | `internal/provider` | Package manager interfaces and concrete implementations. |
@@ -29,12 +30,46 @@ internal/app operation
         +-- config load/patch/validate
         +-- provider registry
         +-- SQLite cache
+        +-- Agent Target registry and native skills service
         +-- syncer
         +-- dots engine
 ```
 
 The CLI and TUI should not implement separate business rules. They should call
 the same app operation and differ only in presentation, prompts, and navigation.
+
+## Agent Skills Lifecycle
+
+```text
+agents.packages desired state
+        |
+        v
+active groups + target resolution + plugin shadow checks (internal/app)
+        |
+        v
+Git / well-known HTTP / local acquisition (internal/agent)
+        |
+        v
+temporary validation and atomic canonical replacement
+        |
+        v
+target-specific links + machine-local inventory metadata
+```
+
+Discovery over an acquired source looks at the conventional skill containers
+(`skills/`, `.agents/skills/`, per-target skill directories, and similar), and
+additionally harvests any `skills` paths declared by a plugin manifest —
+`.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, or
+`.plugin/plugin.json` — so plugin-shaped repositories resolve without a
+bespoke layout. A directory whose `SKILL.md` frontmatter is unusable is
+skipped with a warning instead of failing the package.
+
+`agents.packages` is the only durable skill manifest. Omni stores canonical
+content under the XDG data directory and records hashes/check times in local
+SQLite state. Both are recoverable from settings and source acquisition.
+Legacy `.skill-lock.json` is read only for explicit unmanaged import/adopt; it
+is never updated or deleted. The skills.sh search catalog is independent of
+sync, upgrade, remove, and inventory.
 
 ## Startup
 
@@ -153,6 +188,7 @@ conflict resolution requires an explicit `--use-repo` or `--use-local` choice.
 - sync missing configured tools
 - claim discovered installed tools into the current machine group
 - upgrade configured tools
+- claim unmanaged agent skills and sync skills, MCP servers, and plugins
 - repair dotfile links
 - commit dotfile repo changes
 

@@ -24,24 +24,20 @@ func init() {
 	}
 }
 
-// Active reports whether local go test path guards should be enforced.
 func Active() bool {
 	return runningUnderGoTest() && !Isolated()
 }
 
-// Isolated reports whether tests are already running inside an explicit sandbox.
 func Isolated() bool {
 	return os.Getenv(isolatedEnv) == "1" || os.Getenv("OMNI_PMCONTAINER") == "1"
 }
 
-// MustEnsureSafeEnv installs temp HOME/XDG defaults for local unit tests.
 func MustEnsureSafeEnv() {
 	if err := EnsureSafeEnv(); err != nil {
 		panic(err)
 	}
 }
 
-// EnsureSafeEnv installs temp HOME/XDG defaults for local unit tests.
 func EnsureSafeEnv() error {
 	if !Active() {
 		return nil
@@ -66,7 +62,6 @@ func EnsureSafeEnv() error {
 	return ensureErr
 }
 
-// RequireHome rejects a live HOME during local go test runs.
 func RequireHome(context string) error {
 	if !Active() {
 		return nil
@@ -78,7 +73,6 @@ func RequireHome(context string) error {
 	return RequireTempPath("HOME for "+context, home)
 }
 
-// RequireTempPath rejects non-temp filesystem paths during local go test runs.
 func RequireTempPath(kind, path string) error {
 	if !Active() {
 		return nil
@@ -92,7 +86,6 @@ func RequireTempPath(kind, path string) error {
 	return nil
 }
 
-// PathInTempRoot reports whether path is inside the platform temp directory.
 func PathInTempRoot(path string) bool {
 	for _, root := range tempRoots() {
 		if PathInRoot(path, root) {
@@ -102,7 +95,6 @@ func PathInTempRoot(path string) bool {
 	return false
 }
 
-// PathInRoot reports whether path is root or a descendant of root.
 func PathInRoot(path, root string) bool {
 	absPath, err := filepath.Abs(path)
 	if err != nil {

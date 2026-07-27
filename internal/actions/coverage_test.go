@@ -1,6 +1,7 @@
 package actions
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,7 @@ func TestCoverageMatrixListsEveryAction(t *testing.T) {
 			t.Fatalf("%s has a gap/partial status but no next fixture note", action.ID)
 		}
 	}
+	assertCoverageProseCount(t, len(all))
 	if len(rows) != len(all) {
 		known := map[ID]bool{}
 		for _, action := range all {
@@ -60,6 +62,20 @@ func (r coverageRow) hasGapStatus() bool {
 		}
 	}
 	return false
+}
+
+// Assert the prose count separately because it has drifted despite rows being pinned to All().
+func assertCoverageProseCount(t *testing.T, want int) {
+	t.Helper()
+	path := filepath.Join("..", "..", "docs", "test-matrix.md")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	claim := fmt.Sprintf("the %d user-visible actions", want)
+	if !strings.Contains(string(body), claim) {
+		t.Fatalf("docs/test-matrix.md does not state %q; update the prose count to match All()", claim)
+	}
 }
 
 func readCoverageMatrix(t *testing.T) map[ID]coverageRow {

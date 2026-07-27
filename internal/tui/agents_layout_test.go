@@ -11,7 +11,7 @@ func TestAgentsLayout_FixedGridColumnsAlignAcrossMixedRows(t *testing.T) {
 	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{
-			{Name: "widget-dated", Source: "a/a", Installed: true, Updated: "2026-01-02", PerAgentStatus: map[string]bool{"claude": true}},
+			{Name: "widget-dated", Source: "a/a", Installed: true, Updated: "2026-01-02", PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
 		},
 		[]app.McpServerRow{
 			{Name: "widget-server", Transport: "stdio", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusInstalled}},

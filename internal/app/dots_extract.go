@@ -12,26 +12,14 @@ import (
 	"github.com/lkshrk/omni/internal/dots"
 )
 
-// DotsExtractOptions configures DotsExtract.
 type DotsExtractOptions struct {
-	// Name is the logical name for the new child entry. Empty derives one from
-	// the parent name and the subpath.
+	// Empty derives one from the parent name and the subpath.
 	Name string
-	// Group is the group the new child entry is assigned to. Empty assigns it to
-	// the current host group (matching DotsAdd). The group is created if missing.
+	// Empty assigns the current host group; the group is created if missing.
 	Group string
 }
 
-// DotsExtract splits subpath out of the tracked directory entry parentName into
-// its own dot entry, letting the subtree live in a different group than its
-// parent. It works by composing two existing operations:
-//
-//  1. Add an ignore for the subtree to the parent and eject it — the parent
-//     stops managing those paths and their symlinks become real files again.
-//  2. Adopt the now-real files as a brand-new entry in the target group.
-//
-// This reuses the battle-tested ignore/eject/adopt paths rather than hand-rolling
-// the symlink choreography, so the parent and child end up cleanly stowed.
+// DotsExtract — Composes ignore-and-eject on the parent with adopt into the target group, reusing those tested paths.
 func (a *App) DotsExtract(ctx context.Context, parentName, subpath string, opts DotsExtractOptions) (ops []dots.Op, retErr error) {
 	parentName = strings.TrimSpace(parentName)
 	if parentName == "" {
@@ -119,9 +107,7 @@ func (a *App) DotsExtract(ctx context.Context, parentName, subpath string, opts 
 		return nil, fmt.Errorf("dots extract: %q is not tracked under %q", subrel, parentName)
 	}
 
-	// Anchor the ignore to the entry root so a top-level subdir name does not
-	// also match same-named directories deeper in the tree. Directories get a
-	// trailing slash so the whole subtree is matched.
+	// Anchored to the entry root so a top-level name does not match same-named dirs deeper in the tree.
 	pattern := "/" + filepath.ToSlash(subrel)
 	if info.IsDir() {
 		pattern += "/"
@@ -140,11 +126,7 @@ func (a *App) DotsExtract(ctx context.Context, parentName, subpath string, opts 
 		}
 	}
 
-	// With --no-folding the parent links each file individually, so the home
-	// subtree is a real directory of symlinks (not a single folded symlink) and
-	// can't be ejected by pattern. Instead materialise it from the parent package
-	// as real files in place, then drop it from the parent package; DotsAdd then
-	// re-adopts those real files into a new package + entry.
+	// With --no-folding the subtree is a real dir of symlinks, so materialise it before re-adopting.
 	exec := a.newExecutor()
 	backupPath, err := dots.BackupLocalPathWithExecutor(ctx, exec, childTarget)
 	if err != nil {
@@ -177,7 +159,7 @@ func (a *App) DotsExtract(ctx context.Context, parentName, subpath string, opts 
 		if !childPackageRootExisted {
 			childCleanupPath = childPackageRoot
 		}
-		if err := rollbackDotsAdd(rollbackCtx, exec, childTarget, childCleanupPath, backupPath); err != nil {
+		if err := rollbackDotTargetFromBackup(rollbackCtx, exec, childTarget, childCleanupPath, backupPath); err != nil {
 			rollbackErrs = append(rollbackErrs, fmt.Sprintf("restore child extraction: %v", err))
 		}
 		if stagingRoot != "" && sourceRestored {
@@ -247,10 +229,7 @@ func (a *App) removeDotsExtractChildConfig(name string, originalGroups map[strin
 	})
 }
 
-// DotsExtractThenAddHostVariant splits subpath out of parentName into its own
-// dot entry and then adds a host-specific variant for that new entry, letting a
-// child sub-path row become a host variant in a single step. It returns the new
-// entry's variant info plus the combined ops from both operations.
+// DotsExtractThenAddHostVariant — Returns the new entry's variant info plus the combined ops from both operations.
 func (a *App) DotsExtractThenAddHostVariant(ctx context.Context, parentName, subpath string, opts DotsAddVariantOptions) (DotVariantInfo, []dots.Op, error) {
 	childName := DotExtractName(parentName, subpath)
 	ops, err := a.DotsExtract(ctx, parentName, subpath, DotsExtractOptions{})
@@ -261,17 +240,13 @@ func (a *App) DotsExtractThenAddHostVariant(ctx context.Context, parentName, sub
 	return info, append(ops, variantOps...), err
 }
 
-// DotsExtractWithState runs DotsExtract and returns the refreshed dots state for
-// TUI callers.
 func (a *App) DotsExtractWithState(ctx context.Context, parentName, subpath string, opts DotsExtractOptions) (*DotsOperationStateResult, error) {
 	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		return a.DotsExtract(ctx, parentName, subpath, opts)
 	})
 }
 
-// DotExtractName returns the default child entry name DotsExtract would assign
-// for a subpath under parentName, so callers (e.g. the TUI group picker) can
-// preview the new entry's name before committing.
+// DotExtractName — Lets callers preview the new entry's name before committing.
 func DotExtractName(parentName, subpath string) string {
 	subrel, err := cleanExtractSubpath(subpath)
 	if err != nil {
@@ -280,8 +255,6 @@ func DotExtractName(parentName, subpath string) string {
 	return deriveExtractName(parentName, subrel)
 }
 
-// cleanExtractSubpath normalises a subpath that must be relative to and contained
-// within the parent entry.
 func cleanExtractSubpath(subpath string) (string, error) {
 	s := strings.TrimSpace(subpath)
 	if s == "" {
@@ -297,8 +270,6 @@ func cleanExtractSubpath(subpath string) (string, error) {
 	return s, nil
 }
 
-// deriveExtractName builds a default child entry name from the parent name and
-// the last component of the subpath, sanitised to a single valid name token.
 func deriveExtractName(parentName, subrel string) string {
 	return sanitizeEntryName(parentName + "-" + filepath.Base(subrel))
 }

@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"sort"
 	"strings"
@@ -11,6 +13,100 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 )
+
+func printImportSkillsDiff(w io.Writer, diff app.ImportDiff) {
+	fmt.Fprintln(w, app.ImportDiffSummaryText(diff))
+	for _, n := range diff.Added {
+		fmt.Fprintf(w, "  + %s\n", n)
+	}
+	for _, n := range diff.Updated {
+		fmt.Fprintf(w, "  ~ %s\n", n)
+	}
+	for _, warning := range diff.Warnings {
+		fmt.Fprintf(w, "  ! %s\n", warning)
+	}
+}
+
+// Warnings, drift and failures come from the flattened report so nothing repeats per feature.
+func printAgentsSyncAllResult(w io.Writer, res app.AgentsSyncAllResult, dryRun bool) {
+	for _, msg := range res.Warnings {
+		fmt.Fprintf(w, "warn: %s\n", msg)
+	}
+	if len(res.Imported.Added) > 0 || len(res.Imported.Updated) > 0 {
+		fmt.Fprintf(w, "skills import: %s\n", app.ImportDiffSummaryText(res.Imported))
+		for _, n := range res.Imported.Added {
+			fmt.Fprintf(w, "  + %s\n", n)
+		}
+		for _, n := range res.Imported.Updated {
+			fmt.Fprintf(w, "  ~ %s\n", n)
+		}
+	}
+	if res.McpAdopted.Adopted > 0 {
+		fmt.Fprintf(w, "mcp import: %d claimed\n", res.McpAdopted.Adopted)
+	}
+	// A server omni declined to claim is the reason the user would look at this output at all; silence here reads as a clean adoption.
+	for _, line := range res.McpAdopted.Conflicts {
+		fmt.Fprintf(w, "  ! mcp import: %s\n", line)
+	}
+	for _, line := range res.McpAdopted.Skipped {
+		fmt.Fprintf(w, "  ! mcp import: %s\n", line)
+	}
+	for _, line := range res.McpAdopted.Warnings {
+		fmt.Fprintf(w, "  ! mcp import: %s\n", line)
+	}
+	if res.PluginsAdopted.Adopted > 0 {
+		fmt.Fprintf(w, "plugins import: %d claimed\n", res.PluginsAdopted.Adopted)
+	}
+	if dryRun {
+		for _, line := range res.SkillsDryRun {
+			fmt.Fprintf(w, "skills: %s\n", line)
+		}
+		for _, s := range res.Mcp.WouldInstall {
+			fmt.Fprintf(w, "mcp: would install %s\n", s)
+		}
+		for _, s := range res.Mcp.WouldUpdate {
+			fmt.Fprintf(w, "mcp: would update %s\n", s)
+		}
+		for _, p := range res.Plugins.WouldInstall {
+			fmt.Fprintf(w, "plugins: would install %s\n", p)
+		}
+		for _, s := range res.McpAdopted.WouldAdopt {
+			fmt.Fprintf(w, "mcp: %s\n", s)
+		}
+		for _, p := range res.PluginsAdopted.WouldAdopt {
+			fmt.Fprintf(w, "plugins: %s\n", p)
+		}
+	} else {
+		fmt.Fprintf(w, "skills: %s\n", app.RestoreSkillsSummaryText(res.Skills))
+		for _, s := range res.Mcp.Installed {
+			fmt.Fprintf(w, "mcp: installed %s\n", s)
+		}
+		for _, s := range res.Mcp.Updated {
+			fmt.Fprintf(w, "mcp: updated %s\n", s)
+		}
+		for _, s := range res.Mcp.AlreadyInstalled {
+			fmt.Fprintf(w, "mcp: already installed %s\n", s)
+		}
+		for _, p := range res.Plugins.Installed {
+			fmt.Fprintf(w, "plugins: installed %s\n", p)
+		}
+		for _, p := range res.Plugins.AlreadyInstalled {
+			fmt.Fprintf(w, "plugins: already installed %s\n", p)
+		}
+	}
+	for _, s := range res.Skills.ShadowedByPlugin {
+		fmt.Fprintf(w, "  skipped (provided by plugin): %s\n", s)
+	}
+	for _, s := range res.Mcp.ShadowedByPlugin {
+		fmt.Fprintf(w, "  skipped (provided by plugin): %s\n", s)
+	}
+	for _, d := range res.Drift {
+		fmt.Fprintf(w, "  ~ drift: %s\n", d)
+	}
+	for _, e := range res.Errors {
+		fmt.Fprintf(w, "  ! %s: %s\n", e.Feature, e.Message)
+	}
+}
 
 func printSkippedUnavailable(cmd *cobra.Command, skipped []string) {
 	for _, s := range skipped {
@@ -23,19 +119,95 @@ func newAgentsCmd(state *rootState) *cobra.Command {
 		Use:   "agents",
 		Short: "Manage AI-agent resources (skills)",
 	}
+	sync := newAgentsSyncCmd(state)
 	cmd.AddCommand(
 		newAgentsSkillsCmd(state),
 		newAgentsMcpCmd(state),
 		newAgentsPluginsCmd(state),
 		newAgentsAddCmd(state),
 		newAgentsFindCmd(state),
+		newAgentsResolveAllCmd(state),
+		sync,
+		deprecatedAlias(sync, "restore", nil),
 	)
 	return cmd
 }
 
-// agentErrsFailure turns already-printed per-agent "  ! agent/name: err"
-// lines into a command failure: without it the process exits 0 on a partial
-// failure and scripted callers chain onto an operation that did not happen.
+// The capability-scoped resolve verbs each take one name; this settles whatever a sync left contested across all three at once.
+func newAgentsResolveAllCmd(state *rootState) *cobra.Command {
+	var useManaged bool
+	var useLocal bool
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "resolve",
+		Short: "Settle every drifted skill, MCP server, and plugin with one side",
+		Long: "Settle every currently drifted agent resource in one pass. --use-managed keeps the " +
+			"manifest's definition and overwrites what another tool wrote; --use-local keeps what is " +
+			"live on this host, adopting it where the capability allows and otherwise narrowing the " +
+			"manifest. A per-item refusal is reported and never blocks the rest.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if useManaged == useLocal {
+				return fmt.Errorf("choose exactly one of --use-managed or --use-local")
+			}
+			if useManaged && !dryRun {
+				ok, err := confirmAction(cmd, state,
+					"Replace every drifted agent resource on this host with omni's managed version?")
+				if err != nil || !ok {
+					return err
+				}
+			}
+			res, err := state.app.ResolveAllDrift(cmd.Context(), app.ResolveAllDriftOptions{
+				UseManaged: useManaged,
+				DryRun:     dryRun,
+			})
+			if err != nil {
+				return err
+			}
+			printDriftResolution(cmdOut(cmd), res.Actions, res.Warnings, dryRun)
+			for _, e := range res.Errors {
+				fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ %s\n", e)
+			}
+			// A dry run settled nothing, so the tally has to read as a preview too.
+			verb := "resolved"
+			if dryRun {
+				verb = "would be resolved"
+			}
+			fmt.Fprintf(cmdOut(cmd), "%d skills, %d mcp servers, %d plugins %s\n",
+				res.SkillsResolved, res.McpResolved, res.PluginsResolved, verb)
+			return agentErrsFailure(len(res.Errors))
+		},
+	}
+	cmd.Flags().BoolVar(&useManaged, "use-managed", false, "Replace every drifted resource with omni's managed version")
+	cmd.Flags().BoolVar(&useLocal, "use-local", false, "Keep every drifted resource's live version")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be resolved without making changes")
+	return cmd
+}
+
+// Converges the manifest only; claiming unmanaged skills stays opt-in under `omni tools sync --all`.
+func newAgentsSyncCmd(state *rootState) *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Install the manifest's skills, MCP servers, and plugins onto this host",
+		Long: "Move every agent feature from the manifest onto this host in one pass: install what " +
+			"is missing, repair what drifted into an identical copy, and leave what already matches. " +
+			"Adopting resources the manifest does not declare is the opposite direction — see the " +
+			"per-feature import verbs.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			res, err := state.app.AgentsSyncAll(cmd.Context(), app.AgentsSyncAllOptions{DryRun: dryRun})
+			if err != nil {
+				return err
+			}
+			printAgentsSyncAllResult(cmdOut(cmd), res, dryRun)
+			return agentErrsFailure(len(res.Errors))
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would be synced without running")
+	return cmd
+}
+
+// Without this the process exits 0 on a partial failure and scripted callers chain onto work that did not happen.
 func agentErrsFailure(n int) error {
 	if n == 0 {
 		return nil
@@ -46,10 +218,16 @@ func agentErrsFailure(n int) error {
 func newAgentsAddCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "add <source>",
-		Short: "Add and install a skill package (owner/repo or github URL)",
-		Args:  cobra.ExactArgs(1),
+		Short: "Declare a skill package in the manifest and install it here",
+		Long: "Record a skill package source as manifest intent, fetch it into omni's store, and " +
+			"link it into every targeted agent — declaration and one host's convergence in a single " +
+			"step. Other hosts pick it up on their next sync.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pkg, err := state.app.AddSkillPackage(cmd.Context(), args[0])
+			pkg, warnings, err := state.app.AddSkillPackage(cmd.Context(), args[0])
+			for _, w := range warnings {
+				fmt.Fprintf(cmdOut(cmd), "  ! %s\n", w)
+			}
 			if err != nil {
 				return err
 			}
@@ -60,14 +238,18 @@ func newAgentsAddCmd(state *rootState) *cobra.Command {
 }
 
 func newAgentsFindCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	var owner string
+	cmd := &cobra.Command{
 		Use:   "find <query>",
 		Short: "Search skills.sh for skill packages",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			results, err := state.app.FindSkillPackages(cmd.Context(), strings.Join(args, " "))
-			if err != nil {
+			results, err := state.app.FindSkillPackages(cmd.Context(), strings.Join(args, " "), owner)
+			if err != nil && !app.IsCatalogWarning(err) {
 				return err
+			}
+			if err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", err)
 			}
 			for _, r := range results {
 				fmt.Fprintf(cmdOut(cmd), "%s  (%s)  %s\n", r.Source, r.Skill, r.Installs)
@@ -75,22 +257,89 @@ func newAgentsFindCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&owner, "owner", "", "limit results to a GitHub owner")
+	return cmd
 }
 
 func newAgentsSkillsCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "skills",
-		Short: "Restore and import agent skills",
+		Short: "Sync, upgrade, and import agent skills",
 	}
+	sync := newAgentsSyncSkillsCmd(state)
+	upgrade := newAgentsUpgradeSkillsCmd(state)
 	cmd.AddCommand(
-		newAgentsRestoreSkillsCmd(state),
+		sync,
+		deprecatedAlias(sync, "restore", nil),
 		newAgentsImportSkillsCmd(state),
-		newAgentsUpdateSkillsCmd(state),
+		upgrade,
+		deprecatedAlias(upgrade, "update", nil),
+		newAgentsResolveSkillsCmd(state),
+		newAgentsSkillsStatusCmd(state),
 		newAgentsRemoveSkillPackageCmd(state),
 		newAgentsUninstallSkillPackageCmd(state),
 		newAgentsSkillsGroupCmd(state),
 	)
 	return cmd
+}
+
+func newAgentsResolveSkillsCmd(state *rootState) *cobra.Command {
+	var useManaged bool
+	var useLocal bool
+	var agents []string
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "resolve <source>[@skill]",
+		Short: "Settle a skill entry whose live content diverged from omni's store",
+		Long: "Settle a skill entry another tool took over. --use-managed replaces the " +
+			"foreign content with omni's managed link, keeping the displaced copy only " +
+			"until the install succeeds. --use-local leaves that content alone and narrows " +
+			"the manifest so omni stops managing the entry.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if useManaged == useLocal {
+				return fmt.Errorf("choose exactly one of --use-managed or --use-local")
+			}
+			opts := app.ResolveSkillDriftOptions{
+				Source:   args[0],
+				Agents:   agents,
+				Strategy: app.SkillDriftUseManaged,
+				DryRun:   dryRun,
+			}
+			if useLocal {
+				opts.Strategy = app.SkillDriftUseLocal
+			}
+			if useManaged && !dryRun {
+				ok, err := confirmAction(cmd, state, fmt.Sprintf(
+					"Replace the foreign skill content for %q with omni's managed version?", args[0]))
+				if err != nil || !ok {
+					return err
+				}
+			}
+			res, err := state.app.ResolveSkillDrift(cmd.Context(), opts)
+			printDriftResolution(cmdOut(cmd), res.Actions, res.Warnings, dryRun)
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&useManaged, "use-managed", false, "Replace the foreign entry with omni's managed content")
+	cmd.Flags().BoolVar(&useLocal, "use-local", false, "Keep the foreign entry and stop managing it")
+	cmd.Flags().StringArrayVar(&agents, "agent", nil, "Limit the resolution to this agent target (repeatable)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be resolved without making changes")
+	return cmd
+}
+
+// Renders every resolve verb identically so the three surfaces read the same whichever capability drifted.
+func printDriftResolution(w io.Writer, actions, warnings []string, dryRun bool) {
+	for _, warning := range warnings {
+		fmt.Fprintf(w, "  ! %s\n", warning)
+	}
+	prefix := ""
+	if dryRun {
+		prefix = "would "
+	}
+	for _, action := range actions {
+		fmt.Fprintf(w, "%s%s\n", prefix, action)
+	}
 }
 
 func newAgentsSkillsGroupCmd(state *rootState) *cobra.Command {
@@ -111,11 +360,26 @@ func newAgentsSkillsGroupCmd(state *rootState) *cobra.Command {
 }
 
 func newAgentsRemoveSkillPackageCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	var purge bool
+	cmd := &cobra.Command{
 		Use:   "remove <source>",
-		Short: "Remove a skill package from the manifest",
-		Args:  cobra.ExactArgs(1),
+		Short: "Undeclare a skill package from the manifest",
+		Long: "Drop a skill package from the manifest. The installed links and store content stay " +
+			"on this host, so a later sync of another machine's manifest is unaffected; pass --purge " +
+			"to remove the installed entries and unreferenced content too.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if purge {
+				// A package declared but never synced here has nothing to uninstall, yet undeclaring must still work.
+				switch err := state.app.UninstallSkillPackage(cmd.Context(), args[0]); {
+				case err == nil:
+					fmt.Fprintf(cmdOut(cmd), "uninstalled %s\n", args[0])
+				case app.IsSkillPackageNotInstalled(err):
+					fmt.Fprintf(cmdOut(cmd), "nothing installed for %s\n", args[0])
+				default:
+					return err
+				}
+			}
 			if err := state.app.RemoveSkillPackage(args[0]); err != nil {
 				return err
 			}
@@ -123,14 +387,20 @@ func newAgentsRemoveSkillPackageCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&purge, "purge", false, "also remove the installed agent entries and unreferenced store content")
+	return cmd
 }
 
+// Not an alias of remove: bare uninstall never touched the manifest, and `remove --purge` is the composed replacement.
 func newAgentsUninstallSkillPackageCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
-		Use:   "uninstall <source>",
-		Short: "Uninstall a skill package from agent skill directories",
-		Args:  cobra.ExactArgs(1),
+		Use:         "uninstall <source>",
+		Short:       "Uninstall a skill package from agent skill directories",
+		Hidden:      true,
+		Annotations: map[string]string{annotationDeprecatedAlias: "remove"},
+		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			deprecationNotice(cmd, "agents skills remove --purge")
 			if err := state.app.UninstallSkillPackage(cmd.Context(), args[0]); err != nil {
 				return err
 			}
@@ -140,33 +410,39 @@ func newAgentsUninstallSkillPackageCmd(state *rootState) *cobra.Command {
 	}
 }
 
-func newAgentsUpdateSkillsCmd(state *rootState) *cobra.Command {
+func newAgentsUpgradeSkillsCmd(state *rootState) *cobra.Command {
 	var opts app.UpdateSkillsOptions
 	cmd := &cobra.Command{
-		Use:   "update",
-		Short: "Update manifest skills to their latest upstream versions",
+		Use:   "upgrade",
+		Short: "Refresh omni's stored skill packages from their sources",
+		Long: "Reacquire every manifest skill package from upstream into omni's store, then relink " +
+			"the agents that use it. The manifest is unchanged: this moves newer content, not intent.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			output, dryRun, err := state.app.UpdateSkills(cmd.Context(), opts)
-			if err != nil {
-				return err
+			if opts.DryRun && opts.Check {
+				return fmt.Errorf("choose one of --dry-run or --check")
 			}
+			output, dryRun, err := state.app.UpdateSkills(cmd.Context(), opts)
 			if opts.DryRun {
 				fmt.Fprintln(cmdOut(cmd), dryRun)
-				return nil
+			} else {
+				fmt.Fprintln(cmdOut(cmd), output)
 			}
-			fmt.Fprint(cmdOut(cmd), output)
-			return nil
+			return err
 		},
 	}
-	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "print the skills update command without running it")
+	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "print native upgrade actions without running them")
+	cmd.Flags().BoolVar(&opts.Check, "check", false, "probe each source and report what is outdated, without refreshing")
 	return cmd
 }
 
-func newAgentsRestoreSkillsCmd(state *rootState) *cobra.Command {
+func newAgentsSyncSkillsCmd(state *rootState) *cobra.Command {
 	var opts app.RestoreSkillsOptions
 	cmd := &cobra.Command{
-		Use:   "restore",
+		Use:   "sync",
 		Short: "Install the manifest skill set onto this host",
+		Long: "Move the manifest's skill packages onto this host: install the missing ones, repair " +
+			"entries that drifted into an identical copy, and leave matching ones alone. Adopting " +
+			"packages the manifest does not declare runs the other way — see import.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			res, lines, err := state.app.RestoreSkills(cmd.Context(), opts)
 			if err != nil {
@@ -189,7 +465,7 @@ func newAgentsRestoreSkillsCmd(state *rootState) *cobra.Command {
 				fmt.Fprintf(cmdOut(cmd), "  ! %s: %s\n", f.Name, f.Message)
 			}
 			for _, d := range res.Drift {
-				fmt.Fprintf(cmdOut(cmd), "  ~ drift: %s changed since lock\n", d)
+				fmt.Fprintf(cmdOut(cmd), "  ~ drift: %s\n", d)
 			}
 			for _, s := range res.ShadowedByPlugin {
 				fmt.Fprintf(cmdOut(cmd), "  skipped (provided by plugin): %s\n", s)
@@ -197,27 +473,28 @@ func newAgentsRestoreSkillsCmd(state *rootState) *cobra.Command {
 			return agentErrsFailure(len(res.Failed))
 		},
 	}
-	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "print the skills add commands without running them")
+	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "print native sync actions without running them")
 	return cmd
 }
 
 func newAgentsImportSkillsCmd(state *rootState) *cobra.Command {
 	var opts app.ImportSkillsOptions
 	cmd := &cobra.Command{
-		Use:   "import",
-		Short: "Import CLI/UI-added skills from the lockfile into the manifest",
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Use:   "import [<source>]",
+		Short: "Adopt skill packages this host already has into the manifest",
+		Long: "Move installed-but-undeclared skill packages from this host into the manifest, " +
+			"adopting their on-disk content into omni's store. With a source, only that package is " +
+			"adopted. Installing what the manifest already declares runs the other way — see sync.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 1 {
+				opts.Source = args[0]
+			}
 			diff, err := state.app.ImportSkills(cmd.Context(), opts)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmdOut(cmd), app.ImportDiffSummaryText(diff))
-			for _, n := range diff.Added {
-				fmt.Fprintf(cmdOut(cmd), "  + %s\n", n)
-			}
-			for _, n := range diff.Updated {
-				fmt.Fprintf(cmdOut(cmd), "  ~ %s\n", n)
-			}
+			printImportSkillsDiff(cmdOut(cmd), diff)
 			return nil
 		},
 	}
@@ -225,19 +502,183 @@ func newAgentsImportSkillsCmd(state *rootState) *cobra.Command {
 	return cmd
 }
 
+func newAgentsSkillsStatusCmd(state *rootState) *cobra.Command {
+	return &cobra.Command{
+		Use:   "status <source>[@skill]",
+		Short: "Show one skill package's manifest, store, and per-agent entry state",
+		Long: "Report one package's position in all three stores: what the manifest declares, what " +
+			"omni's store holds, and what every targeted agent directory actually has, with the next " +
+			"step for each entry.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			status, err := state.app.SkillPackageStatus(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			printSkillPackageStatus(cmdOut(cmd), status)
+			return nil
+		},
+	}
+}
+
+func printSkillPackageStatus(w io.Writer, s app.SkillPackageStatus) {
+	fmt.Fprintf(w, "%s\n", s.Source)
+	fmt.Fprintf(w, "  manifest:  %s\n", skillStatusManifestLine(s))
+	if s.Ref != "" {
+		fmt.Fprintf(w, "  ref:       %s\n", s.Ref)
+	}
+	if len(s.Groups) > 0 {
+		fmt.Fprintf(w, "  groups:    %s\n", strings.Join(s.Groups, ", "))
+	}
+	if len(s.Selectors) > 0 {
+		fmt.Fprintf(w, "  selectors: %s\n", strings.Join(s.Selectors, ", "))
+	}
+	fmt.Fprintf(w, "  agents:    %s\n", skillStatusAgentsLine(s))
+	fmt.Fprintf(w, "  skills:    %s\n", skillStatusListLine(s.Skills))
+	fmt.Fprintf(w, "  store:     %s\n", skillStatusStoreLine(s))
+	fmt.Fprintf(w, "  updates:   %s\n", skillStatusUpdatesLine(s))
+	if len(s.Lockfile) > 0 {
+		fmt.Fprintln(w, "  lockfile:")
+		for _, e := range s.Lockfile {
+			line := "    " + e.Skill
+			if e.Ref != "" {
+				line += " @ " + e.Ref
+			}
+			if e.UpdatedAt != "" {
+				line += " (updated " + e.UpdatedAt + ")"
+			}
+			fmt.Fprintln(w, line)
+		}
+	}
+	if len(s.Entries) > 0 {
+		fmt.Fprintln(w, "  entries:")
+		for _, e := range s.Entries {
+			fmt.Fprintf(w, "    %s  %s  %s — %s\n", e.Agent, e.State, e.Path, e.Detail)
+			if e.Hint != "" {
+				fmt.Fprintf(w, "      -> %s\n", e.Hint)
+			}
+		}
+	}
+	for _, hint := range s.Hints {
+		fmt.Fprintf(w, "  -> %s\n", hint)
+	}
+	for _, warning := range s.Warnings {
+		fmt.Fprintf(w, "  ! %s\n", warning)
+	}
+}
+
+func skillStatusManifestLine(s app.SkillPackageStatus) string {
+	if s.Managed {
+		return "managed"
+	}
+	return "not in manifest"
+}
+
+func skillStatusAgentsLine(s app.SkillPackageStatus) string {
+	if len(s.Targets) == 0 {
+		return "none"
+	}
+	line := strings.Join(s.Targets, ", ")
+	if s.Managed && len(s.Agents) == 0 {
+		line += " (all enabled agents)"
+	}
+	return line
+}
+
+func skillStatusListLine(values []string) string {
+	if len(values) == 0 {
+		return "none installed"
+	}
+	return strings.Join(values, ", ")
+}
+
+func skillStatusStoreLine(s app.SkillPackageStatus) string {
+	if s.ContentHash == "" {
+		return s.PackageDir + " (empty)"
+	}
+	return fmt.Sprintf("%s (%s)", s.PackageDir, s.ContentHash[:min(12, len(s.ContentHash))])
+}
+
+func skillStatusUpdatesLine(s app.SkillPackageStatus) string {
+	line := "unknown"
+	switch s.Outdated {
+	case app.SkillOutdatedBehind:
+		line = "outdated"
+	case app.SkillOutdatedCurrent:
+		line = "up to date"
+	}
+	if !s.OutdatedCheckedAt.IsZero() {
+		line += ", checked " + s.OutdatedCheckedAt.Format("2006-01-02")
+	} else {
+		line += ", never checked"
+	}
+	if s.Updated != "" {
+		line += ", installed " + s.Updated
+	}
+	return line
+}
+
 func newAgentsMcpCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mcp",
 		Short: "Manage MCP servers in the agent manifest",
 	}
+	sync := newAgentsMcpSyncCmd(state)
 	cmd.AddCommand(
 		newAgentsMcpListCmd(state),
 		newAgentsMcpAddCmd(state),
 		newAgentsMcpRemoveCmd(state),
-		newAgentsMcpRestoreCmd(state),
+		sync,
+		deprecatedAlias(sync, "restore", nil),
 		newAgentsMcpImportCmd(state),
+		newAgentsMcpResolveCmd(state),
 		newAgentsMcpGroupCmd(state),
 	)
+	return cmd
+}
+
+func newAgentsMcpResolveCmd(state *rootState) *cobra.Command {
+	var useManaged bool
+	var useLocal bool
+	var agents []string
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "resolve <name>",
+		Short: "Settle an MCP server whose live registration diverged from the manifest",
+		Long: "Settle an MCP server whose live registration no longer matches the manifest. " +
+			"--use-managed reinstalls the manifest definition through the agent's own CLI, " +
+			"discarding what it holds. --use-local adopts the live definition as the new " +
+			"manifest intent.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if useManaged == useLocal {
+				return fmt.Errorf("choose exactly one of --use-managed or --use-local")
+			}
+			opts := app.ResolveMcpDriftOptions{
+				Name:     args[0],
+				Agents:   agents,
+				Strategy: app.McpDriftUseManaged,
+				DryRun:   dryRun,
+			}
+			if useLocal {
+				opts.Strategy = app.McpDriftUseLocal
+			}
+			if useManaged && !dryRun {
+				ok, err := confirmAction(cmd, state, fmt.Sprintf(
+					"Replace the live registration for %q with the manifest definition?", args[0]))
+				if err != nil || !ok {
+					return err
+				}
+			}
+			res, err := state.app.ResolveMcpDrift(cmd.Context(), opts)
+			printDriftResolution(cmdOut(cmd), res.Actions, res.Warnings, dryRun)
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&useManaged, "use-managed", false, "Reinstall the manifest definition on the agent")
+	cmd.Flags().BoolVar(&useLocal, "use-local", false, "Adopt the live definition into the manifest")
+	cmd.Flags().StringArrayVar(&agents, "agent", nil, "Limit the resolution to this agent target (repeatable)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be resolved without making changes")
 	return cmd
 }
 
@@ -282,6 +723,8 @@ func newAgentsMcpListCmd(state *rootState) *cobra.Command {
 						marker = "✓"
 					case app.McpStatusShadowed:
 						marker = "via-plugin"
+					case app.McpStatusDrifted:
+						marker = "drift"
 					}
 					agentParts = append(agentParts, fmt.Sprintf("%s(%s)", id, marker))
 				}
@@ -320,7 +763,10 @@ func newAgentsMcpAddCmd(state *rootState) *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "add",
-		Short: "Add an MCP server to the manifest and install it",
+		Short: "Declare an MCP server in the manifest and register it here",
+		Long: "Record an MCP server as manifest intent and register it through the targeted agents' " +
+			"own CLIs — declaration and one host's convergence in a single step. Other hosts pick it " +
+			"up on their next sync.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if name == "" {
 				return fmt.Errorf("--name is required")
@@ -411,8 +857,12 @@ func newAgentsMcpAddCmd(state *rootState) *cobra.Command {
 func newAgentsMcpRemoveCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "remove <name>",
-		Short: "Remove an MCP server from the manifest",
-		Args:  cobra.ExactArgs(1),
+		Short: "Undeclare an MCP server and unregister it from targeted agents",
+		Long: "Drop an MCP server from the manifest and unregister it through the agent CLIs that " +
+			"held it. Unlike `agents skills remove`, the live side always goes with it — a server " +
+			"only exists as its registration, so there is nothing left to keep and no --purge. " +
+			"Adopting a live server instead of dropping it runs the other way — see import.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			res, err := state.app.RemoveMcpServer(cmd.Context(), args[0])
 			if err != nil {
@@ -428,11 +878,14 @@ func newAgentsMcpRemoveCmd(state *rootState) *cobra.Command {
 	}
 }
 
-func newAgentsMcpRestoreCmd(state *rootState) *cobra.Command {
+func newAgentsMcpSyncCmd(state *rootState) *cobra.Command {
 	var opts app.RestoreMcpOptions
 	cmd := &cobra.Command{
-		Use:   "restore",
+		Use:   "sync",
 		Short: "Install the manifest MCP servers onto this host",
+		Long: "Move the manifest's MCP servers onto this host through each agent's own CLI: register " +
+			"the missing ones, update registrations that drifted, and leave matching ones alone. " +
+			"Adopting servers the manifest does not declare runs the other way — see import.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			res, err := state.app.RestoreMcpServers(cmd.Context(), opts)
 			if err != nil {
@@ -463,6 +916,9 @@ func newAgentsMcpRestoreCmd(state *rootState) *cobra.Command {
 			for _, s := range res.ShadowedByPlugin {
 				fmt.Fprintf(w, "skipped (provided by plugin): %s\n", s)
 			}
+			for _, d := range res.Drift {
+				fmt.Fprintf(w, "  ~ drift: %s\n", d)
+			}
 			for _, e := range res.Errors {
 				fmt.Fprintf(w, "  ! %s/%s: %v\n", e.AgentID, e.ServerName, e.Err)
 			}
@@ -476,8 +932,12 @@ func newAgentsMcpRestoreCmd(state *rootState) *cobra.Command {
 func newAgentsMcpImportCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "import [<name>]",
-		Short: "List unmanaged MCP servers, or adopt one into the manifest by name",
-		Args:  cobra.MaximumNArgs(1),
+		Short: "Adopt an MCP server this host already registers into the manifest",
+		Long: "Move a live MCP server registration into the manifest. Without a name it lists what " +
+			"each agent holds unmanaged; with one it adopts that server's transport, command or URL " +
+			"as the manifest's intent. Installing what the manifest declares runs the other way — " +
+			"see sync.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			diff, err := state.app.ImportMcpServers(cmd.Context())
 			if err != nil {
@@ -503,9 +963,6 @@ func newAgentsMcpImportCmd(state *rootState) *cobra.Command {
 	}
 }
 
-// importMcpServerByName adopts an unmanaged server into the manifest, mirroring the
-// TUI's doImportMcpServer. Environment variables remain unavailable from agent list
-// output, while remote headers are preserved when the agent reports them.
 func importMcpServerByName(cmd *cobra.Command, state *rootState, diff app.McpImportDiff, name string) error {
 	agentIDs := make([]string, 0, len(diff.Unmanaged))
 	for id := range diff.Unmanaged {
@@ -524,7 +981,8 @@ func importMcpServerByName(cmd *cobra.Command, state *rootState, diff app.McpImp
 			if !found {
 				match = s
 				found = true
-			} else if s.Transport != match.Transport || s.Command != match.Command || s.URL != match.URL || !maps.Equal(s.Headers, match.Headers) {
+			} else if s.Transport != match.Transport || s.Command != match.Command || s.URL != match.URL ||
+				!maps.Equal(s.Headers, match.Headers) || !maps.Equal(s.EnvLiteral, match.EnvLiteral) {
 				return fmt.Errorf("mcp server %q is unmanaged under multiple agents with conflicting configuration; import each manually", name)
 			}
 			matchedAgents = append(matchedAgents, id)
@@ -534,12 +992,18 @@ func importMcpServerByName(cmd *cobra.Command, state *rootState, diff app.McpImp
 		return fmt.Errorf("mcp server %q is not unmanaged in any agent CLI", name)
 	}
 
+	env, refusals := state.app.McpAdoptCheck(match)
+	if len(refusals) > 0 {
+		return errors.New(strings.Join(refusals, "; "))
+	}
+
 	s := config.McpServer{
 		Name:      match.Name,
 		Transport: match.Transport,
 		Command:   match.Command,
 		URL:       match.URL,
 		Headers:   match.Headers,
+		Env:       env,
 		Agents:    matchedAgents,
 	}
 	res, err := state.app.AddMcpServer(cmd.Context(), s)
@@ -559,15 +1023,63 @@ func newAgentsPluginsCmd(state *rootState) *cobra.Command {
 		Use:   "plugins",
 		Short: "Manage agent plugins and their marketplaces",
 	}
+	sync := newAgentsPluginsSyncCmd(state)
 	cmd.AddCommand(
 		newAgentsPluginsListCmd(state),
 		newAgentsPluginsAddCmd(state),
 		newAgentsPluginsRemoveCmd(state),
-		newAgentsPluginsRestoreCmd(state),
+		sync,
+		deprecatedAlias(sync, "restore", nil),
 		newAgentsPluginsImportCmd(state),
+		newAgentsPluginsResolveCmd(state),
 		newAgentsPluginsGroupCmd(state),
 		newAgentsPluginsMarketplaceCmd(state),
 	)
+	return cmd
+}
+
+func newAgentsPluginsResolveCmd(state *rootState) *cobra.Command {
+	var useManaged bool
+	var useLocal bool
+	var agents []string
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "resolve <name>",
+		Short: "Settle a plugin whose live install came from another marketplace",
+		Long: "Settle a plugin the agent installed from a marketplace other than the one the " +
+			"manifest declares. --use-managed uninstalls that copy and reinstalls from the " +
+			"declared marketplace. --use-local repoints the manifest entry at the marketplace " +
+			"actually in use, which must already be declared.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if useManaged == useLocal {
+				return fmt.Errorf("choose exactly one of --use-managed or --use-local")
+			}
+			opts := app.ResolvePluginDriftOptions{
+				Name:     args[0],
+				Agents:   agents,
+				Strategy: app.PluginDriftUseManaged,
+				DryRun:   dryRun,
+			}
+			if useLocal {
+				opts.Strategy = app.PluginDriftUseLocal
+			}
+			if useManaged && !dryRun {
+				ok, err := confirmAction(cmd, state, fmt.Sprintf(
+					"Uninstall the foreign copy of %q and reinstall it from the declared marketplace?", args[0]))
+				if err != nil || !ok {
+					return err
+				}
+			}
+			res, err := state.app.ResolvePluginDrift(cmd.Context(), opts)
+			printDriftResolution(cmdOut(cmd), res.Actions, res.Warnings, dryRun)
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&useManaged, "use-managed", false, "Reinstall from the manifest's marketplace")
+	cmd.Flags().BoolVar(&useLocal, "use-local", false, "Repoint the manifest at the installed marketplace")
+	cmd.Flags().StringArrayVar(&agents, "agent", nil, "Limit the resolution to this agent target (repeatable)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be resolved without making changes")
 	return cmd
 }
 
@@ -607,7 +1119,11 @@ func newAgentsPluginsListCmd(state *rootState) *cobra.Command {
 				agentParts := make([]string, 0, len(agentIDs))
 				for _, id := range agentIDs {
 					marker := "✓"
-					if row.PerAgentStatus[id] != app.PluginStatusInstalled {
+					switch row.PerAgentStatus[id] {
+					case app.PluginStatusInstalled:
+					case app.PluginStatusDrifted:
+						marker = "drift"
+					default:
 						marker = "-"
 					}
 					agentParts = append(agentParts, fmt.Sprintf("%s(%s)", id, marker))
@@ -652,7 +1168,10 @@ func newAgentsPluginsAddCmd(state *rootState) *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "add",
-		Short: "Add a plugin to the manifest and install it",
+		Short: "Declare a plugin in the manifest and install it here",
+		Long: "Record a plugin and its marketplace as manifest intent and install it through the " +
+			"targeted agents' own CLIs — declaration and one host's convergence in a single step. " +
+			"Other hosts pick it up on their next sync.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if name == "" {
 				return fmt.Errorf("--name is required")
@@ -682,8 +1201,12 @@ func newAgentsPluginsAddCmd(state *rootState) *cobra.Command {
 func newAgentsPluginsRemoveCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "remove <name>",
-		Short: "Remove a plugin from the manifest",
-		Args:  cobra.ExactArgs(1),
+		Short: "Undeclare a plugin and uninstall it from targeted agents",
+		Long: "Drop a plugin from the manifest and uninstall it through the agent CLIs that hold it. " +
+			"Unlike `agents skills remove`, the live side always goes with it — the agent owns the " +
+			"installed copy, so there is no --purge. Adopting an installed plugin instead of " +
+			"dropping it runs the other way — see import.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			res, err := state.app.RemovePlugin(cmd.Context(), args[0])
 			if err != nil {
@@ -702,11 +1225,14 @@ func newAgentsPluginsRemoveCmd(state *rootState) *cobra.Command {
 	}
 }
 
-func newAgentsPluginsRestoreCmd(state *rootState) *cobra.Command {
+func newAgentsPluginsSyncCmd(state *rootState) *cobra.Command {
 	var opts app.RestorePluginOptions
 	cmd := &cobra.Command{
-		Use:   "restore",
+		Use:   "sync",
 		Short: "Install the manifest plugin set onto this host",
+		Long: "Move the manifest's plugins onto this host through each agent's own CLI, installing " +
+			"the missing ones from their declared marketplace and leaving matching ones alone. " +
+			"Adopting plugins the manifest does not declare runs the other way — see import.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			res, err := state.app.RestorePlugins(cmd.Context(), opts)
 			if err != nil {
@@ -728,6 +1254,9 @@ func newAgentsPluginsRestoreCmd(state *rootState) *cobra.Command {
 			for _, p := range res.AlreadyInstalled {
 				fmt.Fprintf(w, "already installed: %s\n", p)
 			}
+			for _, d := range res.Drift {
+				fmt.Fprintf(w, "  ~ drift: %s\n", d)
+			}
 			for _, e := range res.Errors {
 				fmt.Fprintf(w, "  ! %s/%s: %v\n", e.AgentID, e.Name, e.Err)
 			}
@@ -741,8 +1270,12 @@ func newAgentsPluginsRestoreCmd(state *rootState) *cobra.Command {
 func newAgentsPluginsImportCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "import [<name>]",
-		Short: "List unmanaged plugins, or adopt one into the manifest by name",
-		Args:  cobra.MaximumNArgs(1),
+		Short: "Adopt a plugin this host already installed into the manifest",
+		Long: "Move an installed plugin into the manifest. Without a name it lists what each agent " +
+			"holds unmanaged; with one it adopts that plugin's name and marketplace as the " +
+			"manifest's intent, declaring the marketplace too when the agent reports a real source. " +
+			"Installing what the manifest declares runs the other way — see sync.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			diff, err := state.app.ImportPlugins(cmd.Context())
 			if err != nil {
@@ -768,12 +1301,7 @@ func newAgentsPluginsImportCmd(state *rootState) *cobra.Command {
 	}
 }
 
-// importPluginByName adopts an unmanaged plugin into the manifest: identity
-// only (name + marketplace), never version. If the reported marketplace is
-// not yet declared, it is adopted too, but only with a real source an
-// already-targeted agent CLI reports — never a fabricated placeholder, since
-// that would later be replayed as a real `marketplace add <fake>` on restore.
-// If no real source is discoverable, the caller is told to declare it first.
+// An undeclared marketplace is adopted only with a real reported source: a fabricated placeholder would be replayed as a real `marketplace add` on restore.
 func importPluginByName(cmd *cobra.Command, state *rootState, diff app.PluginImportDiff, name string) error {
 	agentIDs := make([]string, 0, len(diff.Unmanaged))
 	for id := range diff.Unmanaged {
@@ -902,8 +1430,10 @@ func newAgentsPluginsMarketplaceAddCmd(state *rootState) *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "add <name>",
-		Short: "Declare a marketplace and add it to targeted agent CLIs",
-		Args:  cobra.ExactArgs(1),
+		Short: "Declare a marketplace in the manifest and add it to targeted agents",
+		Long: "Record a plugin marketplace as manifest intent and add it through the targeted " +
+			"agents' own CLIs, so the plugins declared against it have somewhere to install from.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if source == "" {
 				return fmt.Errorf("--source is required")
@@ -929,8 +1459,11 @@ func newAgentsPluginsMarketplaceAddCmd(state *rootState) *cobra.Command {
 func newAgentsPluginsMarketplaceRemoveCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "remove <name>",
-		Short: "Remove a marketplace from the manifest only (agents keep theirs)",
-		Args:  cobra.ExactArgs(1),
+		Short: "Undeclare a marketplace from the manifest",
+		Long: "Drop a marketplace from the manifest. The agents that already added it keep it, " +
+			"because removing a marketplace an agent still installs plugins from would break them; " +
+			"remove it with the agent's own CLI when that is what you want.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := state.app.RemoveMarketplace(args[0]); err != nil {
 				return err

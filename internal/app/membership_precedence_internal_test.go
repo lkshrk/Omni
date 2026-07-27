@@ -6,16 +6,10 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// When a dot is defined in both the host group and a reusable group, the host
-// group's definition wins: effectiveHostGroups orders the host group first and
-// collectDots dedups by name first-wins. This is the conflict-resolution
-// guarantee behind "unlimited host groups + one reusable group".
 func TestCollectDots_HostGroupDefinitionWinsOverReusable(t *testing.T) {
 	t.Parallel()
 	cfg := &config.RootConfig{
 		Groups: []*config.GroupConfig{
-			// Deliberately list the reusable group first to prove ordering,
-			// not declaration order, drives precedence.
 			{Name: "work", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim", Package: "nvim-work"}}},
 			{Name: "host", Special: "host", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim", Package: "nvim-host"}}},
 		},

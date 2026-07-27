@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -81,12 +82,7 @@ func (m *Model) startDoctorRun(message string) {
 	startOp(m, message)
 }
 
-// refreshDoctorAfterFix re-runs doctor so its cached findings (and the action
-// hints derived from them, e.g. "commit dotfiles") drop once a dashboard fix
-// resolved the underlying issue. The Doctor row reads a doctorResult snapshot,
-// unlike the live Dotfiles row, so without this it keeps showing a stale warn.
-// When doctor is still running or has not produced its first snapshot yet, the
-// refresh is deferred until handleDoctorDoneMsg drains doctorRefreshPending.
+// The Doctor row reads a cached doctorResult snapshot, unlike the live Dotfiles row, so without this it keeps showing a stale warn; deferred via doctorRefreshPending when doctor has not produced its first snapshot yet.
 func (m *Model) refreshDoctorAfterFix(cmds *[]tea.Cmd) {
 	m.refreshDoctorAfterFixWithStatus(cmds, false)
 }
@@ -385,7 +381,7 @@ func (m *Model) startDashboardFixConfig(cmds *[]tea.Cmd) {
 	}
 	a := m.app
 	*cmds = append(*cmds, func() tea.Msg {
-		result := a.FixDoctorIssues(false)
+		result := a.FixDoctorIssues(context.Background(), false)
 		return configOptimizeDoneMsg{
 			report:      result.OptimizeReport,
 			modified:    result.IgnoreModified,
@@ -400,7 +396,7 @@ func (m *Model) startDashboardFixNvmManaged(cmds *[]tea.Cmd) {
 		return
 	}
 	a, ctx := m.app, m.beginCancellableAction()
-	m.loading = true
+	m.beginLoading(loadingOwnerLocalOp)
 	*cmds = append(*cmds, m.spinner.Tick, func() tea.Msg {
 		state, err := a.MigrateAllNvmManagedToolsWithState(ctx)
 		msg := fixNvmDoneMsg{err: err}
@@ -421,7 +417,7 @@ func (m *Model) startDashboardUpgradeAll(cmds *[]tea.Cmd) {
 		m.upgradingKeys = make(map[string]bool)
 	}
 	m.upgradingKeys["*"] = true
-	m.loading = true
+	m.beginLoading(loadingOwnerProgressOp)
 	m.progressText = ""
 	ch, gen := m.beginProgressStream()
 	m.markBulkPendingUpdates()
@@ -501,6 +497,10 @@ func (m *Model) handleStatusAction(action statusAction, cmds *[]tea.Cmd) {
 		m.startDashboardFixNvmManaged(cmds)
 	case statusActionOpenAgents:
 		m.switchMainTab(viewSkills, cmds)
+	case statusActionUpgradeAgents:
+		if !m.skillsRunning && !m.pluginRunning && !m.marketplaceRunning && !m.mcpRunning {
+			*cmds = append(*cmds, m.doAgentsUpdateAll()...)
+		}
 	case statusActionRestoreSkills:
 		if !m.loading && !m.skillsRunning {
 			m.skillsRunning = true

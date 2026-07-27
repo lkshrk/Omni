@@ -1,4 +1,3 @@
-// Package aptrepo installs packages from a configured apt repository.
 package aptrepo
 
 import (
@@ -17,12 +16,10 @@ const (
 	optUpgrade  = "upgrade"
 )
 
-// Provider configures an apt repository and installs packages from it.
 type Provider struct {
 	exec executor.Executor
 }
 
-// New returns an apt_repo Provider.
 func New(exec executor.Executor) *Provider {
 	return &Provider{exec: exec}
 }
@@ -62,21 +59,41 @@ func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 }
 
 func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, string, error) {
-	if check := strings.TrimSpace(tool.Options[optCheck]); check != "" {
-		_, _, err := p.exec.Run(ctx, "sh", "-c", check)
-		return err == nil, "", nil
-	}
 	pkgs := packageList(tool)
+	if check := strings.TrimSpace(tool.Options[optCheck]); check != "" {
+		if _, _, err := p.exec.Run(ctx, "sh", "-c", check); err != nil {
+			return false, "", nil
+		}
+		return true, p.packageVersion(ctx, pkgs), nil
+	}
 	if len(pkgs) == 0 {
 		return false, "", nil
 	}
+	version := ""
 	for _, pkg := range pkgs {
 		stdout, _, err := p.exec.Run(ctx, "dpkg-query", "--showformat=${Version}", "--show", pkg)
 		if err != nil || strings.TrimSpace(stdout) == "" {
 			return false, "", nil
 		}
+		if version == "" {
+			version = strings.TrimSpace(stdout)
+		}
 	}
-	return true, "", nil
+	return true, version, nil
+}
+
+// The recipe lists the tool's own package first, so its version is the one worth reporting.
+func (p *Provider) packageVersion(ctx context.Context, pkgs []string) string {
+	for _, pkg := range pkgs {
+		stdout, _, err := p.exec.Run(ctx, "dpkg-query", "--showformat=${Version}", "--show", pkg)
+		if err != nil {
+			continue
+		}
+		if version := strings.TrimSpace(stdout); version != "" {
+			return version
+		}
+	}
+	return ""
 }
 
 func (p *Provider) ListInstalled(context.Context) ([]provider.InstalledTool, error) {

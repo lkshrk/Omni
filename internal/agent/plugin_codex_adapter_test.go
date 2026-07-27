@@ -91,9 +91,7 @@ func TestCodexPluginAdapter_AddMarketplace(t *testing.T) {
 	}
 }
 
-// codexPluginListEmptyFixture is the exact stdout of `codex plugin list --json`
-// with no plugins installed and no marketplace configured, captured in
-// specs/plugin-cli-probe.md.
+// Exact stdout of `codex plugin list --json` with nothing installed or configured.
 const codexPluginListEmptyFixture = `{
   "installed": [],
   "available": []
@@ -118,12 +116,7 @@ func TestCodexPluginAdapter_ListPlugins_Empty(t *testing.T) {
 	}
 }
 
-// codexPluginListInstalledFixture is the exact stdout of
-// `codex plugin list --json` with one installed plugin, captured in
-// specs/plugin-cli-probe.md. Note the
-// {installed, available} wrapper is present even though --available was not
-// passed (probe Deviation 3) — a different shape convention than claude's
-// bare-array default.
+// The {installed, available} wrapper is present even without --available, unlike claude's bare-array default.
 const codexPluginListInstalledFixture = `{
   "installed": [
     {
@@ -172,11 +165,7 @@ func TestCodexPluginAdapter_ListPlugins_ParsesRealFixture(t *testing.T) {
 	}
 }
 
-// codexPluginListAvailableFixture is the exact stdout of
-// `codex plugin list --json --available`, captured in the probe transcript.
-// version is JSON null for an available-but-uninstalled plugin, which must
-// not be mistaken for the installed entry (ListPlugins only surfaces
-// resp.Installed).
+// version is JSON null for an available-but-uninstalled plugin, which must not be mistaken for an installed entry.
 const codexPluginListAvailableFixture = `{
   "installed": [],
   "available": [
@@ -217,10 +206,7 @@ func TestCodexPluginAdapter_ListPlugins_IgnoresAvailableOnlyEntries(t *testing.T
 	}
 }
 
-// codexPluginListInstalledWithAvailableUpdateFixture matches an installed
-// plugin's name+marketplaceName against an available entry carrying a newer
-// version, mirroring codexPluginListResponse.Available which is parsed but
-// currently discarded.
+// Mirrors codexPluginListResponse.Available, which is parsed but currently discarded.
 const codexPluginListInstalledWithAvailableUpdateFixture = `{
   "installed": [
     {
@@ -261,9 +247,7 @@ func TestCodexPluginAdapter_ListPlugins_JoinsLatestVersionFromAvailable(t *testi
 	}
 }
 
-// codexMarketplaceListFixture is the exact stdout of
-// `codex plugin marketplace list --json` with one marketplace configured,
-// captured in specs/plugin-cli-probe.md.
+// Exact stdout of `codex plugin marketplace list --json` with one marketplace configured.
 const codexMarketplaceListFixture = `{
   "marketplaces": [
     {
@@ -297,10 +281,7 @@ func TestCodexPluginAdapter_ListMarketplaces_ParsesRealFixture(t *testing.T) {
 	}
 }
 
-// codexMarketplaceListEmptyFixture is not captured verbatim in the probe
-// transcript (only the plain-text "No plugin marketplaces in scope." form
-// was captured for the empty case) but is the only shape consistent with
-// codexMarketplaceListResponse's schema for an empty marketplaces array.
+// Reconstructed rather than captured: the empty case only ever printed plain text, and this is the sole shape matching the response schema.
 const codexMarketplaceListEmptyFixture = `{
   "marketplaces": []
 }`
@@ -320,9 +301,7 @@ func TestCodexPluginAdapter_ListMarketplaces_Empty(t *testing.T) {
 	}
 }
 
-// TestCodexPluginAdapter_ListMarketplaces_UpdatedAtFromRootMtime verifies
-// UpdatedAt is derived from the root clone directory's mtime, since codex's
-// marketplace list JSON carries no date field of its own.
+// The marketplace list JSON carries no date field, so UpdatedAt must come from the root clone's mtime.
 func TestCodexPluginAdapter_ListMarketplaces_UpdatedAtFromRootMtime(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -347,9 +326,7 @@ func TestCodexPluginAdapter_ListMarketplaces_UpdatedAtFromRootMtime(t *testing.T
 	}
 }
 
-// TestCodexPluginAdapter_ListMarketplaces_UpdatedAtZeroWhenRootMissing
-// verifies a missing/unreadable root yields a zero UpdatedAt rather than an
-// error — best-effort enrichment, never fatal.
+// Enrichment is best-effort: an unreadable root yields a zero UpdatedAt, never an error.
 func TestCodexPluginAdapter_ListMarketplaces_UpdatedAtZeroWhenRootMissing(t *testing.T) {
 	t.Parallel()
 	fixture := `{"marketplaces":[{"name":"lkshrk","root":"/does/not/exist","marketplaceSource":{"sourceType":"git","source":"https://github.com/lkshrk/agent-marketplace.git"}}]}`

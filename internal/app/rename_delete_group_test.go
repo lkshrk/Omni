@@ -11,13 +11,10 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// ─── RenameGroup ──────────────────────────────────────────────────────────────
-
 func TestRenameGroup_HappyPath(t *testing.T) {
 	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
-	// Seed config with a "dev" group containing two tools.
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(
 			logicalTool("ripgrep", "brew"),
@@ -41,7 +38,6 @@ func TestRenameGroup_HappyPath(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 
-	// Old name must be gone, new name must exist.
 	var newGroup *config.GroupConfig
 	for _, g := range updated.Groups {
 		if g.Name == "dev" {
@@ -54,7 +50,6 @@ func TestRenameGroup_HappyPath(t *testing.T) {
 	if newGroup == nil {
 		t.Fatal("renamed group 'development' not found in config")
 	}
-	// Tools must be preserved.
 	if len(newGroup.Tools) != 2 {
 		t.Errorf("renamed group tools = %d, want 2", len(newGroup.Tools))
 	}
@@ -210,8 +205,6 @@ func TestRenameGroup_NotFoundReturnsError(t *testing.T) {
 	}
 }
 
-// ─── DeleteGroup ──────────────────────────────────────────────────────────────
-
 func TestDeleteGroup_HappyPath_MovesToolsToHost(t *testing.T) {
 	t.Parallel()
 	a, cfgPath := newImportApp(t)
@@ -240,14 +233,12 @@ func TestDeleteGroup_HappyPath_MovesToolsToHost(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 
-	// The "dev" group must be gone.
 	for _, g := range updated.Groups {
 		if g.Name == "dev" {
 			t.Error("deleted group 'dev' still present in config")
 		}
 	}
 
-	// Its tools must have been moved to the host group.
 	hostGroup := findTestGroup(updated, host)
 	tools := materializeTestTools(updated, hostGroup.Tools)
 	names := make(map[string]bool, len(tools))
@@ -525,10 +516,7 @@ func TestDeleteGroup_EmptyNameReturnsError(t *testing.T) {
 }
 
 func TestDeleteGroup_NonExistentGroupReturnsNoError(t *testing.T) {
-	t.Parallel(
-	// DeleteGroup is idempotent for non-existent groups — the implementation
-	// performs a filter that naturally produces a no-op when the name is absent.
-	)
+	t.Parallel()
 
 	a, cfgPath := newImportApp(t)
 
@@ -541,12 +529,10 @@ func TestDeleteGroup_NonExistentGroupReturnsNoError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Should not error for a group that doesn't exist.
 	if err := a.DeleteGroup(context.Background(), "nonexistent", app.DeleteGroupOptions{MoveTo: testShortHostname()}); err != nil {
 		t.Errorf("DeleteGroup on non-existent group: %v", err)
 	}
 
-	// Config should be unchanged.
 	updated, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)

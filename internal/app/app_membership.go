@@ -94,8 +94,6 @@ type DotGroupsChange struct {
 	DotsState      *DotsState
 }
 
-// ReusableGroupNames returns the names of all reusable (non-host) groups
-// currently configured.
 func (a *App) ReusableGroupNames() ([]string, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -356,19 +354,15 @@ func toolGroupLabelsWithFilter(memberships map[string][]string, allowed map[stri
 	return out
 }
 
-// GroupLabelForHost returns the compact memberships visible on one host.
 func GroupLabelForHost(groups []string, info *HostInfo, machineGroup string) string {
 	return CompactGroupLabel(FilterGroupsForHost(groups, ActiveHostGroupSet(info, machineGroup)))
 }
 
-// GroupLabel returns the compact memberships visible on the current machine.
 func GroupLabel(groups []string, info *HostInfo) string {
 	return GroupLabelForHost(groups, info, currentMachineGroupName())
 }
 
-// HostFirstGroups returns groups visible on the current machine, ordered
-// with the host group first followed by reusable groups sorted
-// alphabetically. It applies the same active-host filter as GroupLabel.
+// HostFirstGroups — Host group first, then reusable groups alphabetically, with GroupLabel's active-host filter.
 func HostFirstGroups(groups []string, info *HostInfo) []string {
 	filtered := FilterGroupsForHost(groups, ActiveHostGroupSet(info, currentMachineGroupName()))
 	host := ""
@@ -388,7 +382,6 @@ func HostFirstGroups(groups []string, info *HostInfo) []string {
 	return append(hostGroups, reusable...)
 }
 
-// IsHostGroup reports whether name is the current host's own host group.
 func IsHostGroup(name string, info *HostInfo) bool {
 	if info == nil || name == "" {
 		return false
@@ -745,8 +738,7 @@ func ensureMembershipGroupsOnHostInConfig(cfg *config.RootConfig, activeHost str
 			return fmt.Errorf("group %q not found", group)
 		}
 		if g.IsHost() {
-			// Item memberships may span hosts. Host groups do not belong in
-			// another host's reusable-group assignment list.
+			// Host groups do not belong in another host's reusable-group assignment list.
 			continue
 		}
 		if !slices.Contains(cfg.Hosts[activeHost], group) {
@@ -778,9 +770,7 @@ func moveToolToGroupInConfig(cfg *config.RootConfig, name, groupName string) err
 	if _, ok := cfg.Tools[name]; !ok {
 		return fmt.Errorf("logical tool %q not found; run 'omni tools set %s --provider <ecosystem-provider>' first", name, name)
 	}
-	// MoveToolToGroup is a relocate: the tool ends up in exactly one group. The
-	// multi-group model (unlimited host groups + one reusable group) is reached
-	// through the membership picker, which sets the full group set directly.
+	// A relocate: the multi-group model is reached through the membership picker, which sets the full set.
 	for _, existing := range cfg.Groups {
 		if existing == nil || existing.BaseName() == groupName {
 			continue

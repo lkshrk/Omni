@@ -185,7 +185,6 @@ func TestConsolidateWithState_UpdatesManagerSettingAndReturnsState(t *testing.T)
 		t.Fatalf("save config: %v", err)
 	}
 
-	// Consolidate to npm (non-default) so the setting is explicitly written.
 	state, err := a.ConsolidateWithState(ctx, "node", "npm", nil)
 	if err != nil {
 		t.Fatalf("ConsolidateWithState: %v", err)

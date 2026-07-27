@@ -22,8 +22,14 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		return *m, tea.Batch(cmds...)
 	}
 
-	if m.dashboardReconcilePlanOpen {
+	if m.dashboardReconcilePlanOpen && !isCtrlC(msg) {
 		cmds = append(cmds, m.handleDashboardReconcilePlanKeyMsg(msg)...)
+		return *m, tea.Batch(cmds...)
+	}
+
+	// ctrl+c stays reachable: the modal opens on its own, so it must not be able to trap the interrupt key.
+	if m.agentsDriftPromptOpen && !isCtrlC(msg) {
+		cmds = append(cmds, m.handleAgentsDriftPromptKeyMsg(msg)...)
 		return *m, tea.Batch(cmds...)
 	}
 
@@ -68,6 +74,12 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		return *m, tea.Batch(cmds...)
 	}
 
+	// The post-setup overlay owns the screen, so esc dismisses it instead of reaching the tab underneath.
+	if m.setupReloading && key.Matches(msg, m.keys.Back) {
+		cmds = append(cmds, m.dismissSetupReload()...)
+		return *m, tea.Batch(cmds...)
+	}
+
 	if m.mode == viewSetup {
 		cmd, quit := m.handleSetupKeyMsg(msg)
 		if quit {
@@ -98,9 +110,7 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 	}
 
 	wasHidden := m.cursorHidden
-	// Tab-global keys (bulk sync/update, refresh, commit, quit, help) act on
-	// the whole tab, not the selected row — they must not turn the post-tab-
-	// switch "no selection" state into a selected first row.
+	// Tab-global keys act on the whole tab, so they must not turn the post-tab-switch "no selection" state into a selected first row.
 	if !isTabGlobalKey(msg, m.keys, m.mode) {
 		m.cursorHidden = false
 	}
@@ -110,7 +120,6 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		return *m, tea.Batch(cmds...)
 	}
 
-	// Global actions available from any main tab.
 	if isMainTabMode(m.mode) && !m.focusedTextInputActive() && key.Matches(msg, m.keys.DotCommit) {
 		m.startDashboardDotsCommit(&cmds)
 		return *m, tea.Batch(cmds...)
@@ -176,7 +185,6 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 			cmds = append(cmds, m.handleSkillAgentsPickerKeyMsg(msg)...)
 			break
 		}
-		// Search mode intercepts keys while the input is focused.
 		if m.skillsSearchActive && m.filter.Focused() {
 			cmds = append(cmds, m.handleSkillsSearchKeyMsg(msg)...)
 			break
@@ -254,12 +262,20 @@ func (m *Model) focusedTextInputActive() bool {
 	}
 }
 
-// handleSkillsKeyMsg dispatches keys for the skills chip (skillTypeIdx ==
-// agentsChipSkills): chip switching, agent filter cycling, cursor movement
-// across local + find-result rows, and r/i/u/g/a/c actions. 'c' claims an
-// orphan row; 'i' is the unrelated global import-from-CLI bulk action.
+// 'c' claims an orphan row; 'i' is the unrelated global import-from-CLI bulk action.
 func (m *Model) handleSkillsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	var cmds []tea.Cmd
+	if m.agentsResolveConfirm {
+		return m.handleAgentsResolveConfirmKeyMsg(msg)
+	}
+	if entry, ok := skillsChipCursorRow(*m); ok && agentsResolveEligible(entry) {
+		switch msg.String() {
+		case "u", "l":
+			if handled, resolveCmds := m.agentsRowArmResolve(entry, msg.String() == "l"); handled {
+				return resolveCmds
+			}
+		}
+	}
 	switch msg.String() {
 	case "esc":
 		if m.skillsSearchActive {
@@ -282,6 +298,9 @@ func (m *Model) handleSkillsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		m.agentFilterMove(-1)
 	case "}":
 		m.agentFilterMove(1)
+	case "/":
+		m.openAgentsSearch()
+		cmds = append(cmds, textinput.Blink)
 	case "up", "k":
 		m.agentsChipMoveRow(agentsSectionSkills, -1)
 	case "down", "j":
@@ -295,7 +314,7 @@ func (m *Model) handleSkillsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		case findStart >= 0 && m.skillsCursor >= findStart:
 			findIdx := m.skillsCursor - findStart
 			if findIdx < len(m.skillFindResults) {
-				src := m.skillFindResults[findIdx].Source
+				src := skillFindInstallSource(m.skillFindResults[findIdx])
 				m.skillAddRunning = true
 				m.skillsErr = nil
 				cmds = append(cmds, m.spinner.Tick, m.doAddSkillPackage(src))
@@ -309,14 +328,6 @@ func (m *Model) handleSkillsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		if unmanagedStart >= 0 && m.skillsCursor >= unmanagedStart {
 			m.openAgentsClaimGroupPicker(agentsAllRow{feature: agentsSectionSkills, localIdx: m.skillsCursor})
 		}
-	case "/":
-		m.skillsSearchActive = true
-		m.filter.SetValue("")
-		m.filter.Focus()
-		m.skillsCursor = 0
-		m.skillFindResults = nil
-		m.skillsErr = nil
-		cmds = append(cmds, textinput.Blink)
 	case "g":
 		visible, findStart, unmanagedStart := skillsVisibleRows(*m)
 		if len(visible) > 0 && m.skillsCursor < skillsManagedRowsEnd(findStart, unmanagedStart, len(visible)) {
@@ -327,22 +338,42 @@ func (m *Model) handleSkillsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		if len(visible) > 0 && m.skillsCursor < skillsManagedRowsEnd(findStart, unmanagedStart, len(visible)) {
 			cmds = append(cmds, m.openSkillAgentsPicker(visible[m.skillsCursor]))
 		}
+	// Reject concurrent passes so one cannot clear the spinner while another mutates the skill store.
 	case "r":
+		if m.agentsOpInFlight() {
+			cmds = append(cmds, setStatus(m, agentsBusyStatus, true))
+			break
+		}
 		m.skillsRunning = true
 		m.skillsErr = nil
 		m.skillsResult = nil
 		cmds = append(cmds, m.spinner.Tick, m.doRestoreSkills())
 	case "i":
+		if m.agentsOpInFlight() {
+			cmds = append(cmds, setStatus(m, agentsBusyStatus, true))
+			break
+		}
 		m.skillsRunning = true
 		m.skillsErr = nil
 		m.skillsImport = nil
 		cmds = append(cmds, m.spinner.Tick, m.doImportSkills())
 	case "u":
+		if m.agentsOpInFlight() {
+			cmds = append(cmds, setStatus(m, agentsBusyStatus, true))
+			break
+		}
 		m.skillsRunning = true
 		m.skillsErr = nil
 		cmds = append(cmds, m.spinner.Tick, m.doUpdateSkills())
 	}
 	return cmds
+}
+
+func skillFindInstallSource(result app.FindResult) string {
+	if result.Skill == "" {
+		return result.Source
+	}
+	return result.Source + "@" + result.Skill
 }
 
 func (m *Model) handleTabKeyMsg(msg tea.KeyPressMsg, cmds *[]tea.Cmd) bool {
@@ -435,6 +466,7 @@ func (m *Model) handlePaletteOpenKeyMsg(msg tea.KeyPressMsg, cmds *[]tea.Cmd) bo
 		return false
 	}
 	m.cancelConfirmationForGlobalNavigation()
+	m.commandOrigin = m.mode
 	m.mode = viewCommand
 	m.commandInput.SetValue("")
 	m.commandInput.Focus()
@@ -457,17 +489,27 @@ func isNavigationKey(msg tea.KeyPressMsg, k KeyMap) bool {
 		k.HalfPageUp, k.HalfPageDown, k.PageUp, k.PageDown)
 }
 
-// isTabGlobalKey reports keys whose action is row-agnostic (bulk operations,
-// refresh, dots commit, quit, help). The agents tab's capital U/S/R bulk keys
-// share the same bindings as the tools tab's, so they are covered too.
-// DotAdd ("a") is global only on the dots tab — the same key opens a
-// row-scoped picker on the agents tab, which must keep revealing the cursor.
+// DotAdd ("a") is global only on the dots tab — the same key opens a row-scoped picker on the agents tab, which must keep revealing the cursor.
 func isTabGlobalKey(msg tea.KeyPressMsg, k KeyMap, mode viewMode) bool {
 	if key.Matches(msg, k.UpgradeAll, k.SyncAll, k.Refresh, k.DotRefresh, k.DotCommit,
 		k.Reconcile, k.DotUseRepoAll, k.DotUseLocalAll, k.Quit, k.Help) {
 		return true
 	}
 	return mode == viewDots && key.Matches(msg, k.DotAdd)
+}
+
+// Everything selected saves as nil — the manifest's "every enabled agent" form — so confirming does not silently freeze the package to today's agent set.
+func skillAgentsSelection(rows []app.SkillAgentRow) []string {
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.Targeted {
+			ids = append(ids, r.ID)
+		}
+	}
+	if len(ids) == len(rows) {
+		return nil
+	}
+	return ids
 }
 
 func (m *Model) handleSkillAgentsPickerKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
@@ -489,14 +531,8 @@ func (m *Model) handleSkillAgentsPickerKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 			m.skillAgentsRows[m.skillAgentsCursor].Targeted = !m.skillAgentsRows[m.skillAgentsCursor].Targeted
 		}
 	case key.Matches(msg, m.keys.Confirm):
-		ids := make([]string, 0, len(m.skillAgentsRows))
-		for _, r := range m.skillAgentsRows {
-			if r.Targeted {
-				ids = append(ids, r.ID)
-			}
-		}
 		m.skillAgentsPicker = false
-		cmds = append(cmds, m.doSetSkillAgents(m.skillAgentsSource, ids))
+		cmds = append(cmds, m.doSetSkillAgents(m.skillAgentsSource, skillAgentsSelection(m.skillAgentsRows)))
 	case key.Matches(msg, m.keys.Back):
 		m.skillAgentsPicker = false
 	}
@@ -539,13 +575,14 @@ func (m *Model) handleMcpAgentsPickerKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	return cmds
 }
 
-// handleMcpKeyMsg dispatches keys for the mcp chip (skillTypeIdx == 1): tab
-// switching, cursor movement across managed+unmanaged rows, and r/c/a/d/g
-// actions. 'c' claims (imports) an orphan/unmanaged row into the manifest.
+// 'c' claims (imports) an orphan/unmanaged row into the manifest.
 func (m *Model) handleMcpKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 	s := msg.String()
 
+	if m.agentsResolveConfirm {
+		return m.handleAgentsResolveConfirmKeyMsg(msg)
+	}
 	if m.mcpDeleteConfirm {
 		switch {
 		case key.Matches(msg, m.keys.Confirm) || key.Matches(msg, m.keys.Delete):
@@ -563,6 +600,12 @@ func (m *Model) handleMcpKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		}
 		return cmds
 	}
+	// A drifted row spends 'u'/'l' on the resolution; on every other row 'l' still switches chips.
+	if entry, ok := mcpChipCursorRow(*m); ok && agentsResolveEligible(entry) && (s == "u" || s == "l") {
+		if handled, resolveCmds := m.agentsRowArmResolve(entry, s == "l"); handled {
+			return resolveCmds
+		}
+	}
 
 	switch s {
 	case "left", "h":
@@ -577,6 +620,9 @@ func (m *Model) handleMcpKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		m.agentFilterMove(-1)
 	case "}":
 		m.agentFilterMove(1)
+	case "/":
+		m.openAgentsSearch()
+		cmds = append(cmds, textinput.Blink)
 	case "up", "k":
 		m.agentsChipMoveRow(agentsSectionMcp, -1)
 	case "down", "j":
@@ -613,14 +659,13 @@ func (m *Model) handleMcpKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	return cmds
 }
 
-// handlePluginKeyMsg dispatches keys for the plugin chip (skillTypeIdx == 2):
-// tab switching, cursor movement across managed+unmanaged rows, and
-// r/c/a/d/g actions. Mirrors handleMcpKeyMsg exactly minus the "n" add-form
-// case, which Task 7 adds once the plugin form fields exist.
 func (m *Model) handlePluginKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 	s := msg.String()
 
+	if m.agentsResolveConfirm {
+		return m.handleAgentsResolveConfirmKeyMsg(msg)
+	}
 	if m.pluginDeleteConfirm {
 		switch {
 		case key.Matches(msg, m.keys.Confirm) || key.Matches(msg, m.keys.Delete):
@@ -638,6 +683,11 @@ func (m *Model) handlePluginKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		}
 		return cmds
 	}
+	if entry, ok := pluginChipCursorRow(*m); ok && agentsResolveEligible(entry) && (s == "u" || s == "l") {
+		if handled, resolveCmds := m.agentsRowArmResolve(entry, s == "l"); handled {
+			return resolveCmds
+		}
+	}
 
 	switch s {
 	case "left", "h":
@@ -652,6 +702,9 @@ func (m *Model) handlePluginKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		m.agentFilterMove(-1)
 	case "}":
 		m.agentFilterMove(1)
+	case "/":
+		m.openAgentsSearch()
+		cmds = append(cmds, textinput.Blink)
 	case "up", "k":
 		m.agentsChipMoveRow(agentsSectionPlugins, -1)
 	case "down", "j":
@@ -688,13 +741,7 @@ func (m *Model) handlePluginKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	return cmds
 }
 
-// handleMarketplaceKeyMsg dispatches keys for the marketplace chip
-// (skillTypeIdx == agentsChipMarketplace): tab switching, cursor movement
-// across managed+unmanaged rows, and c/g/d actions. Mirrors handlePluginKeyMsg
-// minus the a/n cases (marketplaces have no per-agent install picker or
-// add-form): 'c' opens the group-membership picker in claim mode like
-// plugins/mcp/skills, and 'g' opens the group-membership picker for a
-// managed row.
+// Mirrors handlePluginKeyMsg minus the a/n cases: marketplaces have no per-agent install picker or add-form.
 func (m *Model) handleMarketplaceKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 	s := msg.String()
@@ -730,6 +777,9 @@ func (m *Model) handleMarketplaceKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		m.agentFilterMove(-1)
 	case "}":
 		m.agentFilterMove(1)
+	case "/":
+		m.openAgentsSearch()
+		cmds = append(cmds, textinput.Blink)
 	case "up", "k":
 		m.agentsChipMoveRow(agentsSectionMarketplaces, -1)
 	case "down", "j":
@@ -878,8 +928,6 @@ func (m *Model) handlePluginFormKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	return cmds
 }
 
-// buildMcpServerFromForm assembles a app.McpServer from the add-server
-// form fields, validating the name and the transport-specific required field.
 func (m *Model) buildMcpServerFromForm() (app.McpServer, error) {
 	name := strings.TrimSpace(m.mcpFormName.Value())
 	if name == "" {
@@ -954,7 +1002,6 @@ func (m *Model) handleSkillsSearchKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		m.skillsCursor = 0
 		m.skillFindResults = nil
 	case key.Matches(msg, m.keys.Confirm):
-		// Submit: blur input so row keys work; also trigger find for the query.
 		m.filter.Blur()
 		q := strings.TrimSpace(m.filter.Value())
 		if q != "" && !looksLikeSkillSource(q) {

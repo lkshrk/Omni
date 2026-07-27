@@ -18,7 +18,6 @@ type claudeCodeMcpAdapter struct {
 	lookupEnv func(string) (string, bool)
 }
 
-// NewClaudeCodeMcpAdapter returns an McpAdapter that delegates to the claude CLI.
 func NewClaudeCodeMcpAdapter(
 	execFn func(context.Context, string, ...string) (string, string, error),
 	lookupEnv func(string) (string, bool),
@@ -73,11 +72,7 @@ func (a *claudeCodeMcpAdapter) Remove(ctx context.Context, name string) error {
 	return nil
 }
 
-// List reads ~/.claude.json's top-level "mcpServers" object directly instead
-// of shelling out to `claude mcp list`, which performs a live health check
-// (i.e. connects to / starts) every registered server before printing.
-// Plugin-provided servers are not stored in this file, so they never leak
-// into the result -- only user-scope servers added via `claude mcp add`.
+// Reads ~/.claude.json directly because `claude mcp list` health-checks every registered server by connecting to it.
 func (a *claudeCodeMcpAdapter) List(ctx context.Context) ([]InstalledMcpServer, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -93,11 +88,8 @@ func (a *claudeCodeMcpAdapter) List(ctx context.Context) ([]InstalledMcpServer, 
 	return parseClaudeConfigMcpServers(data)
 }
 
-// claudeConfigFile mirrors the fields of ~/.claude.json relevant to MCP
-// servers. Each entry is either a stdio server (command/args/env) or a
-// remote server (type "http"/"sse" plus url); type defaults to "http" when
-// a url is present but type is omitted, matching `claude mcp add --transport
-// http` output observed on a live install.
+// An entry is stdio (command/args/env) or remote (type plus url); an omitted type alongside a url is read
+// as "http", but that is inference from the entry's shape rather than something claude reported.
 type claudeConfigFile struct {
 	McpServers map[string]claudeConfigMcpServer `json:"mcpServers"`
 }
@@ -111,8 +103,6 @@ type claudeConfigMcpServer struct {
 	Headers map[string]string `json:"headers"`
 }
 
-// parseClaudeConfigMcpServers converts ~/.claude.json's mcpServers object
-// into InstalledMcpServer entries, sorted by name for deterministic output.
 func parseClaudeConfigMcpServers(data []byte) ([]InstalledMcpServer, error) {
 	var file claudeConfigFile
 	if err := json.Unmarshal(data, &file); err != nil {
@@ -129,9 +119,12 @@ func parseClaudeConfigMcpServers(data []byte) ([]InstalledMcpServer, error) {
 		s := InstalledMcpServer{Name: name, EnvLiteral: entry.Env}
 		if entry.URL != "" {
 			s.HeadersKnown = true
-			switch entry.Type {
+			switch strings.TrimSpace(entry.Type) {
 			case "sse":
 				s.Transport = "sse"
+			case "":
+				s.Transport = "http"
+				s.TransportInferred = true
 			default:
 				s.Transport = "http"
 			}
@@ -147,17 +140,10 @@ func parseClaudeConfigMcpServers(data []byte) ([]InstalledMcpServer, error) {
 	return servers, nil
 }
 
-// mcpPinnedVersionRe matches an npx/bunx package spec pinned to a semver-ish
-// version, e.g. "npx -y @scope/pkg@1.2.3" or "bunx some-pkg@2.0.0". The
-// package name group excludes "@" so a scoped package's leading "@scope/"
-// isn't mistaken for the version separator; the version group requires a
-// leading "\d+\.\d+\.\d+" so tags like "@latest"/"@next" never match.
+// The name group excludes "@" so a scoped package's "@scope/" is not read as the version separator, and the version group requires digits so "@latest" never matches.
 var mcpPinnedVersionRe = regexp.MustCompile(`(?:npx|bunx)\s+(?:-\S+\s+)*(?:@[^\s@]+/)?[^\s@]+@(\d+\.\d+\.\d+[^\s]*)`)
 
-// ExtractMcpPinnedVersion statically parses a pinned semver-ish version out
-// of an npx/bunx invocation in command, or "" if none is present (bare
-// paths, http/sse transports with no command, or untagged/@latest/@next
-// packages). No exec, no network — regex parsing only.
+// ExtractMcpPinnedVersion — Regex parsing only: no exec and no network.
 func ExtractMcpPinnedVersion(command string) string {
 	m := mcpPinnedVersionRe.FindStringSubmatch(command)
 	if m == nil {

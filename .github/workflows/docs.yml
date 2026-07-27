@@ -60,6 +60,7 @@ jobs:
           from pathlib import Path
           import re
           import sys
+          import unicodedata
 
           root = Path.cwd()
           docs = sorted((root / "docs").glob("*.md"))
@@ -67,6 +68,47 @@ jobs:
           warnings = []
           bad_links = []
           placeholder_pattern = re.compile("|".join(["TO" + "DO", "TB" + "D", "FIX" + "ME"]))
+          fence_pattern = re.compile(r"^\s*(?:```|~~~)")
+          heading_pattern = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
+          attr_id_pattern = re.compile(r"\{[^}]*#([A-Za-z0-9_-]+)[^}]*\}\s*$")
+          html_anchor_pattern = re.compile(r"<a\s[^>]*(?:id|name)=[\"']([^\"']+)[\"']", re.I)
+
+          # Mirrors markdown.extensions.toc.slugify so a fragment is checked the way mkdocs renders it.
+          def slugify(value):
+              value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+              value = re.sub(r"[^\w\s-]", "", value).strip().lower()
+              return re.sub(r"[-\s]+", "-", value)
+
+          def anchors_of(text):
+              found = set()
+              seen = {}
+              in_fence = False
+              for line in text.splitlines():
+                  if fence_pattern.match(line):
+                      in_fence = not in_fence
+                      continue
+                  if in_fence:
+                      continue
+                  found.update(a.lower() for a in html_anchor_pattern.findall(line))
+                  match = heading_pattern.match(line)
+                  if not match:
+                      continue
+                  title = match.group(2)
+                  explicit = attr_id_pattern.search(title)
+                  if explicit:
+                      found.add(explicit.group(1).lower())
+                      continue
+                  title = re.sub(r"`([^`]*)`", r"\1", title)
+                  title = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", title)
+                  slug = slugify(title)
+                  if not slug:
+                      continue
+                  count = seen.get(slug, 0)
+                  seen[slug] = count + 1
+                  found.add(slug if count == 0 else f"{slug}_{count}")
+              return found
+
+          anchors = {f.resolve(): anchors_of(f.read_text(encoding="utf-8")) for f in files if f.exists()}
 
           for file in files:
               text = file.read_text(encoding="utf-8")
@@ -77,12 +119,19 @@ jobs:
                   warnings.append(f"{rel}: placeholder marker")
               for line_no, line in enumerate(text.splitlines(), start=1):
                   for match in re.finditer(r"\[[^\]]+\]\(([^)]+)\)", line):
-                      href = match.group(1).split("#", 1)[0]
-                      if not href or href.startswith(("http", "mailto:")):
+                      href, _, fragment = match.group(1).partition("#")
+                      if href.startswith(("http", "mailto:")):
                           continue
-                      target = (file.parent / href).resolve()
-                      if not target.exists():
+                      if not href and not fragment:
+                          continue
+                      target = (file.parent / href).resolve() if href else file.resolve()
+                      if href and not target.exists():
                           bad_links.append(f"{rel}:{line_no} {href}")
+                          continue
+                      if not fragment or target.suffix != ".md" or target not in anchors:
+                          continue
+                      if fragment.lower() not in anchors[target]:
+                          bad_links.append(f"{rel}:{line_no} {href}#{fragment}")
 
           if warnings:
               print("\n".join(warnings))

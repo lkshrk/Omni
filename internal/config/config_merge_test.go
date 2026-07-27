@@ -5,16 +5,14 @@ import (
 	"testing"
 )
 
-// TestMergeRootConfig_AgentsAndHosts pins the include-fragment merge rules:
-// later fragments fill blanks and union identity-keyed arrays, never
-// duplicate or clobber non-empty destination fields.
+// Later fragments fill blanks and union identity-keyed arrays, never clobbering non-empty destination fields.
 func TestMergeRootConfig_AgentsAndHosts(t *testing.T) {
 	dst := &RootConfig{
 		Version: 3,
 		Hosts:   map[string][]string{"mac": {"dev"}},
 		Ignore:  GlobalIgnore{Tools: []string{"jq"}},
 		Agents: AgentsConfig{
-			Packages: []SkillPackage{{Source: "acme/skills", Agents: []string{"claude-code"}}},
+			Packages: []SkillPackage{{Source: "acme/skills", Skills: []string{"review"}, Agents: []string{"claude-code"}}},
 			McpServers: []McpServer{{
 				Name: "srv", Transport: "stdio",
 				EnvLiteral: map[string]string{"A": "1"},
@@ -30,7 +28,7 @@ func TestMergeRootConfig_AgentsAndHosts(t *testing.T) {
 		Ignore:  GlobalIgnore{Tools: []string{"jq", "fzf"}, Dots: []string{".vimrc"}},
 		Agents: AgentsConfig{
 			Packages: []SkillPackage{
-				{Source: "acme/skills", Ref: "v2", Agents: []string{"codex"}},
+				{Source: "acme/skills", Ref: "v2", Skills: []string{"test"}, Agents: []string{"codex"}},
 				{Source: "other/pkg"},
 			},
 			McpServers: []McpServer{
@@ -65,6 +63,9 @@ func TestMergeRootConfig_AgentsAndHosts(t *testing.T) {
 	if pkg.Ref != "v2" || !reflect.DeepEqual(pkg.Agents, []string{"claude-code", "codex"}) {
 		t.Fatalf("merged package = %+v, want ref filled + agents union", pkg)
 	}
+	if !reflect.DeepEqual(pkg.Skills, []string{"review", "test"}) {
+		t.Fatalf("merged package skills = %v, want [review test]", pkg.Skills)
+	}
 
 	if len(dst.Agents.McpServers) != 2 {
 		t.Fatalf("McpServers = %v, want merged-by-name pair", dst.Agents.McpServers)
@@ -93,6 +94,19 @@ func TestMergeRootConfig_AgentsAndHosts(t *testing.T) {
 	}
 	if !reflect.DeepEqual(dst.Agents.Ignore.Skills, []string{"s1"}) {
 		t.Fatalf("Agents.Ignore.Skills = %v", dst.Agents.Ignore.Skills)
+	}
+}
+
+func TestMergeSkillPackages_SelectorlessFragmentPreservesInheritedSelector(t *testing.T) {
+	got := mergeSkillPackages(
+		[]SkillPackage{{Source: "acme/skills", Skills: []string{"review"}}},
+		[]SkillPackage{{Source: "acme/skills", Agents: []string{"codex"}}},
+	)
+	if !reflect.DeepEqual(got[0].Skills, []string{"review"}) {
+		t.Fatalf("skills = %v, want [review]", got[0].Skills)
+	}
+	if !reflect.DeepEqual(got[0].Agents, []string{"codex"}) {
+		t.Fatalf("agents = %v, want [codex]", got[0].Agents)
 	}
 }
 

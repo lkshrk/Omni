@@ -19,8 +19,6 @@ func tool(name string) provider.Tool {
 	return provider.Tool{Name: name, Provider: "pacman", Package: name}
 }
 
-// --- Available ---
-
 func TestAvailable_True(t *testing.T) {
 	p, _ := newPacman(executor.MockCall{Stdout: "Pacman v6.0.2"})
 	ok, err := p.Available(context.Background())
@@ -36,8 +34,6 @@ func TestAvailable_False(t *testing.T) {
 		t.Errorf("Available() = (%v, %v), want (false, nil)", ok, err)
 	}
 }
-
-// --- Install ---
 
 func TestInstall_Success(t *testing.T) {
 	p, m := newPacman(executor.MockCall{Stdout: "resolving dependencies..."})
@@ -57,8 +53,6 @@ func TestInstall_Error(t *testing.T) {
 	}
 }
 
-// --- Name / Description ---
-
 func TestName(t *testing.T) {
 	p, _ := newPacman()
 	if p.Name() != "pacman" {
@@ -72,8 +66,6 @@ func TestDescription(t *testing.T) {
 		t.Error("Description() should not be empty")
 	}
 }
-
-// --- Uninstall ---
 
 func TestUninstall_Success(t *testing.T) {
 	p, m := newPacman(executor.MockCall{})
@@ -92,14 +84,11 @@ func TestUninstall_Error(t *testing.T) {
 	}
 }
 
-// --- Upgrade ---
-
 func TestUpgrade_Success(t *testing.T) {
 	p, m := newPacman(executor.MockCall{})
 	if err := p.Upgrade(context.Background(), tool("ripgrep")); err != nil {
 		t.Fatalf("Upgrade: %v", err)
 	}
-	// pacman upgrade is -S
 	if m.Calls[0].Args[0] != "-S" {
 		t.Errorf("expected '-S', got %q", m.Calls[0].Args[0])
 	}
@@ -111,8 +100,6 @@ func TestUpgrade_Error(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
-
-// --- IsInstalled ---
 
 func TestIsInstalled_Found(t *testing.T) {
 	p, _ := newPacman(executor.MockCall{Stdout: "ripgrep 15.1.0-2"})
@@ -130,8 +117,6 @@ func TestIsInstalled_NotFound(t *testing.T) {
 	}
 }
 
-// --- ListInstalled ---
-
 func TestListInstalled(t *testing.T) {
 	explicit := "ripgrep\n"
 	output := "ripgrep 15.1.0-2\ngit 2.45.0-1\n"
@@ -148,8 +133,6 @@ func TestListInstalled(t *testing.T) {
 	}
 }
 
-// --- InstalledMap ---
-
 func TestInstalledMap(t *testing.T) {
 	explicit := "Ripgrep\n"
 	output := "Ripgrep 15.1.0-2\nGit 2.45.0-1\n"
@@ -165,8 +148,6 @@ func TestInstalledMap(t *testing.T) {
 		t.Errorf("transitive package should not be in map: %v", m)
 	}
 }
-
-// --- parsePacmanQLine ---
 
 func TestParsePacmanQLine(t *testing.T) {
 	tests := []struct {

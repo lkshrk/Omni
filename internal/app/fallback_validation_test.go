@@ -39,9 +39,6 @@ func TestFatalValidationErrorsAllFallbackYieldsNone(t *testing.T) {
 	}
 }
 
-// TestLoadConfigIgnoresFallbackValidationErrors guards the wiring: a config
-// whose only validation problem is in a tool fallback must still load (omni must
-// start), while a non-fallback validation error must still block the load.
 func TestLoadConfigIgnoresFallbackValidationErrors(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -53,8 +50,6 @@ func TestLoadConfigIgnoresFallbackValidationErrors(t *testing.T) {
 	}
 	defer a.Close() //nolint:errcheck
 
-	// Fallback with an unknown status — a real validation error, but in a
-	// fallback, so it must NOT block loading.
 	badFallback := `{"version":9,"tools":{"rg":{"providers":[{"provider":"brew"}],"fallback":{"source":{"type":"github","owner":"o","repo":"r"},"status":"bogus","recipe":{"type":"github_release_asset"}}}}}`
 	if err := os.WriteFile(path, []byte(badFallback), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
@@ -63,7 +58,6 @@ func TestLoadConfigIgnoresFallbackValidationErrors(t *testing.T) {
 		t.Fatalf("load must ignore fallback validation errors, got: %v", err)
 	}
 
-	// A non-fallback error (empty tool name) must still fail the load.
 	badTool := `{"version":9,"tools":{"   ":{"providers":[{"provider":"brew"}]}}}`
 	if err := os.WriteFile(path, []byte(badTool), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)

@@ -18,54 +18,40 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// OpKind classifies the action taken (or planned) for a tool.
 type OpKind int
 
 const (
-	OpInstall             OpKind = iota //nolint:revive // tool is missing → install
-	OpAlreadyInstalled                  // tool is present, no action needed
-	OpUninstall                         // tool removed from config + --prune
-	OpProviderUnavailable               // provider binary not on PATH
-	OpIgnored                           // tool is in the configured ignore list
-	OpFailed                            // install was attempted but the provider returned an error
+	OpInstall OpKind = iota //nolint:revive // tool is missing → install
+	OpAlreadyInstalled
+	OpUninstall
+	OpProviderUnavailable
+	OpIgnored
+	OpFailed
 )
 
-// SyncOp describes a single planned or executed operation.
 type SyncOp struct { //nolint:revive // name is intentional for clarity in external call sites
 	Tool    provider.Tool
 	Kind    OpKind
-	Version string // populated after a successful install or for already-installed
-	Err     error  // non-nil if the operation failed
+	Version string
+	Err     error
 }
 
-// SyncOptions controls Sync behaviour.
 type SyncOptions struct { //nolint:revive // name is intentional for clarity in external call sites
-	// DryRun collects planned ops without executing them.
-	DryRun bool
-	// Prune uninstalls tools that are in the cache but not in config.
-	Prune bool
-	// Group filters operations to a single named group (empty = all groups).
-	Group string
-	// Provider filters operations to a single provider (empty = all).
+	DryRun   bool
+	Prune    bool
+	Group    string
 	Provider string
-	// Progress is called with a human-readable status string before each operation.
 	// Called from the goroutine running the operation; must be safe for concurrent use.
 	Progress     func(string)
 	ToolProgress func(ProgressEvent)
-	// IgnoreList is a set of tool names skipped entirely during this sync.
-	// Tools whose Name matches an entry receive OpIgnored and are not installed.
-	IgnoreList []string
-	// RetryFailed limits the sync to tools that have a non-null failed_at in
-	// the DB (i.e. failed in a previous run). Has no effect in dry-run mode.
+	IgnoreList   []string
+	// Limits the run to tools that failed previously; no effect in dry-run.
 	RetryFailed bool
-	// InstallTimeout is the per-tool deadline passed to provider Install calls.
 	// Zero uses the default of 5 minutes.
 	InstallTimeout time.Duration
-	// SkipPrivileged records privileged package-manager actions as failures
-	// without executing them.
+	// Privileged actions are recorded as failures rather than executed.
 	SkipPrivileged bool
-	// AllowWeak permits explicit sync flows to apply the best weak provider
-	// discovery match when no high-confidence match exists.
+	// Accepts the best weak provider-discovery match when no high-confidence one exists.
 	AllowWeak bool
 }
 
@@ -110,34 +96,28 @@ func (s *Syncer) recordCancelledInstall(ctx context.Context, result *SyncResult,
 	result.Ops = append(result.Ops, op)
 }
 
-// SyncResult summarises what happened during a sync run.
 type SyncResult struct { //nolint:revive // name is intentional for clarity in external call sites
 	Ops             []SyncOp
-	Warnings        []string // advisory: e.g. duplicate tools across groups
+	Warnings        []string
 	SatisfiedGroups []string // non-active groups whose tools are all installed
 }
 
-// Installed returns ops where Kind == OpInstall and Err == nil.
 func (r *SyncResult) Installed() []SyncOp {
 	return r.filter(func(op SyncOp) bool { return op.Kind == OpInstall && op.Err == nil })
 }
 
-// Skipped returns tools that were already installed.
 func (r *SyncResult) Skipped() []SyncOp {
 	return r.filter(func(op SyncOp) bool { return op.Kind == OpAlreadyInstalled })
 }
 
-// Errors returns ops that failed.
 func (r *SyncResult) Errors() []SyncOp {
 	return r.filter(func(op SyncOp) bool { return op.Err != nil })
 }
 
-// Ignored returns ops where Kind == OpIgnored.
 func (r *SyncResult) Ignored() []SyncOp {
 	return r.filter(func(op SyncOp) bool { return op.Kind == OpIgnored })
 }
 
-// Failed returns ops where Kind == OpFailed.
 func (r *SyncResult) Failed() []SyncOp {
 	return r.filter(func(op SyncOp) bool { return op.Kind == OpFailed })
 }
@@ -152,14 +132,12 @@ func (r *SyncResult) filter(fn func(SyncOp) bool) []SyncOp {
 	return out
 }
 
-// provState holds one provider's bulk status data.
 type provState struct {
 	available          bool
 	installed          map[string]string                  // lowercase name → version
 	installedByManager map[string]provider.InstalledEntry // lowercase name → version + concrete manager
 }
 
-// Syncer orchestrates diff-and-apply between the desired config and actual system state.
 type Syncer struct {
 	registry *provider.Registry
 	db       *database.DB
@@ -169,18 +147,10 @@ func toolEntryLookupKeys(t config.ToolEntry) []string {
 	return provider.PackageLookupKeys(t.Name, t.EffectivePackage())
 }
 
-// New creates a Syncer.
 func New(registry *provider.Registry, db *database.DB) *Syncer {
 	return &Syncer{registry: registry, db: db}
 }
 
-// Sync performs (or plans) the synchronisation.
-//
-// Phase 1a — availability: one check per unique provider, concurrent.
-// Phase 1b — bulk install status per available provider, concurrent.
-// Phase 1c — per-tool decision: O(1) map lookup; falls back to IsInstalled for missing entries.
-// Phase 2  — installs: sequential (so progress messages stay readable).
-// Phase 3  — prune (optional).
 func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions) (*SyncResult, error) {
 	result := &SyncResult{}
 
@@ -195,7 +165,6 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 		tools = filtered
 	}
 
-	// --- Filter: ignored tools ---
 	if len(opts.IgnoreList) > 0 || hasIgnoredTools(tools) {
 		ignoreSet := make(map[string]struct{}, len(opts.IgnoreList))
 		for _, name := range opts.IgnoreList {
@@ -221,7 +190,6 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 		tools = active
 	}
 
-	// --- Filter: retry-failed (limit to tools with a prior failure in DB) ---
 	if opts.RetryFailed {
 		failed, err := s.db.ListFailed(ctx)
 		if err != nil {
@@ -240,7 +208,6 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 		tools = retryTools
 	}
 
-	// --- Phase 1a: availability per unique provider ---
 	opts.progress("checking providers…")
 	uniqueProviders := s.uniqueProviderNames(tools)
 	states := make(map[string]*provState, len(uniqueProviders))
@@ -269,7 +236,6 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 		return nil, fmt.Errorf("provider availability check: %w", err)
 	}
 
-	// --- Phase 1b: bulk installed state per available provider ---
 	opts.progress("reading installed packages…")
 	g1b, gCtx1b := errgroup.WithContext(ctx)
 	for name, st := range states {
@@ -303,7 +269,6 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 		return nil, fmt.Errorf("bulk status check: %w", err)
 	}
 
-	// --- Phase 1c: per-tool decision ---
 	type toolDecision struct {
 		entry         config.ToolEntry
 		opProvider    string
@@ -344,7 +309,6 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 		} else if st.installed != nil && !(entry.InstallWith != "" && opProvider == entry.Provider) {
 			ver, installed = provider.LookupString(st.installed, keys)
 		} else {
-			// No BulkChecker — fall back to per-tool check.
 			var err error
 			installed, ver, err = s.isInstalled(ctx, prov, opProvider, entry)
 			if err != nil {
@@ -361,11 +325,7 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 		}
 	}
 
-	// --- Phase 2: build ops and execute installs ---
-	// Already-installed cache updates collect into a slice and write once
-	// in a single transaction at the end. Per-install upserts (after a real
-	// install subprocess) stay individual because the subprocess cost
-	// dwarfs the fsync; batching would only matter relative to a fast op.
+	// Batched because a bare cache update is fsync-bound; post-install upserts are not.
 	var alreadyInstalledUpserts []*database.ToolCache
 	for _, d := range decisions {
 		tool := provider.Tool{
@@ -489,14 +449,12 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 		}
 	}
 
-	// Flush already-installed cache updates as one transaction. A failure
-	// here is non-fatal: the cache will catch up on the next refresh.
+	// Non-fatal: the cache catches up on the next refresh.
 	if err := s.db.UpsertBatch(ctx, alreadyInstalledUpserts); err != nil {
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("cache update batch failed: %v", err))
 	}
 
-	// --- Phase 3: prune (optional) ---
 	if opts.Prune && !opts.DryRun {
 		desiredSet := make(map[string]struct{}, len(cfg.Tools))
 		for _, t := range cfg.Tools {
@@ -708,7 +666,6 @@ func traceReason(ctx context.Context, action, name, providerName, detail string)
 	return executor.WithTraceReason(ctx, fmt.Sprintf("%s %s (%s)", action, name, providerName))
 }
 
-// uniqueProviderNames returns deduplicated operation provider names from the tool list.
 func (s *Syncer) uniqueProviderNames(tools []config.ToolEntry) []string {
 	seen := make(map[string]struct{}, len(tools))
 	var out []string
@@ -722,7 +679,6 @@ func (s *Syncer) uniqueProviderNames(tools []config.ToolEntry) []string {
 	return out
 }
 
-// toNullString converts a Go string to sql.NullString (valid when non-empty).
 func toNullString(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: s != ""}
 }

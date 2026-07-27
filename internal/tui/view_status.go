@@ -38,6 +38,7 @@ const (
 	statusActionFixNvmManaged
 	statusActionOpenAgents
 	statusActionRestoreSkills
+	statusActionUpgradeAgents
 )
 
 type statusAction struct {
@@ -192,14 +193,20 @@ func statusSections(m Model, rows []statusListRow) []sectionedTabSection {
 
 func statusAttentionRows(m Model, counts app.DashboardToolSummary) []statusListRow {
 	hasDotfilesAttention := statusDotfilesAttentionNeedsAttention(m)
-	return []statusListRow{
+	rows := []statusListRow{
 		statusToolUpdatesAttentionRow(m, counts),
 		statusToolSyncAttentionRow(m, counts),
 		statusDotfilesAttentionRow(m),
+	}
+	// The disabled case already says so once on the Agents row; a second muted "disabled" line adds nothing.
+	if agentsDashboardEnabled(m) {
+		rows = append(rows, statusAgentUpdatesAttentionRow(m))
+	}
+	return append(rows,
 		statusAgentsAttentionRow(m),
 		statusAutomationAttentionRow(m),
 		statusDoctorAttentionRow(m, hasDotfilesAttention),
-	}
+	)
 }
 
 func statusDoctorAttentionRow(m Model, hasDotfilesAttention bool) statusListRow {
@@ -260,8 +267,7 @@ func statusDoctorAttentionRow(m Model, hasDotfilesAttention bool) statusListRow 
 		if check.Status == app.DoctorStatusOK {
 			continue
 		}
-		// Skip dots check when the dedicated Dotfiles attention row already
-		// covers it — avoids duplicating dotfile issues across two rows.
+		// The dedicated Dotfiles attention row already covers this, so skip it here rather than duplicating dotfile issues across two rows.
 		if hasDotfilesAttention && check.ID == "dots" {
 			continue
 		}
@@ -359,8 +365,6 @@ func statusDoctorCheckAction(check app.DoctorCheck) statusAction {
 	}
 }
 
-// doctorDotsAction picks the most actionable enter-key action for a dots
-// doctor warning based on the check details.
 func doctorDotsAction(check app.DoctorCheck) statusAction {
 	hasGit, hasSync := false, false
 	for _, d := range check.Details {
@@ -381,8 +385,6 @@ func doctorDotsAction(check app.DoctorCheck) statusAction {
 	}
 }
 
-// doctorDetailHint returns a short inline fix suggestion appended to a doctor
-// check detail line, based on the check ID and detail content.
 func doctorDetailHint(checkID, detail string) string {
 	if checkID != "dots" {
 		return ""
@@ -678,7 +680,7 @@ func statusAutomationRow(m Model, section string) statusListRow {
 
 func statusAgentsOverviewRow(m Model) statusListRow {
 	view := agentsDashboardViewFor(m)
-	summary := statusAgentsOverviewSummary(view)
+	summary := statusAgentsOverviewSummary(view, statusAgentsCounts(m))
 	value := statusAgentsOverviewDataValue(m, view)
 	icon, iconStyle := statusAgentsOverviewIcon(m)
 	working := view.enabled && statusAgentsLoading(m)
@@ -706,15 +708,52 @@ func statusAgentsOverviewRow(m Model) statusListRow {
 }
 
 func statusAgentsOverviewIcon(m Model) (string, lipgloss.Style) {
-	switch {
-	case !agentsDashboardEnabled(m):
+	if !agentsDashboardEnabled(m) {
 		return statusRowQuietIcon(m)
-	case statusAgentsLoading(m):
+	}
+	if statusAgentsLoading(m) {
 		return statusRowWorkingIcon(m, true)
-	case statusAgentsCounts(m).OutOfSync() > 0:
+	}
+	counts := statusAgentsCounts(m)
+	if counts.OutOfSync() > 0 || counts.Outdated() > 0 {
 		return statusRowWarningIcon(m)
-	default:
-		return statusRowOKIcon(m)
+	}
+	return statusRowOKIcon(m)
+}
+
+// Outdated is disjoint from out-of-sync (see agentsDashCounts), so without its own row the Agents row's "in sync" verdict silently hides every pending upgrade.
+func statusAgentUpdatesAttentionRow(m Model) statusListRow {
+	counts := statusAgentsCounts(m)
+	if counts.Outdated() == 0 {
+		icon, iconStyle := statusRowOKIcon(m)
+		if statusAgentsLoading(m) {
+			icon, iconStyle = statusRowWorkingIcon(m, true)
+		}
+		return statusListRow{
+			section:   statusSectionAttention,
+			icon:      icon,
+			iconStyle: iconStyle,
+			label:     "Agent Updates",
+			value:     statusHealthOKValue(m),
+			summary:   "All agent resources up to date.",
+			details:   statusDetailLines(m, "All agent resources up to date."),
+		}
+	}
+	icon, iconStyle := statusRowWarningIcon(m)
+	if statusAgentsLoading(m) {
+		icon, iconStyle = statusRowWorkingIcon(m, true)
+	}
+	names := statusAgentsOutdatedNames(m)
+	return statusListRow{
+		section:        statusSectionAttention,
+		icon:           icon,
+		iconStyle:      iconStyle,
+		label:          "Agent Updates",
+		value:          statusCountValue(m, counts.Outdated(), "upgrade", "upgrades", "current"),
+		summary:        statusSampleSummary(names, "No outdated agent resources."),
+		details:        statusAgentUpdatesDetails(m, counts, names),
+		action:         statusAction{kind: statusActionUpgradeAgents, desc: "upgrade all agents"},
+		needsAttention: true,
 	}
 }
 
@@ -753,7 +792,7 @@ func statusAgentsAttentionRow(m Model) statusListRow {
 	value := statusCountValue(m, counts.OutOfSync(), "issue", "issues", "in sync")
 	action := statusAction{kind: statusActionOpenAgents, desc: "open agents"}
 	if counts.SkillsMissing > 0 && !m.loading && !m.skillsRunning {
-		action = statusAction{kind: statusActionRestoreSkills, desc: "restore skills"}
+		action = statusAction{kind: statusActionRestoreSkills, desc: "sync skills"}
 	}
 	if m.skillsRunning {
 		icon, iconStyle = statusRowWorkingIcon(m, true)
@@ -791,7 +830,9 @@ func statusRowLine(m Model, row statusListRow, selected bool) string {
 	labelText := renderCell(leftCell(style.Render(label), labelW))
 	labelCell := iconText + strings.Repeat(" ", listIconGapWidth) + labelText
 	contentW := rowAvailableWidth(m.width)
-	valueW := lipgloss.Width(row.value)
+	// The badge is right-aligned against contentW, so one longer than the space the label column leaves would push the row past the terminal width.
+	value := fitStyledText(row.value, max(contentW-statusLabelWidth-settingsMinGap, 1))
+	valueW := lipgloss.Width(value)
 	summaryW := contentW - statusLabelWidth - valueW - settingsMinGap - listColumnGap
 	left := []rowCell{leftCell(labelCell, statusLabelWidth)}
 	if summary := strings.TrimSpace(row.summary); !selected && summary != "" && summaryW >= 16 {
@@ -799,7 +840,7 @@ func statusRowLine(m Model, row statusListRow, selected bool) string {
 	}
 	return renderResponsiveGroupListRow(p, selected,
 		left,
-		[]rowCell{rightCell(row.value, 0)},
+		[]rowCell{rightCell(value, 0)},
 		contentW, settingsMinGap, listColumnGap,
 	)
 }
@@ -888,10 +929,7 @@ func statusDoctorIconStyle(m Model) lipgloss.Style {
 	}
 }
 
-// statusDoctorCheckRows composes detail rows for a single doctor check.
-// When the check carries DetailGroups, each group header renders at normal
-// indent and its items are indented two spaces deeper. Falls back to flat
-// Details when no groups are present.
+// With DetailGroups each group header renders at normal indent and its items two spaces deeper; falls back to flat Details when no groups are present.
 func statusDoctorCheckRows(m Model, check app.DoctorCheck) []string {
 	header := check.Label + ": " + check.Message
 	rows := []string{statusDetailLine(m, header)}
@@ -930,8 +968,7 @@ func statusDetailLine(m Model, text string) string {
 	return statusDetailLineIndented(m, text)
 }
 
-// statusDetailLineIndented preserves leading spaces so wrapped detail lines
-// keep their hanging indent (TrimSpace would strip it).
+// Preserves leading spaces so wrapped detail lines keep their hanging indent (TrimSpace would strip it).
 func statusDetailLineIndented(m Model, text string) string {
 	if strings.TrimSpace(text) == "" {
 		return ""
@@ -1054,7 +1091,7 @@ func statusActionKeyBinding(k KeyMap, action statusAction) key.Binding {
 	switch action.kind {
 	case statusActionSyncTools, statusActionSyncDots:
 		return k.SyncAll
-	case statusActionUpgradeTools:
+	case statusActionUpgradeTools, statusActionUpgradeAgents:
 		return k.UpgradeAll
 	case statusActionFixConfig:
 		return k.Fallback

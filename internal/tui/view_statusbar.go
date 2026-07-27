@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -9,34 +10,28 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-// tabKeyMap wraps Model and implements key.Map with tab-aware ShortHelp.
-// The compact footer legend shows different bindings depending on the active view.
 type tabKeyMap struct{ m *Model }
 
-// ShortHelp returns the most-used bindings for the active tab.
 func (t tabKeyMap) ShortHelp() []key.Binding {
 	return tabShortHelpBindings(t.m)
 }
 
-// FullHelp returns tab-specific bindings plus global navigation/help bindings.
 func (t tabKeyMap) FullHelp() [][]key.Binding { return tabFullHelpBindings(t.m) }
 
 func renderStatusBar(m Model) string {
 	p := m.palette
-	// Right: tab-aware key-binding legend — always visible, right-aligned.
 	legend := m.help.View(tabKeyMap{&m})
 	if m.confirmQuit {
-		keyLabel := m.quitConfirmKey
-		if keyLabel == "" {
-			keyLabel = "q"
-		}
-		legend = renderPressAgainActionHint(p, "", keyLabel, "quit")
+		legend = renderPressAgainActionHint(p, "", quitConfirmKeyLabel(m.quitConfirmKey), "quit")
 	} else if m.listConfirm.action == listConfirmSyncAll {
 		desc := "sync all"
 		if m.mode == viewStatus {
 			desc = "reconcile all"
 		}
 		legend = renderPressAgainActionHint(p, "", m.keys.SyncAll.Help().Key, desc)
+	} else if m.agentsSyncAllConfirm {
+		// The agents tab arms its own flag rather than listConfirm; S is global, so the footer is the only place the armed state is announced.
+		legend = renderPressAgainActionHint(p, "", "S", "sync all")
 	}
 
 	contentW := screenContentWidth(m.width)
@@ -56,7 +51,8 @@ func renderStatusBar(m Model) string {
 }
 
 func footerConfirmationPromptActive(m Model) bool {
-	return m.confirmQuit || m.listConfirm.action == listConfirmSyncAll
+	return m.confirmQuit || m.listConfirm.action == listConfirmSyncAll ||
+		m.agentsSyncAllConfirm
 }
 
 func footerStatusOverlapsLegend(status, legend string, contentW int) bool {
@@ -123,8 +119,6 @@ func isProviderRefreshText(text string) bool {
 	return strings.Contains(lower, "refreshing provider") || strings.Contains(lower, "refreshing tool")
 }
 
-// activityLabel returns a descriptive fallback for the footer when no
-// statusMsg or progressText has been set for the current activity.
 func activityLabel(m Model) string {
 	switch {
 	case m.searching:
@@ -138,9 +132,9 @@ func activityLabel(m Model) string {
 	case m.providerSnapshotRefreshing || m.discoveryRefreshing:
 		return "Finding local tools…"
 	case len(m.outdatedProviders) > 0 || m.outdatedSnapshotRefreshing:
-		return "Checking updates…"
+		return m.outdatedCheckStatus()
 	case m.descRefreshing:
-		return "Refreshing tool descriptions…"
+		return descriptionRefreshStatus
 	case m.dotsLoading:
 		return "Loading dots…"
 	case m.dotsPeekLoading:
@@ -152,6 +146,43 @@ func activityLabel(m Model) string {
 	}
 }
 
+const descriptionRefreshStatus = "Refreshing descriptions…"
+
 func (m Model) toolRefreshStatus(done, total int) string {
-	return app.RefreshToolsStatus(app.RefreshProviderScanLabels(m.scanningProviders, m.providerScanLabels), done, total)
+	return app.RefreshToolProgressStatus(m.headScanProviderLabel(m.scanningProviders), "", done, total)
+}
+
+func (m Model) outdatedCheckStatus() string {
+	status := "Checking updates…"
+	if m.outdatedTotal <= 0 {
+		return status
+	}
+	done := max(m.outdatedTotal-len(m.outdatedProviders), 0)
+	status += fmt.Sprintf(" %d/%d", done, m.outdatedTotal)
+	if label := m.headScanProviderLabel(m.outdatedProviders); label != "" {
+		status += ": " + label
+	}
+	return status
+}
+
+// Naming every in-flight provider makes the line jitter with map order and overflow the status bar, so one provider heads the line: the one with the most tools left to account for, which is the likeliest to be the slow one and only changes when it finishes.
+func (m Model) headScanProviderLabel(providers map[string]bool) string {
+	head, headCount := "", -1
+	for providerName := range providers {
+		if providerName == "" {
+			continue
+		}
+		label := app.RefreshProviderScanLabel(providerName, m.providerScanLabels)
+		count := m.providerScanToolCounts[providerName]
+		if count > headCount || (count == headCount && label < head) {
+			head, headCount = label, count
+		}
+	}
+	if head == "" {
+		return ""
+	}
+	if extra := len(providers) - 1; extra > 0 {
+		return fmt.Sprintf("%s +%d", head, extra)
+	}
+	return head
 }

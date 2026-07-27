@@ -9,8 +9,7 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// AgentsIgnoreSet builds name-lookup sets from the manifest's ignore lists.
-// Maps are never nil, even when the underlying list is empty.
+// AgentsIgnoreSet — Maps are never nil, even when the underlying list is empty.
 func (a *App) AgentsIgnoreSet(cfg *config.RootConfig) (skills, mcp, plugins, marketplaces map[string]bool) {
 	toSet := func(names []string) map[string]bool {
 		set := make(map[string]bool, len(names))
@@ -22,8 +21,6 @@ func (a *App) AgentsIgnoreSet(cfg *config.RootConfig) (skills, mcp, plugins, mar
 	return toSet(cfg.Agents.Ignore.Skills), toSet(cfg.Agents.Ignore.McpServers), toSet(cfg.Agents.Ignore.Plugins), toSet(cfg.Agents.Ignore.Marketplaces)
 }
 
-// ToggleAgentsIgnore adds name to the given feature's ignore list if absent, or
-// removes it if present, and returns the new membership state.
 func (a *App) ToggleAgentsIgnore(_ context.Context, feature string, name string) (nowIgnored bool, err error) {
 	name = strings.TrimSpace(name)
 	if name == "" {

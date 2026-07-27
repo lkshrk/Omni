@@ -20,7 +20,9 @@ func newUpgradeCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "upgrade [tool]",
 		Short: "Upgrade a tool or all outdated tools",
-		Long: `Upgrade a single tool or every outdated tool tracked in the local DB.
+		Long: `Upgrade moves newer content, not intent: it refreshes installed tools
+from their provider and leaves config alone. Upgrade a single tool or every
+outdated tool tracked in the local DB.
 ` + actions.MustLongDescription(actions.ToolUpdate) + `
 ` + actions.MustLongDescription(actions.ToolUpdateAll) + `
 

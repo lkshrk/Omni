@@ -300,8 +300,6 @@ func (a *App) bootstrapManager(ecosystem string) string {
 	return manager
 }
 
-// HostBootstrapCompleted reports whether host bootstrap has been marked
-// complete in the local cache DB.
 func (a *App) HostBootstrapCompleted(ctx context.Context, host string) (bool, error) {
 	host = strings.TrimSpace(machineGroupName(host))
 	if host == "" {
@@ -321,8 +319,6 @@ func (a *App) HostBootstrapCompleted(ctx context.Context, host string) (bool, er
 	return value == bootstrapCompleteValue, nil
 }
 
-// MarkHostBootstrapCompleted records that the local machine has passed the
-// bootstrap activation flow for the current config and host.
 func (a *App) MarkHostBootstrapCompleted(ctx context.Context, host string) error {
 	host = strings.TrimSpace(machineGroupName(host))
 	if host == "" {

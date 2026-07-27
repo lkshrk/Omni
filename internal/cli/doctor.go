@@ -22,28 +22,29 @@ func newDoctorCmd(state *rootState) *cobra.Command {
 		Short: "Run read-only health checks",
 		Long:  "Run read-only diagnostics for config, host setup, providers, dotfiles, native services, and local cache state. With --fix, apply safe auto-fixes (duplicate $include definitions, dead ignore patterns) first.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Fix progress is prose, so in JSON mode it goes to stderr rather than into the document stdout parsers consume.
 			out := cmd.OutOrStdout()
+			if format == "json" {
+				out = cmd.ErrOrStderr()
+			}
 			if dryRun && !fix {
 				return fmt.Errorf("--dry-run requires --fix")
 			}
+			// A failed fixer must not cost the user the health report, so diagnostics print before the error returns.
+			var fixErr error
 			if fix {
-				fixResult := state.app.FixDoctorIssues(dryRun)
+				fixResult := state.app.FixDoctorIssues(cmd.Context(), dryRun)
 				if fixResult.OptimizeErr == nil {
 					printOptimizeReport(out, fixResult.OptimizeReport, dryRun)
 				}
-				if dryRun {
-					if err := fixResult.Err(); err != nil {
-						return err
-					}
+				printSkillStoreFixReport(out, fixResult.SkillStore, dryRun)
+				if dryRun && fixResult.Err() == nil {
 					fmt.Fprintln(out, "dry run: no files were changed (ignore-pattern cleanup runs only on a real --fix)")
-					return nil
 				}
-				if len(fixResult.IgnoreModified) > 0 {
+				if !dryRun && len(fixResult.IgnoreModified) > 0 {
 					fmt.Fprintf(out, "cleaned ignore patterns for: %s\n", strings.Join(fixResult.IgnoreModified, ", "))
 				}
-				if err := fixResult.Err(); err != nil {
-					return err
-				}
+				fixErr = fixResult.Err()
 			}
 			result, err := state.app.Doctor(cmd.Context())
 			if err != nil {
@@ -58,6 +59,9 @@ func newDoctorCmd(state *rootState) *cobra.Command {
 					return err
 				}
 				printDoctorResult(cmd, result)
+			}
+			if fixErr != nil {
+				return fmt.Errorf("applying fixes: %w", fixErr)
 			}
 			if result.HasFailures() {
 				return fmt.Errorf("doctor found %d failing check(s)", result.Summary.Fail)
@@ -87,6 +91,26 @@ func printOptimizeReport(out io.Writer, report *config.OptimizeReport, dryRun bo
 		}
 		fmt.Fprintf(out, "%s %s duplicate %s from %s (group %q): %s\n",
 			verb, textutil.PluralCount(len(r.Names), "entry", "entries"), r.Key, r.File, r.Group, strings.Join(r.Names, ", "))
+	}
+}
+
+func printSkillStoreFixReport(out io.Writer, report app.SkillStoreFixReport, dryRun bool) {
+	removed, rebuilt := "removed", "rebuilt"
+	if dryRun {
+		removed, rebuilt = "would remove", "would rebuild"
+	}
+	// Each debris line already carries its own verb, since the action varies per item.
+	for _, line := range report.Debris {
+		fmt.Fprintln(out, line)
+	}
+	for _, path := range report.DanglingLinks {
+		fmt.Fprintf(out, "%s dangling skill link %s\n", removed, path)
+	}
+	for _, path := range report.OrphanedPackages {
+		fmt.Fprintf(out, "%s unreferenced skill package %s\n", removed, path)
+	}
+	for _, source := range report.RebuiltMetadata {
+		fmt.Fprintf(out, "%s local install metadata for %s\n", rebuilt, source)
 	}
 }
 

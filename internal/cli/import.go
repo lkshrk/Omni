@@ -13,10 +13,11 @@ func newImportCmd(state *rootState) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "import",
-		Short: "Import installed tools into the config",
+		Short: "Adopt tools this machine already has into the config",
 		Args:  cobra.NoArgs,
-		Long: `Import discovers tools already installed by each provider and
-adds them to your config file. Tools already present in the config are skipped.
+		Long: `Import moves what each provider already installed here into your
+config, so unmanaged tools become declared. Tools already in the config are
+skipped. Installing what the config declares runs the other way — see sync.
 
   omni import                            # import from all available providers
   omni import --provider brew            # import only from brew

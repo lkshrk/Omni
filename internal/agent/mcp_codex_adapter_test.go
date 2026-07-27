@@ -518,11 +518,7 @@ func TestCodexAdapter_Add_Http_SerializesCompleteTransactions(t *testing.T) {
 	}
 }
 
-// TestCodexAdapter_Add_Http_RejectsEnv pins live-verified codex behavior:
-// `codex mcp add --env FOO=bar smokehttp2 --url https://example.com/mcp`
-// exits 1 with "Error: command is required" -- codex's own --help documents
-// --env as "Only valid with stdio servers". omni must refuse before exec
-// rather than silently dropping the env vars.
+// codex documents --env as stdio-only and exits 1 on an http server, so omni must refuse before exec rather than drop the vars.
 func TestCodexAdapter_Add_Http_RejectsEnv(t *testing.T) {
 	t.Parallel()
 	called := false
@@ -605,10 +601,7 @@ func TestCodexAdapter_Add_MissingEnv(t *testing.T) {
 	}
 }
 
-// codexMcpListJSONFixture is the exact output of a live, sandboxed
-// `codex mcp list --json` run (CODEX_HOME pointed at a scratch dir) after
-// `codex mcp add smokehttp --url https://example.com/mcp` and
-// `codex mcp add t -- echo hi`.
+// Exact output of a sandboxed `codex mcp list --json` run with one http and one stdio server added.
 const codexMcpListJSONFixture = `[
   {
     "name": "smokehttp",
@@ -669,6 +662,25 @@ func TestCodexAdapter_List_ParsesJSON(t *testing.T) {
 	}
 	if servers[1].Name != "t" || servers[1].Transport != "stdio" || servers[1].Command != "echo hi" {
 		t.Fatalf("unexpected second server: %+v", servers[1])
+	}
+}
+
+func TestParseCodexMcpList_ReportsHeadersForNonStreamableRemoteTransport(t *testing.T) {
+	t.Parallel()
+	servers, err := parseCodexMcpList(`[{"name":"docs","transport":{"type":"sse",` +
+		`"url":"https://docs.example.com/sse","http_headers":{"X-Literal":"lit"},` +
+		`"env_http_headers":{"Authorization":"DOCS_TOKEN"}}}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(servers) != 1 || servers[0].Transport != "sse" || servers[0].URL != "https://docs.example.com/sse" {
+		t.Fatalf("servers = %+v, want one sse server", servers)
+	}
+	if !servers[0].HeadersKnown {
+		t.Fatal("HeadersKnown = false; codex reported the header tables, so convergence must not be skipped")
+	}
+	if servers[0].Headers["X-Literal"] != "lit" || servers[0].Headers["Authorization"] != "${DOCS_TOKEN}" {
+		t.Fatalf("headers = %+v, want literal and env-reference headers", servers[0].Headers)
 	}
 }
 

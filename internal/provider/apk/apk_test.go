@@ -21,8 +21,6 @@ func tool(name string) provider.Tool {
 	return provider.Tool{Name: name, Provider: "apk", Package: name}
 }
 
-// --- Available ---
-
 func TestAvailable_True(t *testing.T) {
 	p, _ := newAPK(executor.MockCall{Stdout: "apk-tools 2.14.0"})
 	ok, err := p.Available(context.Background())
@@ -38,8 +36,6 @@ func TestAvailable_False(t *testing.T) {
 		t.Errorf("Available() = (%v, %v), want (false, nil)", ok, err)
 	}
 }
-
-// --- Install ---
 
 func TestInstall_Success(t *testing.T) {
 	p, m := newAPK(executor.MockCall{Stdout: "Installing ripgrep"})
@@ -59,8 +55,6 @@ func TestInstall_Error(t *testing.T) {
 	}
 }
 
-// --- Name / Description ---
-
 func TestName(t *testing.T) {
 	p, _ := newAPK()
 	if p.Name() != "apk" {
@@ -74,8 +68,6 @@ func TestDescription(t *testing.T) {
 		t.Error("Description() should not be empty")
 	}
 }
-
-// --- Uninstall ---
 
 func TestUninstall_Success(t *testing.T) {
 	p, m := newAPK(executor.MockCall{})
@@ -94,8 +86,6 @@ func TestUninstall_Error(t *testing.T) {
 	}
 }
 
-// --- Upgrade ---
-
 func TestUpgrade_Success(t *testing.T) {
 	p, m := newAPK(executor.MockCall{})
 	if err := p.Upgrade(context.Background(), tool("ripgrep")); err != nil {
@@ -112,8 +102,6 @@ func TestUpgrade_Error(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
-
-// --- IsInstalled ---
 
 func TestIsInstalled_Found(t *testing.T) {
 	// apk info -e exits 0 with the package name; apk info -v gives version.
@@ -143,8 +131,6 @@ func TestIsInstalled_EmptyOutput(t *testing.T) {
 	}
 }
 
-// --- ListInstalled ---
-
 func TestListInstalled(t *testing.T) {
 	world := filepath.Join(t.TempDir(), "world")
 	if err := os.WriteFile(world, []byte("ripgrep\n"), 0o644); err != nil {
@@ -165,8 +151,6 @@ func TestListInstalled(t *testing.T) {
 	}
 }
 
-// --- InstalledMap ---
-
 func TestInstalledMap(t *testing.T) {
 	world := filepath.Join(t.TempDir(), "world")
 	if err := os.WriteFile(world, []byte("Ripgrep\n"), 0o644); err != nil {
@@ -186,8 +170,6 @@ func TestInstalledMap(t *testing.T) {
 		t.Errorf("transitive package should not be in map: %v", m)
 	}
 }
-
-// --- parseAPKInfoLine ---
 
 func TestParseAPKInfoLine(t *testing.T) {
 	tests := []struct {

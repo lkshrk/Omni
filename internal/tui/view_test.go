@@ -12,8 +12,6 @@ import (
 	"github.com/lkshrk/omni/internal/dots"
 )
 
-// ── truncatePath ──────────────────────────────────────────────────────────────
-
 func TestTruncatePath(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -84,16 +82,12 @@ func TestDotStateDisplay_ModifiedShowsLocalChanges(t *testing.T) {
 	}
 }
 
-// ── renderDots ────────────────────────────────────────────────────────────────
-
 func TestRenderDots_NotConfigured(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
-	// Zero-value cached availability: startup snapshot not landed — nothing renders.
 	if out := renderDots(m); out != "" {
 		t.Errorf("expected empty output while availability is unknown, got:\n%s", out)
 	}
-	// Known no-repo availability: onboarding with setup hint.
 	m.dotsSyncAvailCached = app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityNoRepo}
 	out := renderDots(m)
 	if !strings.Contains(out, "set up now") {
@@ -372,7 +366,6 @@ func TestRenderDots_SectionsUseSharedListSpacing(t *testing.T) {
 	}
 	assertNextNonBlankLine("Out Of Sync", "zsh")
 	assertNextNonBlankLine("Synced", "nvim")
-	// Repo is rendered as compact inline status, not a section header.
 	found := false
 	for _, line := range lines {
 		if strings.Contains(line, "/home/user/dotfiles") {
@@ -387,12 +380,7 @@ func TestRenderDots_SectionsUseSharedListSpacing(t *testing.T) {
 
 func TestRenderDots_IgnoredSectionChildrenStatus(t *testing.T) {
 	t.Parallel(
-	// Ignored section layout:
-	//   dotfiles  (synthesized container, no dots.ActionUnignore) → "-"
-	//     claude/ (intermediate dir, Ignored=false) → "-"
-	//       a     (explicitly ignored leaf, Ignored=true) → "ignored"
-	//       b     (explicitly ignored leaf, Ignored=true) → "ignored"
-	//   backup    (truly ignored entry, dots.ActionUnignore) → "ignored"
+	// Ignored section: the synthesized container and intermediate dir render "-", while explicitly ignored leaves and truly ignored entries render "ignored".
 	)
 
 	m := baseModel(nil)
@@ -402,7 +390,6 @@ func TestRenderDots_IgnoredSectionChildrenStatus(t *testing.T) {
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
 		{Name: "zsh", TargetPath: "~/.zsh", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 1}},
-		// Synthesized container (from ignoredChildDotStatuses).
 		{
 			Name:       "dotfiles",
 			TargetPath: "~/.config",
@@ -422,7 +409,6 @@ func TestRenderDots_IgnoredSectionChildrenStatus(t *testing.T) {
 				},
 			},
 		},
-		// Truly ignored entry (from ignoredCandidates).
 		{
 			Name:       "backup",
 			TargetPath: "~/.backup",
@@ -448,25 +434,21 @@ func TestRenderDots_IgnoredSectionChildrenStatus(t *testing.T) {
 		if !inIgnored {
 			continue
 		}
-		// Synthesized container "dotfiles" should show "-", not "ignored".
 		if strings.Contains(line, "dotfiles") {
 			if strings.Contains(line, "ignored") {
 				t.Fatalf("synthesized container should show '-' not 'ignored', got: %q", line)
 			}
 		}
-		// Truly ignored "backup" should show "ignored".
 		if strings.Contains(line, "backup") {
 			if !strings.Contains(line, "ignored") {
 				t.Fatalf("truly ignored entry should show 'ignored', got: %q", line)
 			}
 		}
-		// Intermediate dir "claude" child should show "-", not "ignored".
 		if strings.Contains(line, "claude") && !strings.Contains(line, "claude/") {
 			if strings.Contains(line, "ignored") {
 				t.Fatalf("intermediate dir should show '-' not 'ignored', got: %q", line)
 			}
 		}
-		// Leaf children "a" and "b" should show "ignored".
 		for _, leaf := range []string{" a ", " b "} {
 			if strings.Contains(line, leaf) {
 				if !strings.Contains(line, "ignored") {
@@ -917,9 +899,7 @@ func TestRenderDots_MultiGroupBadgeAndFullDetail(t *testing.T) {
 	}
 }
 
-// TestRenderDots_TwoGroupsShowTwoPills is the Task 6 wiring regression guard:
-// an entry in two reusable groups (no active host filtering to collapse
-// them) must render both as separate pills, not a single compact badge.
+// An entry in two reusable groups (no active host filtering to collapse them) must render both as separate pills, not a single compact badge.
 func TestRenderDots_TwoGroupsShowTwoPills(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -940,11 +920,7 @@ func TestRenderDots_TwoGroupsShowTwoPills(t *testing.T) {
 	}
 }
 
-// TestRenderDots_ThreeGroupsNarrowWidthCollapsesToHostPlusCount verifies that
-// when a dots entry belongs to a host group plus two reusable groups and the
-// group column is too narrow to fit all three pills, the row collapses to
-// the host pill plus a "+N" count instead of truncating or dropping groups
-// silently.
+// When the group column cannot fit all three pills the row collapses to the host pill plus a "+N" count instead of truncating or dropping groups silently.
 func TestRenderDots_ThreeGroupsNarrowWidthCollapsesToHostPlusCount(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "laptop")
 	m := baseModel(nil)
@@ -1282,8 +1258,6 @@ func TestRenderDots_UsesHomeAliasForUserPaths(t *testing.T) {
 	}
 }
 
-// ── hintKey ───────────────────────────────────────────────────────────────────
-
 func TestHintKey_NonEmpty(t *testing.T) {
 	t.Parallel()
 	p := defaultPalette()
@@ -1312,8 +1286,6 @@ func TestHintKey_ContainsKeyAndDesc(t *testing.T) {
 		}
 	}
 }
-
-// ── hintJoin ──────────────────────────────────────────────────────────────────
 
 func TestHintJoin(t *testing.T) {
 	t.Parallel()
@@ -1365,8 +1337,6 @@ func TestHintJoin(t *testing.T) {
 	}
 }
 
-// ── placeOverlay ──────────────────────────────────────────────────────────────
-
 func TestPlaceOverlay_ContainsOverlayContent(t *testing.T) {
 	t.Parallel()
 	bg := strings.Repeat("background text here\n", 10)
@@ -1383,13 +1353,10 @@ func TestPlaceOverlay_SmallBgLargeOverlay(t *testing.T) {
 	overlay := "overlay content that is long"
 	// Should not panic with negative startX/Y — both clamped to 0.
 	result := placeOverlay(bg, overlay, 5, 2)
-	// Just verify it doesn't panic and returns something.
 	if result == "" {
 		t.Error("expected non-empty result from placeOverlay")
 	}
 }
-
-// ── integration: renderDots does not panic under various states ───────────────
 
 func TestRenderDots_NoPanic(t *testing.T) {
 	t.Parallel()
@@ -1471,8 +1438,6 @@ func TestRenderDots_NoPanic(t *testing.T) {
 	}
 }
 
-// ── renderDots with settings.DotsDisabled false-value pointer ────────────────
-
 func TestRenderDots_DotsDisabledFalse(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -1480,13 +1445,10 @@ func TestRenderDots_DotsDisabledFalse(t *testing.T) {
 	m.settings.DotsDisabled = &disabled
 	setDotsRepoForTest(&m, "")
 	out := renderDots(m)
-	// Should show "not configured" not "disabled"
 	if strings.Contains(out, "disabled") {
 		t.Errorf("expected not-disabled rendering, got:\n%s", out)
 	}
 }
-
-// ── BoolVal nil safety (used inside renderDots) ───────────────────────────────
 
 func TestRenderDots_NilDotsDisabled(t *testing.T) {
 	t.Parallel()
@@ -1494,7 +1456,6 @@ func TestRenderDots_NilDotsDisabled(t *testing.T) {
 	m.settings.DotsDisabled = nil // ensure nil is handled
 	setDotsRepoForTest(&m, "/tmp/dots")
 	m.dotsLoaded = true
-	// Should not panic.
 	defer func() {
 		if r := recover(); r != nil {
 			t.Errorf("renderDots panicked with nil DotsDisabled: %v", r)
@@ -1502,8 +1463,6 @@ func TestRenderDots_NilDotsDisabled(t *testing.T) {
 	}()
 	_ = renderDots(m)
 }
-
-// ── renderDots confirm overwrite overlay ─────────────────────────────────────
 
 func TestRenderDots_ConfirmOverwrite(t *testing.T) {
 	t.Parallel()
@@ -1527,16 +1486,11 @@ func TestRenderDots_ConfirmOverwrite(t *testing.T) {
 	}
 }
 
-// ── hintJoin separator presence ──────────────────────────────────────────────
-
 func TestHintJoin_SeparatorPresent(t *testing.T) {
 	t.Parallel()
 	p := defaultPalette()
 	got := hintJoin(p, "a", "b", "c")
-	// The separator matches the footer help separator. Strip any ANSI so we can
-	// look at the text.
-	// lipgloss renders styles only when a renderer is set up; in tests we use
-	// the default (no-color) renderer so styles are pass-through.
+	// Tests use the default no-color renderer so styles are pass-through; strip any ANSI before comparing text.
 	if !strings.Contains(got, "•") {
 		// If no ANSI in test environment, may not have styled sep, but content must be there.
 		if !strings.Contains(got, "a") || !strings.Contains(got, "b") || !strings.Contains(got, "c") {
@@ -1544,8 +1498,6 @@ func TestHintJoin_SeparatorPresent(t *testing.T) {
 		}
 	}
 }
-
-// ── placeOverlay does not lose bg dimensions ─────────────────────────────────
 
 func TestPlaceOverlay_NoPanic_Variants(t *testing.T) {
 	t.Parallel()
@@ -1570,8 +1522,6 @@ func TestPlaceOverlay_NoPanic_Variants(t *testing.T) {
 	}
 }
 
-// ── renderDots: long target path is truncated ─────────────────────────────────
-
 func TestRenderDots_LongPathTruncated(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -1581,7 +1531,6 @@ func TestRenderDots_LongPathTruncated(t *testing.T) {
 	m.dotsEntries = []app.DotStatus{
 		{Name: "nvim", TargetPath: longPath, Health: app.HealthOK},
 	}
-	// Should not panic; output should contain "nvim".
 	out := renderDots(m)
 	if !strings.Contains(out, "nvim") {
 		t.Errorf("expected 'nvim' in output with long path, got:\n%s", out)
@@ -1615,8 +1564,6 @@ func TestRenderDots_NarrowWidthFitsRows(t *testing.T) {
 	assertLinesFitWidth(t, renderDots(m), m.width)
 }
 
-// ── config.BoolVal is used in renderDots; just verify it is consistent ────────
-
 func TestRenderDots_DotsDisabledTrue(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -1636,15 +1583,9 @@ func TestRenderDots_DotsDisabledTrue(t *testing.T) {
 	}
 }
 
-// Ensure we import config so BoolVal is exercised via renderDots.
 var _ = config.BoolVal
 
-// ── dotsRowHintItems — ignored-section child hints ────────────────────────────
-
-// ignoredSectionModel builds a model with one synthesized container (dotfiles)
-// in the Ignored section, expanded to show an intermediate dir (claude,
-// Ignored=false) with two explicitly-ignored leaves (a, b, Ignored=true).
-// The synthesized container has dots.ActionIgnore+dots.ActionRemove (no Unignore).
+// One synthesized container (ActionIgnore+ActionRemove, no Unignore) expanded to an intermediate dir with two explicitly-ignored leaves.
 func ignoredSectionModel() Model {
 	m := baseModel(nil)
 	m.width = 120
@@ -1680,14 +1621,10 @@ func ignoredSectionModel() Model {
 	return m
 }
 
-// TestDotsRowHintItems_IgnoredChild_ExplicitlyIgnored verifies that when the
-// cursor is on an explicitly-ignored leaf (Ignored=true) inside the ignored
-// section, dotsRowHintItems returns a hint whose description is "include".
 func TestDotsRowHintItems_IgnoredChild_ExplicitlyIgnored(t *testing.T) {
 	t.Parallel()
 	m := ignoredSectionModel()
 
-	// Enumerate visible rows to find a leaf with Ignored=true.
 	visible := dotsVisibleRows(m)
 	leafIdx := -1
 	for i, row := range visible {
@@ -1724,14 +1661,10 @@ func TestDotsRowHintItems_IgnoredChild_ExplicitlyIgnored(t *testing.T) {
 	}
 }
 
-// TestDotsRowHintItems_IgnoredChild_IntermediateDir verifies that when the
-// cursor is on an intermediate directory (Ignored=false) inside the ignored
-// section, dotsRowHintItems returns a hint whose description is "ignore".
 func TestDotsRowHintItems_IgnoredChild_IntermediateDir(t *testing.T) {
 	t.Parallel()
 	m := ignoredSectionModel()
 
-	// Enumerate visible rows to find an intermediate dir child (Ignored=false).
 	visible := dotsVisibleRows(m)
 	dirIdx := -1
 	for i, row := range visible {
@@ -1768,15 +1701,11 @@ func TestDotsRowHintItems_IgnoredChild_IntermediateDir(t *testing.T) {
 	}
 }
 
-// TestDotsRowHintItems_SynthesizedContainer_HasIgnoreHint verifies that a
-// synthesized container (dots.ActionIgnore, State=dots.StateIgnored, no
-// dots.ActionUnignore) shows an "include" hint (State is Ignored → "include"),
-// confirming the hint branch is reached now that the entry has dots.ActionIgnore.
+// The synthesized container has dots.ActionIgnore, so the hint branch is reached and State=Ignored yields "include".
 func TestDotsRowHintItems_SynthesizedContainer_HasIgnoreHint(t *testing.T) {
 	t.Parallel()
 	m := ignoredSectionModel()
 
-	// The synthesized container is the first visible row (index 0).
 	visible := dotsVisibleRows(m)
 	if len(visible) == 0 {
 		t.Fatal("no visible rows")
@@ -1789,8 +1718,7 @@ func TestDotsRowHintItems_SynthesizedContainer_HasIgnoreHint(t *testing.T) {
 	m.dotsCursor = containerIdx
 	hints := dotsRowHintItems(m)
 
-	// State is dots.StateIgnored, so the hint desc must be "include"
-	// (the entry is already ignored; the action un-ignores it).
+	// State is dots.StateIgnored, so the hint must read "include" — the entry is already ignored and the action un-ignores it.
 	var descs []string
 	for _, h := range hints {
 		descs = append(descs, h.desc)

@@ -1,4 +1,3 @@
-// Package database manages the SQLite tool-cache using bun.
 package database
 
 import (
@@ -13,12 +12,12 @@ import (
 
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
-	_ "modernc.org/sqlite" // register "sqlite" driver
+	"modernc.org/sqlite" // registers the "sqlite" driver
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/lkshrk/omni/internal/testguard"
 )
 
-// ToolCache is the database model for a cached tool entry.
 type ToolCache struct {
 	bun.BaseModel `bun:"table:tool_cache,alias:tc"`
 
@@ -30,6 +29,7 @@ type ToolCache struct {
 	InstalledWith      string            `bun:"installed_with,notnull,default:''"`
 	Version            sql.NullString    `bun:"version"`
 	Outdated           bool              `bun:"outdated,notnull,default:false"`
+	OutdatedUnknown    bool              `bun:"outdated_unknown,notnull,default:false"`
 	LatestVersion      sql.NullString    `bun:"latest_version"`
 	Description        sql.NullString    `bun:"description"`
 	LastChecked        time.Time         `bun:"last_checked,notnull"`
@@ -47,8 +47,7 @@ type ToolCache struct {
 	UpdateDateSource   string            `bun:"-"`
 }
 
-// ToolMetadata is provider registry metadata cached independently from
-// install/config state.
+// ToolMetadata — Cached independently from install/config state.
 type ToolMetadata struct {
 	bun.BaseModel `bun:"table:tool_metadata,alias:tm"`
 
@@ -69,9 +68,7 @@ type ToolMetadata struct {
 	UpdatedAt       time.Time      `bun:"updated_at,notnull"`
 }
 
-// UpdateMetadata is package-manager metadata for a concrete package version.
-// It is keyed by the concrete provider/manager because availability timestamps
-// are only meaningful for the PM that reported them.
+// UpdateMetadata — Keyed by concrete provider/manager: availability timestamps only mean something for the PM that reported them.
 type UpdateMetadata struct {
 	bun.BaseModel `bun:"table:update_metadata,alias:um"`
 
@@ -84,8 +81,7 @@ type UpdateMetadata struct {
 	CheckedAt   time.Time `bun:"checked_at,notnull"`
 }
 
-// LocalState stores machine-local app markers. These rows are intentionally in
-// the cache DB, not settings.json, because they describe this checkout/host.
+// LocalState — Lives in the cache DB, not settings.json, because these rows describe this checkout/host.
 type LocalState struct {
 	bun.BaseModel `bun:"table:local_state,alias:ls"`
 
@@ -94,7 +90,6 @@ type LocalState struct {
 	UpdatedAt time.Time `bun:"updated_at,notnull"`
 }
 
-// PackageAvailability stores explicit provider/package availability probes.
 type PackageAvailability struct {
 	bun.BaseModel `bun:"table:package_availability,alias:pa"`
 
@@ -107,9 +102,7 @@ type PackageAvailability struct {
 	CheckedAt time.Time `bun:"checked_at,notnull"`
 }
 
-// CommandTrace records subprocesses Omni issues through the shared executor.
-// It is intentionally compact: stdout is not stored, and stderr/error fields
-// are caller-truncated/redacted before insertion.
+// CommandTrace — Intentionally compact: stdout is never stored, and stderr/error arrive already truncated and redacted.
 type CommandTrace struct {
 	bun.BaseModel `bun:"table:command_traces,alias:ct"`
 
@@ -125,8 +118,7 @@ type CommandTrace struct {
 	Stderr     string        `bun:"stderr,type:TEXT,notnull,default:''"`
 }
 
-// TrustedTap records a Homebrew tap omni has already run `brew trust` on, so
-// tap sync can skip the trust call on subsequent runs.
+// TrustedTap — Lets tap sync skip the `brew trust` call on later runs.
 type TrustedTap struct {
 	bun.BaseModel `bun:"table:trusted_taps,alias:tt"`
 
@@ -177,7 +169,6 @@ const providerListCacheClearStateKey = "migration.provider_list_cache_cleared"
 const toolMetadataMigratedStateKey = "migration.tool_metadata_migrated"
 const commandTraceRetentionLimit = 5000
 
-// MetadataUpdate is registry metadata learned without changing install state.
 type MetadataUpdate struct {
 	Name            string
 	Provider        string
@@ -194,7 +185,6 @@ type MetadataUpdate struct {
 	SelfUpdates     bool   // cask the manager cannot upgrade (manual installer; app self-updates)
 }
 
-// DB wraps a bun.DB and provides typed tool-cache operations.
 type DB struct {
 	bun *bun.DB
 }
@@ -210,9 +200,40 @@ func metadataKey(name, provider, pkg string) string {
 	return name + "\x00" + provider + "\x00" + pkg
 }
 
-// Open opens (or creates) the SQLite database at path and returns a DB.
-// Use ":memory:" for an in-process test database.
+// Matches the result code rather than the driver's message text, which is not a stable API.
+func isBusyErr(err error) bool {
+	var serr *sqlite.Error
+	if !errors.As(err, &serr) {
+		return false
+	}
+	switch serr.Code() {
+	case sqlite3.SQLITE_BUSY, sqlite3.SQLITE_BUSY_RECOVERY, sqlite3.SQLITE_BUSY_SNAPSHOT, sqlite3.SQLITE_BUSY_TIMEOUT:
+		return true
+	}
+	return false
+}
+
+func execWithBusyRetry(ctx context.Context, db *sql.DB, statement string, budget time.Duration) error {
+	deadline := time.Now().Add(budget)
+	for {
+		_, err := db.ExecContext(ctx, statement)
+		if err == nil || !isBusyErr(err) || time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+}
+
 func Open(path string) (*DB, error) {
+	return OpenContext(context.Background(), path)
+}
+
+// OpenContext lets cancellation stop the WAL retry loop before a competing writer exhausts the busy budget.
+func OpenContext(ctx context.Context, path string) (*DB, error) {
 	if path != ":memory:" {
 		if err := testguard.RequireTempPath("database", path); err != nil {
 			return nil, err
@@ -229,34 +250,29 @@ func Open(path string) (*DB, error) {
 	// SQLite is single-writer; limit to 1 connection to avoid BUSY errors.
 	sqlDB.SetMaxOpenConns(1)
 
-	// Enable WAL mode so concurrent readers (TUI, background sync) don't block
-	// each other. Must be set before any schema work.
-	if _, err := sqlDB.ExecContext(context.Background(), "PRAGMA journal_mode=WAL"); err != nil {
-		_ = sqlDB.Close()
-		return nil, fmt.Errorf("enabling WAL mode: %w", err)
-	}
-	// Retry for up to 5 s before returning SQLITE_BUSY; avoids transient
-	// contention errors during WAL checkpoints with concurrent readers.
-	if _, err := sqlDB.ExecContext(context.Background(), "PRAGMA busy_timeout=5000"); err != nil {
+	// Must precede the WAL switch: that mode change needs brief exclusive access.
+	if _, err := sqlDB.ExecContext(ctx, "PRAGMA busy_timeout=5000"); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("setting busy_timeout: %w", err)
+	}
+	// WAL keeps readers from blocking each other; it bypasses the busy handler, hence the explicit retry.
+	if err := execWithBusyRetry(ctx, sqlDB, "PRAGMA journal_mode=WAL", 5*time.Second); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("enabling WAL mode: %w", err)
 	}
 
 	bunDB := bun.NewDB(sqlDB, sqlitedialect.New())
 	return &DB{bun: bunDB}, nil
 }
 
-// Close releases the underlying connection pool.
 func (db *DB) Close() error {
 	return db.bun.Close()
 }
 
-// Bun exposes the raw *bun.DB for advanced queries in tests.
 func (db *DB) Bun() *bun.DB {
 	return db.bun
 }
 
-// TrustedTaps returns the set of Homebrew taps omni has already trusted.
 func (db *DB) TrustedTaps(ctx context.Context) (map[string]bool, error) {
 	var rows []TrustedTap
 	if err := db.bun.NewSelect().Model(&rows).Scan(ctx); err != nil {
@@ -269,8 +285,6 @@ func (db *DB) TrustedTaps(ctx context.Context) (map[string]bool, error) {
 	return out, nil
 }
 
-// MarkTapTrusted records that a tap has been trusted so future syncs skip the
-// `brew trust` call.
 func (db *DB) MarkTapTrusted(ctx context.Context, name string, at time.Time) error {
 	_, err := db.bun.NewInsert().
 		Model(&TrustedTap{Name: name, TrustedAt: at}).
@@ -283,8 +297,7 @@ func (db *DB) MarkTapTrusted(ctx context.Context, name string, at time.Time) err
 	return nil
 }
 
-// RecordCommandTrace appends one command trace and prunes older rows beyond the
-// rotating retention limit. Callers should treat errors as non-fatal.
+// RecordCommandTrace — Also prunes beyond the retention limit. Callers should treat errors as non-fatal.
 func (db *DB) RecordCommandTrace(ctx context.Context, trace *CommandTrace) error {
 	if trace == nil {
 		return nil
@@ -323,7 +336,6 @@ func (db *DB) pruneCommandTraces(ctx context.Context, limit int) error {
 	return nil
 }
 
-// ListCommandTraces returns newest command traces first.
 func (db *DB) ListCommandTraces(ctx context.Context, limit int) ([]CommandTrace, error) {
 	if limit <= 0 {
 		limit = 50
@@ -339,9 +351,7 @@ func (db *DB) ListCommandTraces(ctx context.Context, limit int) ([]CommandTrace,
 	return traces, nil
 }
 
-// Migrate creates schema tables if they do not already exist (idempotent).
-// For existing databases it also adds new columns via ALTER TABLE, suppressing
-// "duplicate column" errors so the migration is safe to run repeatedly.
+// Migrate — Idempotent: re-runs add missing columns and swallow "duplicate column" errors.
 func (db *DB) Migrate(ctx context.Context) error {
 	if err := db.dropLegacyToolCache(ctx); err != nil {
 		return err
@@ -440,9 +450,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 	if _, err := db.bun.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_command_traces_started_at ON command_traces (started_at DESC)`); err != nil {
 		return fmt.Errorf("creating command trace started_at index: %w", err)
 	}
-	// addCol adds a column to table only when it does not already exist.
-	// PRAGMA table_info is used rather than catching driver error strings, which
-	// are not part of any stable API.
+	// PRAGMA table_info rather than matching driver error strings, which are not a stable API.
 	addCol := func(table, col, def string) error {
 		var cols []struct {
 			CID       int            `bun:"cid"`
@@ -457,7 +465,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 		}
 		for _, c := range cols {
 			if c.Name == col {
-				return nil // already present
+				return nil
 			}
 		}
 		if _, err := db.bun.ExecContext(ctx, "ALTER TABLE "+table+" ADD COLUMN "+col+" "+def); err != nil {
@@ -468,6 +476,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 	for _, c := range []struct{ col, def string }{
 		{"description", "TEXT"},
 		{"outdated", "BOOLEAN NOT NULL DEFAULT FALSE"},
+		{"outdated_unknown", "BOOLEAN NOT NULL DEFAULT FALSE"},
 		{"latest_version", "TEXT"},
 		{"failed_at", "DATETIME"},
 		{"failure_count", "INTEGER NOT NULL DEFAULT 0"},
@@ -494,9 +503,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 			return err
 		}
 	}
-	// Secondary indices for filtered list queries hit on every TUI background
-	// refresh. Without these, ListByProvider/ListDiscovered/ListFailed perform
-	// full table scans.
+	// Without these, the filtered list queries full-scan on every TUI background refresh.
 	for _, idx := range []struct{ name, def string }{
 		{"idx_tool_cache_provider", "ON tool_cache (provider)"},
 		{"idx_tool_cache_tracked", "ON tool_cache (tracked)"},
@@ -518,9 +525,7 @@ func (db *DB) clearProviderDerivedCacheForProviderList(ctx context.Context) erro
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	// Wrap all deletes + sentinel write in one transaction so a mid-wipe crash
-	// leaves the database consistent: either fully wiped (sentinel set) or
-	// untouched (sentinel absent, safe to retry on next startup).
+	// One transaction so a mid-wipe crash leaves the DB either fully wiped or untouched.
 	return db.bun.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		for _, table := range []string{"tool_cache", "tool_metadata", "package_availability", "update_metadata"} {
 			if _, err := tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
@@ -542,8 +547,7 @@ func (db *DB) clearProviderDerivedCacheForProviderList(ctx context.Context) erro
 }
 
 func (db *DB) migrateExistingToolMetadata(ctx context.Context) error {
-	// Guard with a sentinel so the full tool_cache scan runs only once, not on
-	// every startup after the cache has already been promoted to tool_metadata.
+	// Sentinel keeps the full tool_cache scan to once, not every startup after promotion.
 	if _, err := db.GetState(ctx, toolMetadataMigratedStateKey); err == nil {
 		return nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
@@ -606,8 +610,7 @@ func (db *DB) dropLegacyToolCache(ctx context.Context) error {
 	return nil
 }
 
-// Upsert inserts or updates a tool entry by (name, provider, package).
-// Config-tracked tools always have tracked = TRUE.
+// Upsert — Config-tracked tools always have tracked = TRUE.
 func (db *DB) Upsert(ctx context.Context, t *ToolCache) error {
 	if t.Package == "" {
 		t.Package = t.Name
@@ -619,9 +622,7 @@ func (db *DB) Upsert(ctx context.Context, t *ToolCache) error {
 		Set("installed = EXCLUDED.installed").
 		Set("installed_with = EXCLUDED.installed_with").
 		Set("version = EXCLUDED.version").
-		// outdated and latest_version are managed exclusively by UpdateOutdated.
-		// Omitting them here prevents RefreshInstalled from racing with
-		// RefreshOutdated and wiping the ↑ update flags prematurely.
+		// Omitting outdated/latest_version stops RefreshInstalled racing RefreshOutdated and wiping update flags.
 		Set("last_checked = EXCLUDED.last_checked").
 		Set("failure_count = CASE WHEN EXCLUDED.installed THEN 0 ELSE failure_count END").
 		Set("failed_at = CASE WHEN EXCLUDED.installed THEN NULL ELSE failed_at END").
@@ -637,10 +638,7 @@ func (db *DB) Upsert(ctx context.Context, t *ToolCache) error {
 	return nil
 }
 
-// UpsertBatch applies many Upsert calls inside a single transaction so SQLite
-// batches the writes into one fsync. Empty slices are no-ops. Returns the
-// first error encountered; partial state is rolled back. Each entry's Package
-// defaults to Name if empty, matching Upsert's behaviour.
+// UpsertBatch — One transaction so SQLite batches the writes into a single fsync; rolls back on first error.
 func (db *DB) UpsertBatch(ctx context.Context, tools []*ToolCache) error {
 	if len(tools) == 0 {
 		return nil
@@ -677,8 +675,7 @@ func (db *DB) UpsertBatch(ctx context.Context, tools []*ToolCache) error {
 	})
 }
 
-// UpsertMetadataBatch caches registry metadata for tools that may not be
-// installed or configured yet. It never changes install/config state.
+// UpsertMetadataBatch — Never changes install/config state, so uninstalled and unconfigured tools are fine.
 func (db *DB) UpsertMetadataBatch(ctx context.Context, updates []MetadataUpdate) error {
 	if len(updates) == 0 {
 		return nil
@@ -823,7 +820,6 @@ func (db *DB) GetUpdateMetadata(ctx context.Context, providerName, pkg, version 
 	return &metadata, nil
 }
 
-// UpdateOutdated sets the outdated flag and latest version for a tool.
 func (db *DB) UpdateOutdated(ctx context.Context, name, provider, pkg string, outdated bool, latestVersion string) error {
 	if err := requirePackage(name, provider, pkg); err != nil {
 		return err
@@ -832,6 +828,7 @@ func (db *DB) UpdateOutdated(ctx context.Context, name, provider, pkg string, ou
 	_, err := db.bun.NewUpdate().
 		Model((*ToolCache)(nil)).
 		Set("outdated = ?", outdated).
+		Set("outdated_unknown = FALSE").
 		Set("latest_version = ?", lv).
 		Where("name = ? AND provider = ? AND package = ?", name, provider, pkg).
 		Exec(ctx)
@@ -841,8 +838,7 @@ func (db *DB) UpdateOutdated(ctx context.Context, name, provider, pkg string, ou
 	return nil
 }
 
-// UpdateDescription caches a one-line description for a tool without changing
-// install/config state.
+// UpdateDescription — Never changes install/config state.
 func (db *DB) UpdateDescription(ctx context.Context, name, prov, pkg, description string) error {
 	if err := requirePackage(name, prov, pkg); err != nil {
 		return err
@@ -855,7 +851,6 @@ func (db *DB) UpdateDescription(ctx context.Context, name, prov, pkg, descriptio
 	}})
 }
 
-// DescriptionUpdate is one row of UpdateDescriptionBatch input.
 type DescriptionUpdate struct {
 	Name        string
 	Provider    string
@@ -863,8 +858,7 @@ type DescriptionUpdate struct {
 	Description string
 }
 
-// UpdateDescriptionBatch caches many tool descriptions without changing
-// install/config state. Empty slices are no-ops.
+// UpdateDescriptionBatch — Never changes install/config state.
 func (db *DB) UpdateDescriptionBatch(ctx context.Context, updates []DescriptionUpdate) error {
 	if len(updates) == 0 {
 		return nil
@@ -881,8 +875,6 @@ func (db *DB) UpdateDescriptionBatch(ctx context.Context, updates []DescriptionU
 	return db.UpsertMetadataBatch(ctx, metadata)
 }
 
-// Get retrieves a single tool entry by name, provider, and package.
-// Returns sql.ErrNoRows if not found.
 func (db *DB) Get(ctx context.Context, name, provider, pkg string) (*ToolCache, error) {
 	if err := requirePackage(name, provider, pkg); err != nil {
 		return nil, err
@@ -902,8 +894,6 @@ func (db *DB) Get(ctx context.Context, name, provider, pkg string) (*ToolCache, 
 	return t, nil
 }
 
-// GetMetadata retrieves central registry metadata by name, provider, and package.
-// Returns sql.ErrNoRows if not found.
 func (db *DB) GetMetadata(ctx context.Context, name, provider, pkg string) (*ToolMetadata, error) {
 	if err := requirePackage(name, provider, pkg); err != nil {
 		return nil, err
@@ -920,8 +910,6 @@ func (db *DB) GetMetadata(ctx context.Context, name, provider, pkg string) (*Too
 	return m, nil
 }
 
-// ListMetadata returns all central registry metadata rows ordered by provider
-// then name.
 func (db *DB) ListMetadata(ctx context.Context) ([]*ToolMetadata, error) {
 	var metadata []*ToolMetadata
 	if err := db.bun.NewSelect().
@@ -933,8 +921,6 @@ func (db *DB) ListMetadata(ctx context.Context) ([]*ToolMetadata, error) {
 	return metadata, nil
 }
 
-// GetState retrieves a machine-local state value by key.
-// Returns sql.ErrNoRows if not found.
 func (db *DB) GetState(ctx context.Context, key string) (string, error) {
 	state := new(LocalState)
 	err := db.bun.NewSelect().
@@ -948,7 +934,6 @@ func (db *DB) GetState(ctx context.Context, key string) (string, error) {
 	return state.Value, nil
 }
 
-// SetState upserts a machine-local state value.
 func (db *DB) SetState(ctx context.Context, key, value string) error {
 	_, err := db.bun.ExecContext(ctx,
 		`INSERT INTO local_state (key, value, updated_at)
@@ -1141,7 +1126,6 @@ func applyToolMetadata(t *ToolCache, m *ToolMetadata) {
 	}
 }
 
-// List returns all tool entries ordered by provider then name.
 func (db *DB) List(ctx context.Context) ([]*ToolCache, error) {
 	var tools []*ToolCache
 	err := db.bun.NewSelect().
@@ -1157,7 +1141,6 @@ func (db *DB) List(ctx context.Context) ([]*ToolCache, error) {
 	return tools, nil
 }
 
-// ListByProvider returns tool entries for a specific provider.
 func (db *DB) ListByProvider(ctx context.Context, provider string) ([]*ToolCache, error) {
 	var tools []*ToolCache
 	err := db.bun.NewSelect().
@@ -1174,7 +1157,6 @@ func (db *DB) ListByProvider(ctx context.Context, provider string) ([]*ToolCache
 	return tools, nil
 }
 
-// Delete removes a tool entry.
 func (db *DB) Delete(ctx context.Context, name, provider, pkg string) error {
 	if err := requirePackage(name, provider, pkg); err != nil {
 		return err
@@ -1189,8 +1171,7 @@ func (db *DB) Delete(ctx context.Context, name, provider, pkg string) error {
 	return nil
 }
 
-// MarkInstalled marks a tool as installed with a known version and clears any
-// outdated flag, since the tool is now at the latest version.
+// MarkInstalled — Also clears the outdated flag: the tool is now at the latest version.
 func (db *DB) MarkInstalled(ctx context.Context, name, provider, pkg, version string) error {
 	if err := requirePackage(name, provider, pkg); err != nil {
 		return err
@@ -1200,6 +1181,7 @@ func (db *DB) MarkInstalled(ctx context.Context, name, provider, pkg, version st
 		Set("installed = TRUE").
 		Set("version = ?", version).
 		Set("outdated = FALSE").
+		Set("outdated_unknown = FALSE").
 		Set("latest_version = NULL").
 		Set("last_checked = ?", time.Now()).
 		Where("name = ? AND provider = ? AND package = ?", name, provider, pkg).
@@ -1210,15 +1192,12 @@ func (db *DB) MarkInstalled(ctx context.Context, name, provider, pkg, version st
 	return nil
 }
 
-// MarkFailed records a failed install attempt, incrementing the failure count
-// and storing the error message. Creates a stub row if none exists yet.
+// MarkFailed — Creates a stub row if none exists yet.
 func (db *DB) MarkFailed(ctx context.Context, name, prov, pkg, errMsg string) error {
 	return db.markFailed(ctx, name, prov, pkg, errMsg, false)
 }
 
-// MarkUpgradeFailed records a failed upgrade without marking an existing
-// installation missing. If no row exists, it creates the same stub as
-// MarkFailed.
+// MarkUpgradeFailed — Unlike MarkFailed, leaves an existing installation marked present.
 func (db *DB) MarkUpgradeFailed(ctx context.Context, name, prov, pkg, errMsg string) error {
 	return db.markFailed(ctx, name, prov, pkg, errMsg, true)
 }
@@ -1243,8 +1222,7 @@ func (db *DB) markFailed(ctx context.Context, name, prov, pkg, errMsg string, pr
 	return nil
 }
 
-// MarkPrivilegeRequired records that an attempted operation needs privileged
-// package-manager access. Creates a stub row if none exists yet.
+// MarkPrivilegeRequired — Creates a stub row if none exists yet.
 func (db *DB) MarkPrivilegeRequired(ctx context.Context, name, prov, pkg, requirement, reason string) error {
 	if err := requirePackage(name, prov, pkg); err != nil {
 		return err
@@ -1264,8 +1242,7 @@ func (db *DB) MarkPrivilegeRequired(ctx context.Context, name, prov, pkg, requir
 	return nil
 }
 
-// ClearFailure removes the retry/failure marker for a tool without changing
-// installed state. Used when an operation was cancelled rather than failed.
+// ClearFailure — For operations that were cancelled rather than failed; installed state is untouched.
 func (db *DB) ClearFailure(ctx context.Context, name, prov, pkg string) error {
 	if err := requirePackage(name, prov, pkg); err != nil {
 		return err
@@ -1283,8 +1260,6 @@ func (db *DB) ClearFailure(ctx context.Context, name, prov, pkg string) error {
 	return nil
 }
 
-// ListFailed returns all tool entries with a non-null failed_at, ordered by
-// provider then name.
 func (db *DB) ListFailed(ctx context.Context) ([]*ToolCache, error) {
 	var tools []*ToolCache
 	err := db.bun.NewSelect().
@@ -1301,7 +1276,6 @@ func (db *DB) ListFailed(ctx context.Context) ([]*ToolCache, error) {
 	return tools, nil
 }
 
-// MarkUninstalled clears the installed flag and version.
 func (db *DB) MarkUninstalled(ctx context.Context, name, provider, pkg string) error {
 	if err := requirePackage(name, provider, pkg); err != nil {
 		return err
@@ -1311,6 +1285,7 @@ func (db *DB) MarkUninstalled(ctx context.Context, name, provider, pkg string) e
 		Set("installed = FALSE").
 		Set("version = NULL").
 		Set("outdated = FALSE").
+		Set("outdated_unknown = FALSE").
 		Set("latest_version = NULL").
 		Set("last_checked = ?", time.Now()).
 		Where("name = ? AND provider = ? AND package = ?", name, provider, pkg).
@@ -1321,9 +1296,7 @@ func (db *DB) MarkUninstalled(ctx context.Context, name, provider, pkg string) e
 	return nil
 }
 
-// UpsertDiscovered inserts or updates a locally-installed tool that is not
-// declared in config (tracked=false). Never overwrites a config-tracked row.
-// installedWith is the concrete manager that owns the tool (e.g. "pnpm", "npm", "bun").
+// UpsertDiscovered — Records a locally-installed, unconfigured tool; never overwrites a config-tracked row.
 func (db *DB) UpsertDiscovered(ctx context.Context, name, provider, installedWith, version string) error {
 	now := time.Now()
 	_, err := db.bun.ExecContext(ctx,
@@ -1342,7 +1315,6 @@ func (db *DB) UpsertDiscovered(ctx context.Context, name, provider, installedWit
 	return nil
 }
 
-// DiscoveredUpsert is one row of UpsertDiscoveredBatch input.
 type DiscoveredUpsert struct {
 	Name          string
 	Provider      string
@@ -1350,8 +1322,6 @@ type DiscoveredUpsert struct {
 	Version       string
 }
 
-// UpsertDiscoveredBatch applies many UpsertDiscovered calls inside a single
-// transaction. Empty slices are no-ops.
 func (db *DB) UpsertDiscoveredBatch(ctx context.Context, entries []DiscoveredUpsert) error {
 	if len(entries) == 0 {
 		return nil
@@ -1376,22 +1346,18 @@ func (db *DB) UpsertDiscoveredBatch(ctx context.Context, entries []DiscoveredUps
 	})
 }
 
-// MarkTracked promotes a discovered (tracked=false) row to config-tracked.
-// Best-effort: if the row doesn't exist yet this is a no-op.
-// Called after claiming an orphan so it stops appearing as a discovered tool.
+// MarkTracked — Best-effort promotion of a discovered row to config-tracked; a missing row is a no-op.
 func (db *DB) MarkTracked(ctx context.Context, name, provider, pkg string) error {
 	return db.MarkTrackedBatch(ctx, []TrackedTool{{Name: name, Provider: provider, Package: pkg}})
 }
 
-// TrackedTool is one tool-cache row to promote from discovered to config-tracked.
 type TrackedTool struct {
 	Name     string
 	Provider string
 	Package  string
 }
 
-// MarkTrackedBatch promotes discovered rows to config-tracked in one
-// transaction. Best-effort: rows that do not exist are ignored.
+// MarkTrackedBatch — Best-effort: rows that do not exist are ignored.
 func (db *DB) MarkTrackedBatch(ctx context.Context, tools []TrackedTool) error {
 	if len(tools) == 0 {
 		return nil
@@ -1415,8 +1381,6 @@ func (db *DB) MarkTrackedBatch(ctx context.Context, tools []TrackedTool) error {
 	})
 }
 
-// ListDiscovered returns all tool entries that are installed locally but not
-// declared in config (tracked=false), ordered by provider then name.
 func (db *DB) ListDiscovered(ctx context.Context) ([]*ToolCache, error) {
 	var tools []*ToolCache
 	err := db.bun.NewSelect().
@@ -1433,11 +1397,9 @@ func (db *DB) ListDiscovered(ctx context.Context) ([]*ToolCache, error) {
 	return tools, nil
 }
 
-// ReconcileTracked marks the current desired resolved keys as tracked and any
-// previously tracked keys outside that set as untracked.
+// ReconcileTracked — Marks the desired keys tracked and every previously tracked key outside that set untracked.
 func (db *DB) ReconcileTracked(ctx context.Context, desired []*ToolCache) error {
-	// Wrap the reset + per-tool re-mark in a single transaction so the
-	// per-tool UPDATE loop completes in one fsync rather than N.
+	// One transaction so the per-tool UPDATE loop costs one fsync rather than N.
 	return db.bun.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
 		if _, err := tx.NewUpdate().
 			Model((*ToolCache)(nil)).
@@ -1465,18 +1427,17 @@ func (db *DB) ReconcileTracked(ctx context.Context, desired []*ToolCache) error 
 	})
 }
 
-// OutdatedUpdate is one row of the UpdateOutdatedBatch input.
+// OutdatedUpdate — OutdatedUnknown records a provider that can upgrade the tool but cannot say whether it needs upgrading; it is never set together with Outdated.
 type OutdatedUpdate struct {
-	Name          string
-	Provider      string
-	Package       string
-	Outdated      bool
-	LatestVersion string
+	Name            string
+	Provider        string
+	Package         string
+	Outdated        bool
+	OutdatedUnknown bool
+	LatestVersion   string
 }
 
-// UpdateOutdatedBatch applies many UpdateOutdated calls inside a single
-// transaction so SQLite batches the writes into one fsync. Empty slices are
-// no-ops. Returns the first error encountered; partial state is rolled back.
+// UpdateOutdatedBatch — One transaction so SQLite batches the writes into a single fsync; rolls back on first error.
 func (db *DB) UpdateOutdatedBatch(ctx context.Context, updates []OutdatedUpdate) error {
 	if len(updates) == 0 {
 		return nil
@@ -1490,6 +1451,7 @@ func (db *DB) UpdateOutdatedBatch(ctx context.Context, updates []OutdatedUpdate)
 			if _, err := tx.NewUpdate().
 				Model((*ToolCache)(nil)).
 				Set("outdated = ?", u.Outdated).
+				Set("outdated_unknown = ?", u.OutdatedUnknown).
 				Set("latest_version = ?", lv).
 				Where("name = ? AND provider = ? AND package = ?", u.Name, u.Provider, u.Package).
 				Exec(ctx); err != nil {
@@ -1500,8 +1462,6 @@ func (db *DB) UpdateOutdatedBatch(ctx context.Context, updates []OutdatedUpdate)
 	})
 }
 
-// PruneDiscovered removes tracked=false entries that have not been seen since
-// the given cutoff time. Call after a discovery scan to evict stale entries.
 func (db *DB) PruneDiscovered(ctx context.Context, cutoff time.Time) error {
 	_, err := db.bun.ExecContext(ctx,
 		`DELETE FROM tool_cache WHERE tracked = 0 AND last_checked < ?`,

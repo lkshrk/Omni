@@ -157,7 +157,6 @@ func renderGroups(m Model) string {
 				)
 				details := []string{p.styleHelp.Render(detailPrefix + localStats)}
 
-				// Inline delete confirmation.
 				if m.hostDeleteConfirm {
 					details = append(details, renderPressAgainActionHint(p, detailPrefix, "d", "delete"))
 				}
@@ -192,7 +191,6 @@ func renderGroups(m Model) string {
 		}
 	}
 
-	// ── Groups section ──────────────────────────────────────────────────────
 	groupsFocused := m.assignmentSection == 1
 	groupSection := sectionedTabSection{
 		title:            "Groups",
@@ -443,8 +441,7 @@ const groupPickerNewSentinel = "+ new group…"
 
 func renderGroupPicker(m Model) string {
 	p := m.palette
-	// Agents-tab claims target an orphan with no manifest entry, so no group
-	// is "current" and no tools-list selection is required.
+	// Agents-tab claims target an orphan with no manifest entry, so no group is "current" and no tools-list selection is required.
 	group := ""
 	if !m.pickerClaimAgentsSet {
 		t, ok := m.groupPickerActionTool()
@@ -456,9 +453,7 @@ func renderGroupPicker(m Model) string {
 	var sb strings.Builder
 	contentW := groupPickerContentWidth(m)
 
-	// Render group list. The "+ new group…" sentinel is styled differently;
-	// when pickerCreatingGroup is true it is replaced by an inline text input
-	// of the same visual width so the popup never changes size.
+	// When pickerCreatingGroup is true the "+ new group…" sentinel is replaced by an inline text input of the same visual width so the popup never changes size.
 	m.settingsInput.SetWidth(min(groupPickerInputWidth(m), max(contentW-2, 1)))
 
 	labelW, detailW := groupPickerColumnWidths(m, group)
@@ -474,7 +469,6 @@ func renderGroupPicker(m Model) string {
 			lastSection = section
 		}
 
-		// Replace sentinel with input field — same position, same width.
 		if m.pickerCreatingGroup && isNewGroupSentinel(g) {
 			sb.WriteString(pickerCursor(p, isSelected) + renderNewGroupInputView(m, max(contentW-2, 1)) + "\n")
 			continue

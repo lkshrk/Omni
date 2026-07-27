@@ -12,8 +12,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// toolsFromConfig extracts the resolved flat tools list from the first regular
-// group of a RootConfig, falling back to the first group.
 func toolsFromConfig(cfg *config.RootConfig) []config.ToolEntry {
 	for _, g := range cfg.Groups {
 		if !g.IsHost() {
@@ -252,7 +250,6 @@ func TestSwitch_UpdatesDB(t *testing.T) {
 	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
 		t.Fatalf("saving config: %v", err)
 	}
-	// Pre-install under brew so there's a DB entry to remove.
 	if err := a.Install(context.Background(), "black", "brew"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -265,7 +262,6 @@ func TestSwitch_UpdatesDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	// Old brew entry gone, new concrete pip entry present.
 	for _, t2 := range tools {
 		if t2.Provider == "brew" {
 			t.Errorf("old brew entry still in DB: %+v", t2)
@@ -462,10 +458,6 @@ func TestSwitch_PreservesOtherTools(t *testing.T) {
 	}
 }
 
-// ─── MigrateInstallation ──────────────────────────────────────────────────────
-
-// envCleanerProvider extends stubProvider with the oldEnvCleaner interface
-// (UninstallFrom). The app package detects this via type assertion.
 type envCleanerProvider struct {
 	stubProvider
 	installWithManagers   []string
@@ -489,9 +481,6 @@ func (e *envCleanerProvider) UninstallFrom(_ context.Context, tool provider.Tool
 	return e.uninstallFromErr
 }
 
-// TestMigrateInstallation_InstalledWithRegistered verifies that when installedWith
-// is a known registered provider, from=installedWith and Switch(installedWith→configProv)
-// runs — cross-provider migration, no oldEnvCleaner cleanup needed.
 func TestMigrateInstallation_InstalledWithRegistered(t *testing.T) {
 	t.Parallel()
 	pip := &stubProvider{name: "pip", available: true}
@@ -508,7 +497,6 @@ func TestMigrateInstallation_InstalledWithRegistered(t *testing.T) {
 		t.Fatalf("saving config: %v", err)
 	}
 
-	// Tool is in config under "pip" but found installed via "brew" (wrong provider).
 	result, err := a.MigrateInstallation(context.Background(), "black", "brew", "pip")
 	if err != nil {
 		t.Fatalf("MigrateInstallation: %v", err)
@@ -517,7 +505,6 @@ func TestMigrateInstallation_InstalledWithRegistered(t *testing.T) {
 		t.Errorf("unexpected UninstallWarning: %v", result.UninstallWarning)
 	}
 
-	// Config provider should be unchanged since we migrated back to configured ownership.
 	updated, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("loading config: %v", err)

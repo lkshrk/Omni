@@ -727,10 +727,6 @@ func githubFallbackSpec() *config.FallbackSpec {
 	}
 }
 
-// codexToolSpec mirrors the real-world config that triggered the wrong-package
-// bug: a system provider default (brew) plus a secondary node-ecosystem
-// candidate (bun) written by `omni consolidate`, whose Package differs from
-// the logical tool name.
 func codexToolSpec() config.ToolSpec {
 	return config.ToolSpec{
 		Providers: []config.ToolInstallSpec{
@@ -765,11 +761,6 @@ func TestInstall_ExplicitProviderMatchesSecondaryConfiguredCandidate(t *testing.
 
 	saveCodexConfig(t, configPath, codexToolSpec())
 
-	// brew is the primary (first) configured candidate and would be
-	// auto-picked by planInstallRoute; requesting --provider bun explicitly
-	// must still reach the secondary bun candidate and its configured
-	// package, not fall back to installing a package literally named "codex"
-	// via bun.
 	if err := a.Install(ctx, "codex", "bun"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -800,9 +791,6 @@ func TestInstall_UnmatchedRequestedProviderReturnsErrorNotLiteralNameFallback(t 
 
 	saveCodexConfig(t, configPath, codexToolSpec())
 
-	// codex has no configured "npm" candidate (only brew and bun); this must
-	// error rather than silently install a package literally named "codex"
-	// via npm.
 	err := a.Install(ctx, "codex", "npm")
 	if err == nil {
 		t.Fatalf("Install with unmatched provider = nil error, want error")
@@ -826,8 +814,6 @@ func TestInstall_UnconfiguredToolStillUsesLiteralNameFallback(t *testing.T) {
 	}
 	defer a.Close() //nolint:errcheck
 
-	// No config.Tools entry at all for "adhoc-tool" — the legacy ad-hoc
-	// install path must still work.
 	if err := a.Install(ctx, "adhoc-tool", "brew"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}

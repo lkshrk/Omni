@@ -7,9 +7,7 @@ import (
 	_ "github.com/lkshrk/omni/internal/testguard"
 )
 
-// scriptValidation validates a single logical tool "bun" using the script
-// provider through the public ValidateRoot API. validateInstall is an
-// unexported closure, so the script branch is exercised end-to-end here.
+// validateInstall is an unexported closure, so the script branch is exercised through ValidateRoot.
 func scriptValidation(opts map[string]string) []config.ValidationError {
 	root := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
@@ -19,8 +17,7 @@ func scriptValidation(opts map[string]string) []config.ValidationError {
 	return config.ValidateRoot(root, scriptProvVal())
 }
 
-// scriptProvVal includes provider families so a passing script tool proves
-// the ecosystem-only rule is skipped for the script provider.
+// Includes provider families so a passing script tool proves the ecosystem-only rule is skipped.
 func scriptProvVal() config.ProviderValidation {
 	return config.ProviderValidation{
 		Known:      []string{"script", "brew", "system", "node", "python"},
@@ -71,18 +68,19 @@ func TestScriptCheckSatisfiesDetectRequirement(t *testing.T) {
 	}
 }
 
-func TestScriptLatestRequiresVersion(t *testing.T) {
+// Validation cannot know version availability before recipe recording or binary probing, so the provider degrades to an upgradeable unknown state.
+func TestScriptLatestWithoutVersionIsAccepted(t *testing.T) {
 	errs := scriptValidation(map[string]string{
 		"install": "x",
 		"detect":  "bun",
 		"latest":  "bun-latest",
 	})
-	if !scriptHasErrorAt(errs, `$.tools."bun".options.latest`) {
-		t.Errorf(`latest without version: want error at $.tools."bun".options.latest, got %v`, errs)
+	if scriptHasErrorAt(errs, `$.tools."bun".options.latest`) {
+		t.Errorf("latest without version must not be rejected at load: %v", errs)
 	}
 }
 
-func TestRecipeBackedScriptLatestRequiresVersion(t *testing.T) {
+func TestRecipeBackedScriptLatestWithoutVersionIsAccepted(t *testing.T) {
 	root := &config.RootConfig{Tools: map[string]config.ToolSpec{
 		"gh": {Providers: []config.ToolInstallSpec{{
 			Provider: "script", Options: map[string]string{"latest": "gh-latest"},
@@ -91,13 +89,12 @@ func TestRecipeBackedScriptLatestRequiresVersion(t *testing.T) {
 		}}},
 	}}
 	errs := config.ValidateRoot(root, scriptProvVal())
-	if !scriptHasErrorAt(errs, `$.tools."gh".providers[0].options.latest`) {
-		t.Fatalf("recipe latest without version: want options.latest error, got %v", errs)
+	if len(errs) != 0 {
+		t.Fatalf("recipe latest without version must not be rejected at load: %v", errs)
 	}
 }
 
-// scriptProviderValidation drives a Settings.Providers entry using the script
-// provider through ValidateRoot, exercising the validateProviderSpec branch.
+// Drives a Settings.Providers entry through ValidateRoot to reach the validateProviderSpec branch.
 func scriptProviderValidation(opts map[string]string) []config.ValidationError {
 	root := &config.RootConfig{
 		Settings: config.Settings{Providers: []config.ProviderEntry{

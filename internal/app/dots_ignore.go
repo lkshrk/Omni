@@ -45,10 +45,7 @@ func (a *App) DotsAddIgnorePatternContext(ctx context.Context, name, pattern str
 	})
 }
 
-// DotsEjectIgnoredPaths replaces managed symlinks that now match the given
-// ignore pattern with real file copies and removes the corresponding source
-// files from the repo. Call after DotsAddIgnorePattern to clean up previously
-// synced paths that are now ignored. Returns the number of ejected paths.
+// DotsEjectIgnoredPaths — Call after DotsAddIgnorePattern to clean up previously synced paths that are now ignored.
 func (a *App) DotsEjectIgnoredPaths(name, pattern string) (ejected int, err error) {
 	return a.DotsEjectIgnoredPathsContext(context.Background(), name, pattern)
 }
@@ -73,8 +70,7 @@ func (a *App) DotsEjectIgnoredPathsContext(ctx context.Context, name, pattern st
 
 	patterns := []string{pattern}
 	patternIM := dots.CompileIgnoresLenient(patterns)
-	// Build ignore list WITHOUT the new pattern so dots.CopyDotPath doesn't skip
-	// the very files we're ejecting.
+	// Excludes the new pattern so dots.CopyDotPath does not skip the very files being ejected.
 	var copyIgnores []string
 	for _, ig := range entry.Ignore {
 		if ig != pattern {
@@ -148,8 +144,7 @@ func (a *App) DotsEjectIgnoredPathsContext(ctx context.Context, name, pattern st
 		return ejected, walkErr
 	}
 
-	// Second pass: purge repo source files matching the pattern that have no
-	// corresponding symlink at the target (e.g. target already has real files).
+	// Purge repo sources matching the pattern that have no symlink at the target.
 	purgeErr := filepath.WalkDir(entry.SourcePath, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -173,9 +168,7 @@ func (a *App) DotsEjectIgnoredPathsContext(ctx context.Context, name, pattern st
 	return ejected, purgeErr
 }
 
-// DotsSetEntryIgnored toggles whole-entry dotfile ignore state. When ignoring
-// an untracked discovery candidate, the ignored entry is persisted to this
-// machine group so discovery does not keep suggesting it.
+// DotsSetEntryIgnored — Ignoring an untracked candidate persists it to this machine group so discovery stops suggesting it.
 func (a *App) DotsSetEntryIgnored(name, path string, ignored bool) (err error) {
 	return a.DotsSetEntryIgnoredContext(context.Background(), name, path, ignored)
 }
@@ -286,8 +279,7 @@ func dotEntryMatchesNameOrPath(entry config.DotEntry, name, path string) bool {
 	return entry.Name == name || (path != "" && entry.Path == path)
 }
 
-// DotsRemoveIgnorePattern removes a per-entry ignore glob from the named dots
-// entry in config. Removing a pattern that is not present is a no-op.
+// DotsRemoveIgnorePattern — Removing a pattern that is not present is a no-op.
 func (a *App) DotsRemoveIgnorePattern(name, pattern string) (err error) {
 	return a.DotsRemoveIgnorePatternContext(context.Background(), name, pattern)
 }
@@ -319,7 +311,6 @@ func (a *App) DotsRemoveIgnorePatternContext(ctx context.Context, name, pattern 
 	})
 }
 
-// DotsIncludeIgnoredPath ensures a concrete child path is no longer ignored.
 func (a *App) DotsIncludeIgnoredPath(name, relPath string) (err error) {
 	return a.DotsIncludeIgnoredPathContext(context.Background(), name, relPath)
 }

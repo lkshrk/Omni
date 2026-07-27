@@ -42,8 +42,7 @@ func TestNodeProvider_InstalledMap_NonEmpty(t *testing.T) {
 		t.Skip("no Node.js package manager available on this system")
 	}
 
-	// InstalledMap may return an empty map when no globals are installed;
-	// the important thing is that parsing succeeds without error.
+	// An empty map is fine; the point is that parsing succeeds.
 	_, err = p.InstalledMap(ctx)
 	if err != nil {
 		t.Errorf("InstalledMap() unexpected error: %v", err)

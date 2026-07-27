@@ -281,3 +281,21 @@ OMNI_CONFIG=/tmp/omni-repro/settings.json \
 OMNI_CACHE_DIR=/tmp/omni-repro/cache \
 omni doctor
 ```
+
+## Manual TUI QA In A Browser
+
+`scripts/tui-e2e.sh up` builds a static `omni`, seeds an isolated Alpine
+container (manifest skill package, a legacy CLI-managed install for
+import/claim flows, a planted drifted skill, and a stubbed catalog for
+`find`), and serves the TUI at `http://127.0.0.1:7681/` through `ttyd`. Each
+browser connection spawns a fresh TUI process against the container's
+persistent state, so flows that mutate state carry over between reloads.
+
+Requirements: `docker` and `ttyd` on the host. `scripts/tui-e2e.sh down`
+removes the container and stops the bridge. The page can be driven manually
+or by any browser-automation tool for screenshot-verified flow sweeps.
+
+The rig forces `NO_EMOJI=1`: browser terminals (xterm.js) render some
+status glyphs (`✓`, `⚠`, `◷`) two cells wide while Go's width tables count
+one, which corrupts frame diffing. ASCII symbol mode removes the mismatch;
+native terminals are unaffected.

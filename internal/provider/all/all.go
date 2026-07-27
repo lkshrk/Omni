@@ -1,11 +1,4 @@
-// Package all links every built-in concrete provider so their package init()
-// factory registrations run (see provider.RegisterConcrete). Import it for its
-// side effects only:
-//
-//	import _ "github.com/lkshrk/omni/internal/provider/all"
-//
-// Adding a built-in concrete provider means adding one blank import here — the
-// only wiring edit outside the provider's own package and the catalog.
+// Package all is imported for side effects: its blank imports run each provider's init() registration.
 package all
 
 import (

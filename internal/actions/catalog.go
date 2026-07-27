@@ -1,8 +1,6 @@
-// Package actions defines omni's user-visible capabilities independently of
-// the surfaces that expose them.
+// Package actions defines omni's user-visible capabilities independently of the surfaces that expose them.
 package actions
 
-// ID is the stable semantic identifier for a user-visible action.
 type ID string
 
 const (
@@ -26,6 +24,7 @@ const (
 	ToolDeleteSpec                 ID = "tools.delete_spec"
 	ToolNormalizeProviderOverrides ID = "tools.normalize_provider_overrides"
 	ToolHealBrewTaps               ID = "tools.heal_brew_taps"
+	ToolBaselineSystemInventory    ID = "tools.baseline_system_inventory"
 	ToolImport                     ID = "tools.import"
 	ToolSwitchProvider             ID = "tools.switch_provider"
 	DotsSync                       ID = "dots.sync"
@@ -69,12 +68,23 @@ const (
 	SettingsMigrateHostOverrides   ID = "settings.migrate_host_overrides"
 	SettingsExtract                ID = "settings.extract"
 	SetupInit                      ID = "setup.init"
+	AgentsRestore                  ID = "agents.restore"
+	AgentsSyncAll                  ID = "agents.sync_all"
+	AgentsSkillsImport             ID = "agents.skills_import"
+	AgentsSkillsUpdate             ID = "agents.skills_update"
+	AgentsSkillsStatus             ID = "agents.skills_status"
+	AgentsSkillsUseManaged         ID = "agents.skills_resolve_use_managed"
+	AgentsSkillsUseLocal           ID = "agents.skills_resolve_use_local"
+	AgentsMcpUseManaged            ID = "agents.mcp_resolve_use_managed"
+	AgentsMcpUseLocal              ID = "agents.mcp_resolve_use_local"
+	AgentsPluginsUseManaged        ID = "agents.plugins_resolve_use_managed"
+	AgentsPluginsUseLocal          ID = "agents.plugins_resolve_use_local"
+	AgentsResolveAllUseManaged     ID = "agents.resolve_all_use_managed"
+	AgentsResolveAllUseLocal       ID = "agents.resolve_all_use_local"
 	Doctor                         ID = "doctor"
 	DoctorFix                      ID = "doctor.fix"
 )
 
-// Scope describes whether an action targets one row, a whole tab/domain, or
-// another app-wide context.
 type Scope string
 
 const (
@@ -82,9 +92,7 @@ const (
 	ScopeGlobal Scope = "global"
 )
 
-// Requirement describes explicit user input an action needs under the logical
-// tool model. CLI adapters must provide these through flags/args or prompts;
-// TUI adapters must provide them through pickers/popups/inputs.
+// Requirement is explicit user input every adapter must collect before executing the action.
 type Requirement string
 
 const (
@@ -97,8 +105,7 @@ const (
 	RequiresDeleteFallback    Requirement = "delete_fallback"
 )
 
-// TUIBinding records the default TUI exposure for an action without depending
-// on Bubble Tea key types.
+// TUIBinding records TUI exposure as plain strings to keep this package free of Bubble Tea types.
 type TUIBinding struct {
 	KeyMapField        string
 	DefaultKey         string
@@ -113,15 +120,13 @@ type CLIBinding struct {
 	Flags   []string
 }
 
-// PaletteBinding records how an action appears in the TUI command palette.
 type PaletteBinding struct {
 	Command           []string
 	Description       string
 	DescriptionFormat string
 }
 
-// Action is the shared capability metadata used by CLI, TUI, help, and parity
-// tests. Execution still lives in the app layer.
+// Action is shared capability metadata; execution lives in the app layer.
 type Action struct {
 	ID                 ID
 	Domain             string
@@ -140,26 +145,24 @@ type Action struct {
 	CLIOnlyReason      string
 }
 
-// Lifecycle is the canonical catalog for app-wide lifecycle actions.
 var Lifecycle = []Action{
 	{
 		ID:                 Reconcile,
 		Domain:             "lifecycle",
 		Scope:              ScopeGlobal,
 		Label:              "reconcile",
-		Description:        "Sync tools, upgrade tools, sync dotfiles, and commit dotfile changes.",
-		LongDescription:    "Run the host lifecycle in one command: add discovered tools and install missing configured tools, upgrade outdated tools, repair managed dotfile symlinks, and commit pending dotfile repository changes.",
+		Description:        "Sync tools, upgrade tools, sync agent resources, sync dotfiles, and commit dotfile changes.",
+		LongDescription:    "Run the host lifecycle in one command: add discovered tools and install missing configured tools, upgrade outdated tools, claim unmanaged agent capabilities and sync skills, MCP servers and plugins, repair managed dotfile symlinks, and commit pending dotfile repository changes.",
 		Mutates:            true,
 		RequiresConfirm:    true,
-		ConfirmDescription: "Reconcile this host: sync tools, upgrade tools, sync dotfiles, and commit dotfile changes?",
+		ConfirmDescription: "Reconcile this host: sync tools, upgrade tools, sync agent skills, MCP servers and plugins, sync dotfiles, and commit dotfile changes?",
 		TUI:                &TUIBinding{KeyMapField: "Reconcile", DefaultKey: "A", Label: "reconcile all", Description: "Review and run all safe host lifecycle fixes.", ConfirmDescription: "reconcile all"},
 		CLI:                []CLIBinding{{Command: []string{"reconcile"}, Flags: []string{"--message", "--skip-privileged", "--force"}}},
-		Palette:            &PaletteBinding{Command: []string{"reconcile"}, Description: "sync, upgrade, repair dotfiles, and commit changes"},
+		Palette:            &PaletteBinding{Command: []string{"reconcile"}, Description: "sync, upgrade, sync agents, repair dotfiles, and commit changes"},
 		PaletteEligible:    true,
 	},
 }
 
-// Requires reports whether this action declares requirement.
 func (a Action) Requires(requirement Requirement) bool {
 	for _, r := range a.Requirements {
 		if r == requirement {
@@ -169,7 +172,6 @@ func (a Action) Requires(requirement Requirement) bool {
 	return false
 }
 
-// Tools is the canonical catalog for tool actions.
 var Tools = []Action{
 	{
 		ID:              ToolSync,
@@ -201,13 +203,13 @@ var Tools = []Action{
 		Scope:              ScopeRow,
 		Label:              LabelDelete,
 		Description:        "Delete one tool and its config entry.",
-		LongDescription:    "Delete removes the selected logical tool from config. If it is installed locally, omni also uninstalls it with the resolved provider first.",
+		LongDescription:    "Undeclare the selected logical tool and uninstall it from this machine: `tools remove --purge` removes the config entry and, when the tool is installed locally, uninstalls it with the resolved provider first.",
 		Mutates:            true,
 		RequiresConfirm:    true,
 		ConfirmDescription: ConfirmDelete,
 		Requirements:       []Requirement{RequiresToolName},
 		TUI:                &TUIBinding{KeyMapField: "Delete", DefaultKey: "d", Label: LabelDelete, Description: "Delete the selected tool and config entry.", ConfirmDescription: ConfirmDelete},
-		CLI:                []CLIBinding{{Command: []string{"tools", "delete"}, Flags: []string{"--provider"}}},
+		CLI:                []CLIBinding{{Command: []string{"tools", "remove"}, Flags: []string{"--provider", "--purge"}}},
 	},
 	{
 		ID:              ToolUpdate,
@@ -389,13 +391,16 @@ var Tools = []Action{
 		Scope:              ScopeRow,
 		Label:              "delete tool spec",
 		Description:        "Delete a logical tool spec and all memberships.",
-		LongDescription:    "Delete a logical tool spec, all group memberships, group ignores, and tracked cache rows without relying on group membership state.",
+		LongDescription:    "Undeclare a logical tool: delete its spec, all group memberships, group ignores, and tracked cache rows without relying on group membership state. The installed package stays until `tools remove --purge` uninstalls it.",
 		Mutates:            true,
 		RequiresConfirm:    true,
 		ConfirmDescription: "confirm delete tool spec",
 		Requirements:       []Requirement{RequiresToolName},
 		TUI:                &TUIBinding{KeyMapField: "Delete", DefaultKey: "d", Label: "delete tool spec", Description: "Delete the selected tool spec and memberships.", ConfirmDescription: "confirm delete tool spec"},
-		CLI:                []CLIBinding{{Command: []string{"tools", "delete-spec"}}},
+		CLI: []CLIBinding{
+			{Command: []string{"tools", "remove"}},
+			{Command: []string{"tools", "delete-spec"}},
+		},
 	},
 	{
 		ID:                 ToolNormalizeProviderOverrides,
@@ -424,6 +429,19 @@ var Tools = []Action{
 		CLIOnlyReason:      "Config-hygiene cleanup is CLI-only; runs ad hoc, not part of the TUI danger zone yet.",
 	},
 	{
+		ID:                 ToolBaselineSystemInventory,
+		Domain:             "tools",
+		Scope:              ScopeGlobal,
+		Label:              "baseline system inventory",
+		Description:        "Absorb currently installed system packages into the discovery baseline.",
+		LongDescription:    "Re-snapshot this host's apt, dnf, pacman, apk and zypper inventory as the discovery baseline, so runtime dependencies pulled in by other installers stop surfacing as out-of-sync discovered tools. Configured and explicitly ignored tools keep their own state, and packages installed after the re-snapshot still surface.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "confirm baseline system inventory",
+		CLI:                []CLIBinding{{Command: []string{"tools", "baseline"}, Flags: []string{"--dry-run"}}},
+		CLIOnlyReason:      "Host-scoped discovery hygiene that permanently silences packages; kept as a deliberate CLI escape hatch rather than a one-keystroke TUI action.",
+	},
+	{
 		ID:              ToolImport,
 		Domain:          "tools",
 		Scope:           ScopeGlobal,
@@ -448,7 +466,6 @@ var Tools = []Action{
 	},
 }
 
-// Dots is the canonical catalog for dotfile actions.
 var Dots = []Action{
 	{
 		ID:              DotsSync,
@@ -459,7 +476,7 @@ var Dots = []Action{
 		LongDescription: "Repair managed dotfile symlinks without pulling or pushing git changes.",
 		Mutates:         true,
 		TUI:             &TUIBinding{KeyMapField: "Sync", DefaultKey: "s", Label: "sync dotfiles", Description: "Repair managed dotfile symlinks."},
-		CLI:             []CLIBinding{{Command: []string{"dots", "sync"}, Flags: []string{"--dry-run", "--use-repo", "--use-local"}}},
+		CLI:             []CLIBinding{{Command: []string{"dots", "sync"}, Flags: []string{"--dry-run", "--use-repo", "--use-managed", "--use-local"}}},
 		Palette:         &PaletteBinding{Command: []string{"dots", "sync"}, Description: "repair dotfile symlinks (no git)"},
 		PaletteEligible: true,
 	},
@@ -522,13 +539,13 @@ var Dots = []Action{
 		Scope:              ScopeRow,
 		Label:              LabelDelete,
 		Description:        "Delete one dots entry from management.",
-		LongDescription:    "Delete a dots entry from config and remove its managed symlinks from this host.",
+		LongDescription:    "Undeclare a dots entry from config and delete its package from the dots repo, leaving the managed symlinks behind as real local files unless --purge removes them too.",
 		Mutates:            true,
 		RequiresConfirm:    true,
 		ConfirmDescription: ConfirmDelete,
 		Requirements:       []Requirement{RequiresToolName},
 		TUI:                &TUIBinding{KeyMapField: "DotDelete", DefaultKey: "d", Label: LabelDelete, Description: "Delete the selected dotfile entry from sync.", ConfirmDescription: ConfirmDelete},
-		CLI:                []CLIBinding{{Command: []string{"dots", "delete"}, Flags: []string{"--keep-local"}}},
+		CLI:                []CLIBinding{{Command: []string{"dots", "remove"}, Flags: []string{"--keep-local", "--purge"}}},
 	},
 	{
 		ID:                 DotsResolveUseRepo,
@@ -542,7 +559,7 @@ var Dots = []Action{
 		ConfirmDescription: "confirm use repo",
 		Requirements:       []Requirement{RequiresToolName},
 		TUI:                &TUIBinding{KeyMapField: "DotUseRepo", DefaultKey: "u", Label: "use repo", Description: "Resolve the selected conflict with the repo version.", ConfirmDescription: "confirm use repo"},
-		CLI:                []CLIBinding{{Command: []string{"dots", "resolve"}, Flags: []string{"--use-repo"}}},
+		CLI:                []CLIBinding{{Command: []string{"dots", "resolve"}, Flags: []string{"--use-repo", "--use-managed"}}},
 	},
 	{
 		ID:                 DotsResolveUseLocal,
@@ -767,7 +784,6 @@ var Dots = []Action{
 	},
 }
 
-// Groups is the canonical catalog for group-management actions.
 var Groups = []Action{
 	{
 		ID:              GroupCreate,
@@ -837,7 +853,6 @@ var Groups = []Action{
 	},
 }
 
-// Hosts is the canonical catalog for host-management actions.
 var Hosts = []Action{
 	{
 		ID:              HostCreate,
@@ -892,7 +907,6 @@ var Hosts = []Action{
 	},
 }
 
-// Settings is the canonical catalog for settings actions.
 var Settings = []Action{
 	{
 		ID:              SettingsSet,
@@ -969,7 +983,6 @@ var Settings = []Action{
 	},
 }
 
-// Setup is the canonical catalog for onboarding/setup actions.
 var Setup = []Action{
 	{
 		ID:              SetupInit,
@@ -980,11 +993,186 @@ var Setup = []Action{
 		LongDescription: "Run guided bootstrap: choose provider families, host groups, and optional tools or dots activation.",
 		Mutates:         true,
 		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "run bootstrap", Description: "Run the guided bootstrap flow."},
-		CLI:             []CLIBinding{{Command: []string{"bootstrap"}, Flags: []string{"--import", "--no-import", "--import-config"}}},
+		CLI: []CLIBinding{{Command: []string{"bootstrap"}, Flags: []string{
+			"--import", "--no-import", "--import-config", "--import-skills", "--no-import-skills",
+		}}},
 	},
 }
 
-// Diagnostics is the canonical catalog for read-only health checks.
+var Agents = []Action{
+	{
+		ID:              AgentsRestore,
+		Domain:          "agents",
+		Scope:           ScopeGlobal,
+		Label:           "sync agents",
+		Description:     "Install the manifest's skills, MCP servers, and plugins onto this host.",
+		LongDescription: "Run every agent feature's sync in one pass: install the manifest skill packages, MCP servers, and plugins this host is missing. Claiming installs the manifest does not track runs the other way and stays with sync-all.",
+		Mutates:         true,
+		CLI:             []CLIBinding{{Command: []string{"agents", "sync"}, Flags: []string{"--dry-run"}}},
+		Palette:         &PaletteBinding{Command: []string{"agents", "sync"}, Description: "install manifest skills, mcp servers, and plugins"},
+		PaletteEligible: true,
+	},
+	{
+		ID:                 AgentsSyncAll,
+		Domain:             "agents",
+		Scope:              ScopeGlobal,
+		Label:              "sync all agents",
+		Description:        "Claim unmanaged skill packages into the manifest, then sync every agent resource.",
+		LongDescription:    "Add the skill packages another tool installed to the manifest, then sync skills, MCP servers, and plugins — the agents leg of `omni tools sync --all`. The claim phase adopts on-disk directories, so it is confirmed before it runs.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "Claim unmanaged skill packages and sync agent skills, MCP servers, and plugins?",
+		CLI:                []CLIBinding{{Command: []string{"tools", "sync"}, Flags: []string{"--all"}}},
+		Palette:            &PaletteBinding{Command: []string{"agents", "sync-all"}, Description: "claim unmanaged skills, then sync all agent resources"},
+		PaletteEligible:    true,
+	},
+	{
+		ID:              AgentsSkillsImport,
+		Domain:          "agents",
+		Scope:           ScopeGlobal,
+		Label:           "import skills",
+		Description:     "Claim skill packages another tool installed into the manifest.",
+		LongDescription: "Add the skill packages recorded in the legacy CLI lockfile but absent from the manifest, adopting their on-disk installs into omni's store.",
+		Mutates:         true,
+		CLI:             []CLIBinding{{Command: []string{"agents", "skills", "import"}, Flags: []string{"--dry-run"}}},
+		Palette:         &PaletteBinding{Command: []string{"agents", "skills", "import"}, Description: "claim unmanaged skill packages into the manifest"},
+		PaletteEligible: true,
+	},
+	{
+		ID:              AgentsSkillsUpdate,
+		Domain:          "agents",
+		Scope:           ScopeGlobal,
+		Label:           "upgrade skills",
+		Description:     "Refresh omni's stored skill packages from their sources.",
+		LongDescription: "Reacquire every manifest skill package from its source into omni's store and relink the agents that use it. The manifest is unchanged: this moves newer content, not intent.",
+		Mutates:         true,
+		CLI:             []CLIBinding{{Command: []string{"agents", "skills", "upgrade"}, Flags: []string{"--dry-run", "--check"}}},
+		Palette:         &PaletteBinding{Command: []string{"agents", "skills", "upgrade"}, Description: "refresh stored skill packages from their sources"},
+		PaletteEligible: true,
+	},
+	{
+		ID:              AgentsSkillsStatus,
+		Domain:          "agents",
+		Scope:           ScopeRow,
+		Label:           "skill status",
+		Description:     "Show one skill package's manifest, store, and per-agent entry state.",
+		LongDescription: "Report a single package's declared intent, canonical store content, update state, legacy lockfile attribution, and what every targeted agent directory actually holds, with the next step for each entry.",
+		Requirements:    []Requirement{RequiresToolName},
+		CLIOnlyReason:   "The Agents tab already renders per-agent skill state on the rows themselves; this is the scriptable one-package dump of the same state.",
+		CLI:             []CLIBinding{{Command: []string{"agents", "skills", "status"}}},
+	},
+	{
+		ID:                 AgentsSkillsUseManaged,
+		Domain:             "agents",
+		Scope:              ScopeRow,
+		Label:              "use managed",
+		Description:        "Resolve a drifted skill entry with omni's managed content.",
+		LongDescription:    "Replace the content another tool put at a managed skill entry with omni's link into the canonical package store. The displaced copy is kept aside only until the install succeeds.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "confirm use managed",
+		Requirements:       []Requirement{RequiresToolName},
+		TUI:                &TUIBinding{KeyMapField: "AgentsUseManaged", DefaultKey: "u", Label: "use managed", Description: "Resolve the selected drifted skill with omni's content.", ConfirmDescription: "confirm use managed"},
+		CLI:                []CLIBinding{{Command: []string{"agents", "skills", "resolve"}, Flags: []string{"--use-managed", "--agent", "--dry-run"}}},
+	},
+	{
+		ID:                 AgentsSkillsUseLocal,
+		Domain:             "agents",
+		Scope:              ScopeRow,
+		Label:              "use local",
+		Description:        "Resolve a drifted skill entry by releasing it.",
+		LongDescription:    "Leave the content another tool put at a managed skill entry in place and narrow the manifest so omni stops managing that skill, or that package on those agents.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "confirm use local",
+		Requirements:       []Requirement{RequiresToolName},
+		TUI:                &TUIBinding{KeyMapField: "AgentsUseLocal", DefaultKey: "l", Label: "use local", Description: "Stop managing the selected drifted skill entry.", ConfirmDescription: "confirm use local"},
+		CLI:                []CLIBinding{{Command: []string{"agents", "skills", "resolve"}, Flags: []string{"--use-local", "--agent", "--dry-run"}}},
+	},
+	{
+		ID:                 AgentsMcpUseManaged,
+		Domain:             "agents",
+		Scope:              ScopeRow,
+		Label:              "use managed",
+		Description:        "Resolve a drifted MCP server with the manifest definition.",
+		LongDescription:    "Reinstall the manifest's transport, command and URL for a server whose live registration diverged, through the agent's own CLI.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "confirm use managed",
+		Requirements:       []Requirement{RequiresToolName},
+		TUI:                &TUIBinding{KeyMapField: "AgentsUseManaged", DefaultKey: "u", Label: "use managed", Description: "Resolve the selected drifted MCP server with the manifest definition.", ConfirmDescription: "confirm use managed"},
+		CLI:                []CLIBinding{{Command: []string{"agents", "mcp", "resolve"}, Flags: []string{"--use-managed", "--agent", "--dry-run"}}},
+	},
+	{
+		ID:                 AgentsMcpUseLocal,
+		Domain:             "agents",
+		Scope:              ScopeRow,
+		Label:              "use local",
+		Description:        "Resolve a drifted MCP server by adopting the live definition.",
+		LongDescription:    "Record the transport, command and URL the agent actually has as the manifest's new intent for a drifted server.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "confirm use local",
+		Requirements:       []Requirement{RequiresToolName},
+		TUI:                &TUIBinding{KeyMapField: "AgentsUseLocal", DefaultKey: "l", Label: "use local", Description: "Adopt the selected MCP server's live definition into the manifest.", ConfirmDescription: "confirm use local"},
+		CLI:                []CLIBinding{{Command: []string{"agents", "mcp", "resolve"}, Flags: []string{"--use-local", "--agent", "--dry-run"}}},
+	},
+	{
+		ID:                 AgentsPluginsUseManaged,
+		Domain:             "agents",
+		Scope:              ScopeRow,
+		Label:              "use managed",
+		Description:        "Resolve a drifted plugin with the declared marketplace.",
+		LongDescription:    "Uninstall a plugin installed from a marketplace other than the manifest's and reinstall it from the declared one.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "confirm use managed",
+		Requirements:       []Requirement{RequiresToolName},
+		TUI:                &TUIBinding{KeyMapField: "AgentsUseManaged", DefaultKey: "u", Label: "use managed", Description: "Reinstall the selected plugin from the manifest's marketplace.", ConfirmDescription: "confirm use managed"},
+		CLI:                []CLIBinding{{Command: []string{"agents", "plugins", "resolve"}, Flags: []string{"--use-managed", "--agent", "--dry-run"}}},
+	},
+	{
+		ID:                 AgentsPluginsUseLocal,
+		Domain:             "agents",
+		Scope:              ScopeRow,
+		Label:              "use local",
+		Description:        "Resolve a drifted plugin by adopting the installed marketplace.",
+		LongDescription:    "Repoint the manifest entry at the marketplace the plugin is actually installed from, which must already be declared.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "confirm use local",
+		Requirements:       []Requirement{RequiresToolName},
+		TUI:                &TUIBinding{KeyMapField: "AgentsUseLocal", DefaultKey: "l", Label: "use local", Description: "Repoint the selected plugin at the marketplace it is installed from.", ConfirmDescription: "confirm use local"},
+		CLI:                []CLIBinding{{Command: []string{"agents", "plugins", "resolve"}, Flags: []string{"--use-local", "--agent", "--dry-run"}}},
+	},
+	{
+		ID:                 AgentsResolveAllUseManaged,
+		Domain:             "agents",
+		Scope:              ScopeGlobal,
+		Label:              "use managed (all)",
+		Description:        "Resolve every drifted agent resource with omni's managed side.",
+		LongDescription:    "Settle every currently drifted skill package, MCP server and plugin in one pass by keeping the manifest's definition and overwriting what another tool wrote.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "confirm use managed for all",
+		TUI:                &TUIBinding{KeyMapField: "AgentsUseManagedAll", DefaultKey: "U", Label: "use managed (all)", Description: "Resolve every drifted agent resource with omni's side.", ConfirmDescription: "confirm use managed for all"},
+		CLI:                []CLIBinding{{Command: []string{"agents", "resolve"}, Flags: []string{"--use-managed", "--dry-run"}}},
+	},
+	{
+		ID:                 AgentsResolveAllUseLocal,
+		Domain:             "agents",
+		Scope:              ScopeGlobal,
+		Label:              "use local (all)",
+		Description:        "Resolve every drifted agent resource with the local side.",
+		LongDescription:    "Settle every currently drifted skill package, MCP server and plugin in one pass by adopting or releasing whatever is live on this host.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "confirm use local for all",
+		TUI:                &TUIBinding{KeyMapField: "AgentsUseLocalAll", DefaultKey: "L", Label: "use local (all)", Description: "Resolve every drifted agent resource with the local side.", ConfirmDescription: "confirm use local for all"},
+		CLI:                []CLIBinding{{Command: []string{"agents", "resolve"}, Flags: []string{"--use-local", "--dry-run"}}},
+	},
+}
+
 var Diagnostics = []Action{
 	{
 		ID:              Doctor,
@@ -1018,9 +1206,8 @@ func init() {
 	}
 }
 
-// All returns every user-visible action cataloged across domains.
 func All() []Action {
-	out := make([]Action, 0, len(Lifecycle)+len(Tools)+len(Dots)+len(Groups)+len(Hosts)+len(Settings)+len(Setup)+len(Diagnostics))
+	out := make([]Action, 0, len(Lifecycle)+len(Tools)+len(Dots)+len(Groups)+len(Hosts)+len(Settings)+len(Setup)+len(Agents)+len(Diagnostics))
 	out = append(out, Lifecycle...)
 	out = append(out, Tools...)
 	out = append(out, Dots...)
@@ -1028,18 +1215,17 @@ func All() []Action {
 	out = append(out, Hosts...)
 	out = append(out, Settings...)
 	out = append(out, Setup...)
+	out = append(out, Agents...)
 	out = append(out, Diagnostics...)
 	return out
 }
 
-// Get returns action metadata by ID.
 func Get(id ID) (Action, bool) {
 	action, ok := byID[id]
 	return action, ok
 }
 
-// MustTUILabel returns the TUI-specific compact label for id. It falls back to
-// the canonical label so palette-only actions can share short nouns safely.
+// MustTUILabel — Falls back to the canonical label so palette-only actions can share short nouns.
 func MustTUILabel(id ID) string {
 	action, ok := Get(id)
 	if !ok {
@@ -1051,7 +1237,6 @@ func MustTUILabel(id ID) string {
 	return action.Label
 }
 
-// MustDescription returns the short catalog description for id.
 func MustDescription(id ID) string {
 	action, ok := Get(id)
 	if !ok {
@@ -1060,8 +1245,7 @@ func MustDescription(id ID) string {
 	return action.Description
 }
 
-// MustLongDescription returns the long catalog description for id. It falls
-// back to Description so callers can adopt long help incrementally.
+// MustLongDescription — Falls back to Description so callers can adopt long help incrementally.
 func MustLongDescription(id ID) string {
 	action, ok := Get(id)
 	if !ok {
@@ -1073,7 +1257,6 @@ func MustLongDescription(id ID) string {
 	return action.Description
 }
 
-// MustConfirmDescription returns the catalog confirmation label for id.
 func MustConfirmDescription(id ID) string {
 	action, ok := Get(id)
 	if !ok {
@@ -1082,7 +1265,6 @@ func MustConfirmDescription(id ID) string {
 	return action.ConfirmDescription
 }
 
-// MustTUIConfirmDescription returns TUI-specific confirmation copy for id.
 func MustTUIConfirmDescription(id ID) string {
 	action, ok := Get(id)
 	if !ok {
@@ -1094,7 +1276,6 @@ func MustTUIConfirmDescription(id ID) string {
 	return action.ConfirmDescription
 }
 
-// MustPalette returns the palette binding for id.
 func MustPalette(id ID) PaletteBinding {
 	action, ok := Get(id)
 	if !ok {

@@ -18,8 +18,6 @@ func groupHasDot(g *config.GroupConfig, name string) bool {
 	return false
 }
 
-// End-to-end: the membership picker's save path (SetToolGroups) persists a tool
-// in BOTH the host group and one reusable group, and it survives a reload.
 func TestSetToolGroups_PersistsHostAndReusableGroup(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost.local")
 	a, cfgPath := newImportApp(t)
@@ -52,8 +50,6 @@ func TestSetToolGroups_PersistsHostAndReusableGroup(t *testing.T) {
 	}
 }
 
-// A membership edited from one host may retain memberships in other hosts.
-// Only reusable groups are assigned to the active host's reusable group list.
 func TestSetToolGroups_PersistsMultipleHostGroups(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "beta.local")
 	a, cfgPath := newImportApp(t)
@@ -89,7 +85,6 @@ func TestSetToolGroups_PersistsMultipleHostGroups(t *testing.T) {
 	}
 }
 
-// End-to-end for dots: SetDotGroups persists a dot in host + one reusable group.
 func TestSetDotGroups_PersistsHostAndReusableGroup(t *testing.T) {
 	a, cfgDir, _ := newDotsApp(t)
 	cfgPath := cfgDir + "/settings.json"
@@ -162,9 +157,6 @@ func TestSetDotGroups_PersistsMultipleHostGroups(t *testing.T) {
 	}
 }
 
-// SetDotGroups is a defensive backstop: even if a caller passes an unclamped
-// set with two reusable groups, the dot must persist in the host group plus
-// exactly one reusable group, never both.
 func TestSetDotGroups_ClampsMultipleReusableGroupsToOne(t *testing.T) {
 	a, cfgDir, _ := newDotsApp(t)
 	cfgPath := cfgDir + "/settings.json"
@@ -202,8 +194,6 @@ func TestSetDotGroups_ClampsMultipleReusableGroupsToOne(t *testing.T) {
 	}
 }
 
-// MoveToolToGroup is a relocate even from a valid multi-group state: it collapses
-// the tool to exactly the target group (used by claim/reassign flows).
 func TestMoveToolToGroup_CollapsesMultiGroupMembership(t *testing.T) {
 	t.Parallel()
 	a, cfgPath := newImportApp(t)

@@ -14,8 +14,10 @@ func newAddCmd(state *rootState) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "add <package>",
-		Short: "Add a tool to the config",
-		Long: `Add creates a logical tool spec and adds its name to a group.
+		Short: "Declare a tool in config and install it here",
+		Long: `Add records a logical tool spec in a group and installs it on this
+machine, so declaration and this host's convergence happen in one step. Other
+hosts pick it up on their next sync.
 
 Example:
   omni add ripgrep --provider brew --group work

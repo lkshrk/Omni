@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -23,9 +24,13 @@ func newSyncCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sync [group]",
 		Short: "Install missing tools from config",
-		Long: `Install missing tools from config.
+		Long: `Sync moves what config declares onto this machine: it installs the
+tools this host's groups list and are missing locally. Adopting an installed but
+undeclared tool runs the other way — see import.
 
-Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
+Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `. When agent
+features are enabled for this host, --all then imports unmanaged agent skill
+packages into the manifest and syncs agent skills, MCP servers, and plugins.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
@@ -44,7 +49,7 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 			errOut := cmdErr(cmd)
 			if all {
 				if !dryRun {
-					ok, err := confirmAction(cmd, state, "Sync all: add discovered tools to config and install missing configured tools?")
+					ok, err := confirmAction(cmd, state, "Sync all: add discovered tools to config, install missing configured tools, import unmanaged agent skills, MCP servers and plugins, and sync agent skills, MCP servers, and plugins?")
 					if err != nil || !ok {
 						return err
 					}
@@ -75,10 +80,11 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 					fmt.Fprintln(out, "Dry-run — no changes made.")
 				}
 				fmt.Fprintf(out, "%s.\n", app.SyncAllSummaryText(result, "Sync all complete"))
+				agentsErr := runSyncAllAgentsLeg(cmd, state, dryRun)
 				if !dryRun && len(result.ClaimedNames) > 0 && !cmd.Flags().Changed("group") && stdinIsTerminal() {
 					promptReassignClaimedTools(state, result.ClaimedNames)
 				}
-				return nil
+				return errors.Join(syncAllToolFailure(result), agentsErr)
 			}
 			opts := gosync.SyncOptions{
 				DryRun:      dryRun,
@@ -162,4 +168,45 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 	cmd.ValidArgsFunction = completeToolNames(state)
 	_ = cmd.RegisterFlagCompletionFunc("group", completeGroupNames(state))
 	return cmd
+}
+
+// Drift and plugin conflicts are printed, never resolved, and a host with agent features off skips the leg rather than collecting three "disabled" warnings.
+// Mirrors the failure verdict the non---all branch reaches through SummarizeSyncResult; --all reported only the agents leg.
+func syncAllToolFailure(result *app.SyncAllResult) error {
+	if result == nil {
+		return nil
+	}
+	summary := app.SummarizeSyncResult(result.SyncResult)
+	if len(summary.ProviderUnavailable) > 0 {
+		return fmt.Errorf("%s unavailable", textutil.PluralCount(len(summary.ProviderUnavailable), "tool", "tools"))
+	}
+	failed := summary.Failed + len(result.Failures)
+	if failed > 0 {
+		return fmt.Errorf("%s failed", textutil.PluralCount(failed, "tool", "tools"))
+	}
+	return nil
+}
+
+func runSyncAllAgentsLeg(cmd *cobra.Command, state *rootState, dryRun bool) error {
+	cfg, err := state.app.LoadConfig()
+	if err != nil {
+		return err
+	}
+	if !state.app.AgentsEnabled(cfg) {
+		return nil
+	}
+	out := cmdOut(cmd)
+	res, err := state.app.AgentsSyncAll(cmd.Context(), app.AgentsSyncAllOptions{
+		ImportUnmanaged: true,
+		DryRun:          dryRun,
+		Progress: func(msg string) {
+			fmt.Fprintf(out, "  %s\n", msg)
+		},
+	})
+	if err != nil {
+		return err
+	}
+	printAgentsSyncAllResult(out, res, dryRun)
+	fmt.Fprintf(out, "Agents sync complete — %s.\n", app.AgentsSyncAllSummaryText(res))
+	return agentErrsFailure(len(res.Errors))
 }

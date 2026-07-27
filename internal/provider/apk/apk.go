@@ -1,4 +1,3 @@
-// Package apk implements the apk (Alpine Linux) provider.
 package apk
 
 import (
@@ -11,12 +10,10 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// Provider implements the apk package manager.
 type Provider struct {
 	exec executor.Executor
 }
 
-// New creates an apk Provider.
 func New(exec executor.Executor) *Provider {
 	return &Provider{exec: exec}
 }
@@ -77,8 +74,7 @@ func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, s
 	if strings.TrimSpace(stdout) == "" {
 		return false, "", nil
 	}
-	// Fetch version separately from the installed package list; if it fails the
-	// package is still installed, version just unknown.
+	// A failed version fetch still means installed, just with an unknown version.
 	vout, _, err := p.exec.Run(ctx, "apk", "info", "-v")
 	if err != nil {
 		return true, "", nil
@@ -110,7 +106,6 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 }
 
 // InstalledMap returns explicitly requested apk packages as lowercase-name→version.
-// Implements provider.BulkChecker.
 func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) {
 	world := apkWorldPackages()
 	stdout, _, err := p.exec.Run(ctx, "apk", "info", "-v")
@@ -166,7 +161,6 @@ func parseAPKWorldConstraint(line string) string {
 }
 
 // BulkDescribe fetches descriptions for multiple tools via a single `apk info -d` call.
-// Implements provider.BulkDescriber.
 func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map[string]string, error) {
 	if len(tools) == 0 {
 		return nil, nil
@@ -186,9 +180,7 @@ func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map
 	return parseAPKBulkDescriptions(stdout, pkgSet), nil
 }
 
-// parseAPKBulkDescriptions extracts name→description from multi-package `apk info -d` output.
 // Each package block looks like: "<name>-<version> description:\n<text>"
-// pkgSet is used to match the package name prefix in header lines.
 func parseAPKBulkDescriptions(output string, pkgSet map[string]struct{}) map[string]string {
 	m := make(map[string]string)
 	lines := strings.Split(output, "\n")
@@ -197,10 +189,8 @@ func parseAPKBulkDescriptions(output string, pkgSet map[string]struct{}) map[str
 		if !strings.HasSuffix(trimmed, "description:") {
 			continue
 		}
-		// line: "<pkgname>-<version> description:"
 		prefix := strings.TrimSuffix(trimmed, " description:")
-		// Find the longest matching name in pkgSet to avoid "python3" matching
-		// "python3-dev-1.2.3-r0" when both "python3" and "python3-dev" are present.
+		// Longest match wins so "python3" cannot claim "python3-dev-1.2.3-r0".
 		var pkgName string
 		for pkg := range pkgSet {
 			if strings.HasPrefix(prefix, pkg) && len(pkg) > len(pkgName) {
@@ -232,7 +222,6 @@ func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, er
 	return parseAPKDescription(stdout), nil
 }
 
-// parseAPKDescription extracts the description from `apk info -d` output.
 // Format: "<name>-<ver> description:\n<text>"
 func parseAPKDescription(output string) string {
 	lines := strings.Split(output, "\n")
@@ -248,16 +237,13 @@ func parseAPKDescription(output string) string {
 	return ""
 }
 
-// parseAPKInfoLine parses one `apk info -v` output row.
 // Format: "ripgrep-14.1.1-r0" → ("ripgrep", "14.1.1-r0")
-// Alpine packages use <name>-<version> where version starts with a digit.
 func parseAPKInfoLine(line string) (name, version string) {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return "", ""
 	}
-	// Walk backwards from the end to find the second '-' that precedes a digit.
-	// e.g. "py3-requests-2.31.0-r1" → name="py3-requests", version="2.31.0-r1"
+	// Walk back to the '-' preceding a digit: "py3-requests-2.31.0-r1" splits after "py3-requests".
 	for i := len(line) - 1; i > 0; i-- {
 		if line[i] == '-' && i+1 < len(line) && line[i+1] >= '0' && line[i+1] <= '9' {
 			return line[:i], line[i+1:]

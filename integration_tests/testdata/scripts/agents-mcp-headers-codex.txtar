@@ -1,6 +1,8 @@
 # Real Codex integration: a v18 manifest may omit headers, while a remote
 # server with literal and environment-backed headers is persisted in syntax
 # that Codex itself parses.
+#
+# Keep headers-live last: Codex rewrites config.toml and preserves quoted table names only for the final server.
 # @requires: codex
 env HOME=$WORK/home
 env CODEX_HOME=$WORK/home/.codex
@@ -9,11 +11,13 @@ env OMNI_TEST_API_KEY_2=updated-secret
 mkdir $WORK/home
 mkdir $CODEX_HOME
 
-exec omni --config settings.json agents mcp restore
+exec omni --config settings.json agents mcp sync
 stdout 'installed: codex/legacy-no-headers'
 stdout 'installed: codex/headers-live'
+stdout 'installed: codex/headers-env-only'
 
-exec grep '"version": 19' settings.json
+# sync migrates v18 in memory without rewriting the manifest.
+exec grep '"version": 18' settings.json
 exec codex mcp get legacy-no-headers --json
 stdout '"name": "legacy-no-headers"'
 exec codex mcp get headers-live --json
@@ -29,21 +33,29 @@ exec grep '\[mcp_servers\."headers-live"\.env_http_headers\]' $CODEX_HOME/config
 exec grep '"X-API-Key" = "OMNI_TEST_API_KEY"' $CODEX_HOME/config.toml
 ! exec grep 'integration-secret' $CODEX_HOME/config.toml
 
-# Import uses Codex's real list output and preserves literal/environment-backed
-# headers without resolving the secret into Omni's manifest.
-exec omni --config settings-import.json agents mcp import headers-live
-stdout 'imported headers-live'
-exec grep '"X-Literal": "literal-value"' settings-import.json
+# Import refuses resolved header values because adoption must not copy values the user never typed.
+! exec omni --config settings-import.json agents mcp import headers-live
+stderr 'sets header\(s\) X-Literal, #2 to a resolved value'
+# Refusal explicitly confirms that nothing was written.
+stderr 'omni will not copy that into settings\.json'
+stderr 'declare the server manually'
+# Nonstandard resolved header names are withheld by ordinal rather than echoed.
+! stderr 'X~Quoted'
+! stderr 'unicode=雪'
+! exec grep 'literal-value' settings-import.json
+
+exec omni --config settings-import.json agents mcp import headers-env-only
+stdout 'imported headers-env-only'
 exec grep '"X-API-Key": "\${OMNI_TEST_API_KEY}"' settings-import.json
 ! exec grep 'integration-secret' settings-import.json
 
 # Restore reconciles changed headers on an existing registration.
 cp settings-updated.json settings.json
-exec omni --config settings.json agents mcp restore --dry-run
+exec omni --config settings.json agents mcp sync --dry-run
 stdout 'would update: codex/headers-live'
 exec codex mcp get headers-live --json
 stdout '"X-Literal": "literal-value"'
-exec omni --config settings.json agents mcp restore
+exec omni --config settings.json agents mcp sync
 stdout 'already installed: codex/legacy-no-headers'
 stdout 'updated: codex/headers-live'
 exec codex mcp get headers-live --json
@@ -62,6 +74,15 @@ grep -count=1 '\[mcp_servers\."headers-live"\.env_http_headers\]' $CODEX_HOME/co
         "name": "legacy-no-headers",
         "transport": "http",
         "url": "https://legacy.example.com/mcp",
+        "agents": ["codex"]
+      },
+      {
+        "name": "headers-env-only",
+        "transport": "http",
+        "url": "https://env-only.example.com/mcp",
+        "headers": {
+          "X-API-Key": "${OMNI_TEST_API_KEY}"
+        },
         "agents": ["codex"]
       },
       {

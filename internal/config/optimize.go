@@ -9,14 +9,10 @@ import (
 	"strings"
 )
 
-// Group list fields whose entries are plain strings. Merge keeps the EARLIER
-// definition for these (appendUniqueStrings/appendUniqueToolEntries skip
-// values already seen), so the duplicate in the LATER file is the dead copy.
+// Merge keeps the earlier definition of these, so a duplicate in a later file is the dead copy.
 var optimizeStringListKeys = []string{"taps", "tools", "skills", "mcp_servers", "plugins", "marketplaces"}
 
-// OptimizeRemoval records duplicate entries removed from one file.
-// Key is the group list field ("dots", "tools", ...) or "group" when an
-// entire name-only group shell was dropped after its entries deduped away.
+// OptimizeRemoval — Key is the group list field ("dots", "tools", ...) or "group" when a whole name-only group shell was dropped.
 type OptimizeRemoval struct {
 	File  string   `json:"file"`
 	Group string   `json:"group"`
@@ -24,8 +20,6 @@ type OptimizeRemoval struct {
 	Names []string `json:"names"`
 }
 
-// OptimizeReport describes everything OptimizeIncludeChain removed (or, in
-// dry-run, would remove).
 type OptimizeReport struct {
 	Removals []OptimizeRemoval `json:"removals"`
 }
@@ -38,9 +32,7 @@ func (r *OptimizeReport) TotalRemoved() int {
 	}
 	n := 0
 	for _, rem := range r.Removals {
-		// Group-shell drops aren't duplicate entries removed; they're a
-		// side effect of dedupe emptying a group down to its name. Only
-		// count actual duplicate list/dot entries.
+		// Group-shell drops are a side effect of dedupe, not duplicate entries; only count real duplicates.
 		if rem.Key == "group" {
 			continue
 		}
@@ -120,9 +112,7 @@ func dotEntryName(raw json.RawMessage) (string, error) {
 	return e.Name, nil
 }
 
-// dedupeDots removes from each file any group dot entry that a LATER file in
-// merge order also defines: appendUniqueDotEntries replaces in place, so the
-// later definition is the effective one and the earlier copy is dead.
+// Dot entries replace in place on merge, so when a later file redefines one the earlier copy is dead.
 func dedupeDots(files []*optimizeFile, report *OptimizeReport) error {
 	for i, f := range files {
 		for gi := range f.groups {
@@ -191,9 +181,7 @@ func dedupeDots(files []*optimizeFile, report *OptimizeReport) error {
 	return nil
 }
 
-// dedupeStringLists removes from each file any group list value an EARLIER
-// file already defines: appendUniqueStrings keeps the first occurrence, so
-// the later copy is dead. Removing the later copy also preserves merge order.
+// String lists keep their first occurrence on merge, so the later copy is dead and removing it preserves merge order.
 func dedupeStringLists(files []*optimizeFile, report *OptimizeReport) error {
 	for _, key := range optimizeStringListKeys {
 		seen := make(map[string]map[string]bool) // group base -> earlier values
@@ -262,8 +250,7 @@ func setGroupRawList(g *optimizeGroup, key string, kept []json.RawMessage) {
 	g.raw[key] = b
 }
 
-// removeEmptiedGroups drops group objects that our dedupe reduced to a bare
-// {"name": ...} shell. Pre-existing name-only groups (touched == false) stay.
+// Only groups this dedupe emptied are dropped; pre-existing name-only groups stay.
 func removeEmptiedGroups(files []*optimizeFile, report *OptimizeReport) {
 	for _, f := range files {
 		kept := f.groups[:0]
@@ -288,12 +275,7 @@ func removeEmptiedGroups(files []*optimizeFile, report *OptimizeReport) {
 	}
 }
 
-// OptimizeIncludeChain removes duplicate definitions across the $include
-// chain: group dot entries shadowed by a later file, and group list values
-// repeated from an earlier file. The merged config is provably unchanged —
-// after writing, the chain is reloaded and compared (order-normalized)
-// against the pre-fix merge; any difference restores the original files and
-// returns an error. With dryRun, the report is computed and nothing written.
+// OptimizeIncludeChain — After writing, the chain is reloaded and compared against the pre-fix merge; any difference restores the original files and errors.
 func OptimizeIncludeChain(mainPath string, dryRun bool) (*OptimizeReport, error) {
 	before, err := Load(mainPath)
 	if err != nil {
@@ -406,10 +388,7 @@ func renderGroupsPatch(f *optimizeFile) (map[string]json.RawMessage, error) {
 	return map[string]json.RawMessage{"groups": b}, nil
 }
 
-// normalizeForCompare renders a merged config with insignificant ordering
-// removed: groups sorted by base name, and each group's dots and string
-// lists sorted. Dedupe may reorder entries within these lists; ordering
-// there carries no behavior (merge itself dedupes by name).
+// Dedupe may reorder list entries, and that ordering carries no behavior, so sort it away before comparing.
 func normalizeForCompare(cfg *RootConfig) ([]byte, error) {
 	data, err := json.Marshal(cfg)
 	if err != nil {
@@ -419,9 +398,7 @@ func normalizeForCompare(cfg *RootConfig) ([]byte, error) {
 	if err := json.Unmarshal(data, &clone); err != nil {
 		return nil, err
 	}
-	// "$schema" is editor metadata PatchRaw stamps on every write
-	// regardless of patch content (see PatchRaw); it carries no settings
-	// semantics, so it must not participate in the equivalence check.
+	// PatchRaw stamps "$schema" on every write regardless of content, so it must not affect equivalence.
 	clone.Schema = ""
 	sort.SliceStable(clone.Groups, func(i, j int) bool {
 		return clone.Groups[i].BaseName() < clone.Groups[j].BaseName()

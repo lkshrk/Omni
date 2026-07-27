@@ -9,6 +9,8 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	_ "embed"
 	"encoding/hex"
@@ -36,8 +38,7 @@ import (
 //go:embed testdata/github_cli_latest_release.json
 var githubCLILatestRelease []byte
 
-// TestMain registers "omni" as a testscript command so we test the real
-// binary behaviour in a subprocess without needing a separate build step.
+// Registers "omni" as a testscript command so the real binary runs in a subprocess, with no separate build step.
 func TestMain(m *testing.M) {
 	os.Exit(testscript.RunMain(m, map[string]func() int{
 		"omni":                                func() int { cli.Execute(); return 0 },
@@ -53,6 +54,9 @@ func TestMain(m *testing.M) {
 		"omni-tools-fallback-configured-git":  toolsFallbackConfiguredGitMain,
 		"omni-tools-fallback-unsupported-git": toolsFallbackUnsupportedGitMain,
 		"omni-native-fallback-install":        nativeFallbackInstallMain,
+		"omni-corrupt-skill-metadata":         corruptSkillMetadataMain,
+		"omni-wellknown-skills":               wellKnownSkillsMain,
+		"omni-with-skills-catalog":            withSkillsCatalogMain,
 	}))
 }
 
@@ -77,13 +81,38 @@ func runMcpRestore(configPath string) error {
 	return root.Execute()
 }
 
-func assertClaudeMcpHeaderMain() int {
+// Each invocation stands up a fresh stub on a fresh port, so a moved URL is an identity change restore reports as drift; resolve is the verb that applies it.
+func runMcpConverge(configPath, serverName string, resolve bool) error {
+	if !resolve {
+		return runMcpRestore(configPath)
+	}
+	root := cli.NewRootCmd()
+	root.SetArgs([]string{"--yes", "--config", configPath, "agents", "mcp", "resolve", serverName, "--use-managed"})
+	return root.Execute()
+}
+
+func mcpHeaderHelperArgs(usage string) (configPath, serverName, headerName, want string, resolve bool, ok bool) {
 	args := os.Args[1:]
-	if len(args) != 4 {
-		fmt.Fprintln(os.Stderr, "usage: omni-assert-claude-mcp-header <config> <server> <header> <value>")
+	if len(args) < 4 || len(args) > 5 {
+		fmt.Fprintln(os.Stderr, usage)
+		return "", "", "", "", false, false
+	}
+	if len(args) == 5 {
+		if args[4] != "resolve" {
+			fmt.Fprintln(os.Stderr, usage)
+			return "", "", "", "", false, false
+		}
+		resolve = true
+	}
+	return args[0], args[1], args[2], args[3], resolve, true
+}
+
+func assertClaudeMcpHeaderMain() int {
+	configPath, serverName, headerName, want, resolve, ok := mcpHeaderHelperArgs(
+		"usage: omni-assert-claude-mcp-header <config> <server> <header> <value> [resolve]")
+	if !ok {
 		return 2
 	}
-	configPath, serverName, headerName, want := args[0], args[1], args[2], args[3]
 	received := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
@@ -98,8 +127,8 @@ func assertClaudeMcpHeaderMain() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	if err := runMcpRestore(configPath); err != nil {
-		fmt.Fprintf(os.Stderr, "restore MCP server: %v\n", err)
+	if err := runMcpConverge(configPath, serverName, resolve); err != nil {
+		fmt.Fprintf(os.Stderr, "converge MCP server: %v\n", err)
 		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -124,12 +153,11 @@ func assertClaudeMcpHeaderMain() int {
 }
 
 func assertGrokMcpHeaderMain() int {
-	args := os.Args[1:]
-	if len(args) != 4 {
-		fmt.Fprintln(os.Stderr, "usage: omni-assert-grok-mcp-header <config> <server> <header> <value>")
+	configPath, serverName, headerName, want, resolve, ok := mcpHeaderHelperArgs(
+		"usage: omni-assert-grok-mcp-header <config> <server> <header> <value> [resolve]")
+	if !ok {
 		return 2
 	}
-	configPath, serverName, headerName, want := args[0], args[1], args[2], args[3]
 	received := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if value := r.Header.Get(headerName); value != "" {
@@ -146,8 +174,8 @@ func assertGrokMcpHeaderMain() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	if err := runMcpRestore(configPath); err != nil {
-		fmt.Fprintf(os.Stderr, "restore MCP server: %v\n", err)
+	if err := runMcpConverge(configPath, serverName, resolve); err != nil {
+		fmt.Fprintf(os.Stderr, "converge MCP server: %v\n", err)
 		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -322,8 +350,59 @@ func withNPMRegistryMain() int {
 	return 0
 }
 
-func toolsFallbackConfiguredGitMain() int {
+// Stub catalog whose result set includes one row no client can use; each query is appended to $OMNI_TEST_CATALOG_LOG.
+// Usage in txtar: exec omni-with-skills-catalog --config settings.json <cmd> [args...]
+func withSkillsCatalogMain() int {
+	logPath := os.Getenv("OMNI_TEST_CATALOG_LOG")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if logPath != "" {
+			file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			fmt.Fprintln(file, r.URL.RawQuery) //nolint:errcheck
+			file.Close()                       //nolint:errcheck
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("owner") == "acme" {
+			fmt.Fprint(w, `{"skills":[{"source":"acme/skills","skillId":"acme-tool","installs":5}]}`)
+			return
+		}
+		fmt.Fprint(w, `{"skills":[
+			{"source":"owner/repo","skillId":"review","installs":12},
+			{"source":"owner/repo.git","skillId":"broken","installs":9},
+			{"source":"owner/other","skillId":"other","installs":3}
+		]}`)
+	}))
+	defer server.Close()
+	if err := os.Setenv("OMNI_SKILLS_CATALOG_URL", server.URL); err != nil {
+		fmt.Fprintf(os.Stderr, "set OMNI_SKILLS_CATALOG_URL: %v\n", err)
+		return 1
+	}
+	cmd := cli.NewRootCmd()
+	cmd.SetArgs(os.Args[1:])
+	if err := cmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
+// The CLI builds its own client with a nil Transport, so the stub CA is the only seam; the URL stays https and verified.
+func trustStubCA(server *httptest.Server) error {
+	transport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return fmt.Errorf("http.DefaultTransport is not *http.Transport")
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(server.Certificate())
+	transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	return nil
+}
+
+func toolsFallbackConfiguredGitMain() int {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/cli/cli/releases/latest" {
 			http.NotFound(w, r)
 			return
@@ -334,6 +413,10 @@ func toolsFallbackConfiguredGitMain() int {
 		}
 	}))
 	defer server.Close()
+	if err := trustStubCA(server); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	if err := os.Setenv("OMNI_GITHUB_API_BASE", server.URL); err != nil {
 		fmt.Fprintf(os.Stderr, "set OMNI_GITHUB_API_BASE: %v\n", err)
 		return 1
@@ -348,7 +431,7 @@ func toolsFallbackConfiguredGitMain() int {
 }
 
 func toolsFallbackUnsupportedGitMain() int {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/cli/cli/releases/latest" {
 			http.NotFound(w, r)
 			return
@@ -370,12 +453,74 @@ func toolsFallbackUnsupportedGitMain() int {
 }`)
 	}))
 	defer server.Close()
+	if err := trustStubCA(server); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	if err := os.Setenv("OMNI_GITHUB_API_BASE", server.URL); err != nil {
 		fmt.Fprintf(os.Stderr, "set OMNI_GITHUB_API_BASE: %v\n", err)
 		return 1
 	}
 	cmd := cli.NewRootCmd()
 	cmd.SetArgs(os.Args[1:])
+	if err := cmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
+// Serves a valid 0.2.0 index, a digest mismatch, an unsupported schema, and a forbidden probe path that must send the caller on to Git.
+// Usage in txtar: exec omni-wellknown-skills --config settings.json <cmd> [args...]
+func wellKnownSkillsMain() int {
+	const schemaV02 = "https://schemas.agentskills.io/discovery/0.2.0/schema.json"
+	skillMD := []byte("---\nname: hello\ndescription: Served by a well-known skills index.\n---\n\nhello\n")
+	sum := sha256.Sum256(skillMD)
+	digest := "sha256:" + hex.EncodeToString(sum[:])
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeIndex := func(schema, name, digest string) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+				"$schema": schema,
+				"skills": []map[string]any{{
+					"name":        name,
+					"type":        "skill-md",
+					"description": "Served by a well-known skills index.",
+					"url":         "artifact/" + name + ".md",
+					"digest":      digest,
+				}},
+			})
+		}
+		switch r.URL.Path {
+		case "/good/index.json":
+			writeIndex(schemaV02, "hello", digest)
+		case "/bad-digest/index.json":
+			writeIndex(schemaV02, "broken", "sha256:"+strings.Repeat("0", 64))
+		case "/old-schema/index.json":
+			writeIndex("https://schemas.agentskills.io/discovery/0.1.0/schema.json", "legacy", digest)
+		case "/good/artifact/hello.md", "/bad-digest/artifact/broken.md", "/old-schema/artifact/legacy.md":
+			w.Write(skillMD) //nolint:errcheck
+		case "/.well-known/agent-skills/index.json":
+			http.Error(w, "forbidden", http.StatusForbidden)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	args := os.Args[1:]
+	for i, arg := range args {
+		if arg == "--config" && i+1 < len(args) {
+			if err := rewriteStubServerURL(args[i+1], server.URL); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return 1
+			}
+			break
+		}
+	}
+	cmd := cli.NewRootCmd()
+	cmd.SetArgs(args)
 	if err := cmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -528,6 +673,53 @@ func seedPackageAvailabilityMain() int {
 	return 0
 }
 
+// Overwrites every canonical skill package's install metadata with unparsable JSON, so fixtures need no hand-written SQLite.
+// Usage in txtar: exec omni-corrupt-skill-metadata <packages-root>
+func corruptSkillMetadataMain() int {
+	args := os.Args[1:]
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: omni-corrupt-skill-metadata <packages-root>")
+		return 2
+	}
+	cacheDir := os.Getenv("OMNI_CACHE_DIR")
+	if cacheDir == "" {
+		fmt.Fprintln(os.Stderr, "OMNI_CACHE_DIR is required")
+		return 2
+	}
+	entries, err := os.ReadDir(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "read packages root: %v\n", err)
+		return 1
+	}
+	db, err := database.Open(filepath.Join(cacheDir, "omni.db"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "open db: %v\n", err)
+		return 1
+	}
+	defer db.Close()
+	ctx := context.Background()
+	if err := db.Migrate(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "migrate db: %v\n", err)
+		return 1
+	}
+	corrupted := 0
+	for _, entry := range entries {
+		if !entry.IsDir() || len(entry.Name()) != 64 {
+			continue
+		}
+		if err := db.SetState(ctx, "agent.skills."+entry.Name(), "{"); err != nil {
+			fmt.Fprintf(os.Stderr, "corrupt install metadata: %v\n", err)
+			return 1
+		}
+		corrupted++
+	}
+	if corrupted == 0 {
+		fmt.Fprintf(os.Stderr, "no canonical skill packages under %s\n", args[0])
+		return 1
+	}
+	return 0
+}
+
 func markOutdatedRefreshFreshMain() int {
 	if len(os.Args) != 1 {
 		fmt.Fprintln(os.Stderr, "usage: omni-mark-outdated-refresh-fresh")
@@ -560,8 +752,7 @@ func markOutdatedRefreshFreshMain() int {
 	return 0
 }
 
-// TestCLI runs .txtar scripts in testdata/scripts/, skipping dependency/OS-gated
-// fixtures when the local environment does not satisfy them.
+// Runs testdata/scripts/*.txtar, skipping dependency- and OS-gated fixtures the local environment cannot satisfy.
 func TestCLI(t *testing.T) {
 	scripts, err := stowAwareScriptFiles()
 	if err != nil {
@@ -572,8 +763,7 @@ func TestCLI(t *testing.T) {
 		Files:               scripts,
 		RequireExplicitExec: true,
 		Setup: func(env *testscript.Env) error {
-			// Point the app's cache dir to the per-test work directory so the
-			// SQLite database is writable even when HOME=/no-home (testscript default).
+			// Cache dir points at the per-test work dir so SQLite stays writable under testscript's HOME=/no-home.
 			env.Vars = append(env.Vars, "OMNI_CACHE_DIR="+filepath.Join(env.WorkDir, ".omni-cache"))
 			// Use a fixed hostname so txtar scripts can configure hosts deterministically.
 			env.Vars = append(env.Vars, "OMNI_HOSTNAME=testhost")
@@ -684,16 +874,9 @@ func scriptRequires(path, requirement string) (bool, error) {
 	return false, nil
 }
 
-// nativeFallbackInstallMain starts a stub server that serves a GitHub releases
-// API, the asset download, and a checksums file. Before running the omni
-// command it rewrites every occurrence of the placeholder "STUB_SERVER_URL"
-// in the config file (first positional argument after --config) with the
-// actual server URL, so txtar fixtures can embed the placeholder and have it
-// resolved at runtime.
-//
+// Stub server for the GitHub releases API, asset download, and checksums; rewrites STUB_SERVER_URL in the --config file at runtime.
 // Usage in txtar: exec omni-native-fallback-install --config settings.json <cmd> [args...]
 func nativeFallbackInstallMain() int {
-	// Build a minimal tar.gz containing a stub binary.
 	binaryContent := []byte("#!/bin/sh\nexit 0\n")
 	assetName := fmt.Sprintf("mytool_v1.0.0_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
 
@@ -710,11 +893,11 @@ func nativeFallbackInstallMain() int {
 	digest := hex.EncodeToString(sum[:])
 	checksumContent := digest + "  " + assetName + "\n"
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		releaseAssets := func(host string) []map[string]any {
 			return []map[string]any{
-				{"id": 1, "name": assetName, "browser_download_url": "http://" + host + "/asset/" + assetName},
-				{"id": 2, "name": "checksums.txt", "browser_download_url": "http://" + host + "/checksums"},
+				{"id": 1, "name": assetName, "browser_download_url": "https://" + host + "/asset/" + assetName},
+				{"id": 2, "name": "checksums.txt", "browser_download_url": "https://" + host + "/checksums"},
 			}
 		}
 		switch {
@@ -737,12 +920,17 @@ func nativeFallbackInstallMain() int {
 	}))
 	defer server.Close()
 
-	// Rewrite the config file so the asset_download_url always points at the
-	// current invocation's stub server. This handles both the initial placeholder
-	// and subsequent invocations where a prior run already wrote a dead port.
-	//   STUB_SERVER_URL        → current server URL (initial fixture)
-	//   ASSET_NAME_PLACEHOLDER → real GOOS/GOARCH asset name (initial fixture)
-	//   http://127.0.0.1:*/asset/ → current server /asset/ (re-invocations)
+	// Trust the stub CA through DefaultTransport to retain verified HTTPS without a production bypass.
+	transport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "http.DefaultTransport is not *http.Transport")
+		return 1
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(server.Certificate())
+	transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+
+	// Rewrite every placeholder and any previously written 127.0.0.1 asset URL, so re-invocations never hit a dead port.
 	args := os.Args[1:]
 	for i, arg := range args {
 		if arg == "--config" && i+1 < len(args) {
@@ -751,8 +939,6 @@ func nativeFallbackInstallMain() int {
 				s := string(b)
 				s = strings.ReplaceAll(s, "STUB_SERVER_URL", server.URL)
 				s = strings.ReplaceAll(s, "ASSET_NAME_PLACEHOLDER", assetName)
-				// Replace any previously written 127.0.0.1 asset URL with the
-				// current server so re-invocations don't hit a dead port.
 				s = rewriteLocalhostAssetURL(s, server.URL+"/asset/")
 				if s != string(b) {
 					_ = os.WriteFile(cfgPath, []byte(s), 0o644)
@@ -775,10 +961,8 @@ func nativeFallbackInstallMain() int {
 	return 0
 }
 
-// rewriteLocalhostAssetURL replaces any "http://127.0.0.1:<port>/asset/"
-// occurrences in s with newAssetBase so subsequent invocations of the stub
-// helper always download from the live server rather than a dead port.
-var localhostAssetRe = regexp.MustCompile(`http://127\.0\.0\.1:\d+/asset/`)
+// Repoints stale "https://127.0.0.1:<port>/asset/" occurrences at the live server.
+var localhostAssetRe = regexp.MustCompile(`https://127\.0\.0\.1:\d+/asset/`)
 
 func rewriteLocalhostAssetURL(s, newAssetBase string) string {
 	return localhostAssetRe.ReplaceAllString(s, newAssetBase)

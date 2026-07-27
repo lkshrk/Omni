@@ -1,0 +1,60 @@
+# Targeting claude-code keeps the fixture independent of other agent CLIs on the host PATH.
+chmod 0755 $WORK/bin/claude
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json agents plugins sync --dry-run
+stdout -count=1 'would install: claude-code/caveman'
+! exec grep -q 'plugins install' .omni-cache/claude-calls.log
+! exec grep -q 'plugins marketplace add' .omni-cache/claude-calls.log
+
+exec omni --config settings.json agents plugins sync
+stdout -count=1 'installed: claude-code/caveman'
+exec grep -q 'plugins marketplace add lkshrk/marketplace' .omni-cache/claude-calls.log
+exec grep -q 'plugins install caveman@lkshrk' .omni-cache/claude-calls.log
+
+cp list-response-installed.json $WORK/.omni-cache/plugins-list-response.json
+
+exec omni --config settings.json agents plugins sync
+stdout -count=1 'already installed: claude-code/caveman'
+! stdout '^installed: claude-code/caveman$'
+exec sh -c 'test $(grep -c "plugins install caveman@lkshrk" '"$WORK"'/.omni-cache/claude-calls.log) -eq 1'
+exec sh -c 'test $(grep -c "plugins marketplace add lkshrk/marketplace" '"$WORK"'/.omni-cache/claude-calls.log) -eq 1'
+
+-- settings.json --
+{"agents":{"marketplaces":[{"name":"lkshrk","source":"lkshrk/marketplace"}],"plugins":[{"name":"caveman","marketplace":"lkshrk","agents":["claude-code"]}]}}
+
+-- list-response-installed.json --
+{"installed":[{"id":"caveman@lkshrk","version":"1.0.0","scope":"user","enabled":true}],"available":[]}
+
+-- bin/claude --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/claude-calls.log"
+if [ "$1" = "plugins" ] && [ "$2" = "list" ] && [ "$3" = "--json" ] && [ "$4" = "--available" ]; then
+  if [ -f "${OMNI_CACHE_DIR}/plugins-list-response.json" ]; then
+    cat "${OMNI_CACHE_DIR}/plugins-list-response.json"
+  else
+    printf '{"installed":[],"available":[]}\n'
+  fi
+  exit 0
+fi
+if [ "$1" = "plugins" ] && [ "$2" = "marketplace" ] && [ "$3" = "list" ] && [ "$4" = "--json" ]; then
+  if [ -f "${OMNI_CACHE_DIR}/marketplace-added" ]; then
+    printf '[{"name":"lkshrk","source":"github","repo":"lkshrk/marketplace"}]\n'
+  else
+    printf '[]\n'
+  fi
+  exit 0
+fi
+if [ "$1" = "plugins" ] && [ "$2" = "marketplace" ] && [ "$3" = "add" ]; then
+  touch "${OMNI_CACHE_DIR}/marketplace-added"
+  exit 0
+fi
+if [ "$1" = "plugin" ] && [ "$2" = "marketplace" ] && [ "$3" = "update" ]; then
+  exit 0
+fi
+if [ "$1" = "plugins" ] && [ "$2" = "install" ]; then
+  exit 0
+fi
+exit 1

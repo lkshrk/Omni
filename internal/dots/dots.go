@@ -1,6 +1,4 @@
 // Package dots manages stow-backed dotfile links declared in config groups.
-// DotEntry names are logical identities; resolved entries carry the stow
-// package directory selected by the app layer.
 package dots
 
 import (
@@ -14,21 +12,20 @@ import (
 	"github.com/lkshrk/omni/internal/executor"
 )
 
-// OpKind describes what happened (or would happen) for a single file.
 type OpKind int
 
 const (
-	OpSkip           OpKind = iota // symlink already correct
-	OpLink                         // new symlink created
-	OpRepair                       // broken/wrong symlink replaced
-	OpAdopt                        // real file moved into repo + linked
-	OpConflict                     // real file exists; needs adoption or manual conflict resolution
-	OpDryLink                      // dry-run: would create
-	OpDryRepair                    // dry-run: would repair
-	OpDryAdopt                     // dry-run: would adopt
-	OpUnlink                       // symlink removed and replaced with a real file copy
-	OpUnlinkSkip                   // no managed symlink at target; nothing done
-	OpUnlinkConflict               // real (non-managed) file at target; conflict strategy applied
+	OpSkip OpKind = iota
+	OpLink
+	OpRepair
+	OpAdopt    // real file moved into repo + linked
+	OpConflict // real file exists; needs adoption or manual conflict resolution
+	OpDryLink
+	OpDryRepair
+	OpDryAdopt
+	OpUnlink // symlink removed and replaced with a real file copy
+	OpUnlinkSkip
+	OpUnlinkConflict // real (non-managed) file at target; conflict strategy applied
 )
 
 func (k OpKind) String() string {
@@ -60,22 +57,19 @@ func (k OpKind) String() string {
 	}
 }
 
-// ExpandPath expands env vars, then expands a supported tilde prefix.
 func ExpandPath(path string) (string, error) {
 	return ExpandTilde(os.ExpandEnv(path))
 }
 
-// Op records the outcome for a single file within a dots entry.
 type Op struct {
 	Kind  OpKind
-	Entry string // entry name
+	Entry string
 	File  string // relative path within the entry (e.g. "init.lua")
 	Src   string // absolute source path in repo
 	Dst   string // absolute target path in home
 	Err   error
 }
 
-// SyncProgressEvent describes progress for one resolved dots entry.
 type SyncProgressEvent struct {
 	Entry string
 	Index int
@@ -85,32 +79,22 @@ type SyncProgressEvent struct {
 	Ops   []Op
 }
 
-// SyncOptions configures the behaviour of DotsSync.
 type SyncOptions struct {
 	DryRun bool
-	// EntryOrder optionally names entries in the preferred sync/progress order.
 	// Entries not listed keep their relative order after the ordered entries.
 	EntryOrder               []string
 	SuppressUnchangedHistory bool
 	Progress                 func(SyncProgressEvent)
-	// ConflictStrategy forces resolution of conflicting entries that have no
-	// per-entry on_conflict policy: "use_repo" relinks the repo version over the
-	// local target, "use_local" adopts the local content into the repo. Empty
-	// keeps the default behaviour (sync errors on unresolved conflicts).
+	// For entries with no on_conflict policy: "use_repo" relinks, "use_local" adopts, empty errors.
 	ConflictStrategy string
 }
 
-// UnlinkOptions configures the behaviour of Manager.UnlinkAll.
 type UnlinkOptions struct {
-	// ConflictOverwrite, when true, causes real (non-managed) files at target
-	// paths to be moved to trash and replaced with the repo version. When false
-	// they are kept as-is (OpUnlinkConflict is emitted but no change is made).
+	// When true, real files at target paths are trashed and replaced with the repo version.
 	ConflictOverwrite bool
-	// KeepExistingLocal, when true, leaves real non-managed local files in
-	// place instead of treating them as unlink conflicts.
+	// When true, real non-managed local files are left alone rather than treated as conflicts.
 	KeepExistingLocal bool
-	// RemoveLocal removes local real targets via trash, or unlinks local
-	// symlinks, instead of materializing a copy from the repo source.
+	// Trashes or unlinks local targets instead of materializing a copy from the repo source.
 	RemoveLocal bool
 }
 
@@ -125,29 +109,21 @@ type ResolvedEntry struct {
 	OnConflict string   // automatic sync conflict policy: "", "use_repo", "use_local"
 }
 
-// Engine holds a resolved set of dot entries and the stow package root, and
-// carries out sync, conflict resolution, and unlink operations against them. It
-// is constructed per operation from an already-resolved entry set (the app
-// layer owns config→entries resolution) and an optional executor used for the
-// git/stow shell-outs that mutating operations require.
+// Engine — Built per operation from an already-resolved entry set; the app layer owns config to entries.
 type Engine struct {
 	RepoPath string
 	Entries  []ResolvedEntry
 	exec     executor.Executor
 }
 
-// EngineOption configures an Engine at construction time.
 type EngineOption func(*Engine)
 
-// WithExecutor supplies the executor the Engine uses for git/stow shell-outs.
-// Read-only construction (status, resolve-only callers) may omit it; mutating
-// operations such as Sync require it and error when it is absent.
+// WithExecutor — Optional for read-only construction; mutating operations error without it.
 func WithExecutor(exec executor.Executor) EngineOption {
 	return func(e *Engine) { e.exec = exec }
 }
 
-// ValidateEntryName rejects logical names that cannot also safely serve as the
-// default single stow package directory under the dots repo.
+// ValidateEntryName — A name must also work as the default single stow package directory under the dots repo.
 func ValidateEntryName(name string) error {
 	if name == "" {
 		return fmt.Errorf("dots: entry name is required")
@@ -161,9 +137,7 @@ func ValidateEntryName(name string) error {
 	return nil
 }
 
-// ValidateHomeTargetPath verifies that target's physical parent stays within
-// HOME. The final path component is deliberately not resolved so an existing
-// managed symlink can still be unlinked or replaced safely.
+// ValidateHomeTargetPath — Only the parent is resolved, so an existing managed symlink can still be unlinked or replaced.
 func ValidateHomeTargetPath(target string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -232,17 +206,7 @@ func resolveParentPreservingFinal(path string) (string, error) {
 	}
 }
 
-// NewEngine creates an Engine from a stow package root and a slice of DotEntry
-// values. repoPath is expanded (~ resolved). The root does not need to exist:
-// read-only status paths use the resolved source paths to report missing
-// packages without creating the stow content directory. Pass WithExecutor to
-// enable mutating operations.
-//
-// SourcePath for each entry is derived from the stow package tree convention:
-//
-//	<stow-root>/<package>/<rel-from-home>
-//
-// where rel-from-home is filepath.Rel($HOME, expanded(entry.Path)).
+// NewEngine — SourcePath follows the stow tree convention <stow-root>/<package>/<rel-from-$HOME>.
 func NewEngine(repoPath string, entries []config.DotEntry, opts ...EngineOption) (*Engine, error) {
 	expanded, err := ExpandPath(repoPath)
 	if err != nil {
@@ -299,9 +263,6 @@ func NewEngine(repoPath string, entries []config.DotEntry, opts ...EngineOption)
 	return e, nil
 }
 
-// UnlinkAll removes managed symlinks for all entries and replaces them with
-// real file copies sourced from the repo, leaving the user in a clean local
-// state after disabling dots management.
 func (e *Engine) UnlinkAll(opts UnlinkOptions) ([]Op, error) {
 	var all []Op
 	var failures unlinkFailures
@@ -333,7 +294,6 @@ func (f unlinkFailures) Error() string {
 	return "dots: unlink: " + strings.Join(parts, "; ")
 }
 
-// ExpandTilde replaces a leading "~" with the current user's home directory.
 func ExpandTilde(path string) (string, error) {
 	if !strings.HasPrefix(path, "~") {
 		return path, nil
@@ -347,8 +307,7 @@ func ExpandTilde(path string) (string, error) {
 	}
 	if len(path) > 1 {
 		if path[1] != '/' {
-			// Backslash is a path separator on Windows, but a legal filename char
-			// elsewhere. Keep "~\\foo" unsupported on non-Windows.
+			// Backslash is a legal filename char off Windows, so "~\\foo" stays unsupported there.
 			if runtime.GOOS != "windows" || path[1] != '\\' {
 				return path, nil
 			}

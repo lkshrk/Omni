@@ -9,7 +9,6 @@ import (
 	"strings"
 )
 
-// Target is one AI coding tool installation Omni can manage.
 type Target struct {
 	ID      string
 	Display string
@@ -22,10 +21,8 @@ type Target struct {
 	extraSkillsDirs []string
 }
 
-// Option configures capabilities on a Registry.
 type Option func(*Registry) error
 
-// WithMcpAdapters attaches MCP adapters to their canonical targets.
 func WithMcpAdapters(adapters []McpAdapter) Option {
 	return func(r *Registry) error {
 		for _, adapter := range adapters {
@@ -46,7 +43,6 @@ func WithMcpAdapters(adapters []McpAdapter) Option {
 	}
 }
 
-// WithDefaultMcpAdapters attaches Omni's production MCP adapters.
 func WithDefaultMcpAdapters(
 	execFn func(context.Context, string, ...string) (string, string, error),
 	lookupEnv func(string) (string, bool),
@@ -58,7 +54,6 @@ func WithDefaultMcpAdapters(
 	})
 }
 
-// WithPluginAdapters attaches plugin adapters to their canonical targets.
 func WithPluginAdapters(adapters []PluginAdapter) Option {
 	return func(r *Registry) error {
 		for _, adapter := range adapters {
@@ -79,7 +74,6 @@ func WithPluginAdapters(adapters []PluginAdapter) Option {
 	}
 }
 
-// WithDefaultPluginAdapters attaches Omni's production plugin adapters.
 func WithDefaultPluginAdapters(
 	execFn func(context.Context, string, ...string) (string, string, error),
 	lookupEnv func(string) (string, bool),
@@ -91,13 +85,11 @@ func WithDefaultPluginAdapters(
 	})
 }
 
-// Registry owns Omni's supported agent targets in their canonical order.
 type Registry struct {
 	targets []Target
 	byID    map[string]int
 }
 
-// NewRegistry returns the canonical agent target registry.
 func NewRegistry(opts ...Option) (*Registry, error) {
 	return newRegistry(supportedTargets, opts...)
 }
@@ -119,12 +111,10 @@ func newRegistry(targets []Target, opts ...Option) (*Registry, error) {
 	return r, nil
 }
 
-// All returns all supported targets in canonical order.
 func (r *Registry) All() []Target {
 	return slices.Clone(r.targets)
 }
 
-// ByID returns the supported target with id.
 func (r *Registry) ByID(id string) (Target, bool) {
 	i, ok := r.byID[id]
 	if !ok {
@@ -133,7 +123,6 @@ func (r *Registry) ByID(id string) (Target, bool) {
 	return r.targets[i], true
 }
 
-// McpAdapters returns attached MCP adapters in canonical target order.
 func (r *Registry) McpAdapters() []McpAdapter {
 	adapters := make([]McpAdapter, 0)
 	for _, target := range r.targets {
@@ -144,7 +133,6 @@ func (r *Registry) McpAdapters() []McpAdapter {
 	return adapters
 }
 
-// PluginAdapters returns attached plugin adapters in canonical target order.
 func (r *Registry) PluginAdapters() []PluginAdapter {
 	adapters := make([]PluginAdapter, 0)
 	for _, target := range r.targets {
@@ -155,7 +143,6 @@ func (r *Registry) PluginAdapters() []PluginAdapter {
 	return adapters
 }
 
-// ConfigDotCandidateNames returns catalog-owned direct children of ~/.config.
 func (r *Registry) ConfigDotCandidateNames() []string {
 	seen := make(map[string]struct{})
 	var names []string
@@ -173,7 +160,6 @@ func (r *Registry) ConfigDotCandidateNames() []string {
 	return names
 }
 
-// Installed returns detected targets in canonical order.
 func (r *Registry) Installed(home string) []Target {
 	shared := r.sharedConfigDirs()
 	installed := make([]Target, 0, len(r.targets))
@@ -201,7 +187,6 @@ func (r *Registry) Installed(home string) []Target {
 	return installed
 }
 
-// InstalledByID returns the installed target with id.
 func (r *Registry) InstalledByID(home, id string) (Target, bool) {
 	for _, target := range r.Installed(home) {
 		if target.ID == id {
@@ -234,8 +219,6 @@ func (t Target) configPath(home string) string {
 	return filepath.Join(home, t.configDir)
 }
 
-// HasAnySkill reports whether any named skill exists in a directory read by
-// the target.
 func (t Target) HasAnySkill(home string, names []string) bool {
 	dirs := []string{filepath.Join(t.configPath(home), "skills")}
 	for _, dir := range t.extraSkillsDirs {
@@ -264,9 +247,7 @@ func dirNonEmpty(path string) bool {
 	return err == nil && len(entries) > 0
 }
 
-// supportedTargets mirrors vercel-labs/skills "Supported Agents" (Global
-// Path, minus the trailing /skills). Project-only targets with no global path
-// are omitted. Targets that share a global dir are listed individually.
+// Project-only targets with no global path are omitted; targets sharing a global directory are listed individually.
 var supportedTargets = []Target{
 	{ID: "aider-desk", Display: "AiderDesk", configDir: ".aider-desk"},
 	{ID: "amp", Display: "Amp", configDir: ".config/agents"},

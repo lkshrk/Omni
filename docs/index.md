@@ -60,6 +60,7 @@ omni reconcile
 | Understand provider resolution | [Providers](providers.md) |
 | Manage tools | [Tools](tools.md) |
 | Manage dotfiles | [Dotfiles](dotfiles.md) |
+| Move off the old skills CLI | [Upgrading From CLI-Managed Skills](migrating-skills.md) |
 | Use the terminal UI | [TUI](tui.md) |
 | Script Omni | [CLI Reference](cli.md) and [Command Matrix](command-matrix.md) |
 | Follow operational procedures | [Runbooks](runbooks.md) |

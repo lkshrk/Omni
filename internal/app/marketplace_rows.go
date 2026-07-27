@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-// MarketplaceRow is a display row for the TUI marketplace chip.
 type MarketplaceRow struct {
 	Name           string
 	Source         string
@@ -16,9 +15,7 @@ type MarketplaceRow struct {
 	UpdatedAt      time.Time
 }
 
-// MarketplaceRows returns managed rows (from the manifest) with per-adapter
-// status, and unmanaged entries (from ListMarketplaces()) not present in the
-// manifest, keyed by agent ID. Mirrors PluginRows.
+// MarketplaceRows — Unmanaged entries come from ListMarketplaces keyed by agent ID. Mirrors PluginRows.
 func (a *App) MarketplaceRows(ctx context.Context) (managed []MarketplaceRow, unmanaged map[string][]InstalledMarketplace, err error) {
 	cfg, loadErr := a.loadConfig()
 	if loadErr != nil {

@@ -1,5 +1,4 @@
-# Real Grok integration: Omni persists headers through the pinned official CLI,
-# and `grok mcp doctor` emits them without login credentials.
+# Real Grok integration persists headers through the pinned CLI and verifies them without login credentials.
 # @requires: grok
 env HOME=$WORK/home
 mkdir $WORK/home
@@ -9,8 +8,9 @@ stdout 'captured header X-Grok-Probe'
 exec grok mcp list --json
 stdout '"X-Grok-Probe": "grok-wire-value"'
 
-exec omni-assert-grok-mcp-header settings-updated.json headers-grok X-Grok-Probe grok-updated-value
-stdout 'updated: grok/headers-grok'
+# Fresh stub URLs create identity drift resolved explicitly with --use-managed.
+exec omni-assert-grok-mcp-header settings-updated.json headers-grok X-Grok-Probe grok-updated-value resolve
+stdout 'reinstall headers-grok on grok'
 stdout 'captured header X-Grok-Probe'
 exec grok mcp list --json
 stdout '"X-Grok-Probe": "grok-updated-value"'

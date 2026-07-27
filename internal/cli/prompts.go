@@ -11,18 +11,12 @@ import (
 	textutil "github.com/lkshrk/omni/internal/text"
 )
 
-// stdinScanner is the shared line-oriented reader for all interactive prompts.
-// A single Scanner is used across the entire cli package so that buffering is
-// consistent — creating multiple Scanners on os.Stdin causes them to fight over
-// the same underlying stream.
+// One Scanner for the whole package: multiple Scanners on os.Stdin fight over the same buffered stream.
 var stdinScanner = bufio.NewScanner(os.Stdin)
 
 var stdinIsTerminal = defaultStdinIsTerminal
 
-// scanLine reads one line from the shared stdin scanner.
-// Returns ("", false) on EOF or scan error. Scanner errors (e.g. line longer
-// than bufio.MaxScanTokenSize) are reported to stderr so they are not silent;
-// callers still see ok=false and substitute their default value.
+// Scan errors go to stderr rather than staying silent; callers still see ok=false and substitute their default.
 func scanLine() (string, bool) {
 	if !stdinScanner.Scan() {
 		if err := stdinScanner.Err(); err != nil {
@@ -34,15 +28,11 @@ func scanLine() (string, bool) {
 }
 
 func defaultStdinIsTerminal() bool {
-	// term.IsTerminal, not a ModeCharDevice check: /dev/null is a char device
-	// but can never answer a prompt.
+	// term.IsTerminal, not ModeCharDevice: /dev/null is a char device but can never answer a prompt.
 	return term.IsTerminal(os.Stdin.Fd())
 }
 
-// readYesNo reads a single y/n keypress without requiring Enter.
-// Returns (answer, ok). ok is false on read error or non-terminal stdin,
-// in which case the caller should fall back to defaultVal.
-// When stdin is not a terminal, falls back to line-based reading.
+// Reads a single keypress without Enter, falling back to line-based reading when stdin is not a terminal.
 func readYesNo(defaultVal bool) (bool, bool) {
 	fd := os.Stdin.Fd()
 	if !term.IsTerminal(fd) {
@@ -105,9 +95,31 @@ func promptText(question, defaultVal string) (string, bool) {
 	return answer, true
 }
 
-// promptYesNo prints question to stdout and reads a single y/n keypress.
-// Returns defaultVal when the user presses Enter without typing anything.
-// When state.yes is set the prompt is skipped and answered "yes".
+// A bare Enter returns defaultVal, and state.yes skips the prompt entirely as a "yes".
+// promptYesNoFailClosed asks with defaultVal's hint but treats an unanswered prompt as "no", so a run
+// whose stdin holds an answer is honoured while one with nothing to read cannot fall through to yes.
+func promptYesNoFailClosed(state *rootState, question string, defaultVal bool) bool {
+	if state != nil && state.yes {
+		return true
+	}
+	hint := "[y/N]"
+	if defaultVal {
+		hint = "[Y/n]"
+	}
+	fmt.Fprintf(stdOut(), "%s %s ", question, hint)
+	yes, ok := readYesNo(defaultVal)
+	if !ok {
+		fmt.Fprintln(stdOut())
+		return false
+	}
+	if yes {
+		fmt.Fprintln(stdOut(), "y")
+	} else {
+		fmt.Fprintln(stdOut(), "n")
+	}
+	return yes
+}
+
 func promptYesNo(state *rootState, question string, defaultVal bool) bool {
 	if state != nil && state.yes {
 		return true
@@ -130,16 +142,12 @@ func promptYesNo(state *rootState, question string, defaultVal bool) bool {
 	return yes
 }
 
-// promptReassignClaimedTools offers to move freshly claimed tools out of the
-// machine hostname group. The user can move all to one group, choose per tool,
-// or skip (keep in machine group).
 func promptReassignClaimedTools(state *rootState, claimedNames []string) {
 	if len(claimedNames) == 0 {
 		return
 	}
 	if (state != nil && state.yes) || !stdinIsTerminal() {
-		// --yes runs are unattended even when a PTY is attached (e.g. coder
-		// startup scripts); a dangling prompt only reads as a hang in the log.
+		// --yes runs are unattended even with a PTY attached, where a dangling prompt only reads as a hang.
 		return
 	}
 	fmt.Fprintf(stdOut(), "\n%s added to machine group. Move to a different group?\n", textutil.PluralCount(len(claimedNames), "tool", "tools"))
@@ -193,8 +201,6 @@ func promptReassignClaimedTools(state *rootState, claimedNames []string) {
 	// "s", "skip", or anything else: keep in machine group.
 }
 
-// promptSatisfiedGroups checks result.SatisfiedGroups and for each one asks the
-// user whether to assign it to the active host.
 func promptSatisfiedGroups(state *rootState, activeHost string, satisfiedGroups []string, addGroupFn func(group string) error) {
 	if activeHost == "" || len(satisfiedGroups) == 0 {
 		return

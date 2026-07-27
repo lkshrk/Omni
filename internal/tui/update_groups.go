@@ -191,7 +191,7 @@ func (m *Model) cycleGroupToolsProvider(delta int) {
 		m.groupToolsProviderIdx = 0
 		return
 	}
-	count := len(providers) + 1 // all + providers
+	count := len(providers) + 1
 	m.groupToolsProviderIdx = (m.groupToolsProviderIdx + delta) % count
 	if m.groupToolsProviderIdx < 0 {
 		m.groupToolsProviderIdx += count
@@ -258,7 +258,7 @@ func (m *Model) saveGroupToolsEditor(cmds *[]tea.Cmd) {
 		m.closeGroupToolsEditor()
 		return
 	}
-	m.loading = true
+	m.beginLoading(loadingOwnerLocalOp)
 	startOp(m, "Updating tools for "+group+"…")
 	*cmds = append(*cmds, m.spinner.Tick, m.doSetGroupTools(group, membership, originalMembership, ignores, originalIgnores))
 	m.closeGroupToolsEditor()
@@ -270,7 +270,7 @@ func (m *Model) saveGroupDotsEditor(cmds *[]tea.Cmd) {
 		m.closeGroupDotsEditor()
 		return
 	}
-	m.loading = true
+	m.beginLoading(loadingOwnerLocalOp)
 	startOp(m, "Updating dotfiles for "+group+"…")
 	*cmds = append(*cmds, m.spinner.Tick, m.doSetGroupDots(group, membership, originalMembership))
 	m.closeGroupDotsEditor()
@@ -332,7 +332,7 @@ func (m *Model) handleHostSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 			m.groupCreating = false
 			m.settingsInput.Blur()
 			if newName != "" {
-				m.loading = true
+				m.beginLoading(loadingOwnerLocalOp)
 				startOp(m, "Creating group "+newName+"…")
 				cmds = append(cmds, m.spinner.Tick, m.doCreateGroup(newName))
 			}
@@ -490,7 +490,6 @@ func (m *Model) moveGroupsCursorUp() {
 		if m.hostCursor > 0 {
 			m.hostCursor--
 		} else {
-			// Wrap to bottom of groups section.
 			allGroupNames := buildAllGroupNames(m.groupNames)
 			if len(allGroupNames) > 0 {
 				m.assignmentSection = 1
@@ -527,7 +526,6 @@ func (m *Model) moveGroupsCursorDown() {
 		if m.groupCursor < len(allGroupNames)-1 {
 			m.groupCursor++
 		} else {
-			// Wrap to top of hosts section.
 			m.assignmentSection = 0
 			m.hostCursor = 0
 		}

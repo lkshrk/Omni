@@ -702,8 +702,7 @@ EOF
 
 db="$root/cache/omni.db"
 
-# Create DB schema (the old "omni providers" command doesn't exist; create
-# tables directly so the bootstrap-key INSERT below succeeds).
+# Create tables directly because the removed "omni providers" command cannot initialize the schema.
 sqlite3 "$db" <<'SCHEMA'
 CREATE TABLE IF NOT EXISTS tool_cache (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -881,7 +880,7 @@ VALUES
   (datetime('now', '-45 seconds'), datetime('now', '-44 seconds'), 95,
    'checking fallback pre-commit (uv)', 'uv tool list', 'success', 0, '', ''),
   (datetime('now', '-20 seconds'), datetime('now', '-19 seconds'), 140,
-   'restoring agent skills', 'npx skills add vercel-labs/agent-skills#main -g -y', 'success', 0, '', '');
+   'restoring agent skills', 'install vercel-labs/agent-skills at ref main for configured targets', 'success', 0, '', '');
 SQL
 
 echo "$root"

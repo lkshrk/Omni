@@ -1,10 +1,6 @@
 package tui
 
-// commands_test.go — additional coverage for uncovered tea.Cmd closures in
-// commands.go and the loadTools function in model.go.
-//
-// All tests call cmd() directly (the tea.Cmd closure) rather than driving the
-// model through the event loop. This keeps the tests fast and deterministic.
+// Tests call cmd() directly rather than driving the event loop, which keeps them fast and deterministic.
 
 import (
 	"context"
@@ -20,10 +16,7 @@ import (
 	"github.com/lkshrk/omni/internal/dots"
 )
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-// newCmdTestApp creates a minimal App backed by a real settings.json and the
-// given provider. Uses InitTestMode so no system PMs are probed.
+// Uses InitTestMode so no system package managers are probed.
 func newCmdTestApp(t *testing.T, prov ...interface{ Name() string }) *app.App {
 	t.Helper()
 	dir := t.TempDir()
@@ -40,15 +33,12 @@ func newCmdTestApp(t *testing.T, prov ...interface{ Name() string }) *app.App {
 	return a
 }
 
-// newCmdTestModel builds a Model wired to a fresh app in a temp dir.
-// Used by tests that need to call do* methods directly.
 func newCmdTestModel(t *testing.T) Model {
 	t.Helper()
 	a := newCmdTestApp(t)
 	return modelForCmds(a)
 }
 
-// newCmdTestModelWithProvider builds a Model using a stub provider.
 func newCmdTestModelWithProvider(t *testing.T, prov interface{}) Model {
 	t.Helper()
 	dir := t.TempDir()
@@ -58,8 +48,7 @@ func newCmdTestModelWithProvider(t *testing.T, prov interface{}) Model {
 	}
 	a := app.New(cfgPath)
 	a.CacheDir = dir
-	// Delegate to the lower-level InitTestMode with a provider so cmd stubs work.
-	// Use no-provider variant here — do* errors will surface via unknown-provider path.
+	// No-provider variant: do* errors surface via the unknown-provider path.
 	if err := a.InitTestMode(context.Background()); err != nil {
 		t.Fatalf("App.InitTestMode: %v", err)
 	}
@@ -67,10 +56,6 @@ func newCmdTestModelWithProvider(t *testing.T, prov interface{}) Model {
 	return modelForCmds(a)
 }
 
-// ── loadTools ─────────────────────────────────────────────────────────────────
-
-// TestLoadTools_HappyPath verifies that loadTools returns a toolsLoadedMsg with
-// no error when the App has a valid settings.json.
 func TestLoadTools_HappyPath(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -138,8 +123,6 @@ func TestLoadTools_IncludesCachedDotsState(t *testing.T) {
 	}
 }
 
-// TestLoadTools_NoConfig verifies that loadTools returns noConfig=true when
-// there is no settings.json file.
 func TestLoadTools_NoConfig(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -163,8 +146,6 @@ func TestLoadTools_NoConfig(t *testing.T) {
 	}
 }
 
-// TestLoadTools_WithGroups verifies that loadTools correctly populates
-// groupNames and toolGroups when there are config groups.
 func TestLoadTools_WithGroups(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -247,8 +228,6 @@ func TestLoadTools_GroupDisplayIsScopedToActiveHost(t *testing.T) {
 	}
 }
 
-// TestLoadTools_WithHost verifies that loadTools populates hostInfo when
-// a host entry is present.
 func TestLoadTools_WithHost(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -283,9 +262,6 @@ func TestLoadTools_WithHost(t *testing.T) {
 	}
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
-
-// TestModel_Init verifies that Init() returns a non-nil tea.Cmd without panicking.
 func TestModel_Init(t *testing.T) {
 	t.Parallel()
 	m := newCmdTestModel(t)
@@ -295,10 +271,7 @@ func TestModel_Init(t *testing.T) {
 	}
 }
 
-// ── doRefreshDescriptions ─────────────────────────────────────────────────────
-
-// TestDoRefreshDescriptions_HappyPath verifies that doRefreshDescriptions returns
-// a descRefreshDoneMsg when the app has no tools to describe (empty config).
+// The app has no tools to describe (empty config).
 func TestDoRefreshDescriptions_HappyPath(t *testing.T) {
 	t.Parallel()
 	m := newCmdTestModel(t)
@@ -312,9 +285,7 @@ func TestDoRefreshDescriptions_HappyPath(t *testing.T) {
 	}
 }
 
-// TestDoRefreshDescriptions_WithTools verifies that doRefreshDescriptions
-// returns a descRefreshDoneMsg even when the App has tools (no descriptions to fetch
-// in test env, so the refresh returns empty results gracefully).
+// No descriptions are fetchable in the test environment, so the refresh returns empty results gracefully.
 func TestDoRefreshDescriptions_WithTools(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -345,23 +316,17 @@ func TestDoRefreshDescriptions_WithTools(t *testing.T) {
 	}
 }
 
-// ── cancelSearch ──────────────────────────────────────────────────────────────
-
-// TestCancelSearch_NilCancel verifies that cancelSearch is safe to call when
-// searchCancel is nil (the common idle state).
+// A nil searchCancel is the common idle state.
 func TestCancelSearch_NilCancel(t *testing.T) {
 	t.Parallel()
 	m := newCmdTestModel(t)
 	m.searchCancel = nil
-	// Must not panic.
 	m.cancelSearch()
 	if m.searchCancel != nil {
 		t.Error("searchCancel should remain nil after cancelSearch with nil cancel")
 	}
 }
 
-// TestCancelSearch_NonNilCancel verifies that cancelSearch invokes and clears a
-// non-nil cancel function.
 func TestCancelSearch_NonNilCancel(t *testing.T) {
 	t.Parallel()
 	m := newCmdTestModel(t)
@@ -376,10 +341,6 @@ func TestCancelSearch_NonNilCancel(t *testing.T) {
 	}
 }
 
-// ── doSaveDisabledProviders ───────────────────────────────────────────────────
-
-// TestDoSaveDisabledProviders_HappyPath verifies that doSaveDisabledProviders
-// returns a setupProvidersDoneMsg with no error.
 func TestDoSaveDisabledProviders_HappyPath(t *testing.T) {
 	t.Parallel()
 	m := newCmdTestModel(t)
@@ -393,8 +354,7 @@ func TestDoSaveDisabledProviders_HappyPath(t *testing.T) {
 	}
 }
 
-// TestDoSaveDisabledProviders_Empty verifies that saving an empty slice (all
-// providers enabled) does not return an error.
+// An empty slice means all providers are enabled.
 func TestDoSaveDisabledProviders_Empty(t *testing.T) {
 	t.Parallel()
 	m := newCmdTestModel(t)
@@ -408,10 +368,7 @@ func TestDoSaveDisabledProviders_Empty(t *testing.T) {
 	}
 }
 
-// ── doSetupHost ────────────────────────────────────────────────────────────
-
-// TestDoSetupHost_HappyPath verifies that doSetupHost creates the
-// current host entry instead of reviving legacy host mappings.
+// doSetupHost must create the current host entry instead of reviving legacy host mappings.
 func TestDoSetupHost_HappyPath(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost.example")
 	m := newCmdTestModel(t)
@@ -447,8 +404,6 @@ func TestDoSetupHost_HappyPath(t *testing.T) {
 	}
 }
 
-// TestDoSetupHost_EmptyName verifies that doSetupHost surfaces an error
-// when passed an empty host name (app rejects blank names).
 func TestDoSetupHost_EmptyName(t *testing.T) {
 	t.Parallel()
 	m := newCmdTestModel(t)
@@ -457,8 +412,7 @@ func TestDoSetupHost_EmptyName(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected setupHostDoneMsg, got %T", msg)
 	}
-	// An empty host name is invalid; the app should return an error.
-	// If the app is lenient (returns no error), just confirm the message type.
+	// If the app is lenient and returns no error, only the message type is confirmed.
 	_ = got
 }
 
@@ -549,11 +503,7 @@ func TestDoSetupHostGroups_SavesCurrentHostGroups(t *testing.T) {
 	}
 }
 
-// ── doSetupDotsRepo ───────────────────────────────────────────────────────────
-
-// TestDoSetupDotsRepo_HappyPath verifies that doSetupDotsRepo saves the dots
-// repo path. The setup result handler decides whether onboarding should advance
-// to group selection or finish.
+// The setup result handler decides whether onboarding advances to group selection or finishes.
 func TestDoSetupDotsRepo_HappyPath(t *testing.T) {
 	repoDir := t.TempDir()
 	home := t.TempDir()
@@ -604,8 +554,7 @@ func findTUITestGroup(groups []*config.GroupConfig, name string) *config.GroupCo
 	return nil
 }
 
-// TestDoSetupDotsRepo_ErrorOnSave verifies that doSetupDotsRepo surfaces an
-// error without closing onboarding when the settings save fails.
+// A failed settings save must surface an error without closing onboarding.
 func TestDoSetupDotsRepo_ErrorOnSave(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -620,7 +569,6 @@ func TestDoSetupDotsRepo_ErrorOnSave(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = a.Close() })
 
-	// Make the config directory read-only so SaveSettings fails.
 	if err := os.Chmod(dir, 0o555); err != nil {
 		t.Skipf("cannot chmod directory: %v", err)
 	}
@@ -640,10 +588,7 @@ func TestDoSetupDotsRepo_ErrorOnSave(t *testing.T) {
 	}
 }
 
-// ── doUpgradeAll ─────────────────────────────────────────────────────────────
-
-// TestDoUpgradeAll_EmptyApp verifies that doUpgradeAll on an empty app
-// (no tools to upgrade) returns a progressDoneMsg with key="*" and no error.
+// An empty app returns progressDoneMsg with key="*" and no error.
 func TestDoUpgradeAll_EmptyApp(t *testing.T) {
 	t.Parallel()
 	m := newCmdTestModel(t)
@@ -662,16 +607,13 @@ func TestDoUpgradeAll_EmptyApp(t *testing.T) {
 	}
 }
 
-// TestDoUpgradeAll_ChannelClosed verifies that the channel is closed after
-// doUpgradeAll returns (so waitForProgress receives progressDoneMsg).
 func TestDoUpgradeAll_ChannelClosed(t *testing.T) {
 	t.Parallel()
 	m := newCmdTestModel(t)
 	ch := make(chan progressUpdate, 16)
 	m.progressCh = ch
 	_ = m.doUpgradeAll(ch, 1)()
-	// If the channel is still open this receive would block; the goroutine closes
-	// it via defer close(ch), so we should get the zero value with ok=false.
+	// The goroutine closes the channel via defer, so this receive yields the zero value with ok=false instead of blocking.
 	select {
 	case _, ok := <-ch:
 		if ok {
@@ -682,11 +624,7 @@ func TestDoUpgradeAll_ChannelClosed(t *testing.T) {
 	}
 }
 
-// ── doRefreshDiscovered error path ────────────────────────────────────────────
-
-// TestDoRefreshDiscovered_EmptyApp exercises the non-error path more completely:
-// with an empty DB and no providers that return discovered tools, it should
-// return a discoveredRefreshedMsg with nil discovered list and no error.
+// With an empty DB and no discovering providers, the msg carries a nil discovered list and no error.
 func TestDoRefreshDiscovered_EmptyApp(t *testing.T) {
 	t.Parallel()
 	m := newCmdTestModel(t)
@@ -698,17 +636,11 @@ func TestDoRefreshDiscovered_EmptyApp(t *testing.T) {
 	if got.gen != 4 {
 		t.Errorf("gen = %d, want 4", got.gen)
 	}
-	// With no providers that list installed tools, err should be nil and
-	// discovered should be empty (not nil-panicking).
 	if got.err != nil {
 		t.Errorf("unexpected error: %v", got.err)
 	}
 }
 
-// ── anyMissingDescription ─────────────────────────────────────────────────────
-
-// TestAnyMissingDescription_AllPresent verifies the false branch when every
-// tool has a valid description.
 func TestAnyMissingDescription_AllPresent(t *testing.T) {
 	t.Parallel()
 	from := func(desc string) *app.ToolView {
@@ -725,8 +657,6 @@ func TestAnyMissingDescription_AllPresent(t *testing.T) {
 	}
 }
 
-// TestAnyMissingDescription_OneMissing verifies the true branch when at least
-// one tool lacks a description.
 func TestAnyMissingDescription_OneMissing(t *testing.T) {
 	t.Parallel()
 	present := &app.ToolView{
@@ -741,7 +671,6 @@ func TestAnyMissingDescription_OneMissing(t *testing.T) {
 	}
 }
 
-// TestAnyMissingDescription_Empty verifies the false branch for an empty slice.
 func TestAnyMissingDescription_Empty(t *testing.T) {
 	t.Parallel()
 	if anyMissingDescription(nil) {

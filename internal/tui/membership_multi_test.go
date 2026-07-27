@@ -15,11 +15,7 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// TestSelectGroupMembership_MultiSelectInvariant verifies the item-membership
-// picker allows skills (an agent-kind) to belong to any number of groups,
-// including multiple reusable groups at once — only dots cap reusable
-// membership at one. "web" and "team" are reusable (in groupNames); "laptop"
-// is a host group.
+// Skills (an agent-kind) may belong to any number of groups including several reusable ones; only dots cap reusable membership at one.
 func TestSelectGroupMembership_MultiSelectInvariant(t *testing.T) {
 	t.Parallel()
 	m := &Model{
@@ -61,8 +57,6 @@ func TestSelectGroupMembership_MultiSelectInvariant(t *testing.T) {
 	}
 }
 
-// TestRenderGroupMembershipPicker_MarksEveryMember confirms the picker renders a
-// checkbox [x] on every group the item belongs to, not just one (multi-select).
 func TestRenderGroupMembershipPicker_MarksEveryMember(t *testing.T) {
 	t.Parallel()
 	m := baseModel(threeTools())
@@ -167,11 +161,7 @@ func TestGroupMembershipPopupTitle_AllItemKinds(t *testing.T) {
 	}
 }
 
-// TestSelectGroupMembership_InvariantAcrossItemKinds runs the same host+reusable
-// toggle for every item kind routed through the membership picker, since they
-// share selectGroupMembership but store drafts in per-kind maps. Only "dot"
-// caps reusable membership at one; the agent-kinds (mcp/plugin/marketplace)
-// are free multi-select and keep both reusable groups.
+// Every item kind shares selectGroupMembership but stores drafts in per-kind maps; only "dot" caps reusable membership at one.
 func TestSelectGroupMembership_InvariantAcrossItemKinds(t *testing.T) {
 	t.Parallel()
 	kinds := []struct {
@@ -217,9 +207,6 @@ func TestSelectGroupMembership_InvariantAcrossItemKinds(t *testing.T) {
 	}
 }
 
-// membershipToggleTestModel returns a Model configured for the given
-// pickerMembershipKind with an empty membership seed for item "x", following
-// the same construction style as the other tests in this file.
 func membershipToggleTestModel(t *testing.T, kind string) *Model {
 	t.Helper()
 	m := baseModel(nil)
@@ -275,21 +262,8 @@ func TestSelectGroupMembership_DotEvictsSecondReusable(t *testing.T) {
 	}
 }
 
-// ── end-to-end open→toggle→save round trips ─────────────────────────────────
-//
-// The tests below drive the membership picker the way a user would: seed the
-// picker's draft state the same way the open* helpers in
-// update_group_picker.go do, toggle groups via selectGroupMembership (the
-// Space-key handler), then run the real save command
-// (saveGroupMembershipPicker) against a live *app.App + on-disk config and
-// verify the persisted result — proving the whole round trip, not just one
-// toggle in memory.
+// These drive the picker as a user would: seed the draft like the open* helpers, toggle via selectGroupMembership, then run the real save against a live app and on-disk config.
 
-// TestFlow_AgentsSkillMembership_FreeMultiToggleSavesBothGroups drives the
-// membership picker for a skill package (an agent-kind) through opening,
-// toggling two reusable groups, and saving, then asserts the persisted
-// config has the skill in BOTH reusable groups. This is the end-to-end proof
-// that agent-kinds can multi-select (the bug being closed).
 func TestFlow_AgentsSkillMembership_FreeMultiToggleSavesBothGroups(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "laptop")
 	a := newScanPlanTestApp(t)
@@ -299,10 +273,7 @@ func TestFlow_AgentsSkillMembership_FreeMultiToggleSavesBothGroups(t *testing.T)
 	if err := a.CreateGroup("base"); err != nil {
 		t.Fatalf("CreateGroup(base): %v", err)
 	}
-	// Skill visibility is filtered by the current host's active groups
-	// (resolveSkillPackages), independent of the picker's own host wiring —
-	// put both reusable groups on the active host so the refreshed row after
-	// save is actually visible to this test's "machine".
+	// Skill visibility is filtered by the host's active groups, so put both reusable groups on the active host or the refreshed row is not visible here.
 	if err := a.SetHostGroups("laptop", []string{"work", "base"}); err != nil {
 		t.Fatalf("SetHostGroups: %v", err)
 	}
@@ -315,15 +286,13 @@ func TestFlow_AgentsSkillMembership_FreeMultiToggleSavesBothGroups(t *testing.T)
 	m.app = a
 	m.ctx = context.Background()
 
-	// Mirrors openSkillGroupMembershipPicker: seed the draft with the item's
-	// current (empty) memberships and the picker's candidate group list.
+	// Mirrors openSkillGroupMembershipPicker: seed the draft with the item's current memberships and the picker's candidate group list.
 	m.pickerMembershipKind = pickerMembershipSkill
 	m.pickerMembershipName = source
 	m.pickerOriginalGroups = nil
 	m.skillsMemberships = map[string][]string{source: {}}
 	m.pickerGroups = []string{"work", "base"}
 
-	// User presses Space on "work", then Space on "base".
 	m.pickerCursor = 0
 	m.selectGroupMembership()
 	m.pickerCursor = 1
@@ -333,7 +302,6 @@ func TestFlow_AgentsSkillMembership_FreeMultiToggleSavesBothGroups(t *testing.T)
 		t.Fatalf("draft memberships before save = %v, want [work base]", got)
 	}
 
-	// User presses Enter: run the real save command against the live app.
 	var cmds []tea.Cmd
 	m.saveGroupMembershipPicker(&cmds)
 	if len(cmds) == 0 {
@@ -364,11 +332,6 @@ func TestFlow_AgentsSkillMembership_FreeMultiToggleSavesBothGroups(t *testing.T)
 	}
 }
 
-// TestFlow_ToolsMembership_FreeMultiToggleSavesBothReusableGroups drives the
-// membership picker for a tool through opening, toggling two reusable
-// groups, and saving, then reloads the on-disk config to assert the tool
-// ended up a member of BOTH reusable groups (tools are free multi-select,
-// like the agent-kinds).
 func TestFlow_ToolsMembership_FreeMultiToggleSavesBothReusableGroups(t *testing.T) {
 	t.Parallel()
 	prov := &okProvider{name: "brew"}
@@ -383,8 +346,7 @@ func TestFlow_ToolsMembership_FreeMultiToggleSavesBothReusableGroups(t *testing.
 	m := modelForCmds(a)
 	key := toolKey("ripgrep", "brew")
 
-	// Mirrors openGroupMembershipPicker: seed the draft with the tool's
-	// current (empty) memberships and the picker's candidate group list.
+	// Mirrors openGroupMembershipPicker: seed the draft with the tool's current memberships and the picker's candidate group list.
 	m.pickerMembershipKind = pickerMembershipTool
 	m.pickerMembershipName = "ripgrep"
 	m.pickerMembershipKey = key
@@ -392,7 +354,6 @@ func TestFlow_ToolsMembership_FreeMultiToggleSavesBothReusableGroups(t *testing.
 	m.toolMemberships = map[string][]string{key: {}}
 	m.pickerGroups = []string{"work", "base"}
 
-	// User presses Space on "work", then Space on "base".
 	m.pickerCursor = 0
 	m.selectGroupMembership()
 	m.pickerCursor = 1
@@ -402,7 +363,6 @@ func TestFlow_ToolsMembership_FreeMultiToggleSavesBothReusableGroups(t *testing.
 		t.Fatalf("draft memberships before save = %v, want [work base]", got)
 	}
 
-	// User presses Enter: run the real save command against the live app.
 	var cmds []tea.Cmd
 	m.saveGroupMembershipPicker(&cmds)
 	if len(cmds) == 0 {
@@ -431,11 +391,6 @@ func TestFlow_ToolsMembership_FreeMultiToggleSavesBothReusableGroups(t *testing.
 	}
 }
 
-// TestFlow_DotsMembership_SecondReusableReplacesFirstOnSave drives the
-// membership picker for a dot already in one reusable group ("work") through
-// opening, toggling a second reusable group ("base") on, and saving, then
-// reloads the on-disk config to assert the dot ends up with exactly ONE
-// reusable group (the second replaced the first) plus its host group.
 func TestFlow_DotsMembership_SecondReusableReplacesFirstOnSave(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "laptop.local")
 	cfgDir := t.TempDir()
@@ -471,8 +426,7 @@ func TestFlow_DotsMembership_SecondReusableReplacesFirstOnSave(t *testing.T) {
 	m.settings = config.Settings{DotsRepo: repoDir}
 	m.hostInfo, _ = a.HostStatus()
 
-	// Mirrors openDotGroupMembershipPicker-style seeding: the dot starts a
-	// member of its host group plus one reusable group ("work").
+	// The dot starts a member of its host group plus one reusable group ("work").
 	m.pickerMembershipKind = pickerMembershipDot
 	m.pickerMembershipName = "nvim"
 	m.pickerOriginalGroups = []string{"laptop", "work"}
@@ -488,7 +442,6 @@ func TestFlow_DotsMembership_SecondReusableReplacesFirstOnSave(t *testing.T) {
 		t.Fatalf("draft memberships before save = %v, want [laptop base] (work evicted)", got)
 	}
 
-	// User presses Enter: run the real save command against the live app.
 	m.beginDotsOperation("Updating groups for nvim…")
 	var cmds []tea.Cmd
 	m.saveGroupMembershipPicker(&cmds)

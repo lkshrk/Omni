@@ -33,11 +33,7 @@ type cachedMarketplaceRows struct {
 	Unmanaged map[string][]InstalledMarketplace
 }
 
-// CachedAgentsRows is the last successfully loaded agents-tab row state,
-// persisted per section so the TUI can render it at launch while the live
-// adapter CLI refresh runs. A section's Loaded flag is false only when no
-// cache row exists yet (first run) — zero rows with Loaded true means the
-// last real load was genuinely empty.
+// CachedAgentsRows — Loaded false means no cache row exists yet; zero rows with Loaded true was a genuinely empty load.
 type CachedAgentsRows struct {
 	Skills                []SkillPackageRow
 	SkillsUnmanaged       []SkillPackageRow
@@ -53,10 +49,7 @@ type CachedAgentsRows struct {
 	MarketplacesLoaded    bool
 }
 
-// cacheAgentsRowsSectionBestEffort persists one section without ever failing
-// the caller: the cache is a render-only launch optimization, and a failed
-// write must not discard the authoritative live listing it snapshots — the
-// worst outcome of a lost write is one slower launch.
+// Best-effort: a failed cache write must not discard the live listing it snapshots.
 func (a *App) cacheAgentsRowsSectionBestEffort(ctx context.Context, key string, payload any) {
 	// Documented no-op on error, per the rationale above.
 	_ = a.cacheAgentsRowsSection(ctx, key, payload)
@@ -77,10 +70,7 @@ func (a *App) cacheAgentsRowsSection(ctx context.Context, key string, payload an
 	return nil
 }
 
-// loadAgentsRowsSection unmarshals one cached section into out. A missing row
-// or undecodable payload (stale schema after an upgrade) is treated as
-// cache-absent rather than an error: this is a render cache, and failing the
-// whole startup snapshot over it would block the launch it exists to speed up.
+// A missing or undecodable payload counts as cache-absent: a render cache must not fail startup.
 func loadAgentsRowsSection(ctx context.Context, a *App, key string, out any) bool {
 	db := a.readDB()
 	if db == nil {
@@ -93,9 +83,7 @@ func loadAgentsRowsSection(ctx context.Context, a *App, key string, out any) boo
 	return json.Unmarshal([]byte(value), out) == nil
 }
 
-// CachedAgentsRows loads every cached agents-tab section. Sections without a
-// valid cache come back empty with Loaded false; the call itself only touches
-// the local DB and never shells out to agent CLIs.
+// CachedAgentsRows — Local DB only; never shells out to agent CLIs.
 func (a *App) CachedAgentsRows(ctx context.Context) (*CachedAgentsRows, error) {
 	out := &CachedAgentsRows{}
 	var skills cachedSkillRows
@@ -125,9 +113,7 @@ func (a *App) CachedAgentsRows(ctx context.Context) (*CachedAgentsRows, error) {
 	return out, nil
 }
 
-// SkillPackageRowState returns managed and unmanaged skill package rows in
-// one call and refreshes their cache section, so TUI loaders get caching for
-// free. The cache write is best-effort and never fails the returned rows.
+// SkillPackageRowState — The cache write is best-effort and never fails the returned rows.
 func (a *App) SkillPackageRowState(ctx context.Context) (rows, unmanaged []SkillPackageRow, err error) {
 	rows, err = a.SkillPackageRows(ctx)
 	if err != nil {

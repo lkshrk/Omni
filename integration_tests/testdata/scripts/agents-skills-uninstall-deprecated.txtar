@@ -1,0 +1,31 @@
+# The deprecated uninstall spelling still removes target links and unreferenced
+# shared content while leaving the desired-state manifest untouched.
+env HOME=$WORK/home
+env XDG_DATA_HOME=$WORK/data
+
+exec omni --config settings.json agents skills sync
+stdout '^1 installed, 0 failed$'
+exists $WORK/home/.codex/skills/myskill/SKILL.md
+
+exec omni --config settings.json agents skills uninstall ./source
+stdout 'uninstalled ./source'
+stderr 'is deprecated; use "agents skills remove --purge"'
+! exists $WORK/home/.codex/skills/myskill
+grep '"source":"./source"' settings.json
+
+exec omni --config settings.json agents skills sync --dry-run
+stdout '^install ./source all discovered skills for targets codex$'
+
+! exec omni --config settings.json agents skills uninstall ./missing
+stderr 'skill package ".*/missing" is not installed'
+
+-- settings.json --
+{"version":20,"settings":{"agents_use":["codex"]},"agents":{"packages":[{"source":"./source"}]}}
+
+-- source/skills/myskill/SKILL.md --
+---
+name: myskill
+description: Native uninstall test.
+---
+
+myskill

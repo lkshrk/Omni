@@ -1,7 +1,4 @@
-// Package node implements the Node.js provider.
-// Installs are delegated to whichever JS package manager is available
-// (pnpm preferred, then npm). The active manager can be pinned via
-// settings.ecosystems.node.manager in the config file.
+// Package node delegates to bun, then pnpm, then npm; pinnable via settings.ecosystems.node.manager.
 package node
 
 import (
@@ -20,7 +17,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// mgr holds the command shape for one JS package manager.
 type mgr struct {
 	binary               string
 	install              []string // global install args — package name appended by caller
@@ -89,7 +85,6 @@ func defaultRegistryURL() string {
 	return "https://registry.npmjs.org"
 }
 
-// newWithRegistry creates a Provider with a custom registry URL and HTTP client.
 // Intended for use in tests only.
 func newWithRegistry(exec executor.Executor, hint, registryURL string, client *http.Client) *Provider {
 	return &Provider{exec: exec, hint: hint, httpClient: client, registryURL: registryURL}
@@ -100,7 +95,6 @@ func (p *Provider) Description() string {
 	return "Node.js packages via npm registry (bun · pnpm · npm)"
 }
 
-// resolve returns the active manager, honouring hint if set.
 func (p *Provider) resolve(ctx context.Context) (*mgr, error) {
 	if p.hint != "" {
 		for i := range supported {
@@ -126,8 +120,7 @@ func (p *Provider) Available(ctx context.Context) (bool, error) {
 	return err == nil, nil
 }
 
-// ResolvedName implements provider.ConcreteResolver.
-// Returns the binary name of the active manager ("bun", "pnpm", or "npm").
+// ResolvedName — Returns the binary name of the active manager ("bun", "pnpm", or "npm").
 func (p *Provider) ResolvedName(ctx context.Context) (string, error) {
 	m, err := p.resolve(ctx)
 	if err != nil {
@@ -144,7 +137,6 @@ func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	return p.installWith(ctx, tool, m)
 }
 
-// InstallWithManager installs a package using the selected concrete manager.
 func (p *Provider) InstallWithManager(ctx context.Context, tool provider.Tool, manager string) error {
 	m := managerByName(manager)
 	if m == nil {
@@ -170,7 +162,6 @@ func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 	return p.uninstallWith(ctx, tool, m)
 }
 
-// UninstallFrom uninstalls a package using the selected concrete manager.
 func (p *Provider) UninstallFrom(ctx context.Context, tool provider.Tool, manager string) error {
 	m := managerByName(manager)
 	if m == nil {
@@ -196,7 +187,6 @@ func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	return p.upgradeWith(ctx, tool, m)
 }
 
-// UpgradeWithManager upgrades a package using the concrete manager that owns it.
 func (p *Provider) UpgradeWithManager(ctx context.Context, tool provider.Tool, manager string) error {
 	m := managerByName(manager)
 	if m == nil {
@@ -242,7 +232,6 @@ func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, s
 	return p.isInstalledWith(ctx, tool, m)
 }
 
-// IsInstalledWithManager checks package status using a specific concrete manager.
 func (p *Provider) IsInstalledWithManager(ctx context.Context, tool provider.Tool, manager string) (bool, string, error) {
 	m := managerByName(manager)
 	if m == nil {
@@ -266,7 +255,6 @@ func (p *Provider) isInstalledWith(ctx context.Context, tool provider.Tool, m *m
 }
 
 func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool, error) {
-	// Ensure at least one manager is available.
 	if _, err := p.resolve(ctx); err != nil {
 		return nil, err
 	}
@@ -284,9 +272,7 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 	return tools, nil
 }
 
-// InstalledMap returns all globally installed packages as lowercase-name→version.
-// Uses only the effective manager (implements provider.BulkChecker).
-// For cross-manager attribution use InstalledByManager instead.
+// InstalledMap — Lowercase-name to version for the effective manager only; use InstalledByManager for attribution.
 func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) {
 	m, err := p.resolve(ctx)
 	if err != nil {
@@ -309,10 +295,7 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 	return result, nil
 }
 
-// InstalledByManager implements provider.MultiManagerBulkChecker.
-// Probes every available manager (bun, pnpm, npm) and returns per-tool attribution.
-// The effective manager (from resolve()) is probed first so it takes priority when
-// the same tool appears in multiple environments; remaining managers fill in the rest.
+// InstalledByManager — The effective manager is probed first so it wins when a tool exists under several managers.
 func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.InstalledEntry, error) {
 	var effectiveBinary string
 	if m, err := p.resolve(ctx); err == nil {
@@ -321,7 +304,6 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 
 	result := make(map[string]provider.InstalledEntry)
 
-	// probeManager fetches the global package list for m and adds entries to result.
 	// First writer wins: caller controls priority by ordering calls.
 	probeManager := func(m *mgr) error {
 		if _, _, err := p.exec.Run(ctx, m.binary, "--version"); err != nil {
@@ -347,7 +329,6 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 		return nil
 	}
 
-	// Effective manager first (highest priority).
 	for i := range supported {
 		if supported[i].binary == effectiveBinary {
 			if err := probeManager(&supported[i]); err != nil {
@@ -356,10 +337,7 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 			break
 		}
 	}
-	// Remaining managers fill in tools not owned by the effective manager.
-	// A fill-in manager that fails to list (e.g. pnpm's global bin dir not in
-	// PATH → exit 1) must not abort detection: skip it and keep the effective
-	// manager's attribution plus whatever other backends report.
+	// A fill-in manager that fails to list (pnpm's global bin dir off PATH exits 1) must not abort detection.
 	for i := range supported {
 		if supported[i].binary != effectiveBinary {
 			if err := probeManager(&supported[i]); err != nil {
@@ -371,8 +349,7 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 	return result, nil
 }
 
-// isEmptyGlobalListError reports whether err is the benign exit status 1 some
-// package managers use when the global install dir is empty (bun, pnpm).
+// bun and pnpm exit 1 on an empty global install dir; that is benign, not a failure.
 func isEmptyGlobalListError(err error) bool {
 	if err == nil {
 		return false
@@ -390,10 +367,7 @@ type npmOutdatedEntry struct {
 	Latest string `json:"latest"`
 }
 
-// OutdatedMap returns lowercase package name → latest version for outdated globals.
-// It probes every available manager so tools installed outside the active
-// manager still get update status. npm/pnpm exit 1 when outdated packages
-// exist, so stdout is parsed regardless of the process error.
+// OutdatedMap — Probes every manager; npm/pnpm exit 1 when anything is outdated, so stdout is parsed regardless of the error.
 func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	byManager, err := p.OutdatedByManager(ctx)
 	if err != nil {
@@ -413,8 +387,7 @@ func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	return result, nil
 }
 
-// OutdatedByManager probes every available manager and preserves manager
-// attribution for callers that need to update cache rows by InstalledWith.
+// OutdatedByManager — Preserves manager attribution for callers updating cache rows by InstalledWith.
 func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string]string, error) {
 	effective, err := p.resolve(ctx)
 	if err != nil {
@@ -445,8 +418,7 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 			probe(&supported[i])
 		}
 	}
-	// Any available manager that fails makes the aggregate incomplete. Return the
-	// error so callers preserve prior state instead of clearing omitted tools.
+	// One failing manager makes the aggregate incomplete; error out so callers keep prior state.
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)
 	}
@@ -456,8 +428,7 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 	return nil, nil
 }
 
-// OutdatedInfoMap returns outdated package versions plus npm registry
-// publish timestamps when available.
+// OutdatedInfoMap — Enriches outdated versions with npm registry publish timestamps when available.
 func (p *Provider) OutdatedInfoMap(ctx context.Context) (map[string]provider.OutdatedInfo, error) {
 	byManager, err := p.OutdatedInfoByManager(ctx)
 	if err != nil {
@@ -477,8 +448,7 @@ func (p *Provider) OutdatedInfoMap(ctx context.Context) (map[string]provider.Out
 	return result, nil
 }
 
-// OutdatedInfoByManager preserves concrete manager attribution and enriches
-// latest versions with npm registry time[version] metadata.
+// OutdatedInfoByManager — Preserves manager attribution and adds npm registry time[version] metadata.
 func (p *Provider) OutdatedInfoByManager(ctx context.Context) (map[string]map[string]provider.OutdatedInfo, error) {
 	byManager, err := p.OutdatedByManager(ctx)
 	if err != nil {
@@ -688,7 +658,6 @@ func readmeIntro(readme string) string {
 	return strings.TrimSpace(strings.Join(paragraph, " "))
 }
 
-// parseVersion finds "pkg@version" in `list -g <pkg> --depth=0` output.
 // Both npm and pnpm emit tree-format lines: "├── typescript@5.3.3"
 func parseVersion(output, pkg string) string {
 	for _, line := range strings.Split(output, "\n") {
@@ -700,9 +669,7 @@ func parseVersion(output, pkg string) string {
 	return ""
 }
 
-// parseListLine extracts (name, version) from one `list -g --depth=0` line.
-// Scoped packages "@scope/pkg@version" → ("@scope/pkg", "version") require
-// splitting on the last "@" rather than the first.
+// Scoped packages force splitting on the last "@", not the first.
 func parseListLine(line string) (name, version string) {
 	line = stripTopLevelTreePrefix(line)
 	if line == "" {
@@ -718,9 +685,7 @@ func parseListLine(line string) (name, version string) {
 	return line[:idx], line[idx+1:]
 }
 
-// stripTopLevelTreePrefix removes npm/pnpm tree prefixes only from root-level
-// package rows. Indented rows are dependencies of a listed package, not global
-// tools, and must be ignored.
+// Root-level rows only: indented rows are dependencies of a listed package, not global tools.
 func stripTopLevelTreePrefix(line string) string {
 	line = strings.TrimRight(line, " \t\r")
 	for _, prefix := range []string{"├── ", "└── ", "+-- ", "`-- "} {

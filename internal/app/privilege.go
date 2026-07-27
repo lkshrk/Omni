@@ -248,14 +248,7 @@ func isPrivilegedInstallFailure(message string) bool {
 	return ok && plan.RequiresPrivilege()
 }
 
-// privilegePlanFromRowError is the single classifier for whether a stored or
-// serialized error message indicates a privilege requirement. It is a superset
-// of every prior ad-hoc keyword check: the "requires X:" wire prefix (with its
-// specific reason), the package-manager markers, provider.ClassifyPrivilegeError
-// (raw external stderr), and the bare "requires sudo/root/admin"/"administrator"
-// wire phrases. Callers must route through this rather than re-matching keywords,
-// so the lists cannot drift and a dropped phrase can't silently skip a sudo
-// prompt.
+// The single classifier: callers must route through it so the keyword lists cannot drift.
 func privilegePlanFromRowError(message string) (provider.PrivilegePlan, bool) {
 	message = strings.TrimSpace(message)
 	if reason := privilegeReasonFromRowError(message); reason != "" {
@@ -264,9 +257,7 @@ func privilegePlanFromRowError(message string) (provider.PrivilegePlan, bool) {
 	if plan, ok := provider.ClassifyPrivilegeError(errors.New(message)); ok {
 		return plan, true
 	}
-	// Bare omni wire phrases carrying no ":" reason suffix (e.g. an event message
-	// "install requires root"). ClassifyPrivilegeError targets raw package-manager
-	// stderr and misses these, so catch them here.
+	// ClassifyPrivilegeError targets raw package-manager stderr and misses the bare omni wire phrases.
 	lower := strings.ToLower(message)
 	for _, phrase := range []string{"requires sudo", "requires root", "requires admin", "administrator"} {
 		if strings.Contains(lower, phrase) {
@@ -391,11 +382,7 @@ func (a *App) PrivilegedToolCommand(ctx context.Context, view *ToolView, action 
 	}
 	command, args := rawCmd, append([]string(nil), rawArgs...)
 	if concrete != "brew" {
-		// The package name and option values originate from settings.json, which
-		// may be git-synced from a less-trusted source. Refuse to build a sudo
-		// escalation when either looks like an injected flag rather than a
-		// package identifier — a legitimate package/option value never leads
-		// with "-".
+		// settings.json may be git-synced from a less-trusted source, and a legitimate package or option value never leads with "-".
 		if configTokenLooksLikeFlag(pkg, t.Options) {
 			return PrivilegedToolCommand{}, false
 		}
@@ -448,10 +435,7 @@ func brewCaskMayPromptForPassword(plan provider.PrivilegePlan) bool {
 			strings.Contains(reason, "launchctl"))
 }
 
-// configTokenLooksLikeFlag reports whether an untrusted, config-sourced token
-// (a package name or option value from settings.json) could be misparsed as a
-// command-line flag when spliced into a privileged invocation. Legitimate
-// package names and option values never begin with "-".
+// Legitimate package names and option values never begin with "-".
 func configTokenLooksLikeFlag(pkg string, options map[string]string) bool {
 	if strings.HasPrefix(strings.TrimSpace(pkg), "-") {
 		return true
@@ -464,12 +448,7 @@ func configTokenLooksLikeFlag(pkg string, options map[string]string) bool {
 	return false
 }
 
-// privilegedCommandAllowlist is the set of package-manager binaries omni will
-// escalate with sudo. Restricting the escalation to known managers is defense in
-// depth against the thin trust boundary around a git-synced settings.json: the
-// command reaching this path is built by a provider, but a future or compromised
-// provider returning an unexpected binary must never be silently run as root.
-// (brew never reaches here — it is handled without sudo by the caller.)
+// Defense in depth around a git-synced settings.json: a provider returning an unexpected binary must never run as root.
 var privilegedCommandAllowlist = map[string]bool{
 	"apk":     true,
 	"apt-get": true,
@@ -478,9 +457,7 @@ var privilegedCommandAllowlist = map[string]bool{
 	"zypper":  true,
 }
 
-// interactivePrivilegedCommand wraps cmd for privileged execution, returning
-// ok=false when cmd is not an allow-listed package manager. Callers must treat
-// ok=false as "refuse to run" rather than falling back to the raw command.
+// Callers must treat ok=false as refuse-to-run rather than falling back to the raw command.
 func interactivePrivilegedCommand(cmd string, args ...string) (string, []string, bool) {
 	if !privilegedCommandAllowlist[cmd] {
 		return "", nil, false
@@ -518,9 +495,7 @@ type CompleteExternalToolActionStateResult struct {
 	GroupState *ToolGroupState
 }
 
-// CompleteExternalToolAction reconciles app state after a lifecycle action was
-// run outside the normal provider executor, for example by a TUI-owned terminal
-// session that can answer sudo prompts.
+// CompleteExternalToolAction — For a lifecycle action run outside the normal provider executor, e.g. a TUI terminal that can answer sudo prompts.
 func (a *App) CompleteExternalToolAction(ctx context.Context, action provider.PrivilegeAction, name, providerName, pkg, installedWith string) error {
 	return a.completeExternalToolAction(ctx, CompleteExternalToolActionOptions{
 		Action:        action,

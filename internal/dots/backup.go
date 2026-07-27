@@ -22,8 +22,7 @@ func backupExec(exec executor.Executor) executor.Executor {
 	return executor.New()
 }
 
-// BackupLocalPath copies path into ~/dotfiles.bkp before callers mutate the
-// live target. The backup path mirrors the target's home-relative path.
+// BackupLocalPath — Copies into ~/dotfiles.bkp, mirroring the target's home-relative path.
 func BackupLocalPath(path string) (string, error) {
 	return BackupLocalPathWithExecutor(context.Background(), nil, path)
 }
@@ -32,18 +31,15 @@ func BackupLocalPathWithExecutor(ctx context.Context, exec executor.Executor, pa
 	return BackupLocalPathFromWithExecutor(ctx, exec, path, path)
 }
 
-// BackupLocalPathFilteredWithExecutor copies path into the backup destination
-// while skipping paths matched by ignores (entry-root-anchored patterns plus
-// the built-in defaults). Use it only when the mutation being guarded leaves
-// ignored paths untouched in place; destructive flows that remove the whole
-// target must keep taking full backups.
+// BackupLocalPathFilteredWithExecutor — Only for mutations that leave ignored paths in place; destructive flows must take full backups.
 func BackupLocalPathFilteredWithExecutor(ctx context.Context, exec executor.Executor, path string, ignores []string) (string, error) {
+	if ignores == nil {
+		ignores = []string{}
+	}
 	return backupLocalPathFrom(ctx, exec, path, path, ignores)
 }
 
-// BackupLocalPathFrom copies source into the backup destination derived from
-// path. Use this when path is a managed symlink but the durable safety copy
-// should contain the linked repo content before that repo content is removed.
+// BackupLocalPathFrom — For a managed symlink whose safety copy must hold the linked repo content before that content is removed.
 func BackupLocalPathFrom(path, source string) (string, error) {
 	return BackupLocalPathFromWithExecutor(context.Background(), nil, path, source)
 }
@@ -67,10 +63,7 @@ func backupLocalPathFrom(ctx context.Context, exec executor.Executor, path, sour
 	return dst, nil
 }
 
-// BackupAndRemoveLocalPath creates a backup, then moves path to the user's
-// trash. Symlinks are only unlinked because their targets are not local data
-// owned by the link path. If path is already absent it is a no-op, but if a
-// real target exists without a readable backup, removal is refused.
+// BackupAndRemoveLocalPath — Symlinks are only unlinked; a real target without a readable backup is refused rather than removed.
 func BackupAndRemoveLocalPath(path string) (string, error) {
 	return BackupAndRemoveLocalPathWithExecutor(context.Background(), nil, path)
 }
@@ -97,10 +90,7 @@ func BackupAndRemoveLocalPathWithExecutor(ctx context.Context, exec executor.Exe
 	return backupPath, nil
 }
 
-// RemoveLocalPathAfterBackup moves path to trash only after proving backupPath
-// exists. Symlinks are unlinked without a backup because unlinking the link does
-// not delete the target data. This is the guard for flows that must copy local
-// content elsewhere before replacement, such as "use local" conflict resolution.
+// RemoveLocalPathAfterBackup — Trashes path only once backupPath is proven to exist; symlinks need no backup.
 func RemoveLocalPathAfterBackup(path, backupPath string) error {
 	return RemoveLocalPathAfterBackupWithExecutor(context.Background(), nil, path, backupPath)
 }
@@ -135,9 +125,7 @@ func RemoveLocalPathAfterBackupWithExecutor(ctx context.Context, exec executor.E
 	return nil
 }
 
-// TrashLocalPath moves path into the user's trash directory instead of
-// deleting it permanently. Symlinks are unlinked in place because the link
-// itself carries no data. Missing paths are a no-op.
+// TrashLocalPath — Symlinks are unlinked in place because the link itself carries no data.
 func TrashLocalPath(ctx context.Context, exec executor.Executor, path string) error {
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
@@ -265,14 +253,11 @@ func backupCopyPath(ctx context.Context, exec executor.Executor, src, dst string
 		return os.Symlink(target, dst)
 	}
 	if info.IsDir() {
-		// Prefer git ls-files when src is inside a git repo — only tracked
-		// files are backed up, which naturally excludes caches, build
-		// artifacts, and anything in .gitignore.
-		if err := backupCopyGitTracked(ctx, exec, src, dst); err == nil {
-			return nil
+		if ignores == nil {
+			if err := backupCopyGitTracked(ctx, exec, src, dst); err == nil {
+				return nil
+			}
 		}
-		// Fallback: walk the directory but skip ignored paths (the entry's
-		// patterns when provided, otherwise .cache, node_modules, etc.).
 		return backupCopyDirFiltered(ctx, exec, src, dst, ignores)
 	}
 	if !info.Mode().IsRegular() {
@@ -281,9 +266,7 @@ func backupCopyPath(ctx context.Context, exec executor.Executor, src, dst string
 	return backupCopyFile(src, dst, info.Mode())
 }
 
-// backupCopyGitTracked copies only git-tracked files from src into dst.
-// Returns a non-nil error when src is not inside a git repo or git is
-// unavailable, signalling the caller to fall back.
+// Errors when src is not in a git repo or git is missing, signalling the caller to fall back.
 func backupCopyGitTracked(ctx context.Context, exec executor.Executor, src, dst string) error {
 	out, _, err := backupExec(exec).Run(ctx, "git", "-C", src, "ls-files", "-z")
 	if err != nil {
@@ -334,9 +317,7 @@ func backupCopyGitTracked(ctx context.Context, exec executor.Executor, src, dst 
 	return nil
 }
 
-// backupCopyDirFiltered walks src recursively, skipping ignored paths. With
-// nil ignores it applies the built-in defaults; entry ignore lists are matched
-// with the same entry-root anchoring the sync classifier uses.
+// nil ignores means the built-in defaults; entry lists use the sync classifier's entry-root anchoring.
 func backupCopyDirFiltered(ctx context.Context, exec executor.Executor, src, dst string, ignores []string) error {
 	if len(ignores) == 0 {
 		ignores = defaultIgnores

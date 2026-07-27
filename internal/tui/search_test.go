@@ -1,7 +1,5 @@
 package tui
 
-// Tests for the search pipeline: debounceSearch, doSearch, startSearch.
-
 import (
 	"context"
 	"errors"
@@ -17,9 +15,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// ── search provider stubs ──────────────────────────────────────────────────────
-
-// searchProvider is a Provider that also implements Searcher.
 // results and searchErr control what Search returns.
 type searchProvider struct {
 	name      string
@@ -60,10 +55,6 @@ func newSearchCmdApp(t *testing.T, providers ...provider.Provider) *app.App {
 	return a
 }
 
-// ── TestDebounceSearch_EmitsMsg ────────────────────────────────────────────────
-
-// TestDebounceSearch_EmitsMsg verifies that debounceSearch sleeps briefly and
-// then emits a debouncedSearchMsg with the correct query and generation.
 func TestDebounceSearch_EmitsMsg(t *testing.T) {
 	t.Parallel()
 	cmd := debounceSearch("rg", 1)
@@ -80,10 +71,6 @@ func TestDebounceSearch_EmitsMsg(t *testing.T) {
 	}
 }
 
-// ── TestDoSearch_ReturnsResults ────────────────────────────────────────────────
-
-// TestDoSearch_ReturnsResults verifies that doSearch calls app.Search and
-// returns a searchResultsMsg with the converted ToolCache results.
 func TestDoSearch_ReturnsResults(t *testing.T) {
 	t.Parallel()
 	prov := &searchProvider{
@@ -117,8 +104,7 @@ func TestDoSearch_ReturnsResults(t *testing.T) {
 	if len(got.tools) != 2 {
 		t.Fatalf("tools = %d, want 2", len(got.tools))
 	}
-	// After dedup+sort (alphabetical tiebreak when both score 0 for query "rg"),
-	// fd sorts before ripgrep.
+	// After dedup and sort (alphabetical tiebreak when both score 0 for "rg"), fd sorts before ripgrep.
 	if got.tools[0].Name != "fd" {
 		t.Errorf("tools[0].Name = %q, want fd", got.tools[0].Name)
 	}
@@ -200,10 +186,7 @@ func TestDoSearch_PreservesSearchPrivilegeMetadata(t *testing.T) {
 	}
 }
 
-// ── TestDoSearch_CancelledReturnsNil ──────────────────────────────────────────
-
-// TestDoSearch_CancelledReturnsNil verifies that when the context is already
-// cancelled before the search runs, doSearch returns nil (no message dispatched).
+// A context cancelled before the search runs makes doSearch return nil so no message is dispatched.
 func TestDoSearch_CancelledReturnsNil(t *testing.T) {
 	t.Parallel(
 	// Use a provider that would return results, but context is cancelled first.
@@ -225,10 +208,6 @@ func TestDoSearch_CancelledReturnsNil(t *testing.T) {
 	}
 }
 
-// ── TestDoSearch_ErrorReturnsMsg ──────────────────────────────────────────────
-
-// TestDoSearch_ErrorReturnsMsg verifies that when app.Search returns an error,
-// doSearch returns a searchResultsMsg with the err field set.
 func TestDoSearch_ErrorReturnsMsg(t *testing.T) {
 	t.Parallel()
 	prov := &searchProvider{
@@ -335,13 +314,7 @@ func TestSearchResultsMsg_EmptyResultsUsesNonErrorStatus(t *testing.T) {
 	}
 }
 
-// ── TestStartSearch_SetsSearchingFlag ─────────────────────────────────────────
-
-// TestStartSearch_SetsSearchingFlag verifies that calling startSearch sets
-// m.searching to true, clears m.statusMsg (so stale "found N" text from the
-// previous search doesn't show under the spinner), and returns commands.
-// The "Searching…" label is rendered by activityLabel — startSearch only
-// sets statusMsg = "" so that activityLabel is unambiguously shown.
+// startSearch clears statusMsg so stale "found N" text does not show under the spinner; activityLabel then renders "Searching…" unambiguously.
 func TestStartSearch_SetsSearchingFlag(t *testing.T) {
 	t.Parallel()
 	prov := &searchProvider{name: "brew"}
@@ -369,10 +342,7 @@ func TestStartSearch_SetsSearchingFlag(t *testing.T) {
 	}
 }
 
-// ── TestDebounceSearch_DelayIsRoughly300ms ────────────────────────────────────
-
-// TestDebounceSearch_DelayIsRoughly300ms verifies the debounce delay is at
-// least 250ms (allowing for timer imprecision) and under 1s (sanity bound).
+// At least 250ms allowing for timer imprecision, and under 1s as a sanity bound.
 func TestDebounceSearch_DelayIsRoughly300ms(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {
@@ -390,10 +360,6 @@ func TestDebounceSearch_DelayIsRoughly300ms(t *testing.T) {
 	}
 }
 
-// ── TestDoSearch_VersionAndDescriptionPopulated ───────────────────────────────
-
-// TestDoSearch_VersionAndDescriptionPopulated verifies that Version and
-// Description from SearchResult are stored in the ToolCache NullString fields.
 func TestDoSearch_VersionAndDescriptionPopulated(t *testing.T) {
 	t.Parallel()
 	prov := &searchProvider{
@@ -429,10 +395,6 @@ func TestDoSearch_VersionAndDescriptionPopulated(t *testing.T) {
 	}
 }
 
-// ── TestStartSearch_CancelsInFlightSearch ──────────────────────────────────────
-
-// TestStartSearch_CancelsInFlightSearch verifies that calling startSearch a
-// second time cancels the previous search context (m.searchCancel is replaced).
 func TestStartSearch_CancelsInFlightSearch(t *testing.T) {
 	t.Parallel()
 	prov := &searchProvider{name: "brew"}
@@ -448,26 +410,19 @@ func TestStartSearch_CancelsInFlightSearch(t *testing.T) {
 		upgradingKeys: make(map[string]bool),
 	}
 
-	// First startSearch plants a cancel func.
 	m.startSearch("foo")
 	firstCancel := m.searchCancel
 	if firstCancel == nil {
 		t.Fatal("searchCancel should be set after first startSearch")
 	}
 
-	// Second startSearch should cancel the first and plant a new cancel func.
 	m.startSearch("bar")
 	if m.searchCancel == nil {
 		t.Fatal("searchCancel should be set after second startSearch")
 	}
 }
 
-// ── TestStartSearch_ClearsStaleStatusMsg ──────────────────────────────────────
-
-// TestStartSearch_ClearsStaleStatusMsg verifies that starting a new search
-// clears any stale statusMsg from the previous one. Without this, the spinner
-// would show "found 5" (or an error) under the activity indicator instead of
-// letting activityLabel render "Searching…".
+// Without clearing the stale statusMsg the spinner would show "found 5" instead of letting activityLabel render "Searching…".
 func TestStartSearch_ClearsStaleStatusMsg(t *testing.T) {
 	t.Parallel()
 	prov := &searchProvider{name: "brew"}
@@ -495,13 +450,7 @@ func TestStartSearch_ClearsStaleStatusMsg(t *testing.T) {
 	}
 }
 
-// ── TestDebouncedSearchMsg_CacheHit_ClearsSearching ───────────────────────────
-
-// TestDebouncedSearchMsg_CacheHit_ClearsSearching is a regression test for the
-// bug where m.searching remained true when a debouncedSearchMsg resolved to a
-// cache hit. The prior search was cancelled (context cancel + searchGen bump),
-// but m.searching was not cleared in the cache-hit branch, leaving the spinner
-// running forever.
+// The prior search was cancelled but m.searching was not cleared in the cache-hit branch, leaving the spinner running forever.
 func TestDebouncedSearchMsg_CacheHit_ClearsSearching(t *testing.T) {
 	t.Parallel()
 	prov := &searchProvider{name: "brew"}

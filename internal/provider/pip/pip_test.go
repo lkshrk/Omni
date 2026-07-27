@@ -20,8 +20,6 @@ func tool(name string) provider.Tool {
 	return provider.Tool{Name: name, Provider: "pip", Package: name}
 }
 
-// --- Available ---
-
 func TestAvailable_True(t *testing.T) {
 	p, _ := newPip(executor.MockCall{Stdout: "pip 23.3.1"})
 	ok, err := p.Available(context.Background())
@@ -37,8 +35,6 @@ func TestAvailable_False(t *testing.T) {
 		t.Errorf("Available() = (%v, %v), want (false, nil)", ok, err)
 	}
 }
-
-// --- IsInstalled ---
 
 func TestIsInstalled_Found(t *testing.T) {
 	output := "Name: black\nVersion: 23.12.1\nSummary: The uncompromising code formatter.\n"
@@ -56,8 +52,6 @@ func TestIsInstalled_NotFound(t *testing.T) {
 		t.Errorf("expected (false, nil), got (%v, _, %v)", ok, err)
 	}
 }
-
-// --- Install ---
 
 func TestInstall_CallsCorrectCommand(t *testing.T) {
 	p, m := newPip(executor.MockCall{})
@@ -113,8 +107,6 @@ func TestMutation_ExternallyManagedPython(t *testing.T) {
 	}
 }
 
-// --- Uninstall ---
-
 func TestUninstall_CallsYesFlag(t *testing.T) {
 	p, m := newPip(executor.MockCall{})
 	_ = p.Uninstall(context.Background(), tool("black"))
@@ -124,8 +116,6 @@ func TestUninstall_CallsYesFlag(t *testing.T) {
 	}
 }
 
-// --- Upgrade ---
-
 func TestUpgrade_CallsInstallUpgrade(t *testing.T) {
 	p, m := newPip(executor.MockCall{})
 	_ = p.Upgrade(context.Background(), tool("black"))
@@ -134,8 +124,6 @@ func TestUpgrade_CallsInstallUpgrade(t *testing.T) {
 		t.Errorf("expected 'install --upgrade', got %v", args)
 	}
 }
-
-// --- ListInstalled ---
 
 func TestListInstalled(t *testing.T) {
 	// pip list --not-required --format=json output.
@@ -154,7 +142,6 @@ func TestListInstalled(t *testing.T) {
 	if tools[0].Name != "black" || tools[0].Version != "23.12.1" {
 		t.Errorf("unexpected tool: %+v", tools[0])
 	}
-	// Verify --not-required and --format=json flags were passed.
 	args := m.Calls[0].Args
 	if args[0] != "list" || args[1] != "--not-required" || args[2] != "--format=json" {
 		t.Errorf("unexpected args: %v", args)
@@ -163,8 +150,6 @@ func TestListInstalled(t *testing.T) {
 		t.Errorf("expected python3 ownership probe, got %s %v", call.Name, call.Args)
 	}
 }
-
-// --- CLIToolSet ---
 
 func TestCLIToolSet(t *testing.T) {
 	output := `{"black":1,"flake8":1}`
@@ -181,8 +166,6 @@ func TestCLIToolSet(t *testing.T) {
 		t.Errorf("expected python3 -c ..., got %s %v", call.Name, call.Args)
 	}
 }
-
-// --- BulkDescribe ---
 
 func TestBulkDescribe(t *testing.T) {
 	output := "Name: black\nVersion: 23.12.1\nSummary: The uncompromising code formatter.\n---\nName: flake8\nVersion: 6.1.0\nSummary: The modular source code checker.\n"
@@ -223,8 +206,6 @@ func TestBulkDescribe_Error(t *testing.T) {
 	}
 }
 
-// --- Name / Description ---
-
 func TestName(t *testing.T) {
 	p, _ := newPip()
 	if got := p.Name(); got != "pip" {
@@ -238,8 +219,6 @@ func TestDescription_NonEmpty(t *testing.T) {
 		t.Error("Description() is empty")
 	}
 }
-
-// --- InstalledMap ---
 
 func TestInstalledMap_ReturnsTopLevel(t *testing.T) {
 	out := `[{"name":"black","version":"23.12.1"},{"name":"cryptography","version":"41.0.7"}]`
@@ -288,8 +267,6 @@ func TestInstalledMap_Error(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
-
-// --- OutdatedMap ---
 
 func TestOutdatedMap_Found(t *testing.T) {
 	out := `[{"name":"black","latest_version":"24.1.0"},{"name":"cryptography","latest_version":"49.0.0"}]`
@@ -355,8 +332,6 @@ func TestOutdatedMap_DuplicateKeepsNonemptyLatest(t *testing.T) {
 		t.Fatalf("black latest = %q, want retained nonempty 24.1.0", got["black"])
 	}
 }
-
-// --- SelfPackageUpgradeable (PEP 668 externally-managed detection) ---
 
 func TestSelfPackageName_IsPip(t *testing.T) {
 	p, _ := newPip()

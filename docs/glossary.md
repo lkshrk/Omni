@@ -44,6 +44,14 @@ See [State And Files](state-and-files.md).
 The tools and dotfiles Omni expects for the active host after expanding
 settings, host assignments, groups, tool specs, host overrides, and ignores.
 
+## Desired State
+
+What `settings.json` declares: the tools, dot entries, skill packages, MCP
+servers, and plugins you want. The first of the three stores every verb moves
+between.
+
+See [Core Concepts](concepts.md#the-three-stores).
+
 ## Discovered Tool
 
 A package found installed by a provider scan. It may or may not be tracked in
@@ -118,10 +126,27 @@ entries stay visible so the user can reverse the decision later.
 The concrete manager recorded in cache as the owner of an installed package.
 Upgrade and uninstall paths prefer this value when available.
 
+## Live State
+
+What the machine or an agent actually has right now: installed packages, files
+at their real paths, registered MCP servers, installed plugins. `sync` moves
+desired state into it; `import` adopts it back.
+
+See [Core Concepts](concepts.md#the-three-stores).
+
 ## Logical Tool
 
 The portable name Omni manages, independent of package-manager naming. For
 example, logical tool `node` can install package `nodejs`.
+
+## Managed Store
+
+The copy Omni owns on your behalf between desired and live state: the dots
+repo's stow packages, the skill package store, the local cache. `upgrade`
+refreshes it from upstream; `resolve` settles it against a diverged live copy.
+MCP servers and plugins have no managed store — the agent owns the only copy.
+
+See [Core Concepts](concepts.md#the-three-stores).
 
 ## Provider Drift
 
@@ -161,3 +186,14 @@ group expansion.
 
 An alternate install spec for a logical tool, or a host-specific Stow package
 for a dot entry. Context decides which kind of variant is meant.
+
+## Verb Taxonomy
+
+The shared vocabulary across every surface: `add` declares and converges,
+`sync` moves desired state onto this host, `import` adopts live state back into
+the manifest, `upgrade` refreshes the managed store from upstream, `remove`
+undeclares (with `--purge` cleaning live state too), `resolve` settles a
+live-versus-managed conflict, and `status` reports one thing's position in all
+three stores.
+
+See [Core Concepts](concepts.md#the-three-stores) and [CLI](cli.md#deprecated-spellings).

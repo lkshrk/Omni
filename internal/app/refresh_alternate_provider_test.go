@@ -35,7 +35,6 @@ func TestRefreshInstalled_DetectsAlternateConfiguredProvider(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("saving config: %v", err)
 	}
-	// Persist after config save — saveAppConfig replaces the whole file.
 	if err := a.SaveSettings(ctx, config.Settings{
 		ProviderPriority: []string{"brew", "bun", "pnpm", "npm"},
 	}); err != nil {
@@ -103,7 +102,6 @@ func TestRefreshInstalled_StaleCachedOwnerFallsThroughToAlternateProvider(t *tes
 	}); err != nil {
 		t.Fatalf("SaveSettings: %v", err)
 	}
-	// Stale row: previous refresh remembered bun as owner but marked missing.
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:          "pnpm",
 		Provider:      "brew",
@@ -159,7 +157,6 @@ func TestRefreshProviderInstalled_DetectsAlternateConfiguredProvider(t *testing.
 		t.Fatalf("SaveSettings: %v", err)
 	}
 
-	// TUI scans providers independently; the brew pass must not clobber bun installs.
 	if err := a.RefreshProviderInstalled(ctx, "brew"); err != nil {
 		t.Fatalf("RefreshProviderInstalled brew: %v", err)
 	}

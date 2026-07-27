@@ -2,16 +2,16 @@
 # glob/al is ungrouped → restores everywhere
 # work/only is in group "work" → restores on testhost (work is active)
 # home/only is in group "home" → skipped on testhost (home is not active)
-exec omni --config settings.json agents skills restore --dry-run
-stdout 'npx skills add glob/al -g -a codex -y'
-stdout 'npx skills add work/only -g -a codex -y'
+exec omni --config settings.json agents skills sync --dry-run
+stdout 'install glob/al all discovered skills for targets codex'
+stdout 'install work/only all discovered skills for targets codex'
 ! stdout 'home/only'
 
 # Scenario 2: legacy agents.skills migrates to packages (ungrouped → restores everywhere)
 # Two skills share the same source "o/r"; migration dedupes by source → one package.
-# The dry-run must emit exactly one npx skills add line for o/r, not two.
-exec omni --config legacy.json agents skills restore --dry-run
-stdout '^npx skills add o/r#main -g -a codex -y$'
+# The dry-run must emit one native action for o/r with both selectors.
+exec omni --config legacy.json agents skills sync --dry-run
+stdout '^install o/r at ref main skills a,b for targets codex$'
 
 -- legacy.json --
 {

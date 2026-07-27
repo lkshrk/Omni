@@ -2,9 +2,7 @@ package config
 
 import "strings"
 
-// ExpandGroupAgentRefs expands @agents.* shorthand refs in group agent membership
-// lists. Explicit entries are preserved; expanded values are deduplicated while
-// keeping first-seen order.
+// ExpandGroupAgentRefs — Explicit entries are preserved; expanded values dedupe while keeping first-seen order.
 func ExpandGroupAgentRefs(cfg *RootConfig) bool {
 	if cfg == nil {
 		return false
@@ -129,7 +127,6 @@ func agentMarketplaceNames(cfg *RootConfig) []string {
 	return out
 }
 
-// IsAgentRef reports whether value is an @agents.* group membership shorthand.
 func IsAgentRef(value string) bool {
 	switch strings.TrimSpace(value) {
 	case AgentRefPackages, AgentRefMcpServers, AgentRefPlugins, AgentRefMarketplaces:

@@ -413,7 +413,6 @@ func TestSelfHealDotEntryLinkShape_RewritesAbsoluteLinkToRelative(t *testing.T) 
 	if filepath.IsAbs(got) {
 		t.Fatal("healed link should be relative, not absolute")
 	}
-	// Link must still resolve to the source content.
 	body, err := os.ReadFile(target)
 	if err != nil || string(body) != "repo" {
 		t.Fatalf("healed link content = %q err = %v, want repo", body, err)

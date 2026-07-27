@@ -2,8 +2,6 @@ package app
 
 import "strings"
 
-// DotsServicesStatus is a combined read-only snapshot of native dotfile
-// reminder/watch service files and their parsed timing options.
 type DotsServicesStatus struct {
 	Reminder      *DotsReminderService `json:"reminder,omitempty"`
 	ReminderError string               `json:"reminder_error,omitempty"`
@@ -27,9 +25,7 @@ type DashboardDotsAutomationStatus struct {
 	ReadinessWarnings []string
 }
 
-// DotsServicesStatus reports both optional native dotfile services. Individual
-// service errors are captured in the result so callers can still show the other
-// service state.
+// DotsServicesStatus — Individual service errors are captured in the result so callers can still show the other service.
 func (a *App) DotsServicesStatus() DotsServicesStatus {
 	var out DotsServicesStatus
 	reminder, err := a.DotsReminderServiceStatus()

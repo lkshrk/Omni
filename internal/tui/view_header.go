@@ -30,8 +30,7 @@ func renderSetup(m Model) string {
 	case 1, 2:
 		body = renderProviderPickerStep(m, m.setupStep)
 	case 3:
-		// The provider-priority editor popup (editingPriority) overlays this step;
-		// the panel below is the muted background behind that popup.
+		// The provider-priority editor popup overlays this step; the panel below is its muted background.
 		body = renderSetupPanel(m, setupPanel{
 			Lead: "Set provider priority.",
 			Help: []string{
@@ -55,9 +54,7 @@ func renderSetup(m Model) string {
 			),
 		})
 	case 6:
-		// File picker overlays the full screen; this header is not reached during
-		// normal flow since renderFilePicker takes over when showFilePicker=true.
-		// Shown only as a placeholder if the picker is somehow not yet active.
+		// Not reached in normal flow — renderFilePicker takes over when showFilePicker=true; shown only as a placeholder if the picker is somehow not yet active.
 		body = renderSetupPanel(m, setupPanel{
 			Lead: "Dotfiles repo path",
 			Help: []string{"Browse to your local dotfiles git repository."},
@@ -159,6 +156,8 @@ func renderSetup(m Model) string {
 				[]hintItem{hintFromBindingDesc(m.keys.Confirm, "continue")},
 			),
 		})
+	case setupStepImportAdvisories:
+		body = renderSetupImportAdvisoriesStep(m)
 	case setupStepCreateConfig:
 		body = renderSetupPanel(m, setupPanel{
 			Lead: "Creating a new settings.json.",
@@ -174,9 +173,40 @@ func renderSetup(m Model) string {
 	return body
 }
 
-// renderSetupAgentsStep renders setup step 4: detected agents plus the
-// diff-only unmanaged skills/mcp/plugins counts, gating the [i]/[s] footer
-// until the async diff finishes.
+const setupImportAdvisoriesShown = 6
+
+func renderSetupImportAdvisoriesStep(m Model) string {
+	width := max(m.width-2, 12)
+	help := []string{"Review what the import changed before continuing.", ""}
+	shown := m.setupImportNotices
+	if len(shown) > setupImportAdvisoriesShown {
+		shown = shown[:setupImportAdvisoriesShown]
+	}
+	for _, advisory := range shown {
+		for i, line := range wrapText(advisory, width) {
+			prefix := "• "
+			if i > 0 {
+				prefix = "  "
+			}
+			help = append(help, prefix+line)
+		}
+	}
+	if rest := len(m.setupImportNotices) - len(shown); rest > 0 {
+		help = append(help, fmt.Sprintf("… and %d more", rest))
+	}
+
+	return renderSetupPanel(m, setupPanel{
+		Lead: fmt.Sprintf("Import finished with %d warning(s).", len(m.setupImportNotices)),
+		Help: help,
+		Footer: renderSetupFooter(m,
+			nil,
+			nil,
+			[]hintItem{hintFromBindingDesc(m.keys.Confirm, "acknowledge")},
+		),
+	})
+}
+
+// Gates the [i]/[s] footer until the async unmanaged diff finishes.
 func renderSetupAgentsStep(m Model) string {
 	names := make([]string, 0, len(m.setupAgentsList))
 	for _, a := range m.setupAgentsList {
@@ -190,6 +220,9 @@ func renderSetupAgentsStep(m Model) string {
 	} else if m.setupAgentsDiffLoaded {
 		help = append(help, fmt.Sprintf("Not in manifest: %d skill packages · %d mcp servers · %d plugins",
 			m.setupAgentsUnmanagedSkills, m.setupAgentsUnmanagedMcp, m.setupAgentsUnmanagedPlugins))
+		if m.setupAgentsUnmanagedSkills > 0 {
+			help = append(help, "Importing adopts legacy CLI-managed skill installs.")
+		}
 		footer = renderSetupFooter(m,
 			[]hintItem{dangerRawHint("s", "skip")},
 			nil,
@@ -251,7 +284,6 @@ func renderSetupFooter(m Model, left, middle, right []hintItem) string {
 func renderSetupOptions(m Model, options []setupOption) string {
 	p := m.palette
 
-	// Compute fixed-width prefix: cursor (2) + optional checkbox (4).
 	hasCheck := false
 	for _, opt := range options {
 		if opt.Checked != nil {
@@ -264,7 +296,6 @@ func renderSetupOptions(m Model, options []setupOption) string {
 		prefixW += 4 // "[x] "
 	}
 
-	// Find widest label so descriptions align.
 	maxLabelW := 0
 	for _, opt := range options {
 		if w := len([]rune(opt.Label)); w > maxLabelW {
@@ -332,6 +363,8 @@ func renderPostSetupLoading(m Model) string {
 		"",
 		postSetupLoadingTextStyle(p, text).Render(text),
 		p.styleHelp.Render("Scanning configured package ecosystems."),
+		"",
+		renderActionHintText(p, []hintItem{hintFromBindingDesc(m.keys.Back, "dismiss")}),
 	}
 	width := 0
 	for _, line := range rawLines {
@@ -399,6 +432,8 @@ func setupPopupTitle(m Model) string {
 		return logoMark + " Omni - Bootstrap host"
 	case setupStepCreateConfig:
 		return logoMark + " Omni - Create settings"
+	case setupStepImportAdvisories:
+		return logoMark + " Omni - Import warnings"
 	default:
 		return logoMark + " Omni"
 	}
@@ -415,10 +450,7 @@ func renderHeader(m Model) string {
 	return title + tabs + strings.Repeat(" ", gap) + right
 }
 
-// renderHeaderVersion is the binary version as a stable top-right header
-// segment on the dashboard and settings tabs — separate from
-// renderHeaderInfo so transient status text ("checking…", counts) keeps its
-// own contract and the version never moves with it.
+// Separate from renderHeaderInfo so transient status text ("checking…", counts) keeps its own contract and the version never moves with it.
 func renderHeaderVersion(m Model) string {
 	switch m.mode {
 	case viewStatus, viewSettings:
@@ -435,8 +467,7 @@ func renderHeaderInfo(m Model) string {
 	case viewGroups:
 		return renderGroupsHeaderInfo(m)
 	case viewStatus, viewSettings, viewSkills:
-		// Dashboard and settings keep the top-right for the version only
-		// (renderHeaderVersion); agents has no header summary.
+		// Dashboard and settings keep the top-right for the version only (renderHeaderVersion); agents has no header summary.
 		return ""
 	default:
 		return renderToolsHeaderInfo(m)
@@ -493,7 +524,11 @@ func renderTabs(m Model) string {
 	active := func(label string) string { return p.styleStatus.Render("  " + label) }
 	inactive := func(label string) string { return p.styleHelp.Render("  " + label) }
 
-	activeTab := activeTabMode(m.mode)
+	mode := m.mode
+	if mode == viewCommand {
+		mode = m.commandOrigin
+	}
+	activeTab := activeTabMode(mode)
 	var sb strings.Builder
 	for _, tab := range mainTabs() {
 		if activeTab == tab.mode {
@@ -505,7 +540,6 @@ func renderTabs(m Model) string {
 	return sb.String()
 }
 
-// activeTabMode maps any viewMode to the parent tab that should be highlighted.
 func activeTabMode(mode viewMode) viewMode {
 	switch mode {
 	case viewSearch, viewCommand, viewGroupPicker,
@@ -514,7 +548,7 @@ func activeTabMode(mode viewMode) viewMode {
 	case viewGroupTools, viewGroupDots:
 		return viewGroups
 	case viewGroupMembership:
-		// membership picker can overlay tools or dots; default to tools
+		// Membership overlays Tools or Dots; default the tab highlight to Tools.
 		return viewList
 	default:
 		return mode
@@ -568,7 +602,6 @@ func mainTabAtPosition(m Model, x, y int) (viewMode, bool) {
 	return viewList, false
 }
 
-// renderPalette renders the command suggestion list.
 func renderPalette(m Model) string {
 	p := m.palette
 	if len(m.commandSuggestions) == 0 {
@@ -595,9 +628,7 @@ func renderPalette(m Model) string {
 	return t.String() + "\n"
 }
 
-// renderProviderPickerStep renders the shared provider selection UI used in
-// setup steps 1 (first-run import) and 2 (no-host re-run). The only
-// difference between the two steps is the introductory subtitle text.
+// Shared by setup steps 1 (first-run import) and 2 (no-host re-run); only the introductory subtitle differs.
 func renderProviderPickerStep(m Model, step int) string {
 	lead := "Choose which package ecosystems to enable on this machine."
 	help := []string{"Disabled ecosystems can be re-enabled later in Settings."}

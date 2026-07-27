@@ -464,8 +464,6 @@ func TestDotsHistoryConcurrentWritesPreserveAllEntries(t *testing.T) {
 	ctx := context.Background()
 	a, _, _ := newDotsApp(t)
 
-	// Fire 10 concurrent sync-entry calls (all will fail on missing entries,
-	// which is fine — we just need them to record history concurrently).
 	const n = 10
 	var wg sync.WaitGroup
 	wg.Add(n)
@@ -491,8 +489,6 @@ func TestDotsHistoryIDTimestampMatchesTimeField(t *testing.T) {
 	ctx := context.Background()
 	a, _, _ := newDotsApp(t)
 
-	// Record one entry and verify the ID's timestamp prefix is
-	// consistent with the Time field (within 1 second).
 	if _, err := a.DotsSyncEntry(ctx, "ts-check", dots.SyncOptions{}); err == nil {
 		t.Fatal("expected error for missing entry")
 	}
@@ -504,7 +500,6 @@ func TestDotsHistoryIDTimestampMatchesTimeField(t *testing.T) {
 		t.Fatalf("history len = %d, want 1", len(history))
 	}
 	entry := history[0]
-	// ID format: "<unixnano>-<counter>"
 	parts := strings.SplitN(entry.ID, "-", 2)
 	if len(parts) != 2 {
 		t.Fatalf("unexpected ID format: %q", entry.ID)

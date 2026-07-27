@@ -15,16 +15,16 @@ stderr 'mcp servers are disabled for this host'
 stderr 'plugins are disabled for this host'
 
 # 4. skills_disabled turns skills restore into a soft warning (exit 0)
-exec omni --config skills-disabled.json agents skills restore
-stdout 'warn: skills are disabled for this host, skipping restore'
+exec omni --config skills-disabled.json agents skills sync
+stdout 'warn: skills are disabled for this host, skipping sync'
 
 # 5. mcp_disabled turns mcp restore into a soft warning (exit 0)
-exec omni --config mcp-disabled.json agents mcp restore
-stdout 'warn: mcp servers are disabled for this host, skipping restore'
+exec omni --config mcp-disabled.json agents mcp sync
+stdout 'warn: mcp servers are disabled for this host, skipping sync'
 
 # 6. plugins_disabled turns plugins restore into a soft warning (exit 0)
-exec omni --config plugins-disabled.json agents plugins restore
-stdout 'warn: plugins are disabled for this host, skipping restore'
+exec omni --config plugins-disabled.json agents plugins sync
+stdout 'warn: plugins are disabled for this host, skipping sync'
 
 # 7. agents_disabled (master) blocks all three add commands
 ! exec omni --config agents-disabled.json agents add owner/repo
@@ -35,11 +35,11 @@ stderr 'agent skills are disabled for this host'
 stderr 'agent skills are disabled for this host'
 
 # 8. agents_disabled (master) hard-fails all three restore commands
-! exec omni --config agents-disabled.json agents skills restore
+! exec omni --config agents-disabled.json agents skills sync
 stderr 'agent skills are disabled for this host'
-! exec omni --config agents-disabled.json agents mcp restore
+! exec omni --config agents-disabled.json agents mcp sync
 stderr 'agent skills are disabled for this host'
-! exec omni --config agents-disabled.json agents plugins restore
+! exec omni --config agents-disabled.json agents plugins sync
 stderr 'agent skills are disabled for this host'
 
 -- skills-disabled.json --

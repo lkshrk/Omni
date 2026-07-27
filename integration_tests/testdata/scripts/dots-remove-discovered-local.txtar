@@ -1,0 +1,17 @@
+env HOME=$WORK/home
+exec omni --config settings.json dots discover
+stdout 'ghost'
+exec omni -y --config settings.json dots remove ghost
+stdout 'deleted local path'
+stdout '\.config/ghost'
+! exists home/.config/ghost
+exec omni --config settings.json dots discover
+! stdout 'ghost'
+stdout 'No untracked dotfile candidates found'
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host"}]}
+
+-- home/dotfiles/dotfiles/.keep --
+-- home/.config/ghost/local.json --
+{}

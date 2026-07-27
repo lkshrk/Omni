@@ -59,7 +59,6 @@ func traceLogLines(m Model, width int) []string {
 		lines = append(lines, traceLogEntryLines(m, trace, width)...)
 		lines = append(lines, "")
 	}
-	// trim trailing blank
 	for len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
 	}
@@ -144,8 +143,7 @@ func traceLogStatusText(m Model, trace app.CommandTraceView) string {
 	}
 }
 
-// sanitizeTraceLogText protects the terminal from legacy rows that predate
-// capture-time trace sanitization. Keep readable layout controls only.
+// Protects the terminal from legacy rows that predate capture-time trace sanitization; keeps readable layout controls only.
 func sanitizeTraceLogText(s string) string {
 	if s == "" {
 		return ""

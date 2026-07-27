@@ -10,12 +10,7 @@ import (
 	"github.com/lkshrk/omni/internal/text"
 )
 
-// renderFilterBar renders the provider and group filter pill bars.
-// Group pills are shown when the config has reusable groups. The current host
-// group is added separately so users can filter local-only entries.
-// Provider pills are provider families from the provider registry, not a
-// projection of the currently visible tools.
-// Returns empty string when neither condition is met.
+// Provider pills come from the provider registry, not a projection of the currently visible tools; the current host group is added separately so local-only entries can be filtered.
 func renderFilterBar(m Model) string {
 	p := m.palette
 	groupNames := visibleGroupNames(m)
@@ -108,9 +103,7 @@ func toolFilterBarY(m Model) int {
 	return 2
 }
 
-// agentsFilterHitZones computes click targets for the agents tab's two pill
-// bars (type chips, agent-ID filter), mirroring exactly what viewSkillsBody
-// renders: same "  " x-offset, same shared line, same width budget.
+// Must mirror what viewSkillsBody renders: same "  " x-offset, same shared line, same width budget.
 func agentsFilterHitZones(m Model) []toolFilterHitZone {
 	if m.mode != viewSkills {
 		return nil
@@ -149,9 +142,7 @@ func agentsFilterHitZones(m Model) []toolFilterHitZone {
 	return zones
 }
 
-// pillHitZonesDim mirrors pillHitZones but for renderPillBarDim's label
-// convention: labels are used verbatim (no "all" prepend) and a disabled
-// index never yields a clickable zone.
+// Unlike pillHitZones: labels are used verbatim (no "all" prepend) and a disabled index never yields a clickable zone.
 func pillHitZonesDim(kind toolFilterKind, labels []string, activeIdx int, disabled map[int]bool, start, y, maxW int) ([]toolFilterHitZone, int) {
 	zones := make([]toolFilterHitZone, 0, len(labels))
 	x := start
@@ -238,11 +229,7 @@ func pillText(label string, active bool) string {
 	return " " + label + " "
 }
 
-// renderPillBarDim renders pills for a fixed set of names without prepending
-// an "all" option (activeIdx maps directly to names[activeIdx]). Pills
-// flagged in disabled render with the dim help style and never as active, so
-// a disabled section's chip reads as unselectable even if activeIdx briefly
-// points at it.
+// activeIdx maps directly to names[activeIdx] with no "all" prepend; disabled pills never render active, so a disabled chip reads as unselectable even if activeIdx briefly points at it.
 func renderPillBarDim(pal palette, names []string, activeIdx, maxW int, disabled map[int]bool) string {
 	var sb strings.Builder
 	used := 0
@@ -274,7 +261,6 @@ func renderList(m Model) string {
 	p := m.palette
 	var sb strings.Builder
 
-	// Single filter bar — rendered above the tool list (not scrolled).
 	if bar := renderFilterBar(m); bar != "" {
 		sb.WriteString(bar)
 	}
@@ -290,7 +276,6 @@ func renderList(m Model) string {
 		return sb.String()
 	}
 
-	// Build a flat slice of display lines (section headers + tool rows).
 	type displayRow struct {
 		text    string
 		render  func() string // when non-nil, produced lazily; skips styling for off-screen rows
@@ -317,7 +302,7 @@ func renderList(m Model) string {
 		}
 	}
 
-	// Pre-compute column widths then detail lines (detail needs cols for wrap width).
+	// Detail lines need cols for wrap width, so column widths are computed first.
 	cols := newColWidthsWithProviderPins(m.visibleTools, m.toolMemberships, m.hostInfo, visibleGroupNames(m), m.toolProviderPins, m.toolFallbacks, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, m.width, func(t *app.ToolView) bool {
 		return m.syncStatusOf(t) == syncWrongProv
 	})
@@ -356,9 +341,7 @@ func renderList(m Model) string {
 		isIgnored := sec == sectionIgnored
 		ss := m.syncStatusOf(t)
 		isCursor := i == m.cursor && !m.cursorHidden
-		// Defer the styled render so off-screen rows sliced away below never pay
-		// for lipgloss styling. View() runs on every Update (incl. ~10Hz spinner
-		// ticks); only the ~viewport-worth of rows in [start,end] get rendered.
+		// Deferred so off-screen rows never pay for lipgloss styling: View() runs on every Update, including ~10Hz spinner ticks.
 		renderRow := func() string {
 			return renderToolRowWithProviderPin(p, t, cols, spinnerView, groups, m.hostInfo, providerPinForTool(t, m.toolProviderPins), fallbackConcreteForTool(t, m.toolFallbacks), m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, isIgnored, isCursor, ss, rowActionErrorStatus(m, t))
 		}
@@ -369,7 +352,6 @@ func renderList(m Model) string {
 			for _, errorLine := range toolErrorLines(m, t, true) {
 				rows = append(rows, displayRow{text: errorLine, toolIdx: -1})
 			}
-			// Inline detail — expand the selected row with its info.
 			for _, dl := range detail {
 				rows = append(rows, displayRow{text: dl, toolIdx: -1})
 			}
@@ -382,8 +364,7 @@ func renderList(m Model) string {
 		}
 	}
 
-	// Viewport: keep the full selected block (tool row + detail lines) visible.
-	// Subtract subtabLines so the pill bar doesn't crowd out tool rows.
+	// Keep the full selected block visible, and subtract subtabLines so the pill bar doesn't crowd out tool rows.
 	avail := listAvailableHeight(m) - subtabLines
 	if avail < 1 {
 		avail = 1
@@ -426,11 +407,9 @@ func emptyToolsCTA(m Model) string {
 	return fitCellText("  no tools yet — "+sync.Key+" "+actions.MustTUILabel(actions.ToolSyncAll)+"  "+search.Key+" search", screenContentWidth(m.width))
 }
 
-// verReserveW is the column budget reserved for the version string.
 // Wide enough for "1.2.3 → 4.5.6.7" plus a little breathing room.
 const verReserveW = 24
 
-// colWidths holds the pre-computed column widths for the tool list.
 type colWidths struct {
 	name    int // name column — widest tool name, floor 20
 	priv    int // privilege marker column — 0 when no visible tools need it
@@ -441,17 +420,11 @@ type colWidths struct {
 	screenW int // terminal width — used to right-align the group badge
 }
 
-// newColWidths computes all column widths in a single pass over the tool list.
-// screenW is the available terminal width (m.width); it expands the name column
-// to fill the space left after all other fixed elements so the table uses the
-// full pane width.  Short tool names remain short — rows don't pad to the edge.
-// groupNames is the list of reusable group names; when non-empty the group
-// column is always reserved so it does not flicker in/out as filters change.
+// Expands the name column to fill the width left over; short names stay short. A non-empty groupNames always reserves the group column so it does not flicker in and out as filters change.
 func newColWidthsWithProviderPins(tools []*app.ToolView, toolMemberships map[string][]string, info *app.HostInfo, groupNames []string, providerPins map[string]string, fallbacks map[string]app.FallbackSpec, systemBin, pythonBin, nodeBin string, screenW int, wrongProvider func(*app.ToolView) bool) colWidths {
 	seed := colWidths{name: 20, prov: 8, ver: len("missing"), screenW: screenW}
 
-	// Seed group column width from all known reusable group names so
-	// the column is stable regardless of which tools are currently visible.
+	// Seeded from all known group names so the column is stable regardless of which tools are currently visible.
 	for _, g := range groupNames {
 		if n := len([]rune(g)) + 2; n > seed.group {
 			seed.group = n
@@ -490,10 +463,7 @@ func newColWidthsWithProviderPins(tools []*app.ToolView, toolMemberships map[str
 		},
 	}
 
-	// Layout: left group [icon name], right group [provider version group].
-	// The flexible space sits between the groups; individual columns stay at
-	// their largest observed width so rows across tabs obey the same placement
-	// rule.
+	// Individual columns stay at their largest observed width so rows across tabs obey the same placement rule.
 	return seedWidenCapShrinkColWidths(seed, len(tools), measure)
 }
 
@@ -840,12 +810,7 @@ func privilegeProviderCells(priv string, privW int, provider string, providerW i
 	return []rowCell{rightCell(combined, privW+gap+providerW)}
 }
 
-// renderProviderCol renders the provider column with per-part styling.
-// Meta part (system/python/node) uses normal text colour for all families.
-// Concrete part uses the resolved manager label.
-// The wrong-provider glyph (if any) is placed in the priv/mark column before
-// the provider name (just like the lock icon) so names align vertically.
-// plainLabel is the clean label.
+// The wrong-provider glyph goes in the priv/mark column (like the lock icon) so names still align vertically.
 func renderProviderColWithExplicit(p palette, raw, installedWith, explicitWith, systemBin, pythonBin, nodeBin, plainLabel string, colW int, selected, wrongProvider bool) string {
 	meta, concrete, _ := providerPartsWithExplicit(raw, installedWith, explicitWith, systemBin, pythonBin, nodeBin)
 
@@ -854,9 +819,7 @@ func renderProviderColWithExplicit(p palette, raw, installedWith, explicitWith, 
 	plainW := lipgloss.Width(plainLabel)
 	padding := strings.Repeat(" ", max(0, colW-plainW))
 
-	// Show the concrete package manager when resolved; fall back to the ecosystem
-	// name (muted) only for unresolved tools. Wrong-provider concrete tools
-	// (brew route, bun install) surface the actual install source.
+	// Fall back to the muted ecosystem name only for unresolved tools; wrong-provider concrete tools surface the actual install source.
 	label := concrete
 	style := providerMetaStyle(p, meta)
 	if concrete == "" {
@@ -888,13 +851,7 @@ func providerMetaStyle(p palette, meta string) lipgloss.Style {
 	}
 }
 
-// providerPartsWithExplicit splits a raw provider string into a meta label,
-// the concrete backend, and whether the backend is an explicit per-tool
-// override.
-//
-// Ecosystem providers resolve concrete from installedWith, explicit pins, or
-// effective managers. Explicit pins plus concrete providers/managers render as
-// overrides.
+// Ecosystem providers resolve concrete from installedWith, explicit pins, or effective managers; explicit pins plus concrete providers render as overrides.
 func providerPartsWithExplicit(raw, installedWith, explicitWith, systemBin, pythonBin, nodeBin string) (meta, concrete string, isOverride bool) {
 	parts := app.ToolProviderDisplayParts(app.ToolProviderDisplayInput{
 		Provider:               raw,
@@ -954,10 +911,7 @@ func providerPinForTool(t *app.ToolView, providerPins map[string]string) string 
 	return providerPins[t.Name]
 }
 
-// inlineDetailLines returns the lines to insert directly below the selected
-// tool row. The description is word-wrapped up to just before the right-side
-// provider metadata and indented to align with the tool name (not the icon).
-// Returns nil when nothing is selected.
+// Description wraps up to just before the right-side provider metadata and indents to align with the tool name, not the icon.
 func inlineDetailLines(m Model, width int, cols colWidths) []string {
 	p := m.palette
 	t := m.selectedTool()
@@ -965,8 +919,7 @@ func inlineDetailLines(m Model, width int, cols colWidths) []string {
 		return nil
 	}
 
-	// Indent starts just after the name column start so selected-row details
-	// read as secondary content instead of another table row.
+	// Indent starts just after the name column so details read as secondary content instead of another table row.
 	prefix := listTextPrefix()
 	hintPrefix := listHintPrefix()
 	prefixW := lipgloss.Width(prefix)
@@ -974,7 +927,6 @@ func inlineDetailLines(m Model, width int, cols colWidths) []string {
 
 	var lines []string
 
-	// Description — word-wrapped to terminal width.
 	if t.Description != "" {
 		for _, dl := range text.WrapText(t.Description, wrapWidth) {
 			lines = append(lines, prefix+p.styleHelp.Render(dl))
@@ -1244,8 +1196,7 @@ func fullVersionDetailLine(p palette, t *app.ToolView, prefix string) string {
 	return prefix + p.styleHelp.Render("version ") + p.styleVersionMuted.Render(t.Version)
 }
 
-// wrapText wraps text to width runes. Kept for test compatibility; delegates to
-// text.WrapText but returns []string{""} for empty input to preserve old behaviour.
+// Returns []string{""} for empty input, unlike the text.WrapText it delegates to.
 func wrapText(s string, width int) []string {
 	result := text.WrapText(s, width)
 	if result == nil {

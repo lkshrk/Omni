@@ -27,7 +27,6 @@ define run_pm_test
 	$(DOCKER) start -a "$$container"
 endef
 
-# Embed version from git tags; fall back to "dev" on untagged repos.
 GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GIT_COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "")
 BUILD_DATE  := $(shell date -u +%Y-%m-%d)
@@ -35,7 +34,7 @@ LDFLAGS     := -X $(MODULE)/internal/buildinfo.Version=$(GIT_VERSION) \
                -X $(MODULE)/internal/buildinfo.Commit=$(GIT_COMMIT) \
                -X $(MODULE)/internal/buildinfo.Date=$(BUILD_DATE)
 
-.PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-unit test-scripts test-package-managers test-all test-integration-build test-integration docs-build lint clean clean-cache clean-docker prune-tmp install gen-schema demo-gif
+.PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-unit test-scripts test-canary test-package-managers test-all test-integration-build test-integration docs-build lint clean clean-cache clean-docker prune-tmp install gen-schema demo-gif
 
 ## build: compile the binary to ./bin/omni
 build:
@@ -111,6 +110,10 @@ test-fast: test-scripts test-unit-fast
 ## test-scripts: run shell-script regression tests
 test-scripts:
 	$(TEST_SAFE) bash scripts/test-release.sh
+
+## test-canary: run the opt-in upstream contract canary against live endpoints
+test-canary:
+	go test -tags canary -count=1 -run 'TestCanary' ./internal/agent/... ./internal/app/...
 
 ## test-package-managers: run real package-manager provider tests in minimal distro containers
 test-package-managers: prune-tmp

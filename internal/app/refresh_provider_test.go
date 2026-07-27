@@ -15,10 +15,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// ─── RefreshProviderOutdated ──────────────────────────────────────────────────
-
-// provOutdatedStub extends stubProvider with the OutdatedChecker interface.
-// (Distinct from outdatedStub in config_test.go which uses field "outdated".)
 type provOutdatedStub struct {
 	stubProvider
 	outdatedMap map[string]string // lowercase name → latest version
@@ -32,9 +28,6 @@ func (s *provOutdatedStub) OutdatedMap(_ context.Context) (map[string]string, er
 	return s.outdatedMap, nil
 }
 
-// metadataRefreshStub extends provOutdatedStub with MetadataRefresher, counting
-// how often RefreshMetadata is invoked so tests can assert the user-initiated
-// gate (refreshMetadata bool) actually controls the index refresh.
 type metadataRefreshStub struct {
 	provOutdatedStub
 	refreshes int32
@@ -101,8 +94,6 @@ func (s *managerOutdatedInfoStub) OutdatedInfoByManager(_ context.Context) (map[
 	return s.byManager, nil
 }
 
-// selfUnupgradeableStub is an outdated-reporting provider whose own package
-// cannot be upgraded (PEP 668 externally managed), exercising suppression.
 type selfUnupgradeableStub struct {
 	provOutdatedStub
 	upgradeable bool
@@ -171,8 +162,6 @@ func TestRefreshOutdated_KeepsSelfUpgradeableManagerOutdated(t *testing.T) {
 	}
 }
 
-// TestRefreshProviderOutdated_UnknownProvider verifies that an unregistered
-// provider name is silently skipped (returns nil, no panic).
 func TestRefreshProviderOutdated_UnknownProvider(t *testing.T) {
 	t.Parallel()
 	a, _ := newImportApp(t)
@@ -181,8 +170,6 @@ func TestRefreshProviderOutdated_UnknownProvider(t *testing.T) {
 	}
 }
 
-// TestRefreshProviderOutdated_ProviderNotOutdatedChecker verifies that a
-// provider registered without OutdatedChecker is silently skipped.
 func TestRefreshProviderOutdated_ProviderNotOutdatedChecker(t *testing.T) {
 	t.Parallel()
 	prov := &stubProvider{name: "brew", available: true}
@@ -192,8 +179,6 @@ func TestRefreshProviderOutdated_ProviderNotOutdatedChecker(t *testing.T) {
 	}
 }
 
-// TestRefreshProviderOutdated_UnavailableProvider verifies that when the
-// provider is not available, the function returns nil without querying.
 func TestRefreshProviderOutdated_UnavailableProvider(t *testing.T) {
 	t.Parallel()
 	prov := &provOutdatedStub{
@@ -232,9 +217,6 @@ func TestRefreshProviderOutdated_ReturnsOutdatedMapError(t *testing.T) {
 	}
 }
 
-// TestRefreshProviderOutdated_NoOutdatedTools verifies the happy path where the
-// provider is registered, available, implements OutdatedChecker, and the
-// outdated map is empty (nothing to update).
 func TestRefreshProviderOutdated_NoOutdatedTools(t *testing.T) {
 	t.Parallel()
 	prov := &provOutdatedStub{
@@ -273,8 +255,6 @@ func newMetadataRefreshApp(t *testing.T) (*app.App, *metadataRefreshStub) {
 	return a, prov
 }
 
-// TestRefreshProviderOutdated_RefreshMetadataTrue verifies a user-initiated
-// refresh refreshes the provider's local index before checking outdated status.
 func TestRefreshProviderOutdated_RefreshMetadataTrue(t *testing.T) {
 	t.Parallel()
 	a, prov := newMetadataRefreshApp(t)
@@ -286,8 +266,6 @@ func TestRefreshProviderOutdated_RefreshMetadataTrue(t *testing.T) {
 	}
 }
 
-// TestRefreshProviderOutdated_RefreshMetadataFalse verifies a passive scan does
-// not pay the index-refresh cost.
 func TestRefreshProviderOutdated_RefreshMetadataFalse(t *testing.T) {
 	t.Parallel()
 	a, prov := newMetadataRefreshApp(t)
@@ -299,8 +277,6 @@ func TestRefreshProviderOutdated_RefreshMetadataFalse(t *testing.T) {
 	}
 }
 
-// TestRefreshProviderOutdated_MarksOutdated verifies that when a tool is in
-// the outdated map, its DB entry is updated.
 func TestRefreshProviderOutdated_MarksOutdated(t *testing.T) {
 	t.Parallel()
 	prov := &provOutdatedStub{
@@ -309,7 +285,6 @@ func TestRefreshProviderOutdated_MarksOutdated(t *testing.T) {
 	}
 	a, cfgPath := newImportApp(t, prov)
 
-	// Seed DB with the tool first.
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{{
@@ -422,14 +397,6 @@ func TestRefreshProviderOutdated_PersistsManagerUpdateMetadata(t *testing.T) {
 	}
 }
 
-// onlyManagerOutdatedInfoStub mirrors the real node/python provider shape:
-// OutdatedInfoMap (satisfying plain OutdatedInfoChecker) is a convenience
-// wrapper that merges OutdatedInfoByManager's per-manager results into one
-// flat, first-writer-wins map by package name, exactly like
-// node.Provider.OutdatedInfoMap does. This is what lets the bug hide: even
-// without ManagerOutdatedInfoChecker forwarding, namedProvider's own
-// OutdatedInfoMap method still finds a real (but manager-unattributed and
-// therefore cross-contaminated) result from the base.
 type onlyManagerOutdatedInfoStub struct {
 	stubProvider
 	byManager map[string]map[string]provider.OutdatedInfo
@@ -454,18 +421,6 @@ func (s *onlyManagerOutdatedInfoStub) OutdatedInfoMap(_ context.Context) (map[st
 	return result, nil
 }
 
-// TestRefreshProviderOutdated_NamedAliasPreservesManagerAttribution guards
-// against a regression where provider.Named-wrapped aliases (bun, pnpm, uv,
-// ...) lost ManagerOutdatedInfoChecker because Named embedded the base as the
-// Provider interface, so the optional method wasn't promoted.
-// outdatedMapsForProvider then fell through to the wrapper's own concrete
-// OutdatedMap/OutdatedInfoMap methods (which always structurally satisfy
-// OutdatedChecker/OutdatedInfoChecker but return nil when the base lacks
-// those), losing per-manager attribution entirely. outdatedForTool then
-// matched by package name only across every concrete manager flattened
-// together: a same-named package already current under pnpm got contaminated
-// by npm's outdated entry for typescript, wrongly flipping the pnpm-owned row
-// to Outdated=true even though its own manager (pnpm) has no update.
 func TestRefreshProviderOutdated_NamedAliasPreservesManagerAttribution(t *testing.T) {
 	t.Parallel()
 	base := &onlyManagerOutdatedInfoStub{
@@ -475,8 +430,6 @@ func TestRefreshProviderOutdated_NamedAliasPreservesManagerAttribution(t *testin
 			"pnpm": {},
 		},
 	}
-	// Mirror app.go's real registration: bun/pnpm/npm are separate Named
-	// aliases wrapping the same underlying node provider.
 	bun := provider.Named("bun", base)
 	pnpm := provider.Named("pnpm", base)
 	a, _ := newImportApp(t, bun, pnpm)
@@ -577,10 +530,6 @@ func TestRefreshProviderOutdated_UsesRegisteredInstalledWithOwner(t *testing.T) 
 	}
 }
 
-// ─── RefreshProviderInstalled ─────────────────────────────────────────────────
-
-// TestRefreshProviderInstalled_UnknownProvider verifies that an unregistered
-// provider is silently skipped.
 func TestRefreshProviderInstalled_UnknownProvider(t *testing.T) {
 	t.Parallel()
 	a, _ := newImportApp(t)
@@ -589,8 +538,6 @@ func TestRefreshProviderInstalled_UnknownProvider(t *testing.T) {
 	}
 }
 
-// TestRefreshProviderInstalled_NoTools verifies that when there are no config
-// tools for the named provider, the function returns nil immediately.
 func TestRefreshProviderInstalled_NoTools(t *testing.T) {
 	t.Parallel()
 	prov := &bulkCheckingStub{
@@ -599,7 +546,6 @@ func TestRefreshProviderInstalled_NoTools(t *testing.T) {
 	}
 	a, cfgPath := newImportApp(t, prov)
 
-	// Config has no tools at all.
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Groups: []*config.GroupConfig{},
 	}); err != nil {
@@ -611,8 +557,6 @@ func TestRefreshProviderInstalled_NoTools(t *testing.T) {
 	}
 }
 
-// TestRefreshProviderInstalled_BulkPath_MarksInstalled tests the BulkChecker
-// path of RefreshProviderInstalled with an installed tool.
 func TestRefreshProviderInstalled_BulkPath_MarksInstalled(t *testing.T) {
 	t.Parallel()
 	prov := &bulkCheckingStub{
@@ -919,8 +863,6 @@ func TestRefreshProviderInstalled_ReturnsBulkScanDeadline(t *testing.T) {
 	}
 }
 
-// TestRefreshProviderInstalled_BulkPath_MarksNotInstalled tests the BulkChecker
-// path when the tool is absent from the bulk map.
 func TestRefreshProviderInstalled_BulkPath_MarksNotInstalled(t *testing.T) {
 	t.Parallel()
 	prov := &bulkCheckingStub{
@@ -954,8 +896,6 @@ func TestRefreshProviderInstalled_BulkPath_MarksNotInstalled(t *testing.T) {
 	}
 }
 
-// TestRefreshProviderInstalled_SlowPath verifies the per-tool IsInstalled path
-// when the provider has no BulkChecker.
 func TestRefreshProviderInstalled_SlowPath(t *testing.T) {
 	t.Parallel()
 	prov := &isInstalledStub{
@@ -990,8 +930,6 @@ func TestRefreshProviderInstalled_SlowPath(t *testing.T) {
 	}
 }
 
-// TestRefreshProviderInstalled_UnavailableProvider verifies that when a provider
-// is not available, all tools for it are skipped.
 func TestRefreshProviderInstalled_UnavailableProvider(t *testing.T) {
 	t.Parallel()
 	prov := &bulkCheckingStub{
@@ -1013,8 +951,6 @@ func TestRefreshProviderInstalled_UnavailableProvider(t *testing.T) {
 		t.Fatalf("RefreshProviderInstalled unavailable: %v", err)
 	}
 
-	// Provider unavailable — config-led row may show but must be not-installed
-	// since nothing was upserted.
 	tools, err := a.ListTools(context.Background(), "")
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
@@ -1059,9 +995,6 @@ func TestRefreshProviderInstalled_MultiManagerPath_UsesFullSlashPackage(t *testi
 	}
 }
 
-// ─── RefreshDiscovered ────────────────────────────────────────────────────────
-
-// listInstalledStub extends stubProvider with a controlled ListInstalled response.
 type listInstalledStub struct {
 	stubProvider
 	installed []provider.InstalledTool
@@ -1080,8 +1013,6 @@ func (s *cliFilteredListInstalledStub) CLIToolSet(context.Context) (map[string]b
 	return s.cliSet, nil
 }
 
-// TestRefreshDiscovered_PopulatesDB verifies that tools reported by
-// ListInstalled are stored as discovered (tracked=false) entries.
 func TestRefreshDiscovered_PopulatesDB(t *testing.T) {
 	t.Parallel()
 	prov := &listInstalledStub{
@@ -1188,8 +1119,6 @@ func TestRefreshDiscovered_SkipsUnconfiguredPipPackages(t *testing.T) {
 	}
 }
 
-// TestRefreshDiscovered_SkipsConfiguredTools verifies that tools already
-// declared in config are not added to the discovered set.
 func TestRefreshDiscovered_SkipsConfiguredTools(t *testing.T) {
 	t.Parallel()
 	prov := &listInstalledStub{
@@ -1201,7 +1130,6 @@ func TestRefreshDiscovered_SkipsConfiguredTools(t *testing.T) {
 	}
 	a, cfgPath := newImportApp(t, prov)
 
-	// ripgrep is already in config — only jq should be discovered.
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{{
@@ -1227,8 +1155,6 @@ func TestRefreshDiscovered_SkipsConfiguredTools(t *testing.T) {
 	}
 }
 
-// TestRefreshDiscovered_SkipsUnavailableProvider verifies that an unavailable
-// provider is silently skipped.
 func TestRefreshDiscovered_SkipsUnavailableProvider(t *testing.T) {
 	t.Parallel()
 	prov := &listInstalledStub{
@@ -1252,9 +1178,6 @@ func TestRefreshDiscovered_SkipsUnavailableProvider(t *testing.T) {
 	}
 }
 
-// bulkScanTracker holds shared atomic counters used by the concurrent bulk
-// stubs below. Sharing a single tracker lets both stubs increment the same
-// active counter, so the peak reflects true cross-stub overlap.
 type bulkScanTracker struct {
 	active  atomic.Int32
 	maxSeen atomic.Int32
@@ -1272,8 +1195,6 @@ func (tr *bulkScanTracker) enter() {
 
 func (tr *bulkScanTracker) exit() { tr.active.Add(-1) }
 
-// concurrentBulkStub is a BulkChecker that records entry/exit in a shared
-// tracker so TestRefreshInstalled_BulkScansRunConcurrently can assert overlap.
 type concurrentBulkStub struct {
 	stubProvider
 	bulk    map[string]string
@@ -1288,8 +1209,6 @@ func (s *concurrentBulkStub) InstalledMap(_ context.Context) (map[string]string,
 	return s.bulk, nil
 }
 
-// concurrentConcreteStub adds ConcreteResolver to concurrentBulkStub.
-// This exercises the rcMu-guarded resolvedConcrete read path under -race.
 type concurrentConcreteStub struct {
 	concurrentBulkStub
 	concreteName string
@@ -1299,13 +1218,6 @@ func (s *concurrentConcreteStub) ResolvedName(_ context.Context) (string, error)
 	return s.concreteName, nil
 }
 
-// TestRefreshInstalled_BulkScansRunConcurrently verifies that RefreshInstalled
-// fans out independent provider bulk scans in parallel. A shared atomic
-// active-counter proves overlap: peak ≥ 2 means both InstalledMap calls were
-// executing simultaneously. No wall-clock threshold is used.
-//
-// provB implements ConcreteResolver so the rcMu-guarded resolvedConcrete read
-// inside the goroutine is exercised under -race.
 func TestRefreshInstalled_BulkScansRunConcurrently(t *testing.T) {
 	t.Parallel()
 	tracker := &bulkScanTracker{}
@@ -1345,7 +1257,6 @@ func TestRefreshInstalled_BulkScansRunConcurrently(t *testing.T) {
 		t.Errorf("peak concurrent InstalledMap calls = %d, want ≥ 2: provider scans appear serial", got)
 	}
 
-	// Verify detection results are correct.
 	gotA, err := a.DB().Get(context.Background(), "tool-a", "prov-a", "tool-a")
 	if err != nil {
 		t.Fatalf("DB.Get tool-a: %v", err)

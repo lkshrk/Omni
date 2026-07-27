@@ -18,7 +18,6 @@ func TestAuditIgnoreList_Empty(t *testing.T) {
 }
 
 func TestAuditIgnoreList_Clean(t *testing.T) {
-	// A well-formed allowlist pattern: nothing to report.
 	patterns := []string{
 		"*",
 		"!/settings.json",
@@ -45,7 +44,6 @@ func TestAuditIgnoreList_Duplicate(t *testing.T) {
 }
 
 func TestAuditIgnoreList_Contradiction_UnignoreThenIgnore(t *testing.T) {
-	// Real-world case: !/skills/ then skills
 	patterns := []string{
 		"*",
 		"!/skills/",
@@ -78,7 +76,6 @@ func TestAuditIgnoreList_Contradiction_Multiple(t *testing.T) {
 }
 
 func TestAuditIgnoreList_Redundant(t *testing.T) {
-	// "*" already ignores everything; "cache" after it is redundant.
 	patterns := []string{"*", "cache"}
 	findings := dots.AuditIgnoreList(patterns)
 	found := findingByType(findings, "redundant")
@@ -91,9 +88,7 @@ func TestAuditIgnoreList_Redundant(t *testing.T) {
 }
 
 func TestAuditIgnoreList_Redundant_NotIfUnignoreBetween(t *testing.T) {
-	// "*" ignores all, "!cache" un-ignores cache, "cache" re-ignores it.
-	// The re-ignore is NOT redundant — it's a contradiction with the un-ignore,
-	// but it does have an effect (re-ignores after un-ignore).
+	// Re-ignoring after an un-ignore is a contradiction, not redundancy: it still has an effect.
 	patterns := []string{"*", "!cache", "cache"}
 	findings := dots.AuditIgnoreList(patterns)
 	redundant := findingsByType(findings, "redundant")
@@ -103,7 +98,6 @@ func TestAuditIgnoreList_Redundant_NotIfUnignoreBetween(t *testing.T) {
 }
 
 func TestAuditIgnoreList_ShadowedInclude_First(t *testing.T) {
-	// Include as first pattern — nothing before it to reverse.
 	patterns := []string{"!/foo", "*"}
 	findings := dots.AuditIgnoreList(patterns)
 	found := findingByType(findings, "shadowed")
@@ -116,7 +110,6 @@ func TestAuditIgnoreList_ShadowedInclude_First(t *testing.T) {
 }
 
 func TestAuditIgnoreList_ShadowedInclude_NoPriorIgnore(t *testing.T) {
-	// Two includes in a row — second has nothing ignoring its target.
 	patterns := []string{"cache", "!settings.json"}
 	findings := dots.AuditIgnoreList(patterns)
 	found := findingByType(findings, "shadowed")
@@ -126,7 +119,6 @@ func TestAuditIgnoreList_ShadowedInclude_NoPriorIgnore(t *testing.T) {
 }
 
 func TestAuditIgnoreList_ShadowedInclude_NotIfPriorIgnore(t *testing.T) {
-	// "*" ignores all, then "!settings.json" is meaningful.
 	patterns := []string{"*", "!/settings.json"}
 	findings := dots.AuditIgnoreList(patterns)
 	shadowed := findingsByType(findings, "shadowed")
@@ -136,7 +128,6 @@ func TestAuditIgnoreList_ShadowedInclude_NotIfPriorIgnore(t *testing.T) {
 }
 
 func TestAuditIgnoreList_RealWorldClaude(t *testing.T) {
-	// Simulates the user's actual broken Claude config.
 	patterns := []string{
 		"*",
 		"!/settings.json",
@@ -175,7 +166,6 @@ func TestAuditIgnoreList_RealWorldCodex(t *testing.T) {
 	}
 	findings := dots.AuditIgnoreList(patterns)
 	contradictions := findingsByType(findings, "contradiction")
-	// !/skills/ overridden by skills
 	if len(contradictions) < 1 {
 		t.Fatalf("expected at least 1 contradiction, got %d: %v", len(contradictions), findings)
 	}

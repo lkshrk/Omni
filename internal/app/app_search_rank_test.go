@@ -21,8 +21,6 @@ func TestSortByProviderRank(t *testing.T) {
 	for i, p := range provs {
 		got[i] = p.Provider
 	}
-	// Ranked providers first by rank (name breaks the node/pip tie), then
-	// unranked alphabetically.
 	want := []string{"brew", "node", "pip", "apt", "zebra"}
 	for i := range want {
 		if got[i] != want[i] {

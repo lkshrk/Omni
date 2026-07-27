@@ -10,6 +10,11 @@ omni ui
 The TUI is the primary daily interface. It uses the same app behavior as the
 CLI, so durable actions should have matching command-line surfaces.
 
+Every tab moves things between the same three stores, and the help overlay
+(`?`) repeats the model in one line: manifest = what you want, store = what
+Omni holds, live = what agents and machines see. See
+[Core Concepts](concepts.md#the-three-stores).
+
 ![Omni TUI demo](assets/omni-demo.gif)
 
 ## Dashboard
@@ -18,8 +23,8 @@ The dashboard answers "what needs attention?" first, split into a Health Check
 section (state and actions) and a Data section (at-a-glance stats).
 
 Health Check surfaces tool updates, tool sync issues, dotfile health, agent
-skill issues, service automation gaps, and doctor diagnostics — each row
-carries the action needed to resolve it. When both need attention, the
+upgrades, agent skill issues, service automation gaps, and doctor diagnostics —
+each row carries the action needed to resolve it. When both need attention, the
 **Agents** row appears before **Services**. Use `reconcile` from the dashboard
 when you want Omni to repair the normal set of issues for the active host.
 
@@ -37,13 +42,21 @@ The Agents row in Data shows the total managed count (or `disabled` when the
 `agents_disabled` host setting turns off the master switch), with per-feature
 skill/MCP/plugin details on selection. A matching Agents row appears in Health
 Check when skills, MCP servers, or plugins are missing or unmanaged; its
-action is "restore skills" when skill packages are missing, or "open agents"
+action is "sync skills" when skill packages are missing, or "open agents"
 otherwise. The attention count adds skills missing/unmanaged, MCP
 missing/unmanaged, and plugin missing/unmanaged, deduplicated per item (an
 item counts once even if missing across multiple target agents) and with
 ignored items excluded. Agents data — skills, MCP rows, and plugin rows —
 loads once at TUI launch, so this count reflects live state without needing
 the Agents tab to be opened first.
+
+An **Agent Updates** row in Health Check counts the skill packages and plugins
+behind their source, with `U` as its action. Being behind a source is not being
+out of sync — the package is installed and linked — so those items are excluded
+from the Agents row's attention count and reported here instead. The Agents row
+in Data appends the same count (`5 skills · 3 mcp · 4 plugins · 1 upgrade
+available`). The Agent Updates row is omitted entirely when agents are disabled
+for the host, where the muted Agents row already says so.
 
 ## Tools Tab
 
@@ -119,10 +132,11 @@ in the row list instead of hiding it behind an expandable summary.
 
 Rows group into sections by status, in this order:
 
-- **Updates Available** — an installed row with a newer version upstream.
-- **Out of Sync** — either a configured row missing on its target agent, or
-  an unmanaged/lock-only row installed on an agent but not tracked in the
-  manifest.
+- **Updates Available** — an installed row with a newer version upstream, or
+  an installed skill package recorded as behind its source.
+- **Out of Sync** — a configured row missing on its target agent, a drifted
+  row another tool owns, or an unmanaged/lock-only row installed on an agent
+  but not tracked in the manifest.
 - **Installed** — installed and up to date.
 - **Available** — skill search results (`/` search) not yet added.
 - **Ignored** — items on the `agents.ignore` lists, dimmed and excluded from
@@ -141,23 +155,57 @@ Row actions match the Tools tab vocabulary:
 
 | Key | Action |
 | --- | --- |
-| `u` | Update. On a plugin row with an update available, upgrades that one plugin. On a skills row that is installed or missing, runs a skills-wide update (skills update per package, not per row). |
+| `u` | Upgrade. On a plugin row with an update available, upgrades that one plugin. On a skills row that is installed or missing, runs a skills-wide upgrade (`agents skills upgrade` per package, not per row). |
 | `i` | Install a missing row (Out of Sync + missing) onto its target agent. |
 | `g` | Move the item between groups. Not available on Available or orphan (unmanaged) rows. |
+| `a` | On a managed skills row, choose which agents the package installs to. The checkbox is the selection and the right-hand column is the on-disk state, so an installed agent can be left unselected without the row contradicting itself. Selecting every agent saves as the manifest's "all enabled agents" form rather than freezing today's agent list. |
 | `x` | Ignore or unignore the item. Requires a second `x` press to confirm. Available on every non-synthetic row, including Available search results. |
 | `d` | Delete the item from the manifest. Requires a second `d` press to confirm; any other key cancels. Not available on orphan or Available rows. |
 | `c` | Claim an orphan into the manifest (opens the group picker first). |
 | `enter` | On a skills Available row: add a highlighted search result. |
 
-Lock-only skill packages, unmanaged MCP servers, and unmanaged plugins —
-installed on an agent but not tracked in the manifest — appear as orphans in
+A drifted row — a skill entry another tool owns, an MCP server whose live
+registration differs from the manifest's transport/command/URL, or a plugin
+installed from a marketplace other than the declared one — sits in Out of Sync
+with `drifted` in the version column. There `u` and `l` change meaning: `u`
+resolves with Omni's side and `l` with the local one, each armed by a second
+press of the same key (`l` still switches chips on every other row). The
+resolutions are the `omni agents skills|mcp|plugins resolve` verbs; see
+[CLI](cli.md#agents-commands) for what each side does per capability.
+
+A row can only sit in one section, and drift outranks an update for placement.
+An item that is both drifted and behind its source therefore stays in Out of
+Sync, reading `drifted · upgrade` in the version column with `upgrade
+available` in its detail; the Agent Updates dashboard row still counts it, so
+the pending upgrade is never hidden behind the drift.
+
+The tab-wide actions run every feature in one pass: `S` claims what other CLIs
+installed and then converges all three, `R` reloads the rows. The run's outcome
+goes to the status bar as a one-line total; the rows themselves are the report,
+so nothing is stacked above the table. A per-feature failure still gets its own
+`error:` line there, since it names something no row can show.
+
+A run that leaves drift behind ends on a Drift Detected popup naming the first
+ten drifted items. That popup holds every keypress while it is up, which is
+what lets it use the uppercase batch keys: `U` resolves every currently drifted
+item with Omni's side, `L` with the local one, and `esc` dismisses it without
+acting. Both are `omni agents resolve --use-managed|--use-local`; see
+[CLI](cli.md#agents-commands). Resolving one row at a time with the per-row lowercase
+`u`/`l` (above) still works exactly as before; the popup is only ever a
+shortcut for doing it to all of them at once.
+
+Legacy lock-only skill packages, unmanaged MCP servers, and unmanaged plugins
+— installed on an agent but not tracked in the manifest — appear as orphans in
 the Out of Sync section. Orphan rows support claim (`c`, or `i` for MCP/plugins)
 before group, ignore, or delete apply. Claiming a plugin can offer to adopt its
 undeclared marketplace as well.
 
 Skills, MCP rows, and plugin rows all load once at TUI launch (not lazily on
 first tab visit), so the Agents tab and the dashboard's Agents counts reflect
-current state as soon as the TUI starts.
+current state as soon as the TUI starts. That load never probes a skill
+package's source — it renders the last recorded verdict. `R` (refresh all) is
+what re-probes, so an outdated marker appears after an explicit refresh or a
+sync, never as a side effect of drawing the table.
 
 If a feature is disabled for this host (via the `agents_disabled`,
 `skills_disabled`, `mcp_disabled`, or `plugins_disabled` host settings), its

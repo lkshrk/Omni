@@ -19,8 +19,6 @@ func tool(name string) provider.Tool {
 	return provider.Tool{Name: name, Provider: "apt", Package: name}
 }
 
-// --- Available ---
-
 func TestAvailable_True(t *testing.T) {
 	p, _ := newAPT(executor.MockCall{Stdout: "apt 2.4.10"})
 	ok, err := p.Available(context.Background())
@@ -36,8 +34,6 @@ func TestAvailable_False(t *testing.T) {
 		t.Errorf("Available() = (%v, %v), want (false, nil)", ok, err)
 	}
 }
-
-// --- Install ---
 
 func TestInstall_Success(t *testing.T) {
 	p, m := newAPT(executor.MockCall{Stdout: "Setting up ripgrep..."})
@@ -61,8 +57,6 @@ func TestInstall_Error(t *testing.T) {
 	}
 }
 
-// --- Uninstall ---
-
 func TestUninstall_Success(t *testing.T) {
 	p, m := newAPT(executor.MockCall{})
 	if err := p.Uninstall(context.Background(), tool("ripgrep")); err != nil {
@@ -79,8 +73,6 @@ func TestUninstall_Error(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
-
-// --- Upgrade ---
 
 func TestUpgrade_Success(t *testing.T) {
 	p, m := newAPT(executor.MockCall{})
@@ -100,8 +92,6 @@ func TestUpgrade_Error(t *testing.T) {
 	}
 }
 
-// --- Name / Description ---
-
 func TestName(t *testing.T) {
 	p, _ := newAPT()
 	if p.Name() != "apt" {
@@ -115,8 +105,6 @@ func TestDescription(t *testing.T) {
 		t.Error("Description() should not be empty")
 	}
 }
-
-// --- IsInstalled ---
 
 func TestIsInstalled_Found(t *testing.T) {
 	p, _ := newAPT(executor.MockCall{Stdout: "14.1.1-1+b4"})
@@ -142,8 +130,6 @@ func TestIsInstalled_EmptyOutput(t *testing.T) {
 	}
 }
 
-// --- ListInstalled ---
-
 func TestListInstalled(t *testing.T) {
 	manual := "ripgrep\nfd-find\n"
 	output := "ripgrep\t14.1.1-1\tii \nfoo\t1.0\trc \nfd-find\t9.0.0\tii \n"
@@ -163,8 +149,6 @@ func TestListInstalled(t *testing.T) {
 	}
 }
 
-// --- InstalledMap ---
-
 func TestInstalledMap(t *testing.T) {
 	manual := "Ripgrep\n"
 	output := "Ripgrep\t14.1.1-1\tii \nFoo\t1.0\tun \n"
@@ -181,8 +165,6 @@ func TestInstalledMap(t *testing.T) {
 	}
 }
 
-// --- parseAPTListLine ---
-
 func TestParseAPTListLine(t *testing.T) {
 	tests := []struct {
 		line    string
@@ -197,10 +179,7 @@ func TestParseAPTListLine(t *testing.T) {
 		{"only-one-field", "", "", false},
 	}
 	for _, tc := range tests {
-		// access via exported function through package-level testing
 		p, _ := newAPT()
-		// We test parseAPTListLine indirectly through ListInstalled/InstalledMap.
-		// Direct test via a single-line output:
 		resp := executor.MockCall{Stdout: tc.line + "\n"}
 		p2, _ := newAPT(executor.MockCall{Stdout: tc.name + "\n"}, resp)
 		tools, _ := p2.ListInstalled(context.Background())

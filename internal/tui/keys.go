@@ -6,9 +6,7 @@ import (
 	"github.com/lkshrk/omni/internal/actions"
 )
 
-// KeyMap defines all keyboard shortcuts for the TUI.
 type KeyMap struct {
-	// List navigation
 	Up           key.Binding
 	Down         key.Binding
 	Top          key.Binding // home — jump to first item
@@ -20,7 +18,6 @@ type KeyMap struct {
 	ProviderPrev key.Binding // h, left — previous provider candidate
 	ProviderNext key.Binding // l, right — next provider candidate
 
-	// Tool actions
 	Install         key.Binding
 	Delete          key.Binding // d — delete tool/config entry
 	Upgrade         key.Binding
@@ -41,7 +38,6 @@ type KeyMap struct {
 	GroupTools      key.Binding // t — edit selected group tools
 	GroupDots       key.Binding // f — edit selected group dotfiles
 
-	// UI controls
 	Search    key.Binding
 	Confirm   key.Binding // enter — confirm / primary action
 	Quit      key.Binding
@@ -54,12 +50,10 @@ type KeyMap struct {
 	Help      key.Binding // ?
 	MoveGroup key.Binding // g — change selected item's group memberships
 
-	// Tool list actions
 	Refresh   key.Binding // R — re-scan all providers and update install status
 	GroupPrev key.Binding // { — cycle group filter backward
 	GroupNext key.Binding // } — cycle group filter forward
 
-	// Dots tab actions
 	DotRefresh     key.Binding // R — refresh status and discover candidates
 	DotPull        key.Binding // p — git pull + resync (command palette only)
 	DotDelete      key.Binding // d — delete dots entry (confirm required)
@@ -72,18 +66,18 @@ type KeyMap struct {
 	DotUseLocalAll key.Binding // L — force-resolve all conflicts with local version
 	DotCommit      key.Binding // C — commit dotfiles (global)
 
-	// Out-of-sync actions
+	AgentsUseManaged    key.Binding // u — resolve a drifted agent resource with omni's side
+	AgentsUseLocal      key.Binding // l — resolve a drifted agent resource with the local side
+	AgentsUseManagedAll key.Binding // U — resolve every drifted agent resource with omni's side
+	AgentsUseLocalAll   key.Binding // L — resolve every drifted agent resource with the local side
+
 	PinProvider key.Binding // p — pin provider scope
 }
 
-// ShortHelp implements key.Map. Returns the most-used bindings for the
-// compact single-line hint in the status bar.
 func (k KeyMap) ShortHelp() []key.Binding {
 	return footerBindings(k, []key.Binding{k.UpgradeAll, k.SyncAll, k.Refresh}, []key.Binding{k.Search, footerFilterBinding(k, true)})
 }
 
-// FullHelp implements key.Map. Returns all bindings grouped into columns
-// for the ? overlay.
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Top, k.Bottom, k.HalfPageUp, k.HalfPageDown, k.PageUp, k.PageDown, k.ProviderPrev, k.ProviderNext, k.Tab},
@@ -93,7 +87,6 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	}
 }
 
-// DefaultKeyMap returns the default key bindings.
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
 		Up:   key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("", "")),
@@ -288,6 +281,22 @@ func DefaultKeyMap() KeyMap {
 		DotCommit: key.NewBinding(
 			key.WithKeys("C"),
 			key.WithHelp("C", "commit dotfiles"),
+		),
+		AgentsUseManaged: key.NewBinding(
+			key.WithKeys("u"),
+			key.WithHelp("u", actions.MustTUILabel(actions.AgentsSkillsUseManaged)),
+		),
+		AgentsUseLocal: key.NewBinding(
+			key.WithKeys("l"),
+			key.WithHelp("l", actions.MustTUILabel(actions.AgentsSkillsUseLocal)),
+		),
+		AgentsUseManagedAll: key.NewBinding(
+			key.WithKeys("U"),
+			key.WithHelp("U", actions.MustTUILabel(actions.AgentsResolveAllUseManaged)),
+		),
+		AgentsUseLocalAll: key.NewBinding(
+			key.WithKeys("L"),
+			key.WithHelp("L", actions.MustTUILabel(actions.AgentsResolveAllUseLocal)),
 		),
 		PinProvider: key.NewBinding(
 			key.WithKeys("p"),

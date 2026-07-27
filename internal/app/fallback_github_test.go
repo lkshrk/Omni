@@ -432,9 +432,6 @@ func TestGitHubFallbackLiveAPI_ResolvesLatestRelease(t *testing.T) {
 }
 
 func TestFetchLatestGitHubRelease_DoesNotSendTokenToNonGitHubBase(t *testing.T) {
-	// The GITHUB_TOKEN must never be forwarded to a non-GitHub host.
-	// Non-GitHub bases are accepted (local stubs, self-hosted setups) but
-	// receive the request without the Authorization header.
 	t.Setenv("GITHUB_TOKEN", "secret-token")
 
 	var capturedAuth string
@@ -450,7 +447,9 @@ func TestFetchLatestGitHubRelease_DoesNotSendTokenToNonGitHubBase(t *testing.T) 
 	})}
 
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
-	a.SetGitHubFallbackAPIForTest("http://127.0.0.1:1", client)
+	// https so the api-base scheme guard does not short-circuit before the request is built; the stub
+	// transport is what keeps this off the network, and the assertion needs the request to exist.
+	a.SetGitHubFallbackAPIForTest("https://127.0.0.1:1", client)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("gh", "system")),
 	}); err != nil {

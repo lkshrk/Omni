@@ -9,15 +9,13 @@ import (
 	"github.com/lkshrk/omni/internal/actions"
 )
 
-// palCmd is one entry in the command palette.
 type palCmd struct {
 	name string // what the user types
 	desc string // shown in the suggestion list
 	run  func(m *Model) tea.Cmd
 }
 
-// buildPalette returns the full set of available commands for the current model
-// state. Called on every keystroke in palette mode — must be free of IO.
+// Called on every keystroke in palette mode — must be free of IO.
 func buildPalette(m Model) []palCmd {
 	reconcileAction := actions.MustPalette(actions.Reconcile)
 	syncAction := actions.MustPalette(actions.ToolSync)
@@ -36,7 +34,7 @@ func buildPalette(m Model) []palCmd {
 			name: paletteCommandName(syncAction),
 			desc: syncAction.Description,
 			run: func(m *Model) tea.Cmd {
-				m.loading = true
+				m.beginLoading(loadingOwnerProgressOp)
 				m.progressText = ""
 				ch, gen := m.beginProgressStream()
 				m.markBulkPendingSync()
@@ -117,6 +115,8 @@ func buildPalette(m Model) []palCmd {
 		},
 	})
 
+	cmds = appendAgentsPaletteCommands(m, cmds)
+
 	consolidateAction := actions.MustPalette(actions.ToolConsolidate)
 	for _, opt := range m.consolidateOptions {
 		opt := opt
@@ -124,7 +124,7 @@ func buildPalette(m Model) []palCmd {
 			name: paletteCommandName(consolidateAction) + " " + opt.Ecosystem + " " + opt.Manager,
 			desc: paletteDescription(consolidateAction, opt.Manager, opt.Ecosystem),
 			run: func(m *Model) tea.Cmd {
-				m.loading = true
+				m.beginLoading(loadingOwnerLocalOp)
 				startOp(m, "consolidating "+opt.Ecosystem+" → "+opt.Manager+"…")
 				return tea.Batch(m.spinner.Tick, m.doConsolidate(opt.Ecosystem, opt.Manager))
 			},
@@ -132,6 +132,77 @@ func buildPalette(m Model) []palCmd {
 	}
 
 	return cmds
+}
+
+// Each action is gated on the feature that owns it: the composed runs need the agents master switch, the skill operations need the skills feature too.
+func appendAgentsPaletteCommands(m Model, cmds []palCmd) []palCmd {
+	if !m.agentsEnabled {
+		return cmds
+	}
+	restore := actions.MustPalette(actions.AgentsRestore)
+	syncAll := actions.MustPalette(actions.AgentsSyncAll)
+	cmds = append(cmds,
+		palCmd{
+			name: paletteCommandName(restore),
+			desc: restore.Description,
+			run: func(m *Model) tea.Cmd {
+				return m.runAgentsPaletteCommand(func(m *Model) []tea.Cmd {
+					return m.doAgentsRestoreAll()
+				})
+			},
+		},
+		// Sync-all claims on-disk directories, so the palette arms the same confirmation the agents tab's "S" does instead of running it.
+		palCmd{
+			name: paletteCommandName(syncAll),
+			desc: syncAll.Description,
+			run: func(m *Model) tea.Cmd {
+				return m.runAgentsPaletteCommand(func(m *Model) []tea.Cmd {
+					m.agentsSyncAllConfirm = true
+					return []tea.Cmd{m.armConfirmationTimeout()}
+				})
+			},
+		},
+	)
+	if !m.skillsSectionEnabled() {
+		return cmds
+	}
+	importSkills := actions.MustPalette(actions.AgentsSkillsImport)
+	updateSkills := actions.MustPalette(actions.AgentsSkillsUpdate)
+	return append(cmds,
+		palCmd{
+			name: paletteCommandName(importSkills),
+			desc: importSkills.Description,
+			run: func(m *Model) tea.Cmd {
+				return m.runAgentsPaletteCommand(func(m *Model) []tea.Cmd {
+					m.skillsRunning = true
+					m.skillsErr = nil
+					m.skillsImport = nil
+					return []tea.Cmd{m.spinner.Tick, m.doImportSkills()}
+				})
+			},
+		},
+		palCmd{
+			name: paletteCommandName(updateSkills),
+			desc: updateSkills.Description,
+			run: func(m *Model) tea.Cmd {
+				return m.runAgentsPaletteCommand(func(m *Model) []tea.Cmd {
+					m.skillsRunning = true
+					m.skillsErr = nil
+					return []tea.Cmd{m.spinner.Tick, m.doUpdateSkills()}
+				})
+			},
+		},
+	)
+}
+
+// Refuses while an agents operation is in flight for the same reason the tab's own global actions do: a second bulk run would race the first.
+func (m *Model) runAgentsPaletteCommand(run func(*Model) []tea.Cmd) tea.Cmd {
+	if m.skillsRunning || m.skillAddRunning || m.mcpRunning || m.pluginRunning || m.marketplaceRunning {
+		return setStatus(m, "⚠ agents busy — wait for the running operation to finish", true)
+	}
+	var cmds []tea.Cmd
+	m.switchMainTab(viewSkills, &cmds)
+	return tea.Batch(append(cmds, run(m)...)...)
 }
 
 func paletteCommandName(binding actions.PaletteBinding) string {
@@ -145,8 +216,7 @@ func paletteDescription(binding actions.PaletteBinding, args ...any) string {
 	return binding.Description
 }
 
-// filterPalette returns the subset of cmds whose name has q as a prefix.
-// Returns all cmds when q is empty.
+// A fully typed name wins outright, so a command whose name is another's prefix ("agents sync" inside "agents sync-all") stays reachable.
 func filterPalette(cmds []palCmd, q string) []palCmd {
 	if q == "" {
 		return cmds
@@ -154,7 +224,11 @@ func filterPalette(cmds []palCmd, q string) []palCmd {
 	q = strings.ToLower(q)
 	var out []palCmd
 	for _, c := range cmds {
-		if strings.Contains(strings.ToLower(c.name), q) {
+		name := strings.ToLower(c.name)
+		if name == q {
+			return []palCmd{c}
+		}
+		if strings.Contains(name, q) {
 			out = append(out, c)
 		}
 	}

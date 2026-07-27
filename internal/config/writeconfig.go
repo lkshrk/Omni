@@ -10,26 +10,10 @@ import (
 	"strings"
 )
 
-// ErrSkipSave is returned by a WriteConfig mutation to abort the write with no
-// error: the mutation inspected the config and decided nothing needs to change.
+// ErrSkipSave aborts a WriteConfig mutation cleanly when nothing needs to change.
 var ErrSkipSave = errors.New("config: skip save")
 
-// WriteConfig is the single safe seam for editing settings in place. Callers
-// describe *what* to change via mutate; WriteConfig owns *how* to persist it
-// safely:
-//
-//	load → snapshot top-level keys → mutate → validate → diff → route → write
-//
-// load is supplied by the caller so app-layer load migrations run before the
-// snapshot; passing config.Load directly is the include-only default. providers
-// enables semantic validation of the mutated config — pass nil to skip it (the
-// caller has no provider registry yet). Only the top-level keys that actually
-// changed are written, each routed to the fragment that owns it, with stale
-// copies in non-owner files nulled so removed entries cannot resurrect on the
-// next load. That include invariant lives here, never in the caller.
-//
-// A mutate that returns ErrSkipSave aborts the write cleanly; any other error
-// propagates unchanged.
+// WriteConfig — The single safe seam for editing settings in place: only changed top-level keys are written, each routed to its owning fragment with stale copies nulled so removed entries cannot resurrect on the next load.
 func WriteConfig(path string, load func() (*RootConfig, error), providers *ProviderValidation, mutate func(*RootConfig) error) error {
 	cfg, err := load()
 	if err != nil {
@@ -82,9 +66,7 @@ func WriteConfig(path string, load func() (*RootConfig, error), providers *Provi
 	return PatchRawRouted(path, diff)
 }
 
-// fatalValidationErrors drops fallback-pathed and warn-level validation errors:
-// a fallback only matters when actually used, and warn-level errors are
-// advisory. Neither should block a write. `omni doctor` reports the full set.
+// Fallback-pathed and warn-level errors are advisory and must not block a write; `omni doctor` reports the full set.
 func fatalValidationErrors(errs []ValidationError) []ValidationError {
 	fatal := make([]ValidationError, 0, len(errs))
 	for _, e := range errs {
@@ -96,11 +78,7 @@ func fatalValidationErrors(errs []ValidationError) []ValidationError {
 	return fatal
 }
 
-// hostSettingsProjection is the host-overridable subset of Settings, serialized
-// with pointer fields so an explicitly-empty list is distinguishable from an
-// absent one. Snapshotting through this projection keeps host_settings diffs
-// byte-stable and prevents non-overridable Settings fields from leaking into a
-// host_settings write.
+// Pointer fields keep an explicitly-empty list distinguishable from an absent one, and bar non-overridable Settings fields from a host_settings write.
 type hostSettingsProjection struct {
 	Ecosystems        map[string]EcosystemSettings `json:"ecosystems,omitempty"`
 	DotsRepo          string                       `json:"dots_repo,omitempty"`
@@ -115,8 +93,7 @@ type hostSettingsProjection struct {
 	Providers         *[]ProviderEntry             `json:"providers,omitempty"`
 }
 
-// projectHostSettings maps each host's Settings to its overridable projection.
-// It reads values only (snapshotting never mutates), so no deep copy is needed.
+// Reads values only, so the projection needs no deep copy.
 func projectHostSettings(in map[string]Settings) map[string]hostSettingsProjection {
 	if len(in) == 0 {
 		return nil
@@ -147,15 +124,7 @@ func projectHostSettings(in map[string]Settings) map[string]hostSettingsProjecti
 	return out
 }
 
-// snapshotTopLevel marshals the config to a per-top-level-key raw map so two
-// snapshots can be diffed key-by-key. It marshals the whole *RootConfig rather
-// than a hand-mirrored struct, so a newly added top-level field participates in
-// the diff automatically and can never be silently dropped on save. Two keys
-// need special handling:
-//   - $include is a load-time merge directive, stripped before save.
-//   - host_settings goes through the host-overridable projection so
-//     non-overridable Settings fields never leak into a host_settings write and
-//     the diff stays byte-stable.
+// Marshals the whole *RootConfig rather than a hand-mirrored struct so a newly added top-level field can never be silently dropped on save.
 func snapshotTopLevel(cfg *RootConfig) (map[string]json.RawMessage, error) {
 	data, err := json.Marshal(cfg)
 	if err != nil {

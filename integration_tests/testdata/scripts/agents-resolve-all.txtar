@@ -1,0 +1,67 @@
+# `agents resolve` settles all drifted resources without naming each one.
+env HOME=$WORK/home
+env XDG_DATA_HOME=$WORK/data
+
+exec omni --config settings.json agents skills sync
+stdout '^2 installed, 0 failed$'
+
+rm $WORK/home/.claude/skills/demo
+mkdir $WORK/home/.claude/skills/demo
+cp foreign/SKILL.md $WORK/home/.claude/skills/demo/SKILL.md
+rm $WORK/home/.claude/skills/other
+mkdir $WORK/home/.claude/skills/other
+cp foreign/OTHER.md $WORK/home/.claude/skills/other/SKILL.md
+
+exec omni --config settings.json agents resolve --use-managed --dry-run
+stdout 'would replace'
+stdout '^2 skills, 0 mcp servers, 0 plugins would be resolved$'
+cmp $WORK/home/.claude/skills/demo/SKILL.md foreign/SKILL.md
+
+exec omni --yes --config settings.json agents resolve --use-managed
+stdout '^2 skills, 0 mcp servers, 0 plugins resolved$'
+exec sh -c 'test -L '"$WORK"'/home/.claude/skills/demo && test -L '"$WORK"'/home/.claude/skills/other && echo both-relinked'
+stdout both-relinked
+
+exec omni --yes --config settings.json agents resolve --use-managed
+stdout '^0 skills, 0 mcp servers, 0 plugins resolved$'
+
+! exec omni --config settings.json agents resolve
+stderr 'exactly one of --use-managed or --use-local'
+! exec omni --config settings.json agents resolve ./source --use-local
+! exec omni --config settings.json agents resolve --use-managed --use-local
+stderr 'exactly one of --use-managed or --use-local'
+
+-- settings.json --
+{"version":20,"settings":{"agents_use":["claude-code"]},"agents":{"packages":[{"source":"./source"},{"source":"./other"}]}}
+
+-- source/skills/demo/SKILL.md --
+---
+name: demo
+description: Native batch-resolve test skill.
+---
+
+demo
+
+-- other/skills/other/SKILL.md --
+---
+name: other
+description: Second native batch-resolve test skill.
+---
+
+other
+
+-- foreign/SKILL.md --
+---
+name: demo
+description: Another tool's copy of the same skill.
+---
+
+foreign demo
+
+-- foreign/OTHER.md --
+---
+name: other
+description: Another tool's copy of the second skill.
+---
+
+foreign other

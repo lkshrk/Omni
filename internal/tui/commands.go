@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -21,8 +22,7 @@ type runAfterRenderMsg struct {
 	cmd tea.Cmd
 }
 
-// runAfterRender gives the renderer a complete frame to publish newly-set
-// loading, row-operation, and status state before any action work can start.
+// Gives the renderer a complete frame to publish newly-set loading, row-operation, and status state before any action work starts.
 func runAfterRender(cmd tea.Cmd) tea.Cmd {
 	if cmd == nil {
 		return nil
@@ -32,9 +32,7 @@ func runAfterRender(cmd tea.Cmd) tea.Cmd {
 	})
 }
 
-// waitForProgress blocks on one receive from ch and emits a progressMsg.
-// Channel close is reported as a stream event, not operation completion; the
-// background operation returns progressDoneMsg with the final result.
+// Channel close is a stream event, not operation completion; the background operation returns progressDoneMsg separately.
 func waitForProgress(ch chan progressUpdate, gen int) tea.Cmd {
 	return func() tea.Msg {
 		update, ok := <-ch
@@ -154,10 +152,7 @@ const (
 	statusDurationErr = 8000 * time.Millisecond // errors need more time to read
 )
 
-// setStatus sets the status message with appropriate styling and schedules
-// auto-clear. Error messages are shown in red for twice as long as successful
-// ones. Incrementing statusGen ensures stale timers from prior messages are
-// ignored — newer activities always win.
+// Errors show in red for twice as long; incrementing statusGen makes stale timers from prior messages lose to newer activity.
 func setStatus(m *Model, text string, isErr bool) tea.Cmd {
 	return setStatusFor(m, text, isErr, statusDurationOK)
 }
@@ -262,7 +257,6 @@ func launchBatchErrorStatus(errors []string) string {
 	return fmt.Sprintf("✗ launch completed with %d errors: %s", len(errors), strings.Join(errors, "; "))
 }
 
-// doSyncWithProgress triggers a background sync with progress streaming.
 func (m *Model) doSyncWithProgress(ch chan progressUpdate, gen int) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	ctx = withLiveOutput(ctx, ch, gen)
@@ -312,8 +306,6 @@ func (m *Model) doSyncWithProgress(ch chan progressUpdate, gen int) tea.Cmd {
 	}
 }
 
-// doSyncAllWithProgress installs configured missing tools and adds currently
-// discovered local tools to this machine's hostname group.
 func (m *Model) doSyncAllWithProgress(ch chan progressUpdate, gen int, discovered []*app.ToolView) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	ctx = withLiveOutput(ctx, ch, gen)
@@ -355,10 +347,7 @@ func (m *Model) doSyncAllWithProgress(ch chan progressUpdate, gen int, discovere
 		rows := app.SyncAllFailureRows(result)
 		if len(rows.RowErrors) > 0 {
 			msg = app.BulkToolFailureSummaryText(msg, rows)
-			// SyncAll returns errors.Join(claimErr, syncErr); each joined error
-			// is already represented in result.Failures and rows.RowErrors.
-			// Clear err so the status bar shows the summary message instead of
-			// duplicating per-tool failures already attached to row entries.
+			// Each joined SyncAll error is already in result.Failures/rows.RowErrors, so clearing err keeps the status bar on the summary instead of duplicating per-tool failures.
 			err = nil
 		}
 		return progressDoneMsg{
@@ -384,9 +373,7 @@ func syncAllClaimedNames(result *app.SyncAllResult) []string {
 	return result.ClaimedNames
 }
 
-// anyMissingDescription reports whether any tool in the list lacks a cached
-// description. Used to skip the background description warm-up on launches
-// where every tool is already populated.
+// Used to skip the background description warm-up on launches where every tool is already populated.
 func anyMissingDescription(tools []*app.ToolView) bool {
 	for _, t := range tools {
 		if t.Description == "" {
@@ -396,42 +383,155 @@ func anyMissingDescription(tools []*app.ToolView) bool {
 	return false
 }
 
-// doScanProvider scans a single named provider's installed state. A 45-second
-// timeout prevents slow local package-manager calls from blocking the UI
-// indefinitely. Does NOT call ListTools — all goroutines must finish their
-// upserts before a consistent snapshot can be read. The final ListTools is done
-// by doFetchFinalTools once every providerScannedMsg has arrived.
+// Deadlines for the automatic refresh chain. Nothing in that chain is user-initiated
+// and none of it can be cancelled from the UI, so a provider that never returns would
+// otherwise hold the Tools tab on its loading state forever. Each is generous enough
+// that a slow-but-working host still finishes. Overridden in tests.
+var (
+	providerScanTimeout       = 45 * time.Second
+	discoveryScanTimeout      = 90 * time.Second
+	descriptionRefreshTimeout = 120 * time.Second
+	toolSnapshotTimeout       = 30 * time.Second
+	searchTimeout             = 30 * time.Second
+	doctorTimeout             = 60 * time.Second
+)
+
+// scanProgressSink funnels one provider scan's progress into the scan-wide
+// progress channel. A scan that outruns its deadline keeps running in the
+// background, so the sink must be abandoned before the timeout message is
+// emitted: the model closes that channel once the last provider is accounted
+// for, and a send on a closed channel panics.
+type scanProgressSink struct {
+	mu        sync.Mutex
+	ch        chan progressUpdate
+	gen       int
+	abandoned bool
+}
+
+func (s *scanProgressSink) send(update progressUpdate) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.abandoned || s.ch == nil {
+		return
+	}
+	select {
+	case s.ch <- update:
+	default:
+	}
+}
+
+func (s *scanProgressSink) abandon() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.abandoned = true
+	s.mu.Unlock()
+}
+
+func withSinkLiveOutput(ctx context.Context, sink *scanProgressSink) context.Context {
+	if sink == nil || sink.ch == nil {
+		return ctx
+	}
+	return executor.WithOutputObserver(ctx, func(line string) {
+		sink.send(progressUpdate{gen: sink.gen, text: line})
+	})
+}
+
+func runBoundedProviderScan(ctx context.Context, sink *scanProgressSink, scan func(context.Context) error) error {
+	return runBounded(ctx, providerScanTimeout, sink, scan)
+}
+
+// runBounded runs work under timeout and always returns, even when work ignores
+// its context — a package manager subprocess wedged on a dpkg/apt lock is the
+// real-world case. Without this the caller's tea.Cmd would never emit a message
+// and the refreshing flag it owns would stay set forever, leaving the tab stuck
+// on loading.
+func runBounded(ctx context.Context, timeout time.Duration, sink *scanProgressSink, work func(context.Context) error) error {
+	scanCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				done <- fmt.Errorf("panic: %v", r)
+			}
+		}()
+		done <- work(scanCtx)
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-scanCtx.Done():
+		select {
+		case err := <-done:
+			return err
+		default:
+		}
+		sink.abandon()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return scanCtx.Err()
+	}
+}
+
+// The snapshot is mostly local reads, but EffectiveSystemManager probes the host and a sqlite writer can hold the file, so the refresh chain does not wait on it indefinitely.
+func boundedToolSnapshot(ctx context.Context, a *app.App) (*app.ToolDisplaySnapshot, error) {
+	// Buffered and read only on success: an abandoned worker must never block, and its late write must never be visible to the caller.
+	results := make(chan *app.ToolDisplaySnapshot, 1)
+	err := runBounded(ctx, toolSnapshotTimeout, nil, func(snapCtx context.Context) error {
+		snapshot, err := a.ToolDisplaySnapshot(snapCtx)
+		if err != nil {
+			return err
+		}
+		results <- snapshot
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return <-results, nil
+}
+
+// doScanProvider scans a single named provider's installed state. Does NOT call
+// ListTools — all goroutines must finish their upserts before a consistent
+// snapshot can be read. The final ListTools is done by doFetchFinalTools once
+// every providerScannedMsg has arrived.
 func (m *Model) doScanProvider(provName string, gen int, progressCh chan progressUpdate, progressGen int) tea.Cmd {
 	a, ctx := m.app, m.ctx
-	ctx = withLiveOutput(ctx, progressCh, progressGen)
+	sink := &scanProgressSink{ch: progressCh, gen: progressGen}
+	ctx = withSinkLiveOutput(ctx, sink)
 	return func() tea.Msg {
 		defer profile.Start("tui.refresh.installed.provider." + provName)()
 
-		installCtx, cancelInstall := context.WithTimeout(ctx, 45*time.Second)
-		installErr := a.RefreshProviderInstalledWithProgress(installCtx, provName, func(event app.RefreshInstalledProgressEvent) {
-			sendProgressUpdate(progressCh, progressUpdate{
-				gen:                  progressGen,
-				refreshProvider:      event.Provider,
-				refreshProviderLabel: event.ProviderLabel,
-				refreshToolName:      event.Name,
+		installErr := runBoundedProviderScan(ctx, sink, func(scanCtx context.Context) error {
+			return a.RefreshProviderInstalledWithProgress(scanCtx, provName, func(event app.RefreshInstalledProgressEvent) {
+				sink.send(progressUpdate{
+					gen:                  progressGen,
+					refreshProvider:      event.Provider,
+					refreshProviderLabel: event.ProviderLabel,
+					refreshToolName:      event.Name,
+				})
 			})
 		})
-		cancelInstall()
 
 		return providerScannedMsg{gen: gen, provider: provName, err: installErr}
 	}
 }
 
-// doFetchFinalTools fetches a consistent tool list after all per-provider scan
-// goroutines have completed their upserts. This single call avoids the race
-// where concurrent ListTools calls produce snapshots that are missing each
-// other's upserts.
+// One call after all per-provider upserts finish, avoiding the race where concurrent ListTools calls miss each other's upserts.
 func (m *Model) doFetchFinalTools(gen int) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
 		defer profile.Start("tui.refresh.installed.final_tools")()
 
-		snapshot, err := a.ToolDisplaySnapshot(ctx)
+		snapshot, err := boundedToolSnapshot(ctx, a)
 		if err != nil {
 			return allProvidersDoneMsg{gen: gen, err: err}
 		}
@@ -448,9 +548,9 @@ func (m *Model) doCheckProviderOutdated(provName string, gen int) tea.Cmd {
 	return func() tea.Msg {
 		defer profile.Start("tui.refresh.outdated.provider." + provName)()
 
-		outdatedCtx, cancelOutdated := context.WithTimeout(ctx, 45*time.Second)
-		outdatedErr := a.RefreshProviderOutdated(outdatedCtx, provName, true)
-		cancelOutdated()
+		outdatedErr := runBoundedProviderScan(ctx, nil, func(scanCtx context.Context) error {
+			return a.RefreshProviderOutdated(scanCtx, provName, true)
+		})
 		return providerOutdatedCheckedMsg{gen: gen, provider: provName, err: outdatedErr}
 	}
 }
@@ -460,7 +560,7 @@ func (m *Model) doFetchOutdatedTools(gen int) tea.Cmd {
 	return func() tea.Msg {
 		defer profile.Start("tui.refresh.outdated.final_tools")()
 
-		snapshot, err := a.ToolDisplaySnapshot(ctx)
+		snapshot, err := boundedToolSnapshot(ctx, a)
 		if err != nil {
 			return outdatedProvidersDoneMsg{gen: gen, err: err}
 		}
@@ -472,24 +572,25 @@ func (m *Model) doFetchOutdatedTools(gen int) tea.Cmd {
 	}
 }
 
-// doRefreshDiscovered scans all providers for locally-installed tools that are
-// not in the config (orphan scan). Runs as a separate background pass so it
-// does not delay the installedRefreshedMsg signal.
+// A separate background pass so it does not delay the installedRefreshedMsg signal.
 func (m *Model) doRefreshDiscovered(gen int, progressCh chan progressUpdate, progressGen int) tea.Cmd {
 	a, ctx := m.app, m.ctx
-	ctx = withLiveOutput(ctx, progressCh, progressGen)
+	sink := &scanProgressSink{ch: progressCh, gen: progressGen}
+	ctx = withSinkLiveOutput(ctx, sink)
 	return func() tea.Msg {
 		defer profile.Start("tui.refresh.discovered.total")()
 
 		if progressCh != nil {
 			defer close(progressCh)
 		}
-		if err := a.RefreshDiscoveredWithProgress(ctx, func(event app.RefreshDiscoveredProgressEvent) {
-			sendProgress(progressCh, progressGen, app.RefreshDiscoveredProgressText(event))
+		if err := runBounded(ctx, discoveryScanTimeout, sink, func(scanCtx context.Context) error {
+			return a.RefreshDiscoveredWithProgress(scanCtx, func(event app.RefreshDiscoveredProgressEvent) {
+				sink.send(progressUpdate{gen: progressGen, text: app.RefreshDiscoveredProgressText(event)})
+			})
 		}); err != nil {
 			return discoveredRefreshedMsg{gen: gen, err: err}
 		}
-		snapshot, err := a.ToolDisplaySnapshot(ctx)
+		snapshot, err := boundedToolSnapshot(ctx, a)
 		if err != nil {
 			return discoveredRefreshedMsg{gen: gen, err: err}
 		}
@@ -497,37 +598,35 @@ func (m *Model) doRefreshDiscovered(gen int, progressCh chan progressUpdate, pro
 	}
 }
 
-// doRefreshDescriptions pre-warms the description cache for configured and
-// discovered tools that don't have one yet.
 func (m *Model) startDescriptionRefresh() tea.Cmd {
 	m.descRefreshGen++
 	m.descRefreshing = true
-	// Background refresh: take over the shared status stream only when no
-	// other operation owns it, mirroring the scan-settle branch in
-	// handleProviderScannedMsg — beginning a stream here would bump
-	// progressGen and drop the active operation's remaining progress updates.
+	// Take over the shared status stream only when no other operation owns it: beginning a stream here would bump progressGen and drop the active operation's remaining updates.
 	if m.progressCh != nil {
 		return m.doRefreshDescriptions(m.descRefreshGen, nil, 0)
 	}
-	setActivityStatus(m, "Refreshing tool descriptions…")
+	setActivityStatus(m, descriptionRefreshStatus)
 	ch, progressGen := m.beginProgressStream()
 	return tea.Batch(m.doRefreshDescriptions(m.descRefreshGen, ch, progressGen), waitForProgress(ch, progressGen))
 }
 
 func (m *Model) doRefreshDescriptions(gen int, progressCh chan progressUpdate, progressGen int) tea.Cmd {
 	a, ctx := m.app, m.ctx
+	sink := &scanProgressSink{ch: progressCh, gen: progressGen}
 	return func() tea.Msg {
 		defer profile.Start("tui.refresh.descriptions.total")()
 
 		if progressCh != nil {
 			defer close(progressCh)
 		}
-		if err := a.RefreshDescriptionsWithProgress(ctx, 0, func(event app.RefreshDescriptionsProgressEvent) {
-			sendProgress(progressCh, progressGen, app.RefreshDescriptionsProgressText(event))
+		if err := runBounded(ctx, descriptionRefreshTimeout, sink, func(descCtx context.Context) error {
+			return a.RefreshDescriptionsWithProgress(descCtx, 0, func(event app.RefreshDescriptionsProgressEvent) {
+				sink.send(progressUpdate{gen: progressGen, text: app.RefreshDescriptionsProgressText(event)})
+			})
 		}); err != nil {
 			return descRefreshDoneMsg{gen: gen, err: err}
 		}
-		snapshot, err := a.ToolDisplaySnapshot(ctx)
+		snapshot, err := boundedToolSnapshot(ctx, a)
 		if err != nil {
 			return descRefreshDoneMsg{gen: gen, err: err}
 		}
@@ -535,7 +634,6 @@ func (m *Model) doRefreshDescriptions(gen int, progressCh chan progressUpdate, p
 	}
 }
 
-// doUpgradeAll upgrades every outdated tool with progress streaming.
 func (m *Model) doUpgradeAll(ch chan progressUpdate, gen int) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	ctx = withLiveOutput(ctx, ch, gen)

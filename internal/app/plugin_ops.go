@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/lkshrk/omni/internal/agent"
 	"github.com/lkshrk/omni/internal/config"
@@ -19,8 +20,10 @@ type RestorePluginResult struct {
 	AlreadyInstalled []string
 	Skipped          []string
 	WouldInstall     []string
-	Warnings         []string
-	Errors           []PluginError
+	// One user-facing line per pair the agent has installed from another marketplace.
+	Drift    []string
+	Warnings []string
+	Errors   []PluginError
 }
 
 type PluginError struct {
@@ -35,6 +38,8 @@ func (e PluginError) Error() string {
 
 type PluginImportDiff struct {
 	Unmanaged map[string][]InstalledPlugin
+	// Neither managed nor claimable: the manifest already owns the name, so they need a resolution.
+	Drifted map[string][]InstalledPlugin
 }
 
 func WithPluginAdapters(adapters []PluginAdapter) func(*App) {
@@ -63,10 +68,7 @@ func pluginTargetsAdapter(p config.Plugin, adapterID string) bool {
 	return false
 }
 
-// resolvePlugins returns the plugins active for hostname, mirroring
-// resolveMcpServers: ungrouped plugins restore everywhere; group-listed
-// plugins restore when that group is active on hostname — either the host's
-// own group or one of the groups assigned to it via cfg.Hosts.
+// Ungrouped plugins restore everywhere; grouped ones restore when the group is active on the host.
 func resolvePlugins(cfg *config.RootConfig, hostname string) []config.Plugin {
 	activeHostNames, _ := activeHostGroupNames(cfg, hostname)
 	activeHostSet := make(map[string]struct{}, len(activeHostNames))
@@ -100,14 +102,11 @@ func resolvePlugins(cfg *config.RootConfig, hostname string) []config.Plugin {
 	return out
 }
 
-// pluginIdentity is the key used to match a manifest plugin against an
-// adapter's ListPlugins output: name alone is not unique across marketplaces.
+// Name alone is not unique across marketplaces.
 func pluginIdentity(name, marketplace string) string {
 	return name + "\x00" + marketplace
 }
 
-// pluginListed reports whether name/marketplace appears in an adapter's
-// ListPlugins() output.
 func pluginListed(installed []InstalledPlugin, name, marketplace string) bool {
 	want := pluginIdentity(name, marketplace)
 	for _, ip := range installed {
@@ -128,9 +127,7 @@ func findMarketplace(marketplaces []config.Marketplace, name string) *config.Mar
 	return nil
 }
 
-// ensureMarketplace adds m to adapter if adapter does not already report it
-// present. Errors are returned for the caller to collect, never fatal to the
-// batch.
+// Errors are returned for the caller to collect, never fatal to the batch.
 func ensureMarketplace(ctx context.Context, adapter PluginAdapter, m config.Marketplace) error {
 	existing, err := adapter.ListMarketplaces(ctx)
 	if err != nil {
@@ -151,20 +148,12 @@ func marketplaceListed(existing []InstalledMarketplace, name string) bool {
 	return false
 }
 
-// RestorePlugins installs manifest plugins into each targeted agent CLI,
-// adding any marketplace a plugin needs before installing the plugin itself.
-// Every already-configured marketplace on an adapter is also refreshed first
-// (best-effort, collected as a warning on failure) — plugin installs and any
-// future update pass both read from the marketplace's local clone, so a
-// stale clone must never be left in place ahead of them.
+// RestorePlugins — Marketplaces are refreshed first: installs read from the local clone, so a stale one must never precede them.
 func (a *App) RestorePlugins(ctx context.Context, opts RestorePluginOptions) (RestorePluginResult, error) {
 	return a.restorePlugins(ctx, opts, true)
 }
 
-// RestorePluginsPreRefreshed installs missing manifest plugins without the
-// up-front per-adapter marketplace refresh, for callers that just refreshed
-// marketplaces themselves (e.g. the TUI's update-all, which refreshes once
-// before both computing outdated plugins and installing missing ones).
+// RestorePluginsPreRefreshed — For callers that just refreshed marketplaces themselves.
 func (a *App) RestorePluginsPreRefreshed(ctx context.Context, opts RestorePluginOptions) (RestorePluginResult, error) {
 	return a.restorePlugins(ctx, opts, false)
 }
@@ -178,7 +167,7 @@ func (a *App) restorePlugins(ctx context.Context, opts RestorePluginOptions, ref
 		return RestorePluginResult{}, err
 	}
 	if config.BoolVal(a.effectiveSettings(cfg).PluginsDisabled) {
-		return RestorePluginResult{Warnings: []string{"plugins are disabled for this host, skipping restore"}}, nil
+		return RestorePluginResult{Warnings: []string{"plugins are disabled for this host, skipping sync"}}, nil
 	}
 	plugins := resolvePlugins(cfg, currentMachineGroupName())
 	var res RestorePluginResult
@@ -208,6 +197,13 @@ func (a *App) restorePlugins(ctx context.Context, opts RestorePluginOptions, ref
 				continue
 			}
 			_, present := alreadyInstalled[pluginIdentity(p.Name, p.Marketplace)]
+			// The identity match would otherwise read a foreign-marketplace copy as not installed.
+			if live, found := foreignPluginCopy(installed, p); !present && found {
+				res.Drift = append(res.Drift, fmt.Sprintf(
+					"%s/%s: drifted on %s (installed from %s, manifest declares %s; left untouched); resolve with %s",
+					adapter.ID(), p.Name, adapter.ID(), live.Marketplace, p.Marketplace, pluginDriftRemedy))
+				continue
+			}
 			if opts.DryRun {
 				if present {
 					res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
@@ -242,8 +238,7 @@ func (a *App) restorePlugins(ctx context.Context, opts RestorePluginOptions, ref
 type AddPluginResult struct {
 	Errors           []PluginError
 	AlreadyInstalled []string
-	// SkippedUnavailable lists adapter/name pairs whose agent CLI is not on
-	// PATH: normal on multi-host manifests, an actionable warning on explicit installs.
+	// Normal on multi-host manifests, an actionable warning on explicit installs.
 	SkippedUnavailable []string
 }
 
@@ -252,15 +247,12 @@ type UpdatePluginResult struct {
 	SkippedUnavailable []string
 }
 
-// UpdateMarketplacesResult collects per-adapter refresh failures. Errors are
-// data, not fatal: one adapter's refresh failure never stops the others.
+// UpdateMarketplacesResult — Errors are data, not fatal: one adapter's refresh failure never stops the others.
 type UpdateMarketplacesResult struct {
 	Errors []PluginError
 }
 
-// UpdateMarketplaces refreshes every configured marketplace on every
-// available plugin adapter. Callers that follow up with plugin updates
-// should use UpdatePluginsPreRefreshed to avoid repeating the refresh.
+// UpdateMarketplaces — Callers that follow up with plugin updates should use UpdatePluginsPreRefreshed.
 func (a *App) UpdateMarketplaces(ctx context.Context) (UpdateMarketplacesResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -281,27 +273,16 @@ func (a *App) UpdateMarketplaces(ctx context.Context) (UpdateMarketplacesResult,
 	return res, nil
 }
 
-// UpdatePlugin updates a manifest plugin on every targeted, available adapter.
 func (a *App) UpdatePlugin(ctx context.Context, name string) (UpdatePluginResult, error) {
 	return a.UpdatePlugins(ctx, []string{name}, nil)
 }
 
-// UpdatePlugins updates several manifest plugins. Each adapter's marketplace
-// snapshot is refreshed once up front — a plugin update installs from the
-// marketplace's local clone, so a stale clone would make the update install a
-// stale version even though the CLI call succeeds; refreshing per plugin
-// would repeat the same update-all CLI call N times. One adapter's failure
-// (marketplace refresh or plugin update) does not stop the others; errors are
-// collected as data on the result, mirroring AddPluginResult. progress, when
-// non-nil, is called with each plugin name before its update runs.
+// UpdatePlugins — Each adapter's marketplace is refreshed once up front: a stale clone would install a stale version.
 func (a *App) UpdatePlugins(ctx context.Context, names []string, progress func(name string)) (UpdatePluginResult, error) {
 	return a.updatePlugins(ctx, names, progress, true)
 }
 
-// UpdatePluginsPreRefreshed updates plugins without the up-front marketplace
-// refresh, for callers that just ran UpdateMarketplaces themselves (e.g. the
-// TUI's update-all, which must refresh first to even discover which plugins
-// are outdated).
+// UpdatePluginsPreRefreshed — For callers that just ran UpdateMarketplaces themselves.
 func (a *App) UpdatePluginsPreRefreshed(ctx context.Context, names []string, progress func(name string)) (UpdatePluginResult, error) {
 	return a.updatePlugins(ctx, names, progress, false)
 }
@@ -363,21 +344,11 @@ func (a *App) updatePlugins(ctx context.Context, names []string, progress func(n
 type RemovePluginResult struct {
 	Errors             []PluginError
 	SkippedUnavailable []string
-	// Warnings holds uninstall failures on adapters whose plugin listing also
-	// failed: presence was unverifiable, so the failure is reported without
-	// blocking the manifest delete (the plugin may simply not be installed).
+	// Presence was unverifiable, so the failure is reported without blocking the manifest delete.
 	Warnings []PluginError
 }
 
-// AddPlugin validates the marketplace ref, upserts the manifest, then
-// installs on each target adapter. Manifest write is unconditional on
-// adapter outcome (manifest = intent), mirroring AddMcpServer. An adapter
-// that already lists p.Name/p.Marketplace installed is skipped rather than
-// re-installed, mirroring AddMcpServer's skip: neither `claude plugins
-// install` nor `codex plugin add` is documented as idempotent on an already-
-// installed identity, and this path is reachable with an already-installed
-// adapter whenever a caller targets an unmanaged plugin found on multiple
-// agents (e.g. claiming it from the TUI/CLI unmanaged list).
+// AddPlugin — An adapter already listing the identity is skipped: neither agent CLI is documented as idempotent there.
 func (a *App) AddPlugin(ctx context.Context, p config.Plugin) (AddPluginResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -426,8 +397,7 @@ func (a *App) AddPlugin(ctx context.Context, p config.Plugin) (AddPluginResult, 
 	return res, nil
 }
 
-// AddMarketplace validates uniqueness, upserts the manifest, then adds the
-// marketplace on each target adapter. Manifest write is unconditional.
+// AddMarketplace — The manifest write is unconditional.
 func (a *App) AddMarketplace(ctx context.Context, m config.Marketplace) (AddPluginResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -467,8 +437,7 @@ func (a *App) AddMarketplace(ctx context.Context, m config.Marketplace) (AddPlug
 	return res, nil
 }
 
-// RemovePlugin uninstalls from each target adapter (tolerant), then deletes
-// the manifest entry. Marketplaces are never touched by this call.
+// RemovePlugin — Marketplaces are never touched by this call.
 func (a *App) RemovePlugin(ctx context.Context, name string) (RemovePluginResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -496,10 +465,7 @@ func (a *App) RemovePlugin(ctx context.Context, name string) (RemovePluginResult
 		}
 		if removeErr := adapter.RemovePlugin(ctx, *target); removeErr != nil {
 			if listErr != nil {
-				// Presence was unverifiable; the uninstall was attempted anyway
-				// so an installed plugin isn't orphaned. Report the failure as
-				// a warning rather than a hard error — it may just mean the
-				// plugin was never installed — but never swallow it.
+				// Presence was unverifiable, so report a warning rather than a hard error, but never swallow it.
 				res.Warnings = append(res.Warnings, PluginError{AgentID: adapter.ID(), Name: name, Err: fmt.Errorf("uninstall unverified (listing failed: %v): %w", listErr, removeErr)})
 				continue
 			}
@@ -516,9 +482,7 @@ func (a *App) RemovePlugin(ctx context.Context, name string) (RemovePluginResult
 	return res, nil
 }
 
-// RemoveMarketplace deletes only the manifest entry. omni never removes a
-// marketplace from an agent CLI — it may still serve hand-installed plugins
-// omni does not know about.
+// RemoveMarketplace — omni never removes a marketplace from an agent CLI: it may still serve hand-installed plugins.
 func (a *App) RemoveMarketplace(name string) error {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -546,9 +510,6 @@ func (a *App) RemoveMarketplace(name string) error {
 	})
 }
 
-// SetPluginAgents re-targets an existing manifest plugin's Agents list and
-// reconciles every selected adapter, installing it when missing and removing it when
-// deselected.
 func (a *App) SetPluginAgents(ctx context.Context, name string, agents []string) (AddPluginResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -606,9 +567,7 @@ func (a *App) SetPluginAgents(ctx context.Context, name string, agents []string)
 	return res, nil
 }
 
-// PluginByName returns the manifest entry for name, mirroring McpServerByName
-// so callers needing the full config.Plugin (not the PluginRow projection)
-// can fetch it directly.
+// PluginByName — The full config.Plugin, unlike the PluginRow projection.
 func (a *App) PluginByName(name string) (config.Plugin, bool, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -631,8 +590,7 @@ func findPlugin(plugins []config.Plugin, name string) *config.Plugin {
 	return nil
 }
 
-// ImportPlugins returns plugins installed in agent CLIs that are not in the
-// manifest. Callers adopt identity only (name + marketplace); see AddPlugin.
+// ImportPlugins — Matching is on the full identity, so an install from an undeclared marketplace is drift rather than claimable.
 func (a *App) ImportPlugins(ctx context.Context) (PluginImportDiff, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -641,11 +599,16 @@ func (a *App) ImportPlugins(ctx context.Context) (PluginImportDiff, error) {
 	if err := a.requirePluginsEnabled(cfg); err != nil {
 		return PluginImportDiff{}, err
 	}
-	managed := make(map[string]struct{}, len(cfg.Agents.Plugins))
+	managedNames := make(map[string]bool, len(cfg.Agents.Plugins))
+	managedIdentities := make(map[string]bool, len(cfg.Agents.Plugins))
 	for _, p := range cfg.Agents.Plugins {
-		managed[p.Name] = struct{}{}
+		managedNames[p.Name] = true
+		managedIdentities[pluginIdentity(p.Name, p.Marketplace)] = true
 	}
-	diff := PluginImportDiff{Unmanaged: make(map[string][]InstalledPlugin)}
+	diff := PluginImportDiff{
+		Unmanaged: make(map[string][]InstalledPlugin),
+		Drifted:   make(map[string][]InstalledPlugin),
+	}
 	for _, adapter := range a.pluginAdapters() {
 		if !adapter.Available() {
 			continue
@@ -655,27 +618,27 @@ func (a *App) ImportPlugins(ctx context.Context) (PluginImportDiff, error) {
 			continue
 		}
 		for _, plg := range listed {
-			if _, ok := managed[plg.Name]; !ok {
+			switch {
+			case !managedNames[plg.Name]:
 				diff.Unmanaged[adapter.ID()] = append(diff.Unmanaged[adapter.ID()], plg)
+			// An exact identity match is claimed, whichever other marketplaces also carry the name.
+			case plg.Marketplace != "" && !managedIdentities[pluginIdentity(plg.Name, plg.Marketplace)]:
+				diff.Drifted[adapter.ID()] = append(diff.Drifted[adapter.ID()], plg)
 			}
 		}
 	}
 	return diff, nil
 }
 
-// AdoptUnmanagedPlugins folds ImportPlugins' unmanaged results into the
-// manifest by identity only. Identical same-identity (name+marketplace)
-// reports from different agents are adopted once and targeted at their union
-// of agents, mirroring AdoptUnmanagedMcpServers. This is manifest
-// bookkeeping, distinct from AddPlugin: it never calls an agent CLI, since
-// the plugins are already installed there. A plugin whose reported
-// marketplace has no matching declared config.Marketplace is skipped rather
-// than adopted with a dangling reference (see config.Plugin doc comment);
-// the caller should surface that count if it wants to report skips.
-func (a *App) AdoptUnmanagedPlugins(ctx context.Context) (adopted, skipped int, err error) {
+// AdoptUnmanagedPlugins — Manifest bookkeeping only; a plugin whose marketplace is undeclared is skipped rather than adopted with a dangling reference.
+func (a *App) AdoptUnmanagedPlugins(ctx context.Context) (PluginAdoptResult, error) {
+	return a.adoptUnmanagedPlugins(ctx, false)
+}
+
+func (a *App) adoptUnmanagedPlugins(ctx context.Context, dryRun bool) (PluginAdoptResult, error) {
 	diff, err := a.ImportPlugins(ctx)
 	if err != nil {
-		return 0, 0, err
+		return PluginAdoptResult{}, err
 	}
 	type candidate struct {
 		plugin InstalledPlugin
@@ -704,7 +667,8 @@ func (a *App) AdoptUnmanagedPlugins(ctx context.Context) (adopted, skipped int, 
 		}
 	}
 	sort.Strings(identities)
-	err = a.withConfig(func(c *config.RootConfig) error {
+	var res PluginAdoptResult
+	claim := func(c *config.RootConfig) error {
 		managed := make(map[string]struct{}, len(c.Agents.Plugins))
 		for _, p := range c.Agents.Plugins {
 			managed[pluginIdentity(p.Name, p.Marketplace)] = struct{}{}
@@ -715,24 +679,49 @@ func (a *App) AdoptUnmanagedPlugins(ctx context.Context) (adopted, skipped int, 
 				continue
 			}
 			if findMarketplace(c.Agents.Marketplaces, cand.plugin.Marketplace) == nil {
-				skipped++
+				res.Skipped = append(res.Skipped, undeclaredMarketplaceSkip(cand.plugin.Name, cand.plugin.Marketplace))
 				continue
 			}
 			managed[key] = struct{}{}
+			if dryRun {
+				res.WouldAdopt = append(res.WouldAdopt, fmt.Sprintf("would claim plugin %q from %s on %s",
+					cand.plugin.Name, cand.plugin.Marketplace, strings.Join(cand.agents, ", ")))
+				continue
+			}
 			c.Agents.Plugins = append(c.Agents.Plugins, config.Plugin{
 				Name:        cand.plugin.Name,
 				Marketplace: cand.plugin.Marketplace,
 				Agents:      cand.agents,
 			})
-			adopted++
+			res.Adopted++
 		}
 		return nil
-	})
-	return adopted, skipped, err
+	}
+	if dryRun {
+		cfg, err := a.loadConfig()
+		if err != nil {
+			return res, err
+		}
+		return res, claim(cfg)
+	}
+	return res, a.withConfig(claim)
 }
 
-// Marketplaces returns the declared manifest marketplaces, for read-only CLI
-// display.
+// PluginAdoptResult — Skips are data, not failure: one undeclared marketplace must not stop the rest of a claim pass.
+type PluginAdoptResult struct {
+	Adopted int
+	Skipped []string
+	// Populated only on a dry run; one preview line per plugin that would be claimed.
+	WouldAdopt []string
+}
+
+// Shared by adoption and use-local resolution so both name the same missing declaration.
+func undeclaredMarketplaceSkip(name, marketplace string) string {
+	return fmt.Sprintf(
+		"plugin %q comes from marketplace %q, which is not declared; add it with \"omni agents plugins marketplace add\" first",
+		name, marketplace)
+}
+
 func (a *App) Marketplaces() ([]config.Marketplace, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -741,12 +730,7 @@ func (a *App) Marketplaces() ([]config.Marketplace, error) {
 	return cfg.Agents.Marketplaces, nil
 }
 
-// FindUndeclaredMarketplace looks up a real, re-addable source string for an
-// undeclared marketplace via the given agent adapters' ListMarketplaces, for
-// import adoption. It returns ok=false when no targeted adapter reports the
-// marketplace, or reports it with an empty Source — omni must never fabricate
-// a source value: an unreadable source is a hard "declare it first" case, not
-// a placeholder.
+// FindUndeclaredMarketplace — Never fabricates a source: an unreadable one is a hard declare-it-first case, not a placeholder.
 func (a *App) FindUndeclaredMarketplace(ctx context.Context, name string, agentIDs []string) (source string, ok bool, err error) {
 	for _, adapter := range a.pluginAdapters() {
 		if !adapter.Available() || !pluginTargetsAdapter(config.Plugin{Agents: agentIDs}, adapter.ID()) {

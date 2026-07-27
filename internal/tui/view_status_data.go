@@ -51,16 +51,7 @@ func statusStaleSummary(activity, fallback string, hasData bool) string {
 	return activity
 }
 
-// statusRowActivity carries a dashboard Data row's in-flight state so
-// applyStatusRowActivity can apply the same loading-value/stale-summary/
-// working-icon treatment uniformly across tools, dotfiles, automation, and
-// agents rows.
-//
-// keepValue preserves the row's real value instead of swapping to a loading
-// placeholder while active — only agents wants this; tools/dotfiles/
-// automation always swap to the loading value while their activity text is
-// set, even once they have data (e.g. upgrading one of several tracked
-// tools), so they leave keepValue false.
+// keepValue preserves the row's real value instead of a loading placeholder while active — only agents wants this; tools/dotfiles/automation always swap.
 type statusRowActivity struct {
 	text      string
 	hasData   bool
@@ -124,10 +115,7 @@ func dashboardRefreshStateForRow(m Model, label string) dashboardRowRefreshState
 	case "Tool Sync", "Tools":
 		active = statusToolsLoading(m)
 	case "Tool Updates":
-		// The Tool Updates row renders its own upgrade/pending progress
-		// (queued count, "Upgrading tools…", per-tool "name (version)") in
-		// statusToolUpdatesAttentionRow. Do not let the generic refresh
-		// presentation clobber that with a bare "loading…".
+		// The Tool Updates row renders its own upgrade progress in statusToolUpdatesAttentionRow; the generic refresh presentation must not clobber it with a bare "loading…".
 		active = false
 	case "Dotfiles":
 		active = m.dotsLoading || m.dotsPreparing
@@ -153,20 +141,14 @@ func statusToolsLoading(m Model) bool {
 		m.descRefreshing
 }
 
-// statusReconcileToolPlanBusy blocks tool-derived reconcile steps while their
-// snapshot can change underneath the plan. statusToolsLoading covers both
-// foreground mutations (including manual installs via m.loading) and the main
-// refresh phases; outdated checks are separate background snapshot owners.
+// statusToolsLoading covers foreground mutations and the main refresh phases; outdated checks are separate background snapshot owners.
 func statusReconcileToolPlanBusy(m Model) bool {
 	return statusToolsLoading(m) ||
 		len(m.outdatedProviders) > 0 ||
 		m.outdatedSnapshotRefreshing
 }
 
-// agentsIgnoreSets turns the manifest's ignore lists into name-lookup sets.
-// Duplicates app.AgentsIgnoreSet's body because that function takes a loaded
-// *config.RootConfig, which the TUI model doesn't hold (config is loaded on
-// demand inside specific cmds, not cached on Model).
+// Duplicates app.AgentsIgnoreSet because that takes a loaded *config.RootConfig, which the TUI model does not hold.
 func agentsIgnoreSets(ignore app.AgentsIgnore) (skills, mcp, plugins, marketplaces map[string]bool) {
 	toSet := func(names []string) map[string]bool {
 		set := make(map[string]bool, len(names))
@@ -178,42 +160,71 @@ func agentsIgnoreSets(ignore app.AgentsIgnore) (skills, mcp, plugins, marketplac
 	return toSet(ignore.Skills), toSet(ignore.McpServers), toSet(ignore.Plugins), toSet(ignore.Marketplaces)
 }
 
-// agentsDashCounts merges skills/mcp/plugin out-of-sync counts for the
-// dashboard attention row. Skills come pre-aggregated from m.agentsSummary
-// (unfiltered by ignore set); mcp/plugin are derived from the live rows
-// loaded at boot, filtered against the ignore sets since those are rows
-// already being iterated.
+// Outdated counts stay out of OutOfSync: an up-to-date-but-behind package is installed and linked, so the sync row must keep calling it in sync while Agent Updates reports the upgrade.
 type agentsDashCounts struct {
-	SkillsMissing, SkillsUnmanaged             int
-	McpMissing, McpUnmanaged                   int
-	PluginsMissing, PluginsUnmanaged           int
-	MarketplacesMissing, MarketplacesUnmanaged int
+	SkillsMissing, SkillsDrifted, SkillsUnmanaged int
+	McpMissing, McpDrifted, McpUnmanaged          int
+	PluginsMissing, PluginsDrifted                int
+	PluginsUnmanaged                              int
+	MarketplacesMissing, MarketplacesUnmanaged    int
+	SkillsOutdated, PluginsOutdated               int
 }
 
 func (c agentsDashCounts) OutOfSync() int {
-	return c.SkillsMissing + c.SkillsUnmanaged +
-		c.McpMissing + c.McpUnmanaged +
-		c.PluginsMissing + c.PluginsUnmanaged +
+	return c.SkillsMissing + c.SkillsDrifted + c.SkillsUnmanaged +
+		c.McpMissing + c.McpDrifted + c.McpUnmanaged +
+		c.PluginsMissing + c.PluginsDrifted + c.PluginsUnmanaged +
 		c.MarketplacesMissing + c.MarketplacesUnmanaged
+}
+
+func (c agentsDashCounts) Outdated() int {
+	return c.SkillsOutdated + c.PluginsOutdated
 }
 
 func agentsDashboardDataLoaded(m Model) bool {
 	return m.skillsLoaded || m.mcpLoaded || m.pluginLoaded || m.marketplaceLoaded
 }
 
-// agentsDashCountsFromRows mirrors the Agents tab Out of Sync section: one
-// dashboard issue per flattened row that agentsAllRowsList would render there.
+type agentsFeatureName struct {
+	feature agentsSection
+	name    string
+}
+
+// Carries unmanaged beyond feature+name because a name can be both a missing managed entry and an untracked install — two separate issues that share a name.
+type agentsOutOfSyncKey struct {
+	feature   agentsSection
+	name      string
+	unmanaged bool
+}
+
+// One item out of sync is one issue: counting per-agent rows would report it once per agent. The first out-of-sync row's mark picks the bucket, matching DashboardAgentsSummary.
 func agentsDashCountsFromRows(rows []agentsAllRow) agentsDashCounts {
 	var counts agentsDashCounts
+	countedOutdated := make(map[agentsFeatureName]bool)
+	countedOutOfSync := make(map[agentsOutOfSyncKey]bool)
 	for _, e := range rows {
-		if e.status != agentsStatusOutOfSync {
+		outdatedKey := agentsFeatureName{feature: e.feature, name: e.sortName}
+		if e.outdated && !countedOutdated[outdatedKey] {
+			countedOutdated[outdatedKey] = true
+			switch e.feature {
+			case agentsSectionSkills:
+				counts.SkillsOutdated++
+			case agentsSectionPlugins:
+				counts.PluginsOutdated++
+			}
+		}
+		syncKey := agentsOutOfSyncKey{feature: e.feature, name: e.sortName, unmanaged: e.mark == agentsMarkOrphan}
+		if e.status != agentsStatusOutOfSync || countedOutOfSync[syncKey] {
 			continue
 		}
+		countedOutOfSync[syncKey] = true
 		switch e.feature {
 		case agentsSectionSkills:
 			switch e.mark {
 			case agentsMarkMissing:
 				counts.SkillsMissing++
+			case agentsMarkDrifted:
+				counts.SkillsDrifted++
 			case agentsMarkOrphan:
 				counts.SkillsUnmanaged++
 			}
@@ -221,6 +232,8 @@ func agentsDashCountsFromRows(rows []agentsAllRow) agentsDashCounts {
 			switch e.mark {
 			case agentsMarkMissing:
 				counts.McpMissing++
+			case agentsMarkDrifted:
+				counts.McpDrifted++
 			case agentsMarkOrphan:
 				counts.McpUnmanaged++
 			}
@@ -228,6 +241,8 @@ func agentsDashCountsFromRows(rows []agentsAllRow) agentsDashCounts {
 			switch e.mark {
 			case agentsMarkMissing:
 				counts.PluginsMissing++
+			case agentsMarkDrifted:
+				counts.PluginsDrifted++
 			case agentsMarkOrphan:
 				counts.PluginsUnmanaged++
 			}
@@ -251,19 +266,41 @@ func agentsDashCountsFromSummary(summary app.DashboardAgentsSummary, ignore app.
 			counts.SkillsMissing++
 		}
 	}
+	for _, name := range summary.SkillsDriftedNames {
+		if !skillsIgnore[name] {
+			counts.SkillsDrifted++
+		}
+	}
 	for _, name := range summary.SkillsUnmanagedNames {
 		if !skillsIgnore[name] {
 			counts.SkillsUnmanaged++
 		}
 	}
-	_ = mcpIgnore
-	_ = pluginIgnore
+	for _, name := range summary.McpDriftedNames {
+		if !mcpIgnore[name] {
+			counts.McpDrifted++
+		}
+	}
+	for _, name := range summary.PluginsDriftedNames {
+		if !pluginIgnore[name] {
+			counts.PluginsDrifted++
+		}
+	}
+	for _, name := range summary.SkillsOutdatedNames {
+		if !skillsIgnore[name] {
+			counts.SkillsOutdated++
+		}
+	}
+	for _, name := range summary.PluginsOutdatedNames {
+		if !pluginIgnore[name] {
+			counts.PluginsOutdated++
+		}
+	}
 	_ = marketplaceIgnore
 	return counts
 }
 
-// agentsDashboardEnabled mirrors the host-level agents toggle from the startup
-// snapshot. Model.New seeds agentsEnabled true until toolsLoadedMsg corrects it.
+// Model.New seeds agentsEnabled true until toolsLoadedMsg corrects it.
 func agentsDashboardEnabled(m Model) bool {
 	return m.agentsEnabled
 }
@@ -298,8 +335,15 @@ func agentsDashboardViewFor(m Model) agentsDashboardView {
 				continue
 			}
 			view.skillPackages++
-			status, mark := skillPackageRowStatus(row.Installed, row.ShadowedByPlugin)
-			if status == agentsStatusOutOfSync && mark == agentsMarkMissing {
+			status, mark := skillPackageRowStatus(
+				row.Installed,
+				row.ShadowedByPlugin,
+				len(skillShadowedAgents(row, m.enabledAgents)) > 0 &&
+					len(skillMissingAgents(row, m.enabledAgents)) == 0,
+				len(skillDriftedAgents(row, m.enabledAgents)) > 0,
+				skillRowOutdated(row),
+			)
+			if status == agentsStatusOutOfSync && agentsMarkNeedsInstall(mark) {
 				view.skillsMissing++
 				view.skillsMissingNames = append(view.skillsMissingNames, row.Name)
 				continue
@@ -316,13 +360,14 @@ func agentsDashboardViewFor(m Model) agentsDashboardView {
 		summary := m.agentsSummary
 		view.skillPackages = summary.SkillPackages
 		view.skillsInstalled = summary.SkillsInstalled
-		view.skillsMissing = summary.SkillsMissing
+		view.skillsMissing = summary.SkillsMissing + summary.SkillsDrifted
 		view.skillsUnmanaged = summary.SkillsUnmanaged
-		for _, name := range summary.SkillsMissingNames {
+		for _, name := range append(append([]string(nil), summary.SkillsMissingNames...), summary.SkillsDriftedNames...) {
 			if !skillsIgnore[name] {
 				view.skillsMissingNames = append(view.skillsMissingNames, name)
 			}
 		}
+		sort.Strings(view.skillsMissingNames)
 	}
 
 	if m.mcpLoaded && len(m.mcpRows) > 0 {
@@ -353,8 +398,6 @@ func statusAgentsCounts(m Model) agentsDashCounts {
 	return agentsDashCountsFromSummary(m.agentsSummary, m.agentsIgnore)
 }
 
-// statusAgentsOutOfSyncNames collects deduplicated out-of-sync item names for
-// dashboard attention summaries, using the same row set as statusAgentsCounts.
 func statusAgentsOutOfSyncNames(m Model) []string {
 	rows := agentsAllRowsList(m)
 	if !agentsDashboardDataLoaded(m) {
@@ -389,6 +432,40 @@ func statusAgentsOutOfSyncNames(m Model) []string {
 		}
 		seen[e.sortName] = true
 		names = append(names, e.sortName)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func statusAgentsOutdatedNames(m Model) []string {
+	skillsIgnore, _, pluginIgnore, _ := agentsIgnoreSets(m.agentsIgnore)
+	seen := make(map[string]bool)
+	var names []string
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	if !agentsDashboardDataLoaded(m) {
+		for _, name := range m.agentsSummary.SkillsOutdatedNames {
+			if !skillsIgnore[name] {
+				add(name)
+			}
+		}
+		for _, name := range m.agentsSummary.PluginsOutdatedNames {
+			if !pluginIgnore[name] {
+				add(name)
+			}
+		}
+		sort.Strings(names)
+		return names
+	}
+	for _, e := range agentsAllRowsList(m) {
+		if e.outdated {
+			add(e.sortName)
+		}
 	}
 	sort.Strings(names)
 	return names
@@ -466,13 +543,11 @@ func statusAgentsLoading(m Model) bool {
 	if m.skillsRunning || m.mcpRunning || m.pluginRunning || m.marketplaceRunning {
 		return true
 	}
-	// A section whose rows aren't known yet (no cache seed, live load still in
-	// flight) is loading even though no running flag is set — the skills load
-	// in particular never sets one at launch dispatch.
-	return (m.skillsSectionEnabled() && !m.skillsRowsKnown) ||
-		(m.mcpSectionEnabled() && !m.mcpRowsKnown) ||
-		(m.pluginsSectionEnabled() && !m.pluginRowsKnown) ||
-		(m.marketplacesSectionEnabled() && !m.marketplaceRowsKnown)
+	// A section that errored has settled, not stalled: its rows stay unknown, so without the error check the spinner would never stop.
+	return (m.skillsSectionEnabled() && !m.skillsRowsKnown && m.skillsErr == nil) ||
+		(m.mcpSectionEnabled() && !m.mcpRowsKnown && m.mcpErr == nil) ||
+		(m.pluginsSectionEnabled() && !m.pluginRowsKnown && m.pluginErr == nil) ||
+		(m.marketplacesSectionEnabled() && !m.marketplaceRowsKnown && m.marketplaceErr == nil)
 }
 
 func statusToolsActivityText(m Model) string {
@@ -670,8 +745,6 @@ func limitedNames(names []string, limit int) []string {
 	return names[:limit]
 }
 
-// truncatedGitStatus splits a git status string into non-empty lines,
-// caps at maxLines, and returns an overflow summary if truncated.
 func truncatedGitStatus(status string, maxLines int) (lines []string, overflow string) {
 	for _, line := range strings.Split(status, "\n") {
 		if strings.TrimSpace(line) != "" {
@@ -920,9 +993,7 @@ func statusDotsActiveQueuedNames(m Model) ([]string, []string) {
 	return active, queued
 }
 
-// statusDotAttentionSummary returns a summary focused on what's wrong
-// (out-of-sync, dirty repo) without repeating managed/ignored counts
-// that the overview row already shows.
+// Omits the managed/ignored counts the overview row already shows.
 func statusDotAttentionSummary(counts app.DotFileCounts, gitStatus string) string {
 	var parts []string
 	if counts.OutOfSync > 0 {
@@ -937,8 +1008,7 @@ func statusDotAttentionSummary(counts app.DotFileCounts, gitStatus string) strin
 	return strings.Join(parts, ", ") + "."
 }
 
-// statusDotAttentionDetails returns detail lines for the attention row,
-// omitting managed/ignored counts (shown in the overview row below).
+// Omits managed/ignored counts, shown in the overview row below.
 func statusDotAttentionDetails(m Model, counts app.DotFileCounts) []string {
 	var details []string
 	if activity := statusDotsActivityText(m); activity != "" {
@@ -1027,9 +1097,6 @@ func statusWatchAutomationSummary(m Model) string {
 	return "Watch [ON] debounce " + formatSettingsDuration(app.DotsWatchDebounce(service))
 }
 
-// statusAutomationBreakdown gives the compact reminder/watch stat string shown
-// in the Data section's middle column, reading the same service fields the
-// prose summary functions above already read.
 func statusAutomationBreakdown(m Model) string {
 	reminder := "reminder off"
 	if errText := strings.TrimSpace(m.dotsReminderServiceErr); errText != "" {
@@ -1133,11 +1200,15 @@ func dashboardDotsAutomationStatus(m Model) app.DashboardDotsAutomationStatus {
 	})
 }
 
-func statusAgentsOverviewSummary(view agentsDashboardView) string {
+func statusAgentsOverviewSummary(view agentsDashboardView, counts agentsDashCounts) string {
 	if !view.enabled {
 		return "Agents disabled for this host."
 	}
-	return fmt.Sprintf("%d skills · %d mcp · %d plugins", view.skillPackages, view.mcpServers, view.plugins)
+	breakdown := fmt.Sprintf("%d skills · %d mcp · %d plugins", view.skillPackages, view.mcpServers, view.plugins)
+	if counts.Outdated() == 0 {
+		return breakdown
+	}
+	return breakdown + " · " + textutil.PluralCount(counts.Outdated(), "upgrade available", "upgrades available")
 }
 
 func statusAgentsOverviewDetails(m Model, view agentsDashboardView) []string {
@@ -1150,6 +1221,17 @@ func statusAgentsOverviewDetails(m Model, view agentsDashboardView) []string {
 		fmt.Sprintf("plugins: %d", view.plugins),
 		fmt.Sprintf("marketplaces: %d", view.marketplaces),
 	)
+}
+
+func statusAgentUpdatesDetails(m Model, counts agentsDashCounts, names []string) []string {
+	details := []string{
+		statusDetailLine(m, fmt.Sprintf("skills: %d outdated", counts.SkillsOutdated)),
+		statusDetailLine(m, fmt.Sprintf("plugins: %d outdated", counts.PluginsOutdated)),
+	}
+	if len(names) > 0 {
+		details = append(details, statusDetailLine(m, "Outdated: "+statusInlineNames(names, 5)))
+	}
+	return details
 }
 
 func onOffText(enabled bool) string {

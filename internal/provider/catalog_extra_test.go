@@ -42,7 +42,6 @@ func TestBuiltinConcreteEcosystems(t *testing.T) {
 			t.Errorf("ecosystem[%q] = %q, want %q", name, got[name], want)
 		}
 	}
-	// cargo has no ecosystem; script is excluded from the map.
 	if _, ok := got["cargo"]; ok {
 		t.Errorf("cargo must not carry an ecosystem, got %q", got["cargo"])
 	}
@@ -61,7 +60,6 @@ func TestBuiltinConcreteConfigNames(t *testing.T) {
 			t.Errorf("config names must include %q: %v", want, got)
 		}
 	}
-	// Ecosystem parents are not concrete and must be absent.
 	for _, eco := range []string{"system", "node", "python"} {
 		if slices.Contains(got, eco) {
 			t.Errorf("config names must exclude ecosystem %q: %v", eco, got)
@@ -75,11 +73,11 @@ func TestBuiltinEcosystemFor(t *testing.T) {
 		wantEco string
 		wantOK  bool
 	}{
-		{"node", "node", true},   // ecosystem kind resolves to itself
-		{"brew", "system", true}, // concrete with explicit ecosystem
-		{"pnpm", "node", true},   // concrete manager with ecosystem
-		{"cargo", "", false},     // concrete without ecosystem
-		{"unknown", "", false},   // absent entirely
+		{"node", "node", true},
+		{"brew", "system", true},
+		{"pnpm", "node", true},
+		{"cargo", "", false},
+		{"unknown", "", false},
 	} {
 		eco, ok := provider.BuiltinEcosystemFor(tc.name)
 		if eco != tc.wantEco || ok != tc.wantOK {

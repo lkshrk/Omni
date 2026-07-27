@@ -1,14 +1,7 @@
-# agents plugins add: declares a marketplace, then adds a plugin referencing
-# it, confirming both the manifest write and the fake claude CLI install call.
-# --agents claude-code keeps the target deterministic regardless of what real
-# agent CLIs (if any) are on the host PATH.
-# Covers: adding a plugin against an undeclared marketplace is a hard error
-# that never touches the adapter (the calls log stays empty), and re-adding
-# the same plugin name upserts rather than duplicating the manifest entry.
+# Targeting claude-code keeps the fixture independent of other agent CLIs on the host PATH.
 chmod 0755 $WORK/bin/claude
 env PATH=$WORK/bin:$PATH
 
-# Referencing an undeclared marketplace fails before any adapter is invoked.
 ! exec omni --config settings.json agents plugins add --name caveman --marketplace lkshrk --agents claude-code
 stderr 'lkshrk.*declare it first'
 ! exists .omni-cache/claude-calls.log
@@ -20,13 +13,12 @@ exec omni --config settings.json agents plugins add --name caveman --marketplace
 stdout 'added caveman'
 exec grep -q 'plugins install caveman@lkshrk' .omni-cache/claude-calls.log
 
-exec omni --config settings.json agents plugins restore --dry-run
+exec omni --config settings.json agents plugins sync --dry-run
 stdout -count=1 'would install: claude-code/caveman'
 
-# Re-adding the same name is an upsert: no duplicate manifest entry.
 exec omni --config settings.json agents plugins add --name caveman --marketplace lkshrk --agents claude-code
 stdout 'added caveman'
-exec omni --config settings.json agents plugins restore --dry-run
+exec omni --config settings.json agents plugins sync --dry-run
 stdout -count=1 'would install: claude-code/caveman'
 
 -- settings.json --

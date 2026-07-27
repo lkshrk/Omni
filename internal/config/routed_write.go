@@ -11,16 +11,13 @@ import (
 	"strings"
 )
 
-// routedFile is one file participating in the $include chain, in merge order
-// (main first, fragments after — the same order loadIncludes applies them).
+// Ordered as loadIncludes applies them: main first, fragments after.
 type routedFile struct {
 	path string
 	raw  map[string]json.RawMessage
 }
 
-// loadIncludeChain returns the main config file plus every include fragment,
-// flattened depth-first in merge order. Missing fragment files abort: routing
-// a write into a file the load path could not read would hide the problem.
+// Missing fragment files abort: routing a write into a file the load path could not read would hide the problem.
 func loadIncludeChain(mainPath string) ([]routedFile, error) {
 	resolved := mainPath
 	if writePath, err := resolveConfigWritePath(mainPath); err == nil {
@@ -72,12 +69,7 @@ func loadIncludeChainFrom(path string, stack *includePathStack) ([]routedFile, e
 	return chain, nil
 }
 
-// PatchRawRouted applies a top-level key patch like PatchRaw, but writes each
-// key to the file that owns it: the last $include fragment defining the key
-// wins (mirroring merge order), and keys owned by no fragment go to the main
-// file. The "groups" key is split at group-field granularity so fragments that
-// carry only parts of a group (for example a dots-only fragment) keep exactly
-// their parts.
+// PatchRawRouted — Each key goes to the last fragment defining it (mirroring merge order), unowned keys to the main file, with "groups" split at group-field granularity.
 func PatchRawRouted(path string, patch map[string]json.RawMessage) error {
 	chain, err := loadIncludeChain(path)
 	if err != nil {
@@ -127,10 +119,7 @@ func PatchRawRouted(path string, patch map[string]json.RawMessage) error {
 			continue
 		}
 		addFragmentPatch(owner, key, value)
-		// The patch value is the full merged section; stale copies of the key
-		// anywhere else in the chain would union-merge back on the next load
-		// and resurrect entries this patch removed. Consolidate the key into
-		// its owner file by clearing every other copy.
+		// The patch is the full merged section, so stale copies elsewhere in the chain would union-merge back and resurrect removed entries.
 		if _, ok := chain[0].raw[key]; ok {
 			mainPatch[key] = json.RawMessage("null")
 		}
@@ -169,9 +158,7 @@ func countChainFilesWithKey(chain []routedFile, key string) int {
 	return count
 }
 
-// patchFragmentRaw rewrites one include fragment with the patch applied. It
-// intentionally does not stamp $schema or version — fragments are partial
-// documents owned by their parent config.
+// Deliberately stamps no $schema or version: fragments are partial documents owned by their parent config.
 func patchFragmentRaw(path string, raw map[string]json.RawMessage, patch map[string]json.RawMessage) error {
 	rendered := renderFragmentRaw(raw, patch)
 	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, rendered) {
@@ -317,12 +304,7 @@ func copyGroupField(dst, src *GroupConfig, fieldName string) {
 	}
 }
 
-// routeGroupsPatch splits a new merged groups value into per-file projections
-// following current ownership: each group field stays in the file that defines
-// it today, new dots go to the file already carrying dots, and everything else
-// new goes to the group's declaring file (falling back to the last fragment
-// with a groups key). Returns file index -> new groups value; files whose
-// projection is empty get JSON null (key removal). File index 0 is main.
+// Each group field stays in the file that defines it today; files whose projection ends up empty get JSON null (key removal), and index 0 is main.
 func routeGroupsPatch(chain []routedFile, newGroupsRaw json.RawMessage) (map[int]json.RawMessage, error) {
 	owner, err := chainGroupsOwnership(chain)
 	if err != nil {

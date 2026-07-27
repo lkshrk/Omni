@@ -22,7 +22,6 @@ func TestWrapText_LongLineWraps(t *testing.T) {
 			t.Errorf("line %q exceeds wrap width 20", line)
 		}
 	}
-	// Reassembled text must match original words.
 	got := strings.Join(out, " ")
 	want := "one two three four five six seven eight nine ten"
 	if got != want {
@@ -31,7 +30,6 @@ func TestWrapText_LongLineWraps(t *testing.T) {
 }
 
 func TestWrapText_ExactWidth(t *testing.T) {
-	// "hello" is exactly 5 runes — fits in width 5.
 	out := WrapText("hello", 5)
 	if len(out) != 1 || out[0] != "hello" {
 		t.Errorf("WrapText exact width = %v, want [hello]", out)
@@ -63,8 +61,6 @@ func TestWrapText_NegativeWidth_ReturnsNil(t *testing.T) {
 }
 
 func TestWrapText_MultibyteRunes(t *testing.T) {
-	// Each Japanese character is 1 rune; "日本語 テスト" = 3 + 1(space) + 3 = 7 runes.
-	// Width 4 → should wrap between the two words.
 	out := WrapText("日本語 テスト", 4)
 	if len(out) != 2 {
 		t.Fatalf("WrapText multibyte = %v, want 2 lines", out)
@@ -78,7 +74,6 @@ func TestWrapText_MultibyteRunes(t *testing.T) {
 }
 
 func TestWrapText_SingleLongWord_NoBreak(t *testing.T) {
-	// A single word longer than width — cannot break, so it stays on one line.
 	out := WrapText("superlongword", 5)
 	if len(out) != 1 || out[0] != "superlongword" {
 		t.Errorf("WrapText (long word) = %v, want [superlongword]", out)

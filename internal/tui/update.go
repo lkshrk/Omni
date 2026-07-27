@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
@@ -9,7 +10,6 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-// Update handles messages and key events.
 func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	activityBefore := m.spinnerActivityState()
 	defer func() {
@@ -21,6 +21,12 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	}()
 
 	var cmds []tea.Cmd
+
+	m.scrubLoadingOwner()
+
+	if press, ok := msg.(tea.KeyPressMsg); ok {
+		msg = normalizeKeyPress(press)
+	}
 
 	cmds = append(cmds, m.updateActiveFilePicker(msg)...)
 
@@ -39,14 +45,12 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.resizeAdminTerminalSession()
 
 	case tea.BackgroundColorMsg:
-		// Detect terminal light/dark theme for foreground tokens. Backgrounds
-		// stay on the terminal default instead of being repainted by Omni.
+		// Backgrounds stay on the terminal default instead of being repainted by Omni.
 		m.isDark = backgroundIsDark(msg.Color)
 		m.applyTheme(m.isDark)
 
 	case tea.FocusMsg:
 		m.focused = true
-		// Re-kick the spinner tick chain if any activity is still ongoing.
 		if m.spinnerActivityActive() {
 			cmds = append(cmds, m.spinner.Tick)
 		}
@@ -72,7 +76,6 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			m.writeAdminTerminalInput([]byte(msg.Content))
 			return m, tea.Batch(cmds...)
 		}
-		// Route bracketed-paste content directly into whichever text input is live.
 		switch m.mode {
 		case viewSearch:
 			m.filter.SetValue(m.filter.Value() + msg.Content)
@@ -221,6 +224,9 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	case confirmTimeoutMsg:
 		cmds = append(cmds, m.handleConfirmTimeoutMsg(msg)...)
 
+	case setupReloadTimeoutMsg:
+		cmds = append(cmds, m.handleSetupReloadTimeoutMsg(msg)...)
+
 	case settingsSavedMsg:
 		cmds = append(cmds, m.handleSettingsSavedMsg(msg)...)
 
@@ -345,8 +351,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.skillsRunning = false
 		m.skillAddRunning = false
 		m.clearAgentsOpFor(agentsSectionSkills)
-		// On error keep the seeded/previous rows visible instead of wiping
-		// the table with nil; the error surfaces via skillsErr.
+		// On error keep the seeded/previous rows visible instead of wiping the table with nil; the error surfaces via skillsErr.
 		if msg.err == nil {
 			m.skillsRows = msg.rows
 			m.skillsUnmanagedRows = msg.unmanaged
@@ -362,7 +367,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		cmds = append(cmds, m.doLoadAgentsSummary())
 
 	case skillsGroupsUpdatedMsg:
-		if msg.err != nil {
+		if msg.err != nil && !app.IsCatalogWarning(msg.err) {
 			m.skillsErr = msg.err
 		} else {
 			m.skillsRows = msg.rows
@@ -394,6 +399,9 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			m.skillsImport = &d
 			m.skillsLoaded = false
 			cmds = append(cmds, setStatus(&m, app.ImportDiffSummaryText(d), false), m.loadSkillsManifestCmd())
+			if w := skillWarningsText(d.Warnings); w != "" {
+				cmds = append(cmds, setStatus(&m, "⚠ "+w, true))
+			}
 		}
 		return m, tea.Batch(cmds...)
 
@@ -402,6 +410,10 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			m.skillsRunning = false
 			m.clearAgentsOp()
 			m.skillsErr = msg.err
+			if msg.updated {
+				m.skillsLoaded = false
+				cmds = append(cmds, m.loadSkillsManifestCmd())
+			}
 		} else {
 			m.skillsLoaded = false
 			cmds = append(cmds, setStatus(&m, "✓ skills updated", false), m.loadSkillsManifestCmd())
@@ -411,7 +423,8 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	case skillsFoundMsg:
 		m.skillAddRunning = false
 		m.searching = false
-		if msg.err != nil {
+		warning := app.IsCatalogWarning(msg.err)
+		if msg.err != nil && !warning {
 			m.skillsErr = msg.err
 			m.skillsSearchActive = false
 			m.filter.SetValue("")
@@ -419,11 +432,16 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			clampSkillsCursor(&m)
 			clampAgentsAllCursor(&m)
 		} else {
+			m.skillsErr = nil
 			m.skillFindResults = msg.results
 			m.skillFindCursor = 0
 			clampSkillsCursor(&m)
 			clampAgentsAllCursor(&m)
-			cmds = append(cmds, setStatus(&m, fmt.Sprintf("found %d", len(msg.results)), false))
+			status := fmt.Sprintf("found %d", len(msg.results))
+			if warning {
+				status += " (stale cache)"
+			}
+			cmds = append(cmds, setStatus(&m, status, false))
 		}
 
 	case skillAddedMsg:
@@ -438,6 +456,42 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			m.skillAddRunning = false
 			m.clearAgentsOp()
 			m.skillsErr = msg.err
+		} else {
+			m.skillsLoaded = false
+			cmds = append(cmds, m.loadSkillsManifestCmd(), m.doLoadAgentsSummary())
+		}
+		if msg.warning != "" {
+			cmds = append(cmds, setStatus(&m, "⚠ "+msg.warning, true))
+		}
+		return m, tea.Batch(cmds...)
+
+	case agentsBulkResolveDoneMsg:
+		m.skillsRunning = false
+		m.mcpRunning = false
+		m.pluginRunning = false
+		m.clearAgentsOp()
+		if msg.err != nil {
+			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
+			return m, tea.Batch(cmds...)
+		}
+		// The modal is gone and its lines are nil by now, so the status line is the only place a partial failure can still be reported.
+		if failed := len(msg.result.Errors); failed > 0 {
+			cmds = append(cmds, setStatus(&m, fmt.Sprintf("⚠ resolved %d, %d failed: %s", msg.result.Resolved(), failed, strings.Join(msg.result.Errors, "; ")), true))
+		} else {
+			cmds = append(cmds, setStatus(&m, fmt.Sprintf("✓ resolved %d", msg.result.Resolved()), false))
+		}
+		m.skillsLoaded = false
+		cmds = append(cmds, m.loadSkillsManifestCmd(), m.doLoadMcpRows(), m.doLoadPluginRows(), m.doLoadAgentsSummary())
+		return m, tea.Batch(cmds...)
+
+	case skillDriftResolvedMsg:
+		if len(msg.res.Warnings) > 0 {
+			cmds = append(cmds, setStatus(&m, "⚠ "+strings.Join(msg.res.Warnings, "; "), true))
+		}
+		if msg.err != nil {
+			m.skillsRunning = false
+			m.clearAgentsOp()
+			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
 		} else {
 			m.skillsLoaded = false
 			cmds = append(cmds, m.loadSkillsManifestCmd(), m.doLoadAgentsSummary())
@@ -584,6 +638,21 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case mcpDriftResolvedMsg:
+		if len(msg.warnings) > 0 {
+			cmds = append(cmds, setStatus(&m, "⚠ "+strings.Join(msg.warnings, "; "), true))
+		}
+		if msg.err != nil {
+			m.mcpRunning = false
+			m.clearAgentsOp()
+			m.mcpErr = msg.err
+			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
+		} else {
+			m.mcpErr = nil
+			cmds = append(cmds, m.doLoadMcpRows(), m.doLoadAgentsSummary())
+		}
+		return m, tea.Batch(cmds...)
+
 	case mcpAgentsSavedMsg:
 		if msg.err != nil {
 			m.mcpRunning = false
@@ -616,10 +685,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		clampAgentsAllCursor(&m)
 
 	case pluginRestoreDoneMsg:
-		// On success the running flag (and any row-op spinner) stays set until
-		// the reloaded rows land (pluginRowsMsg) — clearing it here would show
-		// the stale pre-op row without its spinner for the whole reload,
-		// which reads as a failed operation.
+		// The running flag stays set until the reloaded rows land (pluginRowsMsg); clearing it here would show the stale pre-op row without its spinner, which reads as a failed operation.
 		if msg.err != nil {
 			m.pluginRunning = false
 			m.pluginErr = msg.err
@@ -634,8 +700,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			m.pluginRunning = false
 			m.clearAgentsOp()
 			m.pluginErr = msg.err
-			// The manifest delete may have succeeded even when an adapter
-			// errored — reload so the removed row doesn't linger as stale.
+			// The manifest delete may have succeeded even when an adapter errored — reload so the removed row does not linger as stale.
 			cmds = append(cmds, m.doLoadPluginRows())
 		} else {
 			m.pluginErr = nil
@@ -661,9 +726,23 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case pluginDriftResolvedMsg:
+		if len(msg.warnings) > 0 {
+			cmds = append(cmds, setStatus(&m, "⚠ "+strings.Join(msg.warnings, "; "), true))
+		}
+		if msg.err != nil {
+			m.pluginRunning = false
+			m.clearAgentsOp()
+			m.pluginErr = msg.err
+			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
+		} else {
+			m.pluginErr = nil
+			cmds = append(cmds, m.doLoadPluginRows(), m.doLoadAgentsSummary())
+		}
+		return m, tea.Batch(cmds...)
+
 	case pluginNeedsMarketplaceMsg:
-		// Loading stays true (set by runAgentsClaimGroupPickerAction) until the
-		// user answers the offer, so the spinner keeps showing on the row.
+		// Loading stays true (set by runAgentsClaimGroupPickerAction) until the user answers the offer, so the spinner keeps showing on the row.
 		cmds = append(cmds, m.armPluginMarketplaceOffer(msg))
 		return m, tea.Batch(cmds...)
 
@@ -674,9 +753,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			m.pluginErr = msg.err
 		} else {
 			m.pluginErr = nil
-			// Installing a plugin also installs its marketplace when the
-			// adapter didn't have it yet (App.SetPluginAgents →
-			// ensureMarketplace), so the marketplace section must reload too.
+			// Installing a plugin also installs its marketplace when the adapter lacked it (App.SetPluginAgents to ensureMarketplace), so marketplaces must reload too.
 			cmds = append(cmds, m.doLoadPluginRows(), m.doLoadMarketplaceRows())
 		}
 		return m, tea.Batch(cmds...)
@@ -750,9 +827,10 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.progressGen++
 		m.progressText = ""
 		m.progressCh = nil
-		// On success each section's running flag stays set until its reloaded
-		// rows land (rows msg handlers clear it) so completed rows keep their
-		// spinner instead of flashing the stale pre-op state.
+		if msg.report != nil {
+			m.openAgentsDriftPrompt(msg.report.Drift)
+		}
+		// Each section's running flag stays set until its reloaded rows land, so completed rows keep their spinner instead of flashing the stale pre-op state.
 		if msg.skills {
 			m.skillsErr = msg.skillsErr
 			if msg.skillsErr == nil {
@@ -786,15 +864,14 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 				m.marketplaceRunning = false
 			}
 		}
-		// A plugin update also refreshes marketplaces internally (see
-		// App.UpdatePlugins), so reload marketplace rows on that path too
-		// even though msg.marketplace is false — otherwise UpdatedAt stays
-		// stale in the TUI's cached rows until the next manual refresh.
+		// A plugin update refreshes marketplaces internally (App.UpdatePlugins), so reload them here too even though msg.marketplace is false, or UpdatedAt stays stale until the next manual refresh.
 		if msg.plugin && !msg.marketplace && msg.pluginErr == nil && m.marketplacesSectionEnabled() {
 			cmds = append(cmds, m.doLoadMarketplaceRows())
 		}
 		if err := firstAgentsProgressError(msg); err != nil {
 			cmds = append(cmds, setStatus(&m, "✗ "+err.Error(), true))
+		} else if msg.report != nil {
+			cmds = append(cmds, setStatus(&m, "✓ "+app.AgentsSyncAllSummaryText(*msg.report), false))
 		}
 		cmds = append(cmds, m.doLoadAgentsSummary())
 		if m.dashboardReconcileCurrent == dashboardReconcilePlanSyncAgents {
@@ -990,9 +1067,7 @@ func (m *Model) scrollBy(delta int) {
 	}
 }
 
-// scrollSkillsTabBy routes a mouse wheel scroll on the agents tab to the
-// same cursor-move logic the active chip's key handler uses, so wheel and
-// keyboard navigation stay in lockstep.
+// Routes to the same cursor-move logic the active chip's key handler uses, so wheel and keyboard navigation stay in lockstep.
 func (m *Model) scrollSkillsTabBy(delta int) {
 	switch m.skillTypeIdx {
 	case agentsChipAll:

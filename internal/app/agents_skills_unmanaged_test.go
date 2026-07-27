@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -25,10 +26,6 @@ func writeSkillLockFixture(t *testing.T, home string, lock config.SkillLockFile)
 	}
 }
 
-// shadowTestPluginAdapter is a minimal local stub for shadow-detection tests
-// in this file's package (app), which cannot see app_test's stubPluginAdapter
-// (defined in the external app_test package for the plugin_ops_test.go
-// suite).
 type shadowTestPluginAdapter struct {
 	id            string
 	listedPlugins []InstalledPlugin
@@ -100,6 +97,29 @@ func TestUnmanagedSkillPackages_LockMinusManifest(t *testing.T) {
 	}
 }
 
+func TestUnmanagedSkillPackages_NormalizesEquivalentSources(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	writeSkillLockFixture(t, home, config.SkillLockFile{
+		Version: 3,
+		Skills: map[string]config.SkillLockEntry{
+			"managed-skill": {Source: "https://github.com/o/managed.git"},
+		},
+	})
+	a := newSkillsTestApp(t, config.AgentsConfig{
+		Packages: []config.SkillPackage{{Source: "o/managed"}},
+	})
+
+	rows, err := a.UnmanagedSkillPackages(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("equivalent source offered as unmanaged: %+v", rows)
+	}
+}
+
 func TestUnmanagedSkillPackages_PopulatesPerAgentStatus(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -127,10 +147,10 @@ func TestUnmanagedSkillPackages_PopulatesPerAgentStatus(t *testing.T) {
 		t.Fatalf("expected 1 unmanaged row, got %+v", rows)
 	}
 	status := rows[0].PerAgentStatus
-	if !status["claude-code"] {
+	if status["claude-code"] != SkillStatusInstalled {
 		t.Error("claude-code should be installed on disk")
 	}
-	if status["cursor"] {
+	if status["cursor"] == SkillStatusInstalled {
 		t.Error("cursor should not be installed on disk")
 	}
 }
@@ -181,13 +201,6 @@ func TestAdoptSkillPackage_GatedBySkillsDisabled(t *testing.T) {
 	}
 }
 
-// TestUnmanagedSkillPackages_SuppressedByInstalledPlugin is a root-cause
-// regression test for the "academic-research-skills plugin surfaces as an
-// unmanaged skill row" report: a plugin's skills land on disk under the
-// agent's skills dir just like an omni-managed package would, so the lockfile
-// scan picks them up as an unmanaged source. Once installedPluginNames
-// reports a same-named plugin on the agent where the package is present, that
-// source must be suppressed rather than offered for claim.
 func TestUnmanagedSkillPackages_SuppressedByInstalledPlugin(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -232,4 +245,48 @@ func newSkillsGateTestApp(t *testing.T, s config.Settings) *App {
 		t.Fatal(err)
 	}
 	return a
+}
+
+func TestRestoreSkills_LegacyCollisionCarriesImportHint(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+
+	source := filepath.Join(t.TempDir(), "legacy-source")
+	writeAppSkill(t, filepath.Join(source, "skills", "demo"), "demo")
+	legacy := filepath.Join(home, ".agents", "skills", "demo")
+	writeAppSkill(t, legacy, "demo")
+	if err := os.WriteFile(filepath.Join(legacy, "EXTRA.md"), []byte("diverged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeSkillLockFixture(t, home, config.SkillLockFile{
+		Version: 3,
+		Skills:  map[string]config.SkillLockEntry{"demo": {Source: source}},
+	})
+
+	a := newSkillsTestApp(t, config.AgentsConfig{
+		Packages: []config.SkillPackage{{Source: source, Agents: []string{"cline"}}},
+	})
+	res, _, err := a.RestoreSkills(context.Background(), RestoreSkillsOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Failed) != 0 {
+		t.Fatalf("failed = %+v, want the contested entry degraded to drift", res.Failed)
+	}
+	if len(res.Drift) != 1 || !strings.Contains(res.Drift[0], "cline") {
+		t.Fatalf("drift = %v, want the contested target named", res.Drift)
+	}
+	hinted := false
+	for _, w := range res.Warnings {
+		if strings.Contains(w, "omni agents skills import") {
+			hinted = true
+		}
+	}
+	if !hinted {
+		t.Fatalf("warnings = %v, want an import hint", res.Warnings)
+	}
+	if _, err := os.Stat(filepath.Join(legacy, "EXTRA.md")); err != nil {
+		t.Errorf("legacy directory must be left untouched: %v", err)
+	}
 }

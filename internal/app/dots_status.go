@@ -25,15 +25,12 @@ func (a *App) DotsList() ([]DotStatus, error) {
 type dotsChildDepthKey struct{}
 type dotsExpandedChildrenKey struct{}
 
-// WithShallowDotsChildren makes status discovery load only direct children.
-// Directory descendants can then be fetched with DotsChildChildren as the TUI
-// expands them. Callers that do not opt in retain the full tree.
+// WithShallowDotsChildren — Callers that do not opt in retain the full tree.
 func WithShallowDotsChildren(ctx context.Context) context.Context {
 	return context.WithValue(ctx, dotsChildDepthKey{}, 1)
 }
 
-// WithExpandedDotsChildren preserves already-expanded TUI branches while a
-// shallow status snapshot is rebuilt.
+// WithExpandedDotsChildren — Preserves already-expanded TUI branches while a shallow snapshot is rebuilt.
 func WithExpandedDotsChildren(ctx context.Context, paths map[string][]string) context.Context {
 	if len(paths) == 0 {
 		return ctx
@@ -78,7 +75,6 @@ func (a *App) QueryDots(opts DotsQueryOptions) ([]DotStatus, error) {
 	return filterDotStatuses(statuses, opts)
 }
 
-// DotsStatus returns DotsList combined with the git status of the dots repo.
 func (a *App) DotsStatus(ctx context.Context) (*DotsStatusResult, error) {
 	mgr, groupMap, variantMap, err := a.buildDotsManager()
 	if err != nil {
@@ -105,8 +101,7 @@ func (a *App) DotsStatus(ctx context.Context) (*DotsStatusResult, error) {
 	return result, membershipErr
 }
 
-// DiscoverDotsStatus returns current tracked status plus transient untracked
-// discovery candidates. It does not mutate config, the repo, or local files.
+// DiscoverDotsStatus — Does not mutate config, the repo, or local files.
 func (a *App) DiscoverDotsStatus(ctx context.Context) (*DotsStatusResult, error) {
 	childDepth := dotsChildDepth(ctx)
 	expandedChildren := dotsExpandedChildren(ctx)
@@ -215,10 +210,7 @@ func ignoredChildDotStatuses(statuses []DotStatus) []DotStatus {
 	return ignored
 }
 
-// collectIgnoredFromChildren gathers the entries that belong in the synthesized
-// Ignored-section tree: every ignored node, plus any tracked (re-included) leaf
-// that lives inside an ignored subtree. The tracked leaves are carried with
-// their real state so they render active instead of being dropped or muted.
+// Tracked leaves carry their real state so they render active instead of being dropped or muted.
 func collectIgnoredFromChildren(children, ignoredChildren []DotChild) []DotChild {
 	seen := make(map[string]bool)
 	var result []DotChild
@@ -231,9 +223,7 @@ func collectIgnoredFromChildren(children, ignoredChildren []DotChild) []DotChild
 		result = append(result, child)
 	}
 	for _, child := range ignoredChildren {
-		// Shallow snapshots keep descendants out of Children. The compact
-		// ignored scan also carries tracked leaves re-included beneath an
-		// ignored directory, and those must reach the synthesized tree too.
+		// The compact ignored scan also carries tracked leaves re-included beneath an ignored directory.
 		add(child)
 	}
 	var walk func(nodes []DotChild, underIgnored bool)
@@ -256,10 +246,7 @@ func collectIgnoredFromChildren(children, ignoredChildren []DotChild) []DotChild
 	return result
 }
 
-// DotChildDisplayState resolves the state a child row should present: an ignored
-// child reads as ignored, an explicit child state wins, otherwise it inherits
-// the parent entry's state. This is the single authority both the app and the
-// TUI consult so the two layers cannot drift.
+// DotChildDisplayState — The single authority both the app and the TUI consult, so the two layers cannot drift.
 func DotChildDisplayState(child DotChild, parentState dots.State) dots.State {
 	if child.Ignored {
 		return dots.StateIgnored
@@ -270,22 +257,14 @@ func DotChildDisplayState(child DotChild, parentState dots.State) dots.State {
 	return parentState
 }
 
-// DotChildIsTrackedLeaf reports whether a child is a genuinely tracked leaf
-// (a managed file/dir with a real, non-ignored state) rather than an ignored
-// entry or a synthesized structural container.
 func DotChildIsTrackedLeaf(child DotChild) bool {
 	return !child.Ignored && child.State != "" && child.State != dots.StateIgnored && len(child.Children) == 0
 }
 
-// DotChildIsSynthesizedContainer reports whether a child row is a structural
-// directory synthesized for the Ignored-section tree (no real state of its own)
-// rather than an explicitly ignored entry or a tracked, re-included leaf.
 func DotChildIsSynthesizedContainer(child DotChild, parentState dots.State) bool {
 	return !child.Ignored && DotChildDisplayState(child, parentState) == dots.StateIgnored
 }
 
-// buildIgnoredChildTree reconstructs a tree of DotChild from a flat list of
-// ignored entries, grouping files under their parent directories.
 func buildIgnoredChildTree(flat []DotChild, targetRoot string) []DotChild {
 	type node struct {
 		child    DotChild
@@ -308,17 +287,13 @@ func buildIgnoredChildTree(flat []DotChild, targetRoot string) []DotChild {
 				cur.order = append(cur.order, part)
 			}
 			if i == len(parts)-1 {
-				// Leaf — use the original child data, unless this path was
-				// already promoted to an intermediate container by a sibling.
+				// Unless this path was already promoted to an intermediate container by a sibling.
 				if len(n.children) == 0 {
 					n.child = child
 					n.child.Depth = i + 1
 				}
 			} else {
-				// Intermediate directory — always a synthesized container (not
-				// explicitly ignored), overwriting any earlier leaf assignment
-				// for this path so an ignored dir with re-included children
-				// renders as structure rather than a single ignored row.
+				// Always synthesized, so an ignored dir with re-included children renders as structure rather than one ignored row.
 				dirRel := strings.Join(parts[:i+1], "/")
 				n.child = DotChild{
 					Name:    part,
@@ -346,9 +321,7 @@ func buildIgnoredChildTree(flat []DotChild, targetRoot string) []DotChild {
 			if len(ch.Children) > 0 {
 				ch.IsDir = true
 			}
-			// Tracked (re-included) leaves keep their real counts so their
-			// synced/managed ratio renders truthfully; everything else reports
-			// the ignored-leaf count.
+			// Tracked leaves keep real counts so their synced-to-managed ratio renders truthfully.
 			if !DotChildIsTrackedLeaf(ch) {
 				n := countIgnoredTree(ch)
 				ch.FileCount = n
@@ -356,7 +329,6 @@ func buildIgnoredChildTree(flat []DotChild, targetRoot string) []DotChild {
 			}
 			result = append(result, ch)
 		}
-		// Sort: dirs first, then alphabetically.
 		sort.SliceStable(result, func(i, j int) bool {
 			if result[i].IsDir != result[j].IsDir {
 				return result[i].IsDir
@@ -369,7 +341,6 @@ func buildIgnoredChildTree(flat []DotChild, targetRoot string) []DotChild {
 	return buildChildren(root)
 }
 
-// countIgnoredTree counts all leaves (files and leaf directories) in the tree.
 // maxDepth guards against malformed trees with cycles.
 const countIgnoredTreeMaxDepth = 64
 
@@ -414,8 +385,7 @@ func (a *App) QueryDotsStatus(ctx context.Context, opts DotsQueryOptions) (*Dots
 	return result, err
 }
 
-// DotsChildChildren loads one directory level for an already-resolved dots
-// entry. It is used by the TUI's on-demand expansion path.
+// DotsChildChildren — Used by the TUI's on-demand expansion path.
 func (a *App) DotsChildChildren(ctx context.Context, name, relPath string, ancestorIgnored bool) ([]DotChild, error) {
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
@@ -557,9 +527,7 @@ func entryHealth(m *dots.Engine, groupMap map[string]string, variantMap map[stri
 	for _, e := range m.Entries {
 		state, actions := dots.ClassifyEntry(e)
 		contentRoot := dotStatusContentRoot(e)
-		// Ignored entries render without children or counts, so skip the
-		// subtree walks entirely — targets like ~/.cargo hold tens of
-		// thousands of files whose scan would be discarded anyway.
+		// Ignored entries render without children, and targets like ~/.cargo hold tens of thousands of files.
 		var children, ignoredChildren []DotChild
 		var counts DotFileCounts
 		if state != dots.StateIgnored {
@@ -801,9 +769,7 @@ func dotPathIsDir(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-// dotDirEntryManaged reports IsManagedDotFile using the dirent's d_type when
-// the kernel provides it, avoiding a per-file lstat on large walks. Unknown or
-// exotic types fall back to Info().
+// Uses the dirent's d_type when available to avoid a per-file lstat on large walks.
 func dotDirEntryManaged(d os.DirEntry) bool {
 	switch d.Type() & os.ModeType {
 	case 0, os.ModeSymlink:
@@ -824,9 +790,7 @@ func dotStatusIsDir(e dots.ResolvedEntry, contentRoot string) bool {
 	return false
 }
 
-// compileDotIgnores compiles the default + per-entry ignore patterns once for
-// a walk. Invalid per-entry patterns yield an empty matcher, preserving the
-// historical "invalid pattern list ignores nothing" behavior.
+// Invalid per-entry patterns yield an empty matcher, preserving the historical ignore-nothing behavior.
 func compileDotIgnores(perEntry []string) *dots.IgnoreMatcher {
 	im, err := dots.CompileIgnores(dots.CombinedIgnores(perEntry))
 	if err != nil {
@@ -835,8 +799,7 @@ func compileDotIgnores(perEntry []string) *dots.IgnoreMatcher {
 	return im
 }
 
-// compileInheritedDotIgnores prefixes the matcher's patterns with "*" so
-// descendants of an ignored directory default to ignored unless re-included.
+// Descendants of an ignored directory default to ignored unless re-included.
 func compileInheritedDotIgnores(im *dots.IgnoreMatcher) *dots.IgnoreMatcher {
 	raw := im.Raw()
 	inherited := make([]string, 0, len(raw)+1)
@@ -1125,10 +1088,7 @@ func dotLocalKindState(kind dots.LocalKind, parentState dots.State) dots.State {
 	}
 }
 
-// attachLastSyncErrors annotates out-of-sync statuses with the most recent
-// recorded failure for their entry so UIs can explain why an entry is broken
-// instead of only showing its state. The newest history verdict per entry
-// wins: a successful newer operation clears an older failure.
+// The newest history verdict per entry wins: a successful newer operation clears an older failure.
 func (a *App) attachLastSyncErrors(ctx context.Context, statuses []DotStatus) {
 	if len(statuses) == 0 {
 		return

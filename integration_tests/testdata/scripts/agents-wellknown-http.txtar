@@ -1,0 +1,24 @@
+# HTTP skill sources install only after the well-known index and artifact digest verify.
+env HOME=$WORK/home
+env XDG_DATA_HOME=$WORK/data
+
+! exec omni-wellknown-skills --config settings.json agents skills sync
+stdout '^1 installed, 3 failed$'
+stdout '! http://127\.0\.0\.1:[0-9]+/bad-digest/index\.json: skill broken: SHA-256 digest mismatch'
+# Parsed indexes fail closed; unavailable probes may fall back to Git because they do not prove a catalog exists.
+stdout '! http://127\.0\.0\.1:[0-9]+/old-schema/index\.json: unsupported skills index at http://127\.0\.0\.1:[0-9]+/old-schema/index\.json: schema "https://schemas\.agentskills\.io/discovery/0\.1\.0/schema\.json"'
+stdout '! http://127\.0\.0\.1:[0-9]+/probe403: git clone http://127\.0\.0\.1:[0-9]+/probe403: exit status 128'
+stdout '\(skills index probe: fetching http://127\.0\.0\.1:[0-9]+/\.well-known/agent-skills/index\.json: HTTP 403 Forbidden\)'
+! stdout 'git clone http://127\.0\.0\.1:[0-9]+/bad-digest'
+! stdout 'git clone http://127\.0\.0\.1:[0-9]+/old-schema'
+! stdout 'git clone http://127\.0\.0\.1:[0-9]+/good'
+stderr 'agent operation\(s\) failed'
+
+exists $WORK/home/.codex/skills/hello/SKILL.md
+! exists $WORK/home/.codex/skills/broken
+! exists $WORK/home/.codex/skills/legacy
+exec sh -c 'ls '"$WORK"'/data/omni/skills/packages | wc -l'
+stdout '^1$'
+
+-- settings.json --
+{"version":20,"settings":{"agents_use":["codex"]},"agents":{"packages":[{"source":"STUB_SERVER_URL/good/index.json"},{"source":"STUB_SERVER_URL/bad-digest/index.json"},{"source":"STUB_SERVER_URL/old-schema/index.json"},{"source":"STUB_SERVER_URL/probe403"}]}}

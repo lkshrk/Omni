@@ -1,0 +1,35 @@
+# Deprecated aliases retain behavior and flags while naming the canonical spelling once on stderr.
+env HOME=$WORK/home
+env XDG_DATA_HOME=$WORK/data
+
+exec omni --config settings.json agents skills restore --dry-run
+stdout '^install ./source all discovered skills for targets codex$'
+stderr '^note: "agents skills restore" renamed to "agents skills sync"$'
+
+exec omni --config settings.json agents skills restore
+stdout '^1 installed, 0 failed$'
+exists $WORK/home/.codex/skills/myskill/SKILL.md
+
+exec omni --config settings.json agents skills update --check
+stderr '^note: "agents skills update" renamed to "agents skills upgrade"$'
+
+exec omni --config settings.json agents restore --dry-run
+stdout 'skills: '
+stderr '^note: "agents restore" renamed to "agents sync"$'
+
+exec omni --config settings.json agents mcp restore --dry-run
+stderr '^note: "agents mcp restore" renamed to "agents mcp sync"$'
+
+exec omni --config settings.json agents plugins restore --dry-run
+stderr '^note: "agents plugins restore" renamed to "agents plugins sync"$'
+
+-- settings.json --
+{"version":20,"settings":{"agents_use":["codex"]},"agents":{"packages":[{"source":"./source"}]}}
+
+-- source/skills/myskill/SKILL.md --
+---
+name: myskill
+description: Deprecated alias test.
+---
+
+myskill

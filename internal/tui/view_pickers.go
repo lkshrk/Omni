@@ -106,8 +106,7 @@ func renderRightAlignedCell(rendered string, width int) string {
 	return strings.Repeat(" ", max(width-lipgloss.Width(rendered), 0)) + rendered
 }
 
-// pickerToggleRowWidth returns the rendered width of one "[ ] label  detail"
-// picker row. detailW=0 means "no detail column".
+// detailW=0 means "no detail column".
 func pickerToggleRowWidth(labelW, detailW int) int {
 	w := 2 + len("[ ]") + 1 + labelW
 	if detailW > 0 {

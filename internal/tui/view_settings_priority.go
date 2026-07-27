@@ -6,11 +6,8 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// providerPriorityContentWidth is the inner text width of the provider-priority
-// popup.
 func providerPriorityContentWidth(m Model) int {
-	// Wide enough that the footer hints (cancel … grab · on/off … save) sit on a
-	// single line instead of wrapping the primary action below.
+	// Wide enough that the footer hints sit on a single line instead of wrapping the primary action below.
 	return popupContentWidth(m, 54, 48, 64)
 }
 
@@ -25,13 +22,8 @@ func providerPriorityPopupFrame(m Model) popupFrame {
 	}
 }
 
-// providerPriorityRowIndent shifts the provider rows in from the popup edge.
 const providerPriorityRowIndent = "   "
 
-// renderProviderPriorityPopup renders the provider-priority editor body: one row
-// per concrete provider with a cursor/hold marker, an on/off dot, and dimmed
-// styling for unavailable or disabled providers, plus an evenly-distributed
-// hints footer.
 func renderProviderPriorityPopup(m Model) string {
 	p := m.palette
 	width := providerPriorityContentWidth(m)
@@ -73,8 +65,7 @@ func renderProviderPriorityPopup(m Model) string {
 	return lipgloss.NewStyle().Width(width).Render(sb.String() + "\n" + footer)
 }
 
-// renderJustifiedHintItems lays out hint items space-between across width: the
-// first sits at the left edge, the last at the right edge, with equal gaps.
+// Space-between across width: the first item sits at the left edge, the last at the right edge, with equal gaps.
 func renderJustifiedHintItems(pal palette, width int, hints []hintItem) string {
 	if len(hints) == 0 {
 		return ""

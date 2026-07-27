@@ -8,10 +8,6 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// TestCachedAgentsRows_RoundTripAndCorruptSection pins the agents rows render
-// cache: row loads persist their result into local_state, CachedAgentsRows
-// returns it with the section's Loaded flag set, and a corrupt payload is
-// treated as cache-absent (Loaded false) instead of failing the call.
 func TestCachedAgentsRows_RoundTripAndCorruptSection(t *testing.T) {
 	t.Parallel()
 	stub := &stubPluginAdapter{
@@ -90,10 +86,6 @@ func TestCachedAgentsRows_RoundTripAndCorruptSection(t *testing.T) {
 	}
 }
 
-// TestAgentsRowsCache_WriteFailureKeepsLiveRows pins the best-effort cache
-// write: with the DB closed underneath the app, SetState fails on every rows
-// load, yet the live listings must come back intact with a nil error — a
-// render-cache write may never discard the authoritative adapter data.
 func TestAgentsRowsCache_WriteFailureKeepsLiveRows(t *testing.T) {
 	t.Parallel()
 	stub := &stubPluginAdapter{

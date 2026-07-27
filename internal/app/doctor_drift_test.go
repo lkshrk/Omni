@@ -13,10 +13,8 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// driftStubProvider is a provider whose availability can be set per-test.
 type driftStubProvider struct {
 	stubProvider
-	// installedMap reports what is installed (name → installedWith).
 	installedMap map[string]string
 }
 
@@ -43,8 +41,6 @@ func (p *driftStubProvider) ListInstalled(_ context.Context) ([]provider.Install
 	return tools, nil
 }
 
-// seedDB writes ToolCache rows directly so drift tests can control InstalledWith
-// without running a full RefreshInstalled cycle.
 func seedDB(t *testing.T, a *app.App, rows []*database.ToolCache) {
 	t.Helper()
 	ctx := context.Background()
@@ -53,8 +49,6 @@ func seedDB(t *testing.T, a *app.App, rows []*database.ToolCache) {
 	}
 }
 
-// buildDriftConfig returns a RootConfig with the given tool→provider mapping
-// and a host group that contains all tools.
 func buildDriftConfig(toolProviders map[string]string) *config.RootConfig {
 	tools := make(map[string]config.ToolSpec, len(toolProviders))
 	entries := make([]config.ToolEntry, 0, len(toolProviders))
@@ -73,8 +67,6 @@ func buildDriftConfig(toolProviders map[string]string) *config.RootConfig {
 	}
 }
 
-// ─── Class 1: provider unusable ──────────────────────────────────────────────
-
 func TestDoctorDrift_ProviderUnusable_DetectedWhenProviderUnavailable(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 
@@ -85,7 +77,6 @@ func TestDoctorDrift_ProviderUnusable_DetectedWhenProviderUnavailable(t *testing
 	})); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-	// No DB row → tool is not installed anywhere.
 
 	result, err := a.Doctor(context.Background())
 	if err != nil {
@@ -117,7 +108,6 @@ func TestDoctorDrift_ProviderUnusable_DetectedWhenProviderUnavailable(t *testing
 func TestDoctorDrift_ProviderUnusable_UnregisteredProvider(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 
-	// Register "brew" only — "npm" is not registered at all.
 	a, cfgPath := newImportApp(t, newDriftProvider("brew", true, nil))
 	if err := saveAppConfig(t, cfgPath, buildDriftConfig(map[string]string{
 		"typescript": "npm", // npm not registered → unregistered provider
@@ -139,8 +129,6 @@ func TestDoctorDrift_ProviderUnusable_UnregisteredProvider(t *testing.T) {
 	}
 }
 
-// ─── Class 2: wrong-provider install ─────────────────────────────────────────
-
 func TestDoctorDrift_WrongProvider_DetectedWhenInstalledWithDiffers(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 
@@ -152,7 +140,6 @@ func TestDoctorDrift_WrongProvider_DetectedWhenInstalledWithDiffers(t *testing.T
 		t.Fatalf("save config: %v", err)
 	}
 
-	// Seed the DB with InstalledWith="corepack" to simulate wrong-provider install.
 	seedDB(t, a, []*database.ToolCache{{
 		Name:          "pnpm",
 		Provider:      "brew",
@@ -181,13 +168,9 @@ func TestDoctorDrift_WrongProvider_DetectedWhenInstalledWithDiffers(t *testing.T
 	}
 }
 
-// ─── Class 3: provider unavailable but tool present another way ───────────────
-
 func TestDoctorDrift_UnavailableButPresent_DetectedViaInstalledWith(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 
-	// brew is unavailable but pnpm is present via corepack (HCL-26 PATH detection
-	// would have written the InstalledWith row).
 	unavailBrew := newDriftProvider("brew", false, nil)
 	a, cfgPath := newImportApp(t, unavailBrew)
 	if err := saveAppConfig(t, cfgPath, buildDriftConfig(map[string]string{
@@ -219,20 +202,14 @@ func TestDoctorDrift_UnavailableButPresent_DetectedViaInstalledWith(t *testing.T
 	if !driftGroupContains(check.Groups, "corepack") {
 		t.Fatalf("drift groups do not mention actual provider 'corepack': %+v", check.Groups)
 	}
-	// Suggestion must guide user to reconfigure provider.
 	if !driftGroupContains(check.Groups, "reconfigure") {
 		t.Fatalf("drift suggestion missing 'reconfigure' guidance: %+v", check.Groups)
 	}
 }
 
-// ─── Class 1 false-positive guard: working fallback ──────────────────────────
-
 func TestDoctorDrift_NoDrift_WhenPrimaryProviderUnavailableButFallbackWorks(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 
-	// Primary provider "pip" is unavailable, but "brew" is available and listed
-	// as a secondary Providers[] entry. The resolver picks "brew" as the usable
-	// route — this must NOT produce a Class-1 finding.
 	unavailPip := newDriftProvider("pip", false, nil)
 	availBrew := newDriftProvider("brew", true, map[string]string{"git": "2.43.0"})
 	a, cfgPath := newImportApp(t, unavailPip, availBrew)
@@ -267,13 +244,9 @@ func TestDoctorDrift_NoDrift_WhenPrimaryProviderUnavailableButFallbackWorks(t *t
 	}
 }
 
-// ─── Class 2: PATH-detected tools (InstalledWith="") do not trigger wrong-provider ──
-
 func TestDoctorDrift_NoDrift_WhenInstalledWithEmptyPathDetected(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 
-	// HCL-26 PATH-detection writes Installed:true with InstalledWith:"" to avoid
-	// wrong-provider classification. This must not produce a Class-2 finding.
 	brew := newDriftProvider("brew", true, nil)
 	a, cfgPath := newImportApp(t, brew)
 	if err := saveAppConfig(t, cfgPath, buildDriftConfig(map[string]string{
@@ -282,7 +255,6 @@ func TestDoctorDrift_NoDrift_WhenInstalledWithEmptyPathDetected(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	// Seed with InstalledWith="" — the HCL-26 PATH-detected shape.
 	seedDB(t, a, []*database.ToolCache{{
 		Name:          "git",
 		Provider:      "brew",
@@ -327,8 +299,6 @@ func TestDoctorNvmManagedDriftHelpers(t *testing.T) {
 	}
 }
 
-// ─── Class 4: nvm-managed binary with system-provider config ──────────────────
-
 func TestDoctorDrift_NvmManaged_DetectedWhenSystemConfiguredButBinaryUnderNvm(t *testing.T) {
 	for _, prov := range []string{"brew", "apt"} {
 		t.Run(prov, func(t *testing.T) {
@@ -356,7 +326,6 @@ func TestDoctorDrift_NvmManaged_DetectedWhenSystemConfiguredButBinaryUnderNvm(t 
 				t.Fatalf("save config: %v", err)
 			}
 
-			// PATH-detected shape: installed on PATH but no concrete manager claim.
 			seedDB(t, a, []*database.ToolCache{{
 				Name:          "pnpm",
 				Provider:      prov,
@@ -435,8 +404,6 @@ func TestDoctorDrift_NvmManaged_SkippedWhenWrongProviderAlreadyReportsNodeManage
 	}
 }
 
-// ─── Clean (no-drift) case ────────────────────────────────────────────────────
-
 func TestDoctorDrift_NoDrift_WhenAllProvidersAvailableAndInstalledWithMatches(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 
@@ -448,7 +415,6 @@ func TestDoctorDrift_NoDrift_WhenAllProvidersAvailableAndInstalledWithMatches(t 
 		t.Fatalf("save config: %v", err)
 	}
 
-	// Seed with InstalledWith matching the configured provider.
 	seedDB(t, a, []*database.ToolCache{{
 		Name:          "git",
 		Provider:      "brew",
@@ -493,9 +459,6 @@ func TestDoctorDrift_NoDrift_WhenNoToolsConfigured(t *testing.T) {
 	}
 }
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-// driftGroupContains reports whether any group header or item contains substr.
 func driftGroupContains(groups []app.DoctorDetailGroup, substr string) bool {
 	for _, g := range groups {
 		if strings.Contains(g.Header, substr) {

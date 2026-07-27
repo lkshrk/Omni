@@ -2,11 +2,7 @@ package tui
 
 import "github.com/lkshrk/omni/internal/app"
 
-// seedAgentsRowsFromCache pre-populates the agents-tab sections from the
-// persisted last-known rows so the tab renders instantly at launch while the
-// live adapter CLI loads run. Loaded flags stay untouched: the live loads
-// still fire and their results replace the seed. A section already holding
-// rows (a live load raced ahead) is never overwritten with stale cache.
+// Loaded flags stay untouched so the live loads still fire and replace the seed; a section already holding rows is never overwritten with stale cache.
 func (m *Model) seedAgentsRowsFromCache(cache *app.CachedAgentsRows) {
 	if cache == nil {
 		return

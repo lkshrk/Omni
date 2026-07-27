@@ -1,4 +1,3 @@
-// Package cli contains all Cobra command definitions.
 package cli
 
 import (
@@ -19,7 +18,6 @@ import (
 	"github.com/lkshrk/omni/internal/tui"
 )
 
-// rootState is shared across all subcommands via closure.
 type rootState struct {
 	configPath string
 	cacheDir   string
@@ -31,7 +29,6 @@ var initRootApp = func(ctx context.Context, a *app.App) error {
 	return a.Init(ctx)
 }
 
-// NewRootCmd builds and returns the root Cobra command tree.
 func NewRootCmd() *cobra.Command {
 	state := &rootState{}
 
@@ -51,8 +48,7 @@ Already set up?
   omni dots sync      sync dotfile symlinks from repo`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		// No subcommand → launch the TUI directly. This makes `omni` alone
-		// behave the same as `omni ui` so the binary is self-contained.
+		// No subcommand launches the TUI so bare `omni` behaves like `omni ui`.
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			defer profile.Start("cli.tui.run")()
 			model := tui.New(cmd.Context(), state.app)
@@ -138,10 +134,7 @@ Already set up?
 	return root
 }
 
-// hostExempt lists command names (and their ancestor names) that may run
-// without an active host. Checked against the full command chain.
-// NOTE: Do NOT add "omni" here — it is the ancestor of every command and would
-// exempt the entire CLI from host enforcement.
+// Checked against the full command chain, so never add "omni": it is every command's ancestor and would exempt the whole CLI.
 var hostExempt = map[string]bool{
 	"bootstrap":  true,
 	"doctor":     true,
@@ -166,15 +159,8 @@ func commandInChain(cmd *cobra.Command, name string) bool {
 	return false
 }
 
-// requireActiveHost returns an error when no host is configured for this machine,
-// unless the command (or one of its ancestors) is exempt from host checks,
-// or the command was invoked with an explicit --group flag.
 func requireActiveHost(cmd *cobra.Command, a *app.App) error {
-	// The bare `omni` root command (no subcommand) launches the TUI, which
-	// handles host setup internally. Skip enforcement here so the TUI can
-	// present its own onboarding flow when no host is configured.
-	// NOTE: we check cmd.Parent() == nil rather than adding "omni" to
-	// hostExempt, because the ancestor walk would then exempt every subcommand.
+	// The bare root launches the TUI, which onboards hosts itself; checked via Parent() because hostExempt would exempt every subcommand.
 	if cmd.Parent() == nil {
 		return nil
 	}
@@ -182,13 +168,11 @@ func requireActiveHost(cmd *cobra.Command, a *app.App) error {
 		if hostExempt[c.Name()] {
 			return nil
 		}
-		// An explicit --group flag targets a concrete group and does not need
-		// active-host expansion.
+		// An explicit --group targets a concrete group and needs no active-host expansion.
 		if f := c.Flags().Lookup("group"); f != nil && f.Changed {
 			return nil
 		}
-		// Install's --force opts out of host enforcement. Other commands use
-		// --force for command-local behavior such as update-quarantine bypasses.
+		// Only install's --force opts out of host enforcement; elsewhere --force is command-local.
 		if commandInChain(cmd, "install") {
 			if f := c.Flags().Lookup("force"); f != nil && f.Changed {
 				return nil
@@ -198,11 +182,6 @@ func requireActiveHost(cmd *cobra.Command, a *app.App) error {
 	return a.RequireActiveHost()
 }
 
-// Execute runs the root command with a signal-aware context.
-// Pressing Ctrl+C (SIGINT) or sending SIGTERM cancels the context, which
-// propagates cancellation to child processes via the context passed to RunE.
-// A background goroutine ensures the process exits immediately on signal even
-// when the main goroutine is blocked reading stdin (e.g. confirmation prompts).
 func Execute() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -211,10 +190,7 @@ func Execute() {
 	defer signal.Stop(signals)
 	var signalExitCode atomic.Int32
 
-	// Force-exit on signal so blocking stdin reads cannot prevent shutdown.
-	// When the TUI is active the terminal is in raw mode and Ctrl+C is
-	// delivered as a byte on stdin (not SIGINT), so this only fires for
-	// non-TUI code paths.
+	// Force-exit on signal so a blocking stdin read cannot prevent shutdown; under the TUI Ctrl+C arrives as a stdin byte, so this never fires there.
 	go func() {
 		sig := <-signals
 		exitCode := 1
@@ -229,8 +205,7 @@ func Execute() {
 
 	root := NewRootCmd()
 	if err := root.ExecuteContext(ctx); err != nil {
-		// Preserve failure status even when the canceled operation's error beats
-		// the force-exit goroutine here.
+		// Preserve failure status when the canceled operation's error beats the force-exit goroutine.
 		if ctx.Err() != nil {
 			exitCode := int(signalExitCode.Load())
 			if exitCode == 0 {

@@ -30,8 +30,7 @@ type pathPickerModel struct {
 	completionEntries []pathPickerEntry
 	completionIndex   int
 
-	// Kept as public-looking fields so picker-focused tests can assert the
-	// same TUI-owned bounds and cursor contract the old filepicker exposed.
+	// Public-looking so picker-focused tests can assert the same TUI-owned bounds and cursor contract the old filepicker exposed.
 	AutoHeight bool
 	Cursor     string
 }

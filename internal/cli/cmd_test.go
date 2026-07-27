@@ -4,6 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -26,11 +30,20 @@ import (
 	textutil "github.com/lkshrk/omni/internal/text"
 )
 
-// ─── test harness ─────────────────────────────────────────────────────────────
+// The CLI builds its own client with a nil Transport, so the stub CA is the only seam; the URL stays https and verified.
+func trustTestServerCA(t *testing.T, server *httptest.Server) {
+	t.Helper()
+	transport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		t.Fatal("http.DefaultTransport is not *http.Transport")
+	}
+	previous := transport.TLSClientConfig
+	pool := x509.NewCertPool()
+	pool.AddCert(server.Certificate())
+	transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	t.Cleanup(func() { transport.TLSClientConfig = previous })
+}
 
-// newTestCmd builds a root command wired to a clean temp dir.
-// Returns cmd and the config path. Callers should set additional args with
-// cmd.SetArgs(append([]string{...flags...}, subcommandArgs...)) before Execute.
 func newTestCmd(t *testing.T) (*cobra.Command, string) {
 	t.Helper()
 	cfgDir := t.TempDir()
@@ -42,7 +55,6 @@ func newTestCmd(t *testing.T) (*cobra.Command, string) {
 	return cmd, cfgPath
 }
 
-// withConfig pre-writes a RootConfig to the config path.
 func withConfig(t *testing.T, cfgPath string, cfg *config.RootConfig) {
 	t.Helper()
 	normalizeCLITestRootConfig(cfg)
@@ -95,8 +107,7 @@ func normalizeCLITestRootConfig(cfg *config.RootConfig) {
 	cfg.Groups = merged
 }
 
-// withHost keeps the old test helper name while creating an active host entry
-// so host-enforced commands pass requireActiveHost.
+// Creates an active host entry so host-enforced commands pass requireActiveHost.
 func withHost(t *testing.T, cfgPath string) {
 	t.Helper()
 	cfg, err := config.Load(cfgPath)
@@ -129,29 +140,17 @@ func cliTestHostGroup(names ...string) *config.GroupConfig {
 	return group
 }
 
-// executeCmd sets the final args on cmd, captures stdout, runs Execute, and
-// returns (stdout, err). Some tests still check only errors and config state
-// when stdout content is not part of the behavior under test.
 func executeCmd(t *testing.T, cmd *cobra.Command, args ...string) (stdout string, err error) {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	cmd.SetOut(buf)
-	// Prepend existing persistent flags (--config, --cache-dir) to the new args.
 	existingArgs := cmd.Flags().Args() // won't have them yet; use a wrapper
 	_ = existingArgs
 
-	// Re-set: the persistent flags were already set in newTestCmd; here we
-	// only add the subcommand args.
 	currentArgs := cmd.Flags().Args()
 	_ = currentArgs
-	// cobra root already has --config/--cache-dir set via SetArgs in newTestCmd.
-	// We need to override SetArgs with the full command line.
-	// Extract persistent flags from previous SetArgs call.
-	// Simplest approach: rebuild the full args slice.
 
-	// We cannot get back the values set via SetArgs after they've been parsed,
-	// so we rely on the fact that newTestCmd already stored them in the string vars.
-	// Just set the sub-command args directly (persistent flags are already bound).
+	// Persistent flags are already bound, so only the subcommand args need setting.
 	cmd.SetArgs(args)
 	cmd.SetOut(buf)
 	err = cmd.Execute()
@@ -388,8 +387,6 @@ func TestEnsureDotsStowForCLI_InteractiveInstalls(t *testing.T) {
 		t.Fatalf("output = %q, want install confirmation", out.String())
 	}
 }
-
-// ─── helpers: pure functions ───────────────────────────────────────────────────
 
 func TestGroupList_Empty(t *testing.T) {
 	got := groupList(nil)
@@ -756,14 +753,10 @@ func TestPrintDotOps_NoChanges(t *testing.T) {
 	}
 }
 
-// errFoo is a sentinel error for conflict tests.
 var errFoo = fmt.Errorf("test conflict error")
-
-// ─── requireDotsConfigured ────────────────────────────────────────────────────
 
 func TestRequireDotsConfigured_NotConfigured(t *testing.T) {
 	_, cfgPath := newTestCmd(t)
-	// Write config with no DotsRepo.
 	withConfig(t, cfgPath, &config.RootConfig{})
 
 	a, err := buildTestApp(t, cfgPath)
@@ -797,8 +790,7 @@ func TestRequireDotsConfigured_Configured(t *testing.T) {
 	}
 }
 
-// buildTestApp creates an App via InitTestMode (no real providers) with the
-// given config path, using a temp cache dir.
+// Uses InitTestMode, so no real providers are registered.
 func buildTestApp(t *testing.T, cfgPath string, providers ...provider.Provider) (*app.App, error) {
 	t.Helper()
 	cacheDir := t.TempDir()
@@ -811,15 +803,10 @@ func buildTestApp(t *testing.T, cfgPath string, providers ...provider.Provider) 
 	return a, nil
 }
 
-// ─── version flag ────────────────────────────────────────────────────────────
-
-// tempConfigPath returns a path to a nonexistent file in a new temp dir.
 func tempConfigPath(t *testing.T) string {
 	t.Helper()
 	return filepath.Join(t.TempDir(), "settings.json")
 }
-
-// ─── list command ─────────────────────────────────────────────────────────────
 
 func TestList_NoConfig_PrintsHelpfulMessage(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -827,10 +814,8 @@ func TestList_NoConfig_PrintsHelpfulMessage(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 
-	// Pre-create an active host with no tools.
 	withConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{cliTestHostGroup()}})
 
-	// Config present + active host + no tools → "No tools in cache".
 	cmd := NewRootCmd()
 	errBuf := &bytes.Buffer{}
 	cmd.SetErr(errBuf)
@@ -839,7 +824,6 @@ func TestList_NoConfig_PrintsHelpfulMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list with host and empty config: %v", err)
 	}
-	// DB is empty; command returning nil is the primary assertion.
 }
 
 func TestList_NoConfigFile_WithoutHost_RequiresHost(t *testing.T) {
@@ -847,7 +831,6 @@ func TestList_NoConfigFile_WithoutHost_RequiresHost(t *testing.T) {
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// No settings.json, no host assignment → requireActiveHost should fail.
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "list"})
@@ -859,12 +842,6 @@ func TestList_NoConfigFile_WithoutHost_RequiresHost(t *testing.T) {
 		t.Errorf("expected 'no host configuration' error, got: %v", err)
 	}
 }
-
-// ─── providers command ────────────────────────────────────────────────────────
-
-// ─── hosts commands ──────────────────────────────────────────────────────────
-
-// ─── groups command ───────────────────────────────────────────────────────────
 
 func TestGroups_EmptyConfig(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -906,8 +883,6 @@ func TestGroups_WithGroups(t *testing.T) {
 	}
 }
 
-// ─── sync command ─────────────────────────────────────────────────────────────
-
 func TestSync_DryRun_EmptyConfig(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -929,7 +904,6 @@ func TestSync_DryRun_NoConfig_File(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 
-	// No settings.json at all; active-host enforcement should fail first.
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "sync", "--dry-run"})
 	err := cmd.Execute()
@@ -944,7 +918,6 @@ func TestSync_DryRun_WithHost_NoConfigFile(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 
-	// Config with active host but no tools → sync --dry-run should succeed.
 	withConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{cliTestHostGroup()}})
 
 	cmd := NewRootCmd()
@@ -955,23 +928,18 @@ func TestSync_DryRun_WithHost_NoConfigFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sync --dry-run with host and empty config: %v", err)
 	}
-	// sync --dry-run with nothing to install should print "Dry-run" via fmt.Fprintln.
 }
-
-// ─── add command ──────────────────────────────────────────────────────────────
 
 func TestAdd_RequiresHost_WithActiveHost(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// Pre-create config with an active host so host enforcement passes.
 	withConfig(t, cfgPath, &config.RootConfig{})
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "add", "testpkg", "--provider", "system", "--install-with", "brew", "--group", "base"})
-	// This may error because brew is not available, but should not error on host checks.
 	_ = cmd.Execute()
 }
 
@@ -980,7 +948,6 @@ func TestAdd_NoHost_ReturnsError(t *testing.T) {
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// Config with no active host group.
 	withConfig(t, cfgPath, &config.RootConfig{})
 
 	cmd := NewRootCmd()
@@ -990,8 +957,6 @@ func TestAdd_NoHost_ReturnsError(t *testing.T) {
 		t.Error("expected error when no active host")
 	}
 }
-
-// ─── dots commands ────────────────────────────────────────────────────────────
 
 func TestDotsList_NoDotsRepo_ReturnsError(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -1031,7 +996,6 @@ func TestDotsAdd_NoGroup_NonInteractive_ReturnsError(t *testing.T) {
 	withConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{DotsRepo: t.TempDir()},
 	})
-	// Force non-interactive stdin.
 	origIsTerminal := stdinIsTerminal
 	stdinIsTerminal = func() bool { return false }
 	t.Cleanup(func() { stdinIsTerminal = origIsTerminal })
@@ -1047,7 +1011,7 @@ func TestDotsAdd_NoGroup_NonInteractive_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestDotsDelete_NoDotsRepo_ReturnsError(t *testing.T) {
+func TestDotsRemove_NoDotsRepo_ReturnsError(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
@@ -1055,7 +1019,7 @@ func TestDotsDelete_NoDotsRepo_ReturnsError(t *testing.T) {
 	withConfig(t, cfgPath, &config.RootConfig{})
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "delete", "nvim"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "remove", "nvim"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when dots_repo is not configured")
@@ -1345,6 +1309,13 @@ func TestDotsResolveRequiresExactlyOneSide(t *testing.T) {
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected conflicting side error")
 	}
+
+	// --use-managed is the uniform cross-domain spelling and must land on the same side as --use-repo.
+	cmd = NewRootCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "resolve", "nvim", "--use-managed", "--use-local"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("--use-managed err = %v, want the conflicting side error", err)
+	}
 }
 
 func TestDotsResolveUseRepoCommand(t *testing.T) {
@@ -1404,10 +1375,7 @@ func TestDotsResolveUseRepoCommand(t *testing.T) {
 	}
 }
 
-// ─── requireActiveHost ────────────────────────────────────────────────────────
-
 func TestRequireActiveHost_ExemptCommands(t *testing.T) {
-	// Commands in hostExempt should pass even without a host.
 	exemptCmds := []struct {
 		args []string
 	}{
@@ -1426,7 +1394,6 @@ func TestRequireActiveHost_ExemptCommands(t *testing.T) {
 			args := append([]string{"--config", cfgPath, "--cache-dir", cacheDir}, tc.args...)
 			cmd.SetArgs(args)
 			err := cmd.Execute()
-			// Should not fail due to missing host (may fail for other reasons).
 			if err != nil && strings.Contains(err.Error(), "no host configuration") {
 				t.Errorf("exempt command %v should not require host, got: %v", tc.args, err)
 			}
@@ -1481,13 +1448,10 @@ func TestRequireActiveHost_NonExemptCommand_WithHost_Passes(t *testing.T) {
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "groups"})
 	err := cmd.Execute()
-	// Error may occur for other reasons but not host setup.
 	if err != nil && strings.Contains(err.Error(), "no host configuration") {
 		t.Errorf("should not get host error with active host, got: %v", err)
 	}
 }
-
-// ─── hostExempt map ───────────────────────────────────────────────────────────
 
 func TestHostExempt_ContainsExpectedCommands(t *testing.T) {
 	expected := []string{"bootstrap", "doctor", "init", "hosts", "dots", "ui", "version", "settings", "help", "completion", "agents"}
@@ -1502,8 +1466,6 @@ func TestHostExempt_ContainsExpectedCommands(t *testing.T) {
 	}
 }
 
-// ─── dots command tree structure ──────────────────────────────────────────────
-
 func TestDotsCmd_NoSubcommand_ShowsHelp(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -1515,13 +1477,8 @@ func TestDotsCmd_NoSubcommand_ShowsHelp(t *testing.T) {
 	outBuf := &bytes.Buffer{}
 	cmd.SetOut(outBuf)
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots"})
-	// dots with no subcommand should show help (exit 0).
 	_ = cmd.Execute()
 }
-
-// ─── version constant ─────────────────────────────────────────────────────────
-
-// ─── consolidate command error paths ─────────────────────────────────────────
 
 func TestConsolidate_MutuallyExclusive_ToAndArgs(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -1568,7 +1525,6 @@ func TestConsolidate_EcosystemDryRun_EmptyConfig(t *testing.T) {
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "--dry-run", "python", "uv"})
-	// Should succeed with "Nothing to migrate" since config is empty.
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("consolidate dry-run empty config: %v", err)
@@ -1607,9 +1563,7 @@ func TestConsolidate_ProviderMode_EmptyConfig_AllAlreadyOn(t *testing.T) {
 	}
 }
 
-// ─── delete command ────────────────────────────────────────────────────────
-
-func TestDelete_MissingProvider_ReturnsError(t *testing.T) {
+func TestToolsRemovePurge_MissingProvider_ReturnsError(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
@@ -1618,7 +1572,7 @@ func TestDelete_MissingProvider_ReturnsError(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "delete", "sometool"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "remove", "--purge", "sometool"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when --provider is missing")
@@ -1627,8 +1581,6 @@ func TestDelete_MissingProvider_ReturnsError(t *testing.T) {
 		t.Errorf("expected '--provider' in error, got: %v", err)
 	}
 }
-
-// ─── upgrade command ──────────────────────────────────────────────────────────
 
 func TestUpgrade_AllAndName_Mutually_Exclusive(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -1684,8 +1636,6 @@ func TestUpgrade_NameUsesInstalledProvider(t *testing.T) {
 	}
 }
 
-// ─── switch command ───────────────────────────────────────────────────────────
-
 func TestSwitch_MissingFrom_ReturnsError(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -1724,10 +1674,6 @@ func TestSwitch_MissingTo_ReturnsError(t *testing.T) {
 	}
 }
 
-// ─── import command ───────────────────────────────────────────────────────────
-
-// ─── install command ──────────────────────────────────────────────────────────
-
 func TestInstall_WithExplicitProvider_AttemptsFailed(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -1737,13 +1683,9 @@ func TestInstall_WithExplicitProvider_AttemptsFailed(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	// Use pip as provider — if pip exists, install may attempt; if not, it errors.
-	// Either way, we're testing the code path is covered.
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "install", "--provider", "pip", "nonexistent_package_xyz_123"})
 	_ = cmd.Execute()
 }
-
-// ─── list with group filter ───────────────────────────────────────────────────
 
 func TestList_GroupFilter_UnknownGroup_ReturnsError(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -1793,17 +1735,13 @@ func TestList_GroupFilter_KnownGroup_EmptyDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list --group work with known group but empty DB: %v", err)
 	}
-	// DB is empty → "No tools in cache" printed (to os.Stdout).
 }
-
-// ─── sync with group positional arg ──────────────────────────────────────────
 
 func TestSync_GroupPositionalArg_WithNamedGroup(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// Use a reusable group so the group filter matches.
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"git": {Provider: "system", InstallWith: "brew"},
@@ -1821,10 +1759,6 @@ func TestSync_GroupPositionalArg_WithNamedGroup(t *testing.T) {
 		t.Fatalf("sync --dry-run work: %v", err)
 	}
 }
-
-// ─── search command ───────────────────────────────────────────────────────────
-
-// ─── groups with host group ───────────────────────────────────────────────────
 
 func TestGroups_HostGroup_ShowsSpecialGroup(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -1853,8 +1787,6 @@ func TestGroups_HostGroup_ShowsSpecialGroup(t *testing.T) {
 	}
 }
 
-// ─── add command with host ────────────────────────────────────────────────────
-
 func TestAdd_WithHost_AppendsToConfig(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -1865,16 +1797,11 @@ func TestAdd_WithHost_AppendsToConfig(t *testing.T) {
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "add", "ripgrep", "--provider", "system", "--install-with", "brew", "--group", "base"})
-	// This may succeed (writes config) or fail (if add validation fails for provider).
-	// Either way, we exercise the code path.
 	_ = cmd.Execute()
 }
 
-// ─── promptSatisfiedGroups ─────────────────────────────────────────────────────
-
 func TestPromptSatisfiedGroups_NoActiveHost_NoCalls(t *testing.T) {
 	called := false
-	// No active host -> should be a no-op.
 	promptSatisfiedGroups(nil, "", []string{"base"}, func(g string) error {
 		called = true
 		return nil
@@ -1886,7 +1813,6 @@ func TestPromptSatisfiedGroups_NoActiveHost_NoCalls(t *testing.T) {
 
 func TestPromptSatisfiedGroups_NoSatisfiedGroups_NoCalls(t *testing.T) {
 	called := false
-	// Active host but no satisfied groups -> should be a no-op.
 	promptSatisfiedGroups(nil, "work", nil, func(g string) error {
 		called = true
 		return nil
@@ -1895,8 +1821,6 @@ func TestPromptSatisfiedGroups_NoSatisfiedGroups_NoCalls(t *testing.T) {
 		t.Error("expected no addGroupFn call when no satisfied groups")
 	}
 }
-
-// ─── consolidate ecosystem mode without dry-run ───────────────────────────────
 
 func TestConsolidate_EcosystemMode_EmptyConfig_NothingToMigrate(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -1930,8 +1854,6 @@ func TestConsolidate_EcosystemMode_InvalidEcosystem_ReturnsError(t *testing.T) {
 	}
 }
 
-// ─── import command: results with added tools ──────────────────────────────────
-
 func TestImport_WithProvider_EmptyConfig(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -1941,16 +1863,12 @@ func TestImport_WithProvider_EmptyConfig(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	// brew import with an empty config — if brew is available, may find real tools.
-	// If not available, returns empty. Either way, exercise the code path.
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "import", "--provider", "nonexistentprovider"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("import with nonexistent provider: %v", err)
 	}
 }
-
-// ─── list with provider filter ────────────────────────────────────────────────
 
 func TestList_ProviderFilter_EmptyDB(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -1966,8 +1884,6 @@ func TestList_ProviderFilter_EmptyDB(t *testing.T) {
 		t.Fatalf("list --provider brew with empty DB: %v", err)
 	}
 }
-
-// ─── NewRootCmd covers persistent flags ───────────────────────────────────────
 
 func TestNewRootCmd_HasExpectedSubcommands(t *testing.T) {
 	cmd := NewRootCmd()
@@ -2007,9 +1923,7 @@ func TestNewRootCmd_HasPersistentFlags(t *testing.T) {
 	}
 }
 
-// ─── delete with provider specified ───────────────────────────────────────
-
-func TestDelete_WithProvider_AttemptsFailed(t *testing.T) {
+func TestToolsRemovePurge_WithProvider_AttemptsFailed(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
@@ -2018,12 +1932,9 @@ func TestDelete_WithProvider_AttemptsFailed(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "tools", "delete", "--provider", "brew", "sometool"})
-	// May succeed or fail depending on brew availability — we just want the code path.
+	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "tools", "remove", "--purge", "--provider", "brew", "sometool"})
 	_ = cmd.Execute()
 }
-
-// ─── switch with both flags ───────────────────────────────────────────────────
 
 func TestSwitch_BothFlags_AttemptsFailed(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -2035,11 +1946,8 @@ func TestSwitch_BothFlags_AttemptsFailed(t *testing.T) {
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "reinstall", "sometool", "--from", "brew", "--to", "pip"})
-	// Will likely fail (tool not in config) but exercises the code path.
 	_ = cmd.Execute()
 }
-
-// ─── init command: existing config path (non-interactive) ────────────────────
 
 func TestInit_ExistingConfig_PrintsNothingToDo(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -2086,9 +1994,7 @@ func TestBootstrapExistingHostMarksComplete(t *testing.T) {
 	}
 }
 
-// ─── dots delete: entry not found path ───────────────────────────────────────
-
-func TestDotsDelete_WithDotsRepo_EntryNotFound_ReturnsError(t *testing.T) {
+func TestDotsRemove_WithDotsRepo_EntryNotFound_ReturnsError(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
@@ -2100,18 +2006,14 @@ func TestDotsDelete_WithDotsRepo_EntryNotFound_ReturnsError(t *testing.T) {
 	})
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "dots", "delete", "nonexistent_entry"})
+	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "dots", "remove", "nonexistent_entry"})
 	err := cmd.Execute()
-	// Should error because the entry doesn't exist.
 	if err == nil {
 		t.Error("expected error when removing nonexistent dots entry")
 	}
 }
 
-// ─── newInitCmd at 7% — more coverage via providers listing ──────────────────
-
 func TestInit_CallsProviderDetection(t *testing.T) {
-	// Same as TestInit_ExistingConfig but verify no panic and success.
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
@@ -2125,10 +2027,7 @@ func TestInit_CallsProviderDetection(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	// The init command should have printed "Config already exists".
 }
-
-// ─── consolidate: all tools on node/python ────────────────────────────────────
 
 func TestConsolidate_EcosystemMode_NodeBun_EmptyConfig(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -2175,10 +2074,6 @@ func TestConsolidate_EcosystemMode_PythonPip(t *testing.T) {
 	}
 }
 
-// ─── upgrade with --all and real DB ──────────────────────────────────────────
-
-// ─── dots push: with repo configured ─────────────────────────────────────────
-
 func TestDotsPush_WithDotsRepo_NothingToCommit(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -2192,7 +2087,6 @@ func TestDotsPush_WithDotsRepo_NothingToCommit(t *testing.T) {
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "push"})
-	// May fail if git is not available or not a repo — just exercise the code path.
 	_ = cmd.Execute()
 }
 
@@ -2209,11 +2103,8 @@ func TestDotsCommit_WithDotsRepo_NothingToCommit(t *testing.T) {
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "commit"})
-	// May fail if git is not available or not a repo — just exercise the code path.
 	_ = cmd.Execute()
 }
-
-// ─── dots pull: with repo configured ─────────────────────────────────────────
 
 func TestDotsPull_WithDotsRepo(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -2228,18 +2119,14 @@ func TestDotsPull_WithDotsRepo(t *testing.T) {
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "pull"})
-	// May fail if git is not available — just exercise the code path.
 	_ = cmd.Execute()
 }
-
-// ─── consolidate ecosystem dry-run with migration items path ─────────────────
 
 func TestConsolidate_EcosystemDryRun_WithPythonTools(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// Config with pip tools — when consolidating to uv, these will be "migrated".
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"black": {Provider: "python", InstallWith: "pip"},
@@ -2306,15 +2193,12 @@ func TestConsolidate_EcosystemDryRun_ASCIISymbolModeUsesCommandOutput(t *testing
 	}
 }
 
-// ─── sync: warnings output ────────────────────────────────────────────────────
-
 func TestSync_DuplicateToolOwnership_IsAllowed(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// A tool may belong to any number of reusable groups, so having ripgrep in
-	// both "base" and "work" is valid and sync should succeed.
+	// A tool may belong to any number of reusable groups.
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"ripgrep": {Provider: "system", InstallWith: "brew"},
@@ -2338,15 +2222,11 @@ func TestSync_DuplicateToolOwnership_IsAllowed(t *testing.T) {
 	}
 }
 
-// ─── import: skipped tools count ─────────────────────────────────────────────
-
 func TestImport_AllToolsSkipped_ShowsSkippedCount(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// Put tools in config that a provider would have found.
-	// With nonexistent provider, result will be empty.
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"git": {Provider: "system", InstallWith: "brew"},
@@ -2367,8 +2247,6 @@ func TestImport_AllToolsSkipped_ShowsSkippedCount(t *testing.T) {
 	}
 }
 
-// ─── dots sync: all up to date path ──────────────────────────────────────────
-
 func TestDotsSync_AllUpToDate_WithDotsRepo(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	t.Setenv("HOME", t.TempDir())
@@ -2388,13 +2266,10 @@ func TestDotsSync_AllUpToDate_WithDotsRepo(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("dots sync: %v", err)
 	}
-	// No entries → "All symlinks up to date." printed.
 	if !strings.Contains(outBuf.String(), "up to date") {
 		t.Errorf("expected 'up to date', got: %q", outBuf.String())
 	}
 }
-
-// ─── sync: already installed path ────────────────────────────────────────────
 
 func TestSync_DryRun_NoInstallsNeeded_PrintsDryRun(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -2411,14 +2286,11 @@ func TestSync_DryRun_NoInstallsNeeded_PrintsDryRun(t *testing.T) {
 	}
 }
 
-// ─── consolidate: ecosystem → "nothing to migrate" non-dry-run result ─────────
-
 func TestConsolidate_EcosystemMode_NothingToMigrate_SettingsUpdated(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// Config has no tools in the python ecosystem — consolidate does nothing.
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"git": {Provider: "system", InstallWith: "brew"},
@@ -2438,8 +2310,6 @@ func TestConsolidate_EcosystemMode_NothingToMigrate_SettingsUpdated(t *testing.T
 	}
 }
 
-// ─── providers: table with no available providers ────────────────────────────
-
 func TestProviders_AllUnavailable_ReturnsNil(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -2455,8 +2325,6 @@ func TestProviders_AllUnavailable_ReturnsNil(t *testing.T) {
 	}
 }
 
-// ─── add command: name override ───────────────────────────────────────────────
-
 func TestAdd_WithNameOverride_UsesOverrideName(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -2467,7 +2335,6 @@ func TestAdd_WithNameOverride_UsesOverrideName(t *testing.T) {
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "add", "typescript", "--provider", "node", "--install-with", "npm", "--name", "ts", "--group", "base"})
-	// Exercises the name-override code path: displayName = name (not pkg).
 	_ = cmd.Execute()
 }
 
@@ -2481,18 +2348,13 @@ func TestAdd_ToGroup_UsesGroupName(t *testing.T) {
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "add", "slack", "--provider", "system", "--install-with", "brew", "--group", "work"})
-	// Exercises the group-destination code path: dest = group (not "base").
 	_ = cmd.Execute()
 }
-
-// ─── newInitCmd: fresh machine path (no config) with stdin closed ─────────────
 
 func TestInit_NewMachine_NoConfig(t *testing.T) {
 	// init with no config requires stdin interaction for host setup.
 	t.Skip("init with no config requires stdin interaction")
 }
-
-// ─── sync with retry-failed flag ─────────────────────────────────────────────
 
 func TestSync_RetryFailed_EmptyDB(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -2509,8 +2371,6 @@ func TestSync_RetryFailed_EmptyDB(t *testing.T) {
 	}
 }
 
-// ─── sync with provider filter ────────────────────────────────────────────────
-
 func TestSync_ProviderFilter_DryRun(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -2526,8 +2386,6 @@ func TestSync_ProviderFilter_DryRun(t *testing.T) {
 	}
 }
 
-// ─── search command: no results ──────────────────────────────────────────────
-
 func TestSearch_EmptyQuery_NoResults(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -2540,8 +2398,6 @@ func TestSearch_EmptyQuery_NoResults(t *testing.T) {
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "search", "nonexistent_xyzqrstuvwxyz_package_123"})
 	_ = cmd.Execute()
 }
-
-// ─── import command with group flag ──────────────────────────────────────────
 
 func TestImport_WithGroupFlag_DryRun(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -2559,9 +2415,6 @@ func TestImport_WithGroupFlag_DryRun(t *testing.T) {
 	}
 }
 
-// TestDotsVariantAddSubpath_MissingParentErrors verifies the --subpath flag
-// routes through the extract-then-variant composition and surfaces its error
-// when the parent entry does not exist.
 func TestDotsVariantAddSubpath_MissingParentErrors(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	home := t.TempDir()
@@ -2690,7 +2543,6 @@ func TestDotsGroup_MultiHostOneReusableOK_TwoReusableRejected(t *testing.T) {
 		Hosts: map[string][]string{"testhost": {}},
 	})
 
-	// host group "testhost", reusable "work","base", dot "nvim"
 	ok := NewRootCmd()
 	ok.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir,
 		"dots", "group", "nvim", "--group", "testhost", "--group", "work"})
@@ -2713,7 +2565,7 @@ func TestGroupsSetTool_MultipleReusableGroups(t *testing.T) {
 
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
-			"eslint": {Type: "package", Provider: "brew", Package: "eslint"},
+			"eslint": {Provider: "brew", Package: "eslint"},
 		},
 		Groups: []*config.GroupConfig{
 			{Name: "testhost", Special: "host"},
@@ -2756,8 +2608,6 @@ func cliGroupHasTool(g *config.GroupConfig, name string) bool {
 	return false
 }
 
-// ─── dots add command: with flags ─────────────────────────────────────────────
-
 func TestDotsAdd_WithFlags_ErrorPath(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -2775,7 +2625,6 @@ func TestDotsAdd_WithFlags_ErrorPath(t *testing.T) {
 		"--name", "testentry",
 		"--group", "base",
 	})
-	// Will likely error because path doesn't exist — exercises the code path.
 	_ = cmd.Execute()
 }
 
@@ -2817,8 +2666,6 @@ func TestDotsAdd_DiscoveredPersistsCandidate(t *testing.T) {
 	}
 }
 
-// ─── list: with provider filter that returns no results ────────────────────────
-
 func TestList_BothFilters_EmptyDB(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -2831,15 +2678,12 @@ func TestList_BothFilters_EmptyDB(t *testing.T) {
 		Hosts: map[string][]string{"testhost": {}},
 	})
 
-	// Test --provider filter with empty DB.
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "list", "--provider", "pip"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list --provider pip: %v", err)
 	}
 }
-
-// ─── groups: description column ──────────────────────────────────────────────
 
 func TestGroups_WithDescription_PrintsDescription(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -2980,13 +2824,14 @@ func TestToolsFallbackFromGitHub_ResolverFailurePreservesConfig(t *testing.T) {
 
 func TestToolsFallbackUsesConfiguredGit(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/cli/cli/releases/latest" {
 			t.Fatalf("unexpected GitHub API path %q", r.URL.Path)
 		}
 		http.ServeFile(w, r, "../app/testdata/github_cli_latest_release.json")
 	}))
 	defer server.Close()
+	trustTestServerCA(t, server)
 	t.Setenv("OMNI_GITHUB_API_BASE", server.URL)
 
 	cfgDir := t.TempDir()
@@ -3398,8 +3243,6 @@ func cliTestGroupByName(cfg *config.RootConfig, name string) *config.GroupConfig
 	return nil
 }
 
-// ─── dots list: with entries shows table ─────────────────────────────────────
-
 func TestDotsList_WithEntries_ShowsTable(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -3424,7 +3267,6 @@ func TestDotsList_WithEntries_ShowsTable(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("dots list with entries: %v", err)
 	}
-	// Should show table header and entry names (health may vary).
 	output := outBuf.String()
 	if !strings.Contains(output, "NAME") {
 		t.Errorf("expected NAME column header, got: %q", output)
@@ -3567,8 +3409,6 @@ func TestDotsStatus_JSONFiltersEntries(t *testing.T) {
 	}
 }
 
-// ─── dots status: with entries ────────────────────────────────────────────────
-
 func TestDotsStatus_WithEntries_ShowsTable(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -3589,23 +3429,18 @@ func TestDotsStatus_WithEntries_ShowsTable(t *testing.T) {
 	outBuf := &bytes.Buffer{}
 	cmd.SetOut(outBuf)
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "status"})
-	// Status may fail if git operations fail; tolerate errors from git.
 	_ = cmd.Execute()
-	// If it succeeded, should include table header.
 	out := outBuf.String()
 	if len(out) > 0 && !strings.Contains(out, "NAME") && !strings.Contains(out, "Git") {
 		t.Errorf("unexpected output: %q", out)
 	}
 }
 
-// ─── sync: provider flag narrows to one provider ─────────────────────────────
-
 func TestSync_DryRun_WithProviderFlag_NoToolsForProvider(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// Config has brew tools but we filter to pip — no tools match.
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"git": {Provider: "system", InstallWith: "brew"},
@@ -3627,8 +3462,6 @@ func TestSync_DryRun_WithProviderFlag_NoToolsForProvider(t *testing.T) {
 	}
 }
 
-// ─── upgrade: individual tool name uses installed cache owner ────────────────
-
 func TestUpgrade_NameNoSuchInstalledTool(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -3645,8 +3478,6 @@ func TestUpgrade_NameNoSuchInstalledTool(t *testing.T) {
 	}
 }
 
-// ─── import: dry-run flag set (would-import action string) ───────────────────
-
 func TestImport_DryRun_AllProviders_EmptyConfig(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -3657,20 +3488,14 @@ func TestImport_DryRun_AllProviders_EmptyConfig(t *testing.T) {
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "import", "--dry-run"})
-	// Scans all available providers for already-installed tools.
-	// In most environments some tools will be found (brew, pip, etc.).
-	// Either path (found tools or none) is valid.
 	_ = cmd.Execute()
 }
-
-// ─── consolidate: ecosystem dry-run prints would-migrate with dry-run path ───
 
 func TestConsolidate_EcosystemDryRun_NodeTools_PrintsWouldMigrate(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// Config with npm tools — when consolidating to bun, they would migrate.
 	settings := config.Settings{}
 	settings.ProviderPriority = append([]string{"npm"}, settings.ProviderPriority...)
 	withConfig(t, cfgPath, &config.RootConfig{
@@ -3690,14 +3515,11 @@ func TestConsolidate_EcosystemDryRun_NodeTools_PrintsWouldMigrate(t *testing.T) 
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "--dry-run", "node", "bun"})
-	// ConsolidatePlan with node tools — should plan migration.
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("consolidate --dry-run node bun with node tools: %v", err)
 	}
 }
-
-// ─── switch: missing tool returns error from app layer ───────────────────────
 
 func TestSwitch_ToolNotFound_ReturnsError(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -3710,13 +3532,10 @@ func TestSwitch_ToolNotFound_ReturnsError(t *testing.T) {
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "reinstall", "nonexistent_tool_xyz", "--from", "brew", "--to", "pip"})
 	err := cmd.Execute()
-	// Should error: tool not found in config.
 	if err == nil {
 		t.Error("expected error when switching nonexistent tool")
 	}
 }
-
-// ─── install: no config file shows error ─────────────────────────────────────
 
 func TestInstall_WithHost_ExplicitProvider_ReachesInstall(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -3727,11 +3546,8 @@ func TestInstall_WithHost_ExplicitProvider_ReachesInstall(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	// Use an explicit provider — will fail at install step but exercises more code paths
-	// than the "no provider available" path.
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "install",
 		"nonexistent_package_xyz_abc_999", "--provider", "pip"})
-	// Either succeeds (unlikely without pip+package) or errors at install.
 	_ = cmd.Execute()
 }
 
@@ -4171,10 +3987,7 @@ func TestInstall_ConfiguredToolAllowWeakPythonFamilyFilterInstallsConcreteMatch(
 	}
 }
 
-// ─── install --group ────────────────────────────────────────────────────────
-
 func TestInstall_Group_NoHostRequired_SyncsGroup(t *testing.T) {
-	// --group + --force should work without any host setup.
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
@@ -4193,8 +4006,7 @@ func TestInstall_Group_NoHostRequired_SyncsGroup(t *testing.T) {
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir,
 		"tools", "install", "--group", "devtools", "--force"})
-	// The sync may fail at provider level (no brew in test), but the command
-	// must not fail at the host-enforcement gate.
+	// A provider-level failure is fine here; the command must not fail at the host-enforcement gate.
 	err := cmd.Execute()
 	if err != nil && strings.Contains(err.Error(), "run 'omni bootstrap'") {
 		t.Fatalf("--group --force should bypass host check, got: %v", err)
@@ -4261,8 +4073,6 @@ func TestInstall_NoArgsNoGroup_ReturnsError(t *testing.T) {
 	}
 }
 
-// ─── sync: group positional arg that exists with tools ───────────────────────
-
 func TestSync_DryRun_WithNamedGroupArg(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -4286,8 +4096,6 @@ func TestSync_DryRun_WithNamedGroupArg(t *testing.T) {
 		t.Fatalf("sync --dry-run devtools: %v", err)
 	}
 }
-
-// ─── list: group filter where tools ARE in config (uses inGroup logic) ────────
 
 func TestList_GroupFilter_GroupWithTools_InConfig(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -4315,10 +4123,7 @@ func TestList_GroupFilter_GroupWithTools_InConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list --group devtools: %v", err)
 	}
-	// DB is empty but group exists → "No tools in cache" is printed.
 }
-
-// ─── hosts remove: host assignment roundtrip ──────────────────────────────────
 
 func TestHostsEnsure_ThenRemove_Roundtrip(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -4355,8 +4160,6 @@ func TestHostsEnsure_ThenRemove_Roundtrip(t *testing.T) {
 		t.Error("expected host entry to be removed")
 	}
 }
-
-// ─── add command: non-interactive group requirement ───────────────────────────
 
 func TestAdd_NonTTYRequiresGroup(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -4410,8 +4213,6 @@ func TestAdd_TTYPromptsForGroup(t *testing.T) {
 	}
 }
 
-// ─── consolidate: provider mode with tools to migrate (dry-run) ──────────────
-
 func TestConsolidate_ProviderMode_DryRun_WithBrewTools(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -4439,8 +4240,6 @@ func TestConsolidate_ProviderMode_DryRun_WithBrewTools(t *testing.T) {
 	}
 }
 
-// ─── sync: OpIgnored path — global ignore list ────────────────────────────────
-
 func TestSync_DryRun_WithIgnoredTool(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -4467,9 +4266,7 @@ func TestSync_DryRun_WithIgnoredTool(t *testing.T) {
 	}
 }
 
-// ─── delete: success path via provider (may error at PM level) ─────────────
-
-func TestDelete_WithProvider_TargetsMissingTool(t *testing.T) {
+func TestToolsRemovePurge_TargetsMissingTool(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
@@ -4478,13 +4275,9 @@ func TestDelete_WithProvider_TargetsMissingTool(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "delete", "--provider", "pip", "definitely_nonexistent_xyz_tool_123"})
-	// Will fail at the PM level — exercises code paths in newDeleteCmd beyond
-	// the --provider-missing check.
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "remove", "--purge", "--provider", "pip", "definitely_nonexistent_xyz_tool_123"})
 	_ = cmd.Execute()
 }
-
-// ─── dots status: with git repo has clean status ─────────────────────────────
 
 func TestDotsStatus_WithGitRepo_WorkingTreeClean(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -4492,7 +4285,6 @@ func TestDotsStatus_WithGitRepo_WorkingTreeClean(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 
-	// Create a real git repo so that DotsStatus can call git status.
 	repoDir := t.TempDir()
 	if err := initGitRepo(t, repoDir); err != nil {
 		t.Skip("git not available: " + err.Error())
@@ -4510,16 +4302,13 @@ func TestDotsStatus_WithGitRepo_WorkingTreeClean(t *testing.T) {
 		t.Fatalf("dots status with git repo: %v", err)
 	}
 	output := outBuf.String()
-	// Clean git repo → "Git: working tree clean".
 	if !strings.Contains(output, "Git") {
 		t.Errorf("expected 'Git' in output, got: %q", output)
 	}
 }
 
-// initGitRepo initialises a minimal git repo in dir for testing.
 func initGitRepo(t *testing.T, dir string) error {
 	t.Helper()
-	// Use os/exec to run git commands — git is a standard system binary.
 	var runErr error
 	runCmd := func(args ...string) {
 		if runErr != nil {
@@ -4544,8 +4333,6 @@ func initGitRepo(t *testing.T, dir string) error {
 	return runErr
 }
 
-// ─── dots status: ensure the working-tree-clean path is asserted ─────────────
-
 func TestDotsStatus_EmptyEntries_OutputsCleanStatus(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -4564,17 +4351,12 @@ func TestDotsStatus_EmptyEntries_OutputsCleanStatus(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("dots status: %v", err)
 	}
-	// Non-git dir → gitStatus is empty → prints "Git: working tree clean".
 	output := outBuf.String()
 	if !strings.Contains(output, "Git") {
 		t.Errorf("expected 'Git' in output, got: %q", output)
 	}
 }
 
-// ─── scanLine and promptYesNo via stdinScanner mock ──────────────────────────
-
-// withMockStdin replaces the package-level stdinScanner with one reading from
-// the provided string, runs f, then restores the original scanner.
 func withMockStdin(t *testing.T, input string, f func()) {
 	t.Helper()
 	orig := stdinScanner
@@ -4584,9 +4366,7 @@ func withMockStdin(t *testing.T, input string, f func()) {
 		stdinIsTerminal = origTerm
 	})
 	stdinScanner = bufio.NewScanner(strings.NewReader(input))
-	// Mocked input implies an interactive session: prompts gated on a real
-	// terminal must still read it, independent of go test's /dev/null stdin
-	// happening to satisfy the char-device check.
+	// Mocked input implies an interactive session, so terminal-gated prompts must still read it under go test's /dev/null stdin.
 	stdinIsTerminal = func() bool { return true }
 	f()
 }
@@ -4675,8 +4455,6 @@ func TestPromptYesNo_EOF_UsesDefault(t *testing.T) {
 }
 
 func TestPromptYesNo_StateYesBypass(t *testing.T) {
-	// state.yes must short-circuit the prompt and return true regardless of
-	// the default value or stdin content.
 	called := false
 	stdinScannerOrig := stdinScanner
 	t.Cleanup(func() { stdinScanner = stdinScannerOrig })
@@ -4722,8 +4500,6 @@ func TestPromptSatisfiedGroups_WithSatisfiedGroup_NoAnswer_NoCalls(t *testing.T)
 	}
 }
 
-// ─── promptReassignClaimedTools ──────────────────────────────────────────────
-
 func newReassignTestApp(t *testing.T, toolNames ...string) *app.App {
 	t.Helper()
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -4753,7 +4529,7 @@ func newReassignTestApp(t *testing.T, toolNames ...string) *app.App {
 func TestPromptReassign_AllToSameGroup(t *testing.T) {
 	a := newReassignTestApp(t, "ripgrep", "fd", "bat")
 	state := &rootState{app: a}
-	// User types "a" (all), then "dev" as group name.
+	// Choose all, then assign every tool to dev.
 	withMockStdin(t, "a\ndev\n", func() {
 		promptReassignClaimedTools(state, []string{"ripgrep", "fd", "bat"})
 	})
@@ -4776,7 +4552,7 @@ func TestPromptReassign_AllToSameGroup(t *testing.T) {
 func TestPromptReassign_Individual(t *testing.T) {
 	a := newReassignTestApp(t, "ripgrep", "fd")
 	state := &rootState{app: a}
-	// User types "i" (individual), "dev" for ripgrep, "" for fd (uses lastGroup="dev").
+	// Choose individual; assign ripgrep to dev, then reuse dev for fd.
 	withMockStdin(t, "i\ndev\n\n", func() {
 		promptReassignClaimedTools(state, []string{"ripgrep", "fd"})
 	})
@@ -4806,7 +4582,6 @@ func TestPromptReassign_Skip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	// Tool should stay in testhost group, no "dev" group created.
 	if findGroup(cfg, "dev") != nil {
 		t.Error("expected no 'dev' group after skip")
 	}
@@ -4822,7 +4597,6 @@ func TestPromptReassign_EOF(t *testing.T) {
 	withMockStdin(t, "", func() {
 		promptReassignClaimedTools(state, []string{"ripgrep"})
 	})
-	// Should not panic or error — graceful exit on EOF.
 	cfg, err := config.Load(a.ConfigPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -4866,7 +4640,6 @@ func TestPromptReassign_SkipsAssumeYes(t *testing.T) {
 
 func TestPromptReassign_Empty(t *testing.T) {
 	state := &rootState{}
-	// Empty list — should be no-op, no panic.
 	promptReassignClaimedTools(state, nil)
 	promptReassignClaimedTools(state, []string{})
 }
@@ -4887,8 +4660,6 @@ func groupToolNames(g *config.GroupConfig) []string {
 	}
 	return names
 }
-
-// ─── global ignore add/remove roundtrip ──────────────────────────────────────
 
 func TestGlobalIgnore_AddRemove_Roundtrip(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -4932,8 +4703,6 @@ func TestGlobalIgnore_AddRemove_Roundtrip(t *testing.T) {
 	}
 }
 
-// ─── dots status: dirty git repo prints non-empty git status ─────────────────
-
 func TestDotsStatus_WithDirtyGitRepo_PrintsGitStatus(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -4945,7 +4714,6 @@ func TestDotsStatus_WithDirtyGitRepo_PrintsGitStatus(t *testing.T) {
 		t.Skip("git not available: " + err.Error())
 	}
 
-	// Add an untracked file to make git status non-empty.
 	untracked := filepath.Join(repoDir, "untracked.txt")
 	if err := os.WriteFile(untracked, []byte("dirty\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -4963,7 +4731,6 @@ func TestDotsStatus_WithDirtyGitRepo_PrintsGitStatus(t *testing.T) {
 		t.Fatalf("dots status with dirty repo: %v", err)
 	}
 	output := outBuf.String()
-	// Dirty repo → GitStatus != "" → prints "Git status:" header and the status lines.
 	if !strings.Contains(output, "Git status:") {
 		t.Errorf("expected 'Git status:' in output for dirty repo, got: %q", output)
 	}
@@ -5186,7 +4953,6 @@ func TestDoctorFixRemovesDuplicateDotDefinitions(t *testing.T) {
   "groups": [{"name": "dev", "dots": [{"name": "git", "path": "~/.gitconfig"}]}]
 }`)
 
-	// Dry-run: reports, does not write.
 	output, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "doctor", "--fix", "--dry-run")
 	if err != nil {
 		t.Fatalf("doctor --fix --dry-run: %v\n%s", err, output)
@@ -5202,7 +4968,6 @@ func TestDoctorFixRemovesDuplicateDotDefinitions(t *testing.T) {
 		t.Fatal("dry-run must not have fixed anything")
 	}
 
-	// Real fix: removes the parent copy, doctor no longer warns.
 	output, err = runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "doctor", "--fix")
 	if err != nil {
 		t.Fatalf("doctor --fix: %v\n%s", err, output)
@@ -5272,6 +5037,161 @@ func TestDoctorFixOptimizerFailureStillCleansIgnorePatterns(t *testing.T) {
 	}
 	if want := []string{"*", "!/settings.json"}; !slices.Equal(dev.Dots[0].Ignore, want) {
 		t.Fatalf("ignore patterns = %v, want %v", dev.Dots[0].Ignore, want)
+	}
+}
+
+func TestDoctorFixCleansSkillStoreDebris(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgPath := filepath.Join(t.TempDir(), "settings.json")
+	cacheDir := t.TempDir()
+	withConfig(t, cfgPath, &config.RootConfig{})
+	debris := filepath.Join(home, "data", "omni", "skills", "packages", ".install-abc123")
+	if err := os.MkdirAll(debris, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// The detail-group items live only in JSON output; text prints the check summary.
+	output, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "doctor", "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "leftover artifact(s) from an interrupted operation") {
+		t.Fatalf("doctor output missing skill store finding:\n%s", output)
+	}
+
+	output, err = runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "doctor", "--fix", "--dry-run")
+	if err != nil {
+		t.Fatalf("doctor --fix --dry-run: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "would remove leftover skill store artifact "+debris) {
+		t.Fatalf("dry-run output missing planned skill store removal:\n%s", output)
+	}
+	if _, statErr := os.Stat(debris); statErr != nil {
+		t.Fatalf("dry run removed %s: %v", debris, statErr)
+	}
+
+	output, err = runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "doctor", "--fix")
+	if err != nil {
+		t.Fatalf("doctor --fix: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "removed leftover skill store artifact "+debris) {
+		t.Fatalf("fix output missing skill store removal:\n%s", output)
+	}
+	if _, statErr := os.Stat(debris); !os.IsNotExist(statErr) {
+		t.Fatalf("doctor --fix left %s in place: %v", debris, statErr)
+	}
+	output, err = runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "doctor", "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor after fix: %v\n%s", err, output)
+	}
+	if strings.Contains(output, "leftover artifact(s) from an interrupted operation") {
+		t.Fatalf("doctor report still shows skill store debris after fix:\n%s", output)
+	}
+}
+
+// Drives the real root command because metadata detection and rebuild need InitReadOnly to open the existing cache DB.
+func TestDoctorFixRebuildsSkillMetadataThroughRealWiring(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgPath := filepath.Join(t.TempDir(), "settings.json")
+	cacheDir := t.TempDir()
+
+	source := t.TempDir()
+	withConfig(t, cfgPath, &config.RootConfig{
+		Agents: config.AgentsConfig{Packages: []config.SkillPackage{{Source: source}}},
+	})
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(source)))
+	skillDir := filepath.Join(home, "data", "omni", "skills", "packages", hash, "skills", "one")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "---\nname: one\ndescription: test\n---\n\nbody\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(cacheDir, "omni.db")
+	stateKey := "agent.skills." + hash
+	db, err := database.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetState(context.Background(), stateKey, "{not json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "doctor", "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "missing local install metadata") {
+		t.Fatalf("doctor output missing metadata finding:\n%s", output)
+	}
+
+	output, err = runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "doctor", "--fix", "--dry-run")
+	if err != nil {
+		t.Fatalf("doctor --fix --dry-run: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "would rebuild local install metadata for "+source) {
+		t.Fatalf("dry-run output missing planned rebuild:\n%s", output)
+	}
+
+	output, err = runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "doctor", "--fix")
+	if err != nil {
+		t.Fatalf("doctor --fix: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "rebuilt local install metadata for "+source) {
+		t.Fatalf("fix output missing rebuild:\n%s", output)
+	}
+
+	db, err = database.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	raw, err := db.GetState(context.Background(), stateKey)
+	if err != nil {
+		t.Fatalf("reading rebuilt metadata: %v", err)
+	}
+	var rebuilt map[string]any
+	if err := json.Unmarshal([]byte(raw), &rebuilt); err != nil {
+		t.Fatalf("rebuilt metadata is not valid JSON: %v\n%s", err, raw)
+	}
+	if rebuilt["source"] != source {
+		t.Fatalf("rebuilt metadata source = %v, want %s", rebuilt["source"], source)
+	}
+}
+
+func TestReconcileConfirmTextNamesAgentScope(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "settings.json")
+	cacheDir := t.TempDir()
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Hosts:  map[string][]string{"testhost": {}},
+		Groups: []*config.GroupConfig{{Name: "testhost", Special: "host"}},
+	})
+
+	output, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "reconcile")
+	if err != nil {
+		t.Fatalf("reconcile: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "Aborted.") {
+		t.Fatalf("reconcile without --yes should abort at the prompt:\n%s", output)
+	}
+	for _, want := range []string{"agent skills", "MCP servers and plugins"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("reconcile confirm prompt missing %q:\n%s", want, output)
+		}
 	}
 }
 
@@ -5423,8 +5343,6 @@ func TestList_JSONExcludesIgnoredTools(t *testing.T) {
 	}
 }
 
-// ─── list: installed tool with version string ─────────────────────────────────
-
 func TestList_WithInstalledToolAndVersion_PrintsVersion(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
@@ -5446,7 +5364,6 @@ func TestList_WithInstalledToolAndVersion_PrintsVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DB.Upsert: %v", err)
 	}
-	// Mark it installed with a version to exercise the version.Valid branch.
 	if err := a.DB().MarkInstalled(ctx, "fzf", "brew", "fzf", "0.54.0"); err != nil {
 		t.Fatalf("DB.MarkInstalled: %v", err)
 	}
@@ -5456,31 +5373,21 @@ func TestList_WithInstalledToolAndVersion_PrintsVersion(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list with versioned tool: %v", err)
 	}
-	// Exercise covers the version.Valid branch.
 }
 
-// ─── NewRootCmd default config path (no --config flag) ────────────────────────
-
-// TestNewRootCmd_DefaultConfigPath_ViaEnv exercises the PersistentPreRunE branch
-// that resolves the config path from OMNI_CONFIG when --config is not provided.
 func TestNewRootCmd_DefaultConfigPath_ViaEnv(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	cacheDir := t.TempDir()
 	withConfig(t, cfgPath, &config.RootConfig{})
 
-	// Set OMNI_CONFIG so DefaultConfigPath returns our temp file.
 	t.Setenv("OMNI_CONFIG", cfgPath)
 
 	cmd := NewRootCmd()
-	// Run a host-exempt command (providers) without --config.
 	cmd.SetArgs([]string{"--cache-dir", cacheDir, "tools", "providers"})
 	err := cmd.Execute()
-	// Providers is host-exempt; the default-path branch is exercised.
 	_ = err
 }
-
-// ─── list: missing tool (not installed) prints "missing" status ──────────────
 
 func TestList_WithMissingTool_PrintsMissingStatus(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -5494,7 +5401,6 @@ func TestList_WithMissingTool_PrintsMissingStatus(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	// Seed a tool that is NOT installed to exercise the "missing" branch.
 	err = a.DB().Upsert(ctx, &database.ToolCache{
 		Name:      "bat",
 		Provider:  "brew",
@@ -5510,7 +5416,6 @@ func TestList_WithMissingTool_PrintsMissingStatus(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list with missing tool: %v", err)
 	}
-	// Exercises the Installed=false → status="missing" branch in newListCmd.
 }
 
 func TestSettingsShow_KeyAndJSON(t *testing.T) {
@@ -5667,8 +5572,6 @@ func TestSettingsSet_RejectsInvalidManagerAndPriority(t *testing.T) {
 	}
 }
 
-// ─── list: group filter with matching tool in DB ──────────────────────────────
-
 func TestList_GroupFilter_MatchingTool_PrintsTool(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
@@ -5705,13 +5608,8 @@ func TestList_GroupFilter_MatchingTool_PrintsTool(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list --group work with matching tool: %v", err)
 	}
-	// Exercises the group filter loop + tool filtering + tool-print loop.
 }
 
-// ─── init: full flow with stdin mock ─────────────────────────────────────────
-
-// TestInit_FullFlow_WithMockedStdin exercises the init command's non-interactive
-// branches by providing stdin answers for the setup prompts.
 func TestInit_FullFlow_WithMockedStdin(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -5719,9 +5617,7 @@ func TestInit_FullFlow_WithMockedStdin(t *testing.T) {
 	// Use a non-existent config path so init proceeds past the "already exists" guard.
 	cfgPath := filepath.Join(cfgDir, "new_settings.json")
 
-	// Provide stdin answers:
-	// - Dots section: "n" (no)
-	// - Import: "n" (no)
+	// Decline existing-config import, then update quarantine.
 	stdinInput := "n\nn\n"
 	withMockStdin(t, stdinInput, func() {
 		cmd := NewRootCmd()
@@ -5747,6 +5643,7 @@ func TestBootstrapImportConfigFlag(t *testing.T) {
 		Hosts: map[string][]string{"testhost": {"work"}},
 	})
 
+	// Decline configured-tool sync, then dotfile sync.
 	withMockStdin(t, "n\nn\n", func() {
 		cmd := NewRootCmd()
 		cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "bootstrap", "--import-config", sourcePath})
@@ -5784,6 +5681,7 @@ func TestBootstrapPromptImportsExistingConfig(t *testing.T) {
 		Hosts: map[string][]string{"testhost": {"work"}},
 	})
 
+	// Import sourcePath, then decline tool and dotfile sync.
 	withMockStdin(t, "y\n"+sourcePath+"\nn\nn\n", func() {
 		cmd := NewRootCmd()
 		cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "bootstrap"})
@@ -5800,8 +5698,6 @@ func TestBootstrapPromptImportsExistingConfig(t *testing.T) {
 		t.Fatal("imported config missing jq tool")
 	}
 }
-
-// ─── ensureHost: active host setup ────────────────────────────────────────────
 
 func TestEnsureHost_UsesAppHostnameOverride(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "virtualhost.example")
@@ -5827,10 +5723,6 @@ func TestEnsureHost_UsesAppHostnameOverride(t *testing.T) {
 	}
 }
 
-// ─── runDotsInitSection direct tests ──────────────────────────────────────────
-
-// TestRunDotsInitSection_EmptyPath_Skips tests the path where the user enters
-// an empty dots repo path, causing the function to skip dots setup.
 func TestRunDotsInitSection_EmptyPath_Skips(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
@@ -5848,8 +5740,6 @@ func TestRunDotsInitSection_EmptyPath_Skips(t *testing.T) {
 	})
 }
 
-// TestRunDotsInitSection_ValidPath_NoEntries tests the path where the user
-// provides a valid repo path that exists on disk but has no discoverable entries.
 func TestRunDotsInitSection_ValidPath_NoEntries(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	// Config must exist for SaveSettings to work.
@@ -5860,19 +5750,15 @@ func TestRunDotsInitSection_ValidPath_NoEntries(t *testing.T) {
 		t.Fatalf("buildTestApp: %v", err)
 	}
 
-	// Use an empty temp dir as the "repo" — no discoverable config entries.
 	repoDir := t.TempDir()
 
-	// Stdin: repo path, then empty line for non-standard paths (finish).
+	// Enter repoDir; the trailing blank is ignored.
 	stdinInput := repoDir + "\n\n"
 	withMockStdin(t, stdinInput, func() {
 		_ = runDotsInitSection(context.Background(), a)
-		// May fail if SaveSettings fails — tolerate errors.
 	})
 }
 
-// TestRunDotsInitSection_RelativePath_NormalizesToAbsolute verifies that a
-// relative dots repo path entered during init is persisted as an absolute path.
 func TestRunDotsInitSection_RelativePath_NormalizesToAbsolute(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
@@ -5951,8 +5837,6 @@ func TestRunDotsInitSection_ExpandsEnvironmentVariablePath(t *testing.T) {
 	}
 }
 
-// TestRunDotsInitSection_InvalidPath tests the path where the user provides
-// a path that doesn't exist on disk.
 func TestRunDotsInitSection_InvalidPath(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
@@ -5965,15 +5849,12 @@ func TestRunDotsInitSection_InvalidPath(t *testing.T) {
 	nonExistentPath := filepath.Join(t.TempDir(), "does_not_exist")
 	withMockStdin(t, nonExistentPath+"\n", func() {
 		err := runDotsInitSection(context.Background(), a)
-		// Should return error for non-existent path.
 		if err == nil {
 			t.Error("expected error for non-existent repo path")
 		}
 	})
 }
 
-// TestRunDotsInitSection_UnsupportedTildePrefix_DoesNotExpand verifies that
-// values like "~user/.config" are not treated as home-relative.
 func TestRunDotsInitSection_UnsupportedTildePrefix_DoesNotExpand(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
@@ -6013,8 +5894,6 @@ func TestRunDotsInitSection_UnsupportedTildePrefix_DoesNotExpand(t *testing.T) {
 	})
 }
 
-// TestRunDotsInitSection_WithDiscoverableEntries tests the path where the repo
-// has discoverable config entries and the user chooses "yes" to add them all.
 func TestRunDotsInitSection_WithDiscoverableEntries(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
@@ -6024,22 +5903,19 @@ func TestRunDotsInitSection_WithDiscoverableEntries(t *testing.T) {
 		t.Fatalf("buildTestApp: %v", err)
 	}
 
-	// Create a temp "repo" dir with a discoverable hidden config dir.
 	repoDir := t.TempDir()
 	nvimDir := filepath.Join(repoDir, "nvim")
 	if err := os.MkdirAll(nvimDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 
-	// Stdin: repo path, "y" to add all entries, then empty line for non-standard paths.
+	// Enter repoDir; trailing legacy answers are ignored.
 	stdinInput := repoDir + "\ny\n\n"
 	withMockStdin(t, stdinInput, func() {
 		_ = runDotsInitSection(context.Background(), a)
 	})
 }
 
-// TestRunDotsInitSection_WithEntries_PickIndividually tests the per-entry
-// prompting when the user declines to add all entries at once.
 func TestRunDotsInitSection_WithEntries_PickIndividually(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
@@ -6055,15 +5931,13 @@ func TestRunDotsInitSection_WithEntries_PickIndividually(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 
-	// Stdin: repo path, "n" to not add all, "y" to add nvim individually, then empty.
+	// Enter repoDir; trailing legacy answers are ignored.
 	stdinInput := repoDir + "\nn\ny\n\n"
 	withMockStdin(t, stdinInput, func() {
 		_ = runDotsInitSection(context.Background(), a)
 	})
 }
 
-// TestRunDotsInitSection_NonStandardPath_Nonexistent tests entering a non-standard
-// path that doesn't exist (exercises the error branch in the non-standard loop).
 func TestRunDotsInitSection_NonStandardPath_Nonexistent(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
@@ -6074,16 +5948,14 @@ func TestRunDotsInitSection_NonStandardPath_Nonexistent(t *testing.T) {
 	}
 
 	repoDir := t.TempDir()
-	// Stdin: repo path (no entries), then a nonexistent extra path, then empty.
+	// Enter repoDir; trailing legacy extra-path input is ignored.
 	stdinInput := repoDir + "\n/nonexistent/path/xyz\n\n"
 	withMockStdin(t, stdinInput, func() {
 		_ = runDotsInitSection(context.Background(), a)
 	})
 }
 
-// TestAgentsSkillsGroup_MultipleGroups pins that `agents skills group` sets a
-// skill package's full group membership with no reusable-group cap: the
-// source must land in every named group.
+// Skill package group membership has no reusable-group cap: the source lands in every named group.
 func TestAgentsSkillsGroup_MultipleGroups(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -6121,8 +5993,6 @@ func TestAgentsSkillsGroup_MultipleGroups(t *testing.T) {
 	}
 }
 
-// TestAgentsMcpGroup_MultipleGroups pins that `agents mcp group` sets an MCP
-// server's full group membership across every named group.
 func TestAgentsMcpGroup_MultipleGroups(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -6160,8 +6030,6 @@ func TestAgentsMcpGroup_MultipleGroups(t *testing.T) {
 	}
 }
 
-// TestAgentsPluginGroup_MultipleGroups pins that `agents plugins group` sets
-// a plugin's full group membership across every named group.
 func TestAgentsPluginGroup_MultipleGroups(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -6201,9 +6069,6 @@ func TestAgentsPluginGroup_MultipleGroups(t *testing.T) {
 	}
 }
 
-// TestAgentsMarketplaceGroup_MultipleGroups pins that `agents plugins
-// marketplace group` sets a marketplace's full group membership across every
-// named group.
 func TestAgentsMarketplaceGroup_MultipleGroups(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()

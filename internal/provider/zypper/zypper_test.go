@@ -19,8 +19,6 @@ func tool(name string) provider.Tool {
 	return provider.Tool{Name: name, Provider: "zypper", Package: name}
 }
 
-// --- Available ---
-
 func TestAvailable_True(t *testing.T) {
 	p, _ := newZypper(executor.MockCall{Stdout: "zypper 1.14.70"})
 	ok, err := p.Available(context.Background())
@@ -36,8 +34,6 @@ func TestAvailable_False(t *testing.T) {
 		t.Errorf("Available() = (%v, %v), want (false, nil)", ok, err)
 	}
 }
-
-// --- Install ---
 
 func TestInstall_Success(t *testing.T) {
 	p, m := newZypper(executor.MockCall{Stdout: "Installing: ripgrep"})
@@ -57,8 +53,6 @@ func TestInstall_Error(t *testing.T) {
 	}
 }
 
-// --- Name / Description ---
-
 func TestName(t *testing.T) {
 	p, _ := newZypper()
 	if p.Name() != "zypper" {
@@ -72,8 +66,6 @@ func TestDescription(t *testing.T) {
 		t.Error("Description() should not be empty")
 	}
 }
-
-// --- Uninstall ---
 
 func TestUninstall_Success(t *testing.T) {
 	p, m := newZypper(executor.MockCall{})
@@ -92,8 +84,6 @@ func TestUninstall_Error(t *testing.T) {
 	}
 }
 
-// --- Upgrade ---
-
 func TestUpgrade_Success(t *testing.T) {
 	p, m := newZypper(executor.MockCall{})
 	if err := p.Upgrade(context.Background(), tool("ripgrep")); err != nil {
@@ -111,8 +101,6 @@ func TestUpgrade_Error(t *testing.T) {
 	}
 }
 
-// --- IsInstalled empty output ---
-
 func TestIsInstalled_EmptyOutput(t *testing.T) {
 	p, _ := newZypper(executor.MockCall{Stdout: ""})
 	ok, _, err := p.IsInstalled(context.Background(), tool("pkg"))
@@ -120,8 +108,6 @@ func TestIsInstalled_EmptyOutput(t *testing.T) {
 		t.Errorf("expected not installed for empty output")
 	}
 }
-
-// --- IsInstalled ---
 
 func TestIsInstalled_Found(t *testing.T) {
 	p, _ := newZypper(executor.MockCall{Stdout: "14.1.1-4"})
@@ -138,8 +124,6 @@ func TestIsInstalled_NotFound(t *testing.T) {
 		t.Errorf("IsInstalled() = (%v, _, %v), want (false, nil)", ok, err)
 	}
 }
-
-// --- ListInstalled ---
 
 func TestListInstalled(t *testing.T) {
 	output := "S | Name    | Type    | Version  | Arch   | Repository\n" +
@@ -158,8 +142,6 @@ func TestListInstalled(t *testing.T) {
 		t.Errorf("unexpected tool[0]: %+v", tools[0])
 	}
 }
-
-// --- InstalledMap ---
 
 func TestInstalledMap(t *testing.T) {
 	output := "S | Name    | Type    | Version  | Arch   | Repository\n" +

@@ -50,12 +50,6 @@ func TestMcpServerRows_InstalledStatus(t *testing.T) {
 	}
 }
 
-// TestMcpServerRows_ReflectsGroupMembership is a root-cause probe for the
-// "mcp group assignment silently fails" report: SetMcpGroups writes
-// cfg.Groups[*].McpServers correctly (see TestSetMcpGroups_RoundTrip in
-// agents_membership_test.go), but McpServerRows never reads that reverse
-// mapping back onto McpServerRow.Groups, so the TUI always renders an mcp
-// row's group membership as empty regardless of what was persisted.
 func TestMcpServerRows_ReflectsGroupMembership(t *testing.T) {
 	t.Parallel()
 	stub := &stubMcpAdapter{id: "claude-code", available: true, listed: nil}
@@ -150,13 +144,6 @@ func TestMcpServerRows_UnmanagedSection(t *testing.T) {
 	}
 }
 
-// TestMcpServerRows_UnmanagedSuppressedByInstalledPlugin is a root-cause
-// regression test for the "context-mode mcp server shows permanently
-// missing" report: a plugin-scoped server (installed via a Claude Code
-// plugin) never appears in claude's own user-scope mcp list, so it looked
-// unmanaged-and-claimable forever. Once installedPluginNames reports a
-// same-named plugin on the agent, the entry must be suppressed from
-// unmanaged rather than offered for claim.
 func TestMcpServerRows_UnmanagedSuppressedByInstalledPlugin(t *testing.T) {
 	t.Parallel()
 	mcpStub := &stubMcpAdapter{
@@ -185,10 +172,6 @@ func TestMcpServerRows_UnmanagedSuppressedByInstalledPlugin(t *testing.T) {
 	}
 }
 
-// TestMcpServerRows_ManifestEntryShadowedByPlugin_NotHidden covers the other
-// half of the shadow contract: a manifest server (declared intent) must stay
-// visible even when a plugin now provides it, but flagged as shadowed rather
-// than reported as a real gap.
 func TestMcpServerRows_ManifestEntryShadowedByPlugin_NotHidden(t *testing.T) {
 	t.Parallel()
 	mcpStub := &stubMcpAdapter{id: "claude-code", available: true, listed: nil}

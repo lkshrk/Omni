@@ -57,11 +57,10 @@ func TestSkills_ViewBodyWithSkills(t *testing.T) {
 	m.skillTypeIdx = agentsChipSkills
 	m.agentsEnabled = true
 	m.width = 120
-	// Name IS the owner/repo — that is the display text in the name column.
 	m.enabledAgents = []string{"claude"}
 	m.skillsRows = []app.SkillPackageRow{
-		{Name: "github.com/foo/caveman", Source: "github.com/foo/caveman", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
-		{Name: "github.com/bar/review", Source: "github.com/bar/review", Ref: "v2", PerAgentStatus: map[string]bool{"claude": false}},
+		{Name: "github.com/foo/caveman", Source: "github.com/foo/caveman", Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
+		{Name: "github.com/bar/review", Source: "github.com/bar/review", Ref: "v2", PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusMissing}},
 	}
 	m.skillsCursor = 0
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
@@ -71,11 +70,9 @@ func TestSkills_ViewBodyWithSkills(t *testing.T) {
 	if !strings.Contains(out, "github.com/bar/review") {
 		t.Errorf("viewSkillsBody() missing row 'github.com/bar/review', got:\n%s", out)
 	}
-	// Per-row hints appear inline under the selected row, eligibility-driven
-	// via agentsRowHints — an installed row is update-eligible.
-	// Hint format: key then desc, no brackets (e.g. "u update").
-	if !strings.Contains(out, "u update") {
-		t.Errorf("viewSkillsBody() missing per-row hint 'u update' for selected row, got:\n%s", out)
+	// Hints are eligibility-driven via agentsRowHints (an installed row is update-eligible); format is key then desc, no brackets.
+	if !strings.Contains(out, "u upgrade") {
+		t.Errorf("viewSkillsBody() missing per-row hint 'u upgrade' for selected row, got:\n%s", out)
 	}
 }
 
@@ -84,11 +81,10 @@ func TestSkills_ViewBodySectionHeaders(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
-	// Name IS the owner/repo source — that is what renders in the name column.
 	m.enabledAgents = []string{"claude"}
 	m.skillsRows = []app.SkillPackageRow{
-		{Name: "github.com/foo/caveman", Source: "github.com/foo/caveman", Updated: "2026-06-01", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
-		{Name: "github.com/bar/review", Source: "github.com/bar/review", Installed: false, PerAgentStatus: map[string]bool{"claude": false}},
+		{Name: "github.com/foo/caveman", Source: "github.com/foo/caveman", Updated: "2026-06-01", Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
+		{Name: "github.com/bar/review", Source: "github.com/bar/review", Installed: false, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusMissing}},
 	}
 	out := m.viewSkillsBody()
 	if !strings.Contains(out, "Installed") {
@@ -112,8 +108,8 @@ func TestSkills_ViewBodyInstalledIcon(t *testing.T) {
 	m.skillTypeIdx = agentsChipSkills
 	m.enabledAgents = []string{"claude"}
 	m.skillsRows = []app.SkillPackageRow{
-		{Name: "installed-skill", Source: "gh/x", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
-		{Name: "missing-skill", Source: "gh/y", Installed: false, PerAgentStatus: map[string]bool{"claude": false}},
+		{Name: "installed-skill", Source: "gh/x", Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
+		{Name: "missing-skill", Source: "gh/y", Installed: false, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusMissing}},
 	}
 	out := m.viewSkillsBody()
 	if !strings.Contains(out, "✓") {
@@ -136,10 +132,9 @@ func TestSkills_ViewBodyFooterUpdate(t *testing.T) {
 	}
 	m.skillsCursor = 0
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
-	// Per-row hint appears under the selected row (not a static footer).
-	// Hint format: key then desc, no brackets (e.g. "u update").
-	if !strings.Contains(out, "u update") {
-		t.Errorf("viewSkillsBody() missing per-row hint 'u update' for selected row, got:\n%s", out)
+	// Hint format is key then desc, no brackets (e.g. "u upgrade"), under the selected row rather than a static footer.
+	if !strings.Contains(out, "u upgrade") {
+		t.Errorf("viewSkillsBody() missing per-row hint 'u upgrade' for selected row, got:\n%s", out)
 	}
 }
 
@@ -370,6 +365,25 @@ func TestSkills_UpdatedMsgWithErrorSetsErr(t *testing.T) {
 	}
 }
 
+func TestSkills_PartialUpdatedMsgReloadsManifest(t *testing.T) {
+	m := agentsAllProgressModel(t, nil, nil, nil)
+	m.mode = viewSkills
+	m.skillsRunning = true
+
+	newModel, cmd := m.Update(skillsUpdatedMsg{updated: true, err: errors.New("one failed")})
+	m = newModel.(Model)
+
+	if m.skillsErr == nil {
+		t.Fatal("partial update error was not retained")
+	}
+	if m.skillsLoaded {
+		t.Fatal("partial update did not invalidate skills inventory")
+	}
+	if cmd == nil {
+		t.Fatal("partial update did not queue inventory reload")
+	}
+}
+
 func TestSkills_DisabledBody(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -470,8 +484,8 @@ func TestSkills_StatusColumn(t *testing.T) {
 	m.width = 120
 	m.enabledAgents = []string{"claude"}
 	m.skillsRows = []app.SkillPackageRow{
-		{Name: "skill-present", Source: "github.com/foo/present", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
-		{Name: "skill-absent", Source: "github.com/foo/absent", Installed: false, PerAgentStatus: map[string]bool{"claude": false}},
+		{Name: "skill-present", Source: "github.com/foo/present", Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
+		{Name: "skill-absent", Source: "github.com/foo/absent", Installed: false, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusMissing}},
 	}
 
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
@@ -526,12 +540,10 @@ func TestSkills_LayoutColumnsAligned(t *testing.T) {
 	m.agentsEnabled = true
 	m.width = 120
 	m.enabledAgents = []string{"claude"}
-	// renderSplitRow right-aligns the whole right-side cell group (agent, version,
-	// badge) against the row's total width via alignLR, so the agent column sits
-	// at a fixed offset from the line end regardless of name length.
+	// renderSplitRow right-aligns the whole right-side cell group via alignLR, so the agent column sits at a fixed offset from the line end regardless of name length.
 	m.skillsRows = []app.SkillPackageRow{
-		{Name: "cv", Source: "github.com/short/src", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
-		{Name: "a-much-longer-skill-name", Source: "github.com/longer/source-path", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+		{Name: "cv", Source: "github.com/short/src", Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
+		{Name: "a-much-longer-skill-name", Source: "github.com/longer/source-path", Installed: true, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
 	}
 
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
@@ -852,10 +864,7 @@ func TestFeatureToggles_PluginsErrorPreservesState(t *testing.T) {
 	}
 }
 
-// TestHelpPopup_AgentsTab_TitleAndActions is a regression test for the agents
-// tab's "?" popup showing the Tools help: helpPopupTitle must return "Agents
-// Help" for viewSkills, and the popup must render the agents Row/Bulk action
-// groups instead of Tools-only actions like "pin provider".
+// helpPopupTitle must return "Agents Help" for viewSkills and render the agents Row/Bulk groups, not Tools-only actions like "pin provider".
 func TestHelpPopup_AgentsTab_TitleAndActions(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -867,7 +876,7 @@ func TestHelpPopup_AgentsTab_TitleAndActions(t *testing.T) {
 	}
 
 	help := stripANSIEscapeSequences(renderHelpPopupWithWidth(m, helpPopupContentWidth(m)))
-	for _, want := range []string{"install", "update all", "sync all", "refresh"} {
+	for _, want := range []string{"install", "upgrade all", "sync all", "refresh"} {
 		if !strings.Contains(help, want) {
 			t.Errorf("agents help popup missing agents action %q, got:\n%s", want, help)
 		}
@@ -877,7 +886,6 @@ func TestHelpPopup_AgentsTab_TitleAndActions(t *testing.T) {
 	}
 }
 
-// TestDoUninstallSkillPackage_NilAppReturnsNil verifies the nil-app guard.
 func TestDoUninstallSkillPackage_NilAppReturnsNil(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -887,8 +895,6 @@ func TestDoUninstallSkillPackage_NilAppReturnsNil(t *testing.T) {
 	}
 }
 
-// TestDoUninstallSkillPackage_ErrorPropagates verifies an app failure lands
-// in skillRemovedMsg.err.
 func TestDoUninstallSkillPackage_ErrorPropagates(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -905,5 +911,32 @@ func TestDoUninstallSkillPackage_ErrorPropagates(t *testing.T) {
 	}
 	if got.err == nil {
 		t.Error("expected an error when the config path is unreadable")
+	}
+}
+
+// The CLI prints ImportDiff.Warnings as "! <warning>"; the TUI must not drop them silently.
+func TestSkills_ImportedMsgSurfacesWarnings(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.skillsRunning = true
+
+	diff := app.ImportDiff{Added: []string{"new-skill"}, Warnings: []string{"adopting o/r: boom"}}
+	m = drive(m, skillsImportedMsg{diff: diff})
+
+	if !m.statusIsErr || !strings.Contains(m.statusMsg, "adopting o/r: boom") {
+		t.Errorf("statusMsg = %q (isErr=%v), want the import warning", m.statusMsg, m.statusIsErr)
+	}
+}
+
+func TestSkills_AddedMsgSurfacesWarnings(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewSkills
+
+	m = drive(m, skillAddedMsg{warning: "legacy CLI-managed install remains"})
+
+	if !m.statusIsErr || !strings.Contains(m.statusMsg, "legacy CLI-managed install remains") {
+		t.Errorf("statusMsg = %q (isErr=%v), want the add warning", m.statusMsg, m.statusIsErr)
 	}
 }

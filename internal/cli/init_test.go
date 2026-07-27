@@ -8,8 +8,7 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-// makeRepoTree creates a temporary directory tree from a slice of paths.
-// Paths ending in "/" are directories; all others are empty files.
+// Paths ending in "/" become directories; all others become empty files.
 func makeRepoTree(t *testing.T, paths []string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -97,7 +96,6 @@ func TestDiscoverDotsEntries_ShellConfigs_Bare(t *testing.T) {
 }
 
 func TestDiscoverDotsEntries_ShellConfigs_DotPrefixed(t *testing.T) {
-	// Files stored with a leading dot — same canonical name and path as bare.
 	root := makeRepoTree(t, []string{".zshrc", ".bashrc", ".gitconfig"})
 	got, err := app.DiscoverDotsEntries(root)
 	if err != nil {
@@ -121,7 +119,6 @@ func TestDiscoverDotsEntries_ShellConfigs_DotPrefixed(t *testing.T) {
 }
 
 func TestDiscoverDotsEntries_WellKnownDirs(t *testing.T) {
-	// Well-known dirs (claude, ssh) should map to home, not ~/.config.
 	root := makeRepoTree(t, []string{"claude/", "grok/", ".ssh/", ".docker/", ".kube/", "nvim/"})
 	got, err := app.DiscoverDotsEntries(root)
 	if err != nil {
@@ -151,7 +148,6 @@ func TestDiscoverDotsEntries_WellKnownDirs(t *testing.T) {
 }
 
 func TestDiscoverDotsEntries_SkipsPlainFiles_NonWellKnown(t *testing.T) {
-	// Plain files with no well-known mapping should be skipped.
 	root := makeRepoTree(t, []string{"README.md", "setup.sh", "nvim/"})
 	got, err := app.DiscoverDotsEntries(root)
 	if err != nil {
@@ -173,7 +169,6 @@ func TestDiscoverDotsEntries_SkipsPlainFiles_NonWellKnown(t *testing.T) {
 }
 
 func TestDiscoverDotsEntries_SkipsHiddenDirs_NonWellKnown(t *testing.T) {
-	// Hidden dirs with no well-known mapping should be skipped.
 	root := makeRepoTree(t, []string{".git/", ".local/", "nvim/"})
 	got, err := app.DiscoverDotsEntries(root)
 	if err != nil {

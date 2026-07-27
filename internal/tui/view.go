@@ -24,7 +24,6 @@ const (
 	iconPrivileged     = "⚿"
 )
 
-// newHelp creates a help.Model styled to match the omni palette.
 func newHelp() help.Model {
 	p := defaultPalette()
 	h := help.New()
@@ -38,9 +37,10 @@ func newHelp() help.Model {
 	return h
 }
 
-// View renders the full TUI and satisfies the tea.Model interface.
 func (m Model) View() tea.View {
-	v := tea.NewView(textutil.SymbolsFromEnv().Apply(m.viewString()))
+	// A line wider or a frame taller than the terminal desynchronises bubbletea's frame diff, leaving the stale fragments and stacked footers that survive tab switches and Ctrl+L.
+	frame := clipFrame(clipLines(m.viewString(), m.width), m.height)
+	v := tea.NewView(textutil.SymbolsFromEnv().Apply(frame))
 	v.AltScreen = true
 	v.WindowTitle = m.windowTitle()
 	v.ReportFocus = true
@@ -48,7 +48,6 @@ func (m Model) View() tea.View {
 	return v
 }
 
-// windowTitle returns a tab-specific terminal title.
 func (m Model) windowTitle() string {
 	switch m.mode {
 	case viewDots:
@@ -70,12 +69,10 @@ func (m Model) windowTitle() string {
 	}
 }
 
-// viewString builds the full terminal output as a plain string.
-// Used internally so overlay helpers (placeOverlay) can operate on strings.
+// Kept as a plain string so overlay helpers (placeOverlay) can operate on it.
 func (m Model) viewString() string {
 	p := m.palette
 
-	// File picker popup — overlays whatever view is currently active (same pattern as help overlay).
 	if m.showFilePicker {
 		bgModel := m
 		bgModel.showFilePicker = false
@@ -87,7 +84,6 @@ func (m Model) viewString() string {
 		return p.styleErr.Render("Error: "+m.err.Error()) + "\n" + p.styleHelp.Render("Press q to quit.")
 	}
 
-	// Provider-priority editor popup — overlays the settings tab.
 	if m.editingPriority {
 		bgModel := m
 		bgModel.editingPriority = false
@@ -158,8 +154,7 @@ func (m Model) viewString() string {
 		return placeOverlay(bgModel.viewString(), renderPostSetupLoading(m), m.width, m.height)
 	}
 
-	// Setup/onboarding is modal over the regular tools UI. Keep mode=viewSetup
-	// for key routing, but render a normal background so async scans/status stay visible.
+	// Keep mode=viewSetup for key routing but render a normal background so async scans and status stay visible.
 	if m.mode == viewSetup {
 		bgModel := m
 		bgModel.mode = m.setupBackgroundMode
@@ -279,6 +274,14 @@ func (m Model) viewString() string {
 		return placePopup(bg, m, renderDashboardReconcilePlanPopup(m), dashboardReconcilePlanPopupFrame(m))
 	}
 
+	if m.agentsDriftPromptOpen {
+		bgModel := m
+		bgModel.agentsDriftPromptOpen = false
+		bgModel.suppressFooterHints = true
+		bg := bgModel.viewString()
+		return placePopup(bg, m, renderAgentsDriftPromptPopup(m), agentsDriftPromptPopupFrame(m))
+	}
+
 	if m.mode == viewGroups && m.groupDeleteConfirm {
 		bgModel := m
 		bgModel.groupDeleteConfirm = false
@@ -304,7 +307,6 @@ func (m Model) viewString() string {
 		return placePopup(bg, m, renderHostGroupEditor(m), groupEditorPopupFrame(m))
 	}
 
-	// Help — centered popup overlay, drawn over the current tab.
 	if m.help.ShowAll {
 		// Render background without the overlay so the main screen stays visible.
 		bgModel := m
@@ -331,13 +333,11 @@ func (m Model) viewString() string {
 
 	var sb strings.Builder
 
-	// Header
 	sb.WriteString(renderHeader(m))
 	sb.WriteByte('\n')
 	sb.WriteString(renderHRule(p, m.width))
 	sb.WriteByte('\n')
 
-	// Filter input (when active)
 	if m.mode == viewSearch {
 		sb.WriteString(screenEdgeInset() + renderEmptyAwareTextInputView(p, m.filter, m.filter.Placeholder, 0))
 		sb.WriteByte('\n')
@@ -345,7 +345,6 @@ func (m Model) viewString() string {
 		sb.WriteByte('\n')
 	}
 
-	// Command palette input (when active)
 	if m.mode == viewCommand {
 		sb.WriteString(p.styleHelp.Render(screenEdgeInset()+": ") + renderEmptyAwareTextInputView(p, m.commandInput, m.commandInput.Placeholder, 0))
 		sb.WriteByte('\n')
@@ -353,8 +352,7 @@ func (m Model) viewString() string {
 		sb.WriteByte('\n')
 	}
 
-	// Main body — collected separately so it can be padded to fill available
-	// height, keeping the footer pinned to the bottom of the terminal.
+	// Collected separately so it can be padded to fill available height, keeping the footer pinned to the bottom of the terminal.
 	var body string
 	switch {
 	case m.mode == viewSettings:
@@ -390,9 +388,7 @@ func (m Model) viewString() string {
 	return sb.String()
 }
 
-// placeOverlay renders fg centered on top of bg using the lipgloss compositor.
-// The compositor uses a proper cell buffer with z-ordering, so ANSI sequences
-// that span the overlay boundary are handled correctly.
+// The lipgloss compositor uses a cell buffer with z-ordering, so ANSI sequences spanning the overlay boundary are handled correctly.
 func placeOverlay(bg, fg string, bgW, bgH int) string {
 	fgLines := strings.Split(fg, "\n")
 	fgH := len(fgLines)
@@ -803,9 +799,6 @@ func renderPopupBodyWithFooterItems(m Model, width, bodyHeight int, body string,
 	return lipgloss.NewStyle().Width(width).Render(body)
 }
 
-// listAvailableHeight returns the number of terminal lines available for the
-// scrollable tool list. It subtracts the fixed header, separators, and status
-// bar from the total terminal height.
 func listAvailableHeight(m Model) int {
 	h := m.height
 	h -= 2 // title row + top separator
@@ -819,8 +812,7 @@ func listAvailableHeight(m Model) int {
 	return h
 }
 
-// renderFilePickerPopup returns the file picker popup content. The shared popup
-// frame is applied by View so the file picker matches other modal surfaces.
+// The shared popup frame is applied by View so the file picker matches other modal surfaces.
 func renderFilePickerPopup(m Model) string {
 	p := m.palette
 	contentW := filePickerContentWidth(m)

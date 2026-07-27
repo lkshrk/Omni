@@ -17,7 +17,6 @@ import (
 	"github.com/lkshrk/omni/internal/profile"
 )
 
-// viewMode is the active top-level view.
 type viewMode int
 
 const (
@@ -40,7 +39,6 @@ const (
 	viewSkills                          // agent skills management tab
 )
 
-// section groups tools into visual categories in the list view.
 type section int
 
 const (
@@ -52,7 +50,6 @@ const (
 	sectionIgnored                    // 5 - in the active host's ignore list (rendered last, dimmed)
 )
 
-// syncStatus is the out-of-sync sub-category for a tool in sectionOutOfSync.
 type syncStatus int
 
 const (
@@ -65,7 +62,6 @@ const (
 
 const searchCacheTTL = 5 * time.Minute
 
-// searchCacheEntry holds cached provider search results.
 type searchCacheEntry struct {
 	tools []*app.ToolView
 	at    time.Time
@@ -99,9 +95,7 @@ type dotsVariantRequest struct {
 	name       string
 	remove     bool
 	discovered bool
-	// parentName and subpath are set only for the child-row path: the subpath is
-	// first extracted out of parentName into its own entry (named name), then a
-	// host variant is created for it.
+	// Set only on the child-row path: subpath is extracted out of parentName into its own entry, then given a host variant.
 	parentName string
 	subpath    string
 }
@@ -179,7 +173,6 @@ const (
 	dashboardReconcilePlanSyncAgents    dashboardReconcilePlanKind = app.ReconcileStepSyncAgents
 )
 
-// Model is the root Bubbletea model.
 type Model struct {
 	app     *app.App
 	ctx     context.Context
@@ -201,9 +194,7 @@ type Model struct {
 	discoveredKeys  map[string]bool // "name\x00provider" set for fast orphan lookup
 	visibleTools    []*app.ToolView // after filter + sort
 	searchTools     []*app.ToolView // results from last provider search (not in allTools)
-	// sectionCounts caches the per-section tool count computed once in applyFilter.
-	// Keyed by section constant (sectionUpdates, sectionInstalled, etc.).
-	// Avoids iterating visibleTools on every View() call (e.g. during active typing).
+	// Cached once in applyFilter so View() does not re-iterate visibleTools on every keystroke.
 	sectionCounts       map[section]int
 	searching           bool                        // true while a provider search is in flight
 	searchGen           int                         // incremented on each new search; stale results are dropped
@@ -212,6 +203,8 @@ type Model struct {
 	descRefreshGen      int                         // generation for background description refreshes
 	cursor              int
 	loading             bool
+	loadingOwner        loadingOwner    // who raised m.loading; see loading_gate.go
+	loadingGen          int             // bumped on every raise; stamped onto opCompleteMsg
 	confirmQuit         bool            // true after first quit key; second press exits
 	quitConfirmKey      string          // key used to arm confirmQuit ("q" or "ctrl+c")
 	confirmGen          int             // increments whenever a timed confirmation is armed
@@ -245,43 +238,38 @@ type Model struct {
 
 	scanningProviders      map[string]bool
 	outdatedProviders      map[string]bool
+	outdatedTotal          int
 	providerScanToolCounts map[string]int
 	providerScanToolDone   map[string]int
 	providerScanLabels     map[string]string
 	refreshToolDone        int
 	refreshToolTotal       int
 	scanGen                int
-	// scanProgressCh is the progress stream owned by the in-flight provider
-	// scan fan-out. The per-provider scan commands share it, so no producer
-	// can close it; the settle branch of handleProviderScannedMsg closes this
-	// field instead of m.progressCh, which may meanwhile belong to a newer
-	// stream started by an unrelated operation (e.g. agents update all).
-	scanProgressCh             chan progressUpdate
+	// Owned by the scan fan-out, so no producer may close it; handleProviderScannedMsg closes this rather than m.progressCh, which may belong to a newer stream.
+	scanProgressCh chan progressUpdate
+	// The orphan scan closes its own channel before its result message lands, so the model must release m.progressCh on that message; waiting for progressStreamClosedMsg would leave the description phase without a stream.
+	discoveryProgressCh        chan progressUpdate
 	discoveryGen               int
 	providerSnapshotRefreshing bool
 	outdatedSnapshotRefreshing bool
 	discoveryRefreshing        bool
 	descRefreshing             bool
-	// migrating is true while a doMigrateProvider command is in flight.
-	// Prevents progressDoneMsg (from a concurrent launch scan) from prematurely
-	// clearing m.loading, and prevents installedRefreshedMsg/updatesRefreshedMsg
-	// from wiping the "Migrating…" status before migration completes.
+	// Gates progressDoneMsg and the refresh msgs from clearing m.loading or the "Migrating…" status mid-migration.
 	migrating bool
 
-	// progress streaming from background operations
 	progressCh   chan progressUpdate
 	progressGen  int
 	progressText string
 
-	// command palette
 	commandInput         textinput.Model
 	commandSuggestions   []palCmd
 	commandCursor        int
+	commandOrigin        viewMode // tab the palette was opened from; restored on close
 	dotsConfiguredCached bool
 	dotsSyncAvailCached  app.DotsSyncAvailability
 	consolidateOptions   []app.EcosystemMigration // cached at load time; registry lookup, no IO
 
-	// group subtabs — used by group picker (move tool to group), not for list filtering
+	// Used by the group picker (move tool to group), not for list filtering.
 	groupNames              []string          // ordered reusable group names
 	toolGroups              map[string]string // "name\x00provider" → group name
 	toolMemberships         map[string][]string
@@ -296,23 +284,19 @@ type Model struct {
 	toolGit                 map[string]string
 	nvmManaged              map[string]bool
 
-	// provider filter — [All] [system] [node] [python] …
 	providerNames  []string // ordered provider-family names from the app/provider registry
 	providerTabIdx int      // 0=All, 1+=providerNames[idx-1]
 
-	// effective package-manager binaries resolved at load time via PATH probing.
 	effectivePythonManager string // e.g. "uv", "pip3"
 	effectiveNodeManager   string // e.g. "bun", "pnpm", "npm"
 	effectiveSystemManager string // e.g. "brew", "apt" — concrete PM backing the system provider family
 
-	// group-assignment tab
 	hostInfo    *app.HostInfo
 	hostCursor  int
 	ignoreSet   map[string]bool // tool names ignored by the active host
 	groupFilter string          // non-empty: only show tools belonging to this group
 	groupTabIdx int             // 0=all, 1=current host, 2+=reusable groups; mirrors groupFilter
 
-	// host group-assignment editing (inline picker in Groups tab)
 	hostEditMode       int      // 0=none, 1=editGroups
 	hostGroupPicker    []string // groups shown in the host assignment picker
 	hostGroupIdx       int      // cursor in the host assignment picker
@@ -326,7 +310,6 @@ type Model struct {
 	hostRenameMode     bool     // true when the inline host rename text input is open
 	hostRenameName     string   // host captured when inline rename was opened
 
-	// group-assignment tab section focus
 	// 0 = hosts list, 1 = groups list
 	assignmentSection  int
 	groupCursor        int  // cursor within the allGroupNames list
@@ -337,16 +320,13 @@ type Model struct {
 	groupRenameName    string
 	groupCreating      bool // true when the shared new-group popup is open
 
-	// group tools editor popup
 	groupToolsEditor         groupAssignmentEditor
 	groupToolsProviderIdx    int
 	groupToolsIgnore         map[string]bool // logical tool name -> staged group-level ignore in groupToolsEditor.group
 	groupToolsOriginalIgnore map[string]bool // logical tool name -> original group-level ignore in groupToolsEditor.group
 
-	// group dotfiles editor popup
 	groupDotsEditor groupAssignmentEditor
 
-	// inline group-picker
 	pickerGroups           []string
 	pickerCursor           int
 	pickerCreatingGroup    bool // true when the user selected the "+ new group…" sentinel
@@ -364,17 +344,12 @@ type Model struct {
 	mcpMemberships         map[string][]string // mcp server name → current group memberships (picker draft)
 	pluginMemberships      map[string][]string // plugin name → current group memberships (picker draft)
 	marketplaceMemberships map[string][]string // marketplace name → current group memberships (picker draft)
-	// pickerDotExtract* are set when the group popup was opened on a child
-	// sub-path row: confirming extracts the subtree into a new entry assigned to
-	// the picked groups instead of editing an existing entry's membership.
+	// Set when the group popup opened on a child sub-path row: confirming extracts the subtree into a new entry instead of editing an existing entry's membership.
 	pickerDotExtractParent string
 	pickerDotExtractSub    string
 	pickerActionTool       app.ToolView
 	pickerActionToolSet    bool
-	// pickerClaimAgents payload for claiming an agents-tab orphan row: which
-	// feature (pickerMembershipSkill/Mcp/Plugin, carried in
-	// pickerMembershipKind while pickerPurposeClaim is set for this flow) and
-	// identity to adopt on confirm, then assign to the chosen group.
+	// Claim payload for an agents-tab orphan row; pickerMembershipKind carries the feature while pickerPurposeClaim is set.
 	pickerClaimAgentsRow agentsAllRow
 	pickerClaimAgentsSet bool
 	pickerOriginalGroups []string
@@ -387,57 +362,44 @@ type Model struct {
 	fallbackTargetSet    bool
 	fallbackEditor       fallbackEditorState
 
-	// setup wizard step (0 = create config?, 1 = import tools?, 2 = provider
-	// selection, 3 = node manager, 4 = agents onboarding, 5 = enable dotfiles?,
-	// 6 = dots repo path, 7 = copy host?, 8 = host picker, 9 = reusable groups,
-	// 10 = existing-host activation)
-	setupStep int
-	// setupAgentsList is the detected-agents snapshot rendered by step 4.
+	// 0=create config, 1=import tools, 2=providers, 3=node manager, 4=agents onboarding, 5=enable dotfiles, 6=dots repo path, 7=copy host, 8=host picker, 9=reusable groups, 10=existing-host activation, 11=create config, 12=import advisories
+	setupStep       int
 	setupAgentsList []app.AgentInfo
-	// setupAgentsDiffLoading/Loaded track the async unmanaged-count fetch for
-	// step 4; Loaded gates rendering the diff line and the [i]/[s] footer.
+	// Import advisories wait here for an explicit acknowledgement: adoption can write a resolved
+	// credential into settings.json, and a status line loses that disclosure to the post-setup reload.
+	setupImportNotices []string
+	// Loaded gates rendering the diff line and the [i]/[s] footer.
 	setupAgentsDiffLoading      bool
 	setupAgentsDiffLoaded       bool
 	setupAgentsUnmanagedSkills  int
 	setupAgentsUnmanagedMcp     int
 	setupAgentsUnmanagedPlugins int
-	// setupBackgroundMode is the main tab rendered behind setup/onboarding
-	// popups. Zero value keeps first-run setup on the tools tab.
+	// Zero value keeps first-run setup on the tools tab.
 	setupBackgroundMode viewMode
 	setupProviders      []app.SetupProviderOption
 	setupProviderIdx    int
-	// setupCopyHostIdx is the cursor for the host-copy picker in step 8.
-	setupCopyHostIdx int
-	// setupGroupIdx/draft are the final reusable-group selection in step 9.
-	setupGroupIdx   int
-	setupGroupDraft map[string]bool
-	// setupActivationIdx is the cursor for existing-host bootstrap activation.
-	setupActivationIdx int
-	// setupComplete is set after onboarding has completed so a follow-up reload
-	// cannot reopen setup from a stale no-host snapshot.
+	setupCopyHostIdx    int
+	setupGroupIdx       int
+	setupGroupDraft     map[string]bool
+	setupActivationIdx  int
+	// Set after onboarding so a follow-up reload cannot reopen setup from a stale no-host snapshot.
 	setupComplete bool
-	// setupReloading keeps a centered loading overlay visible after onboarding has
-	// switched back to the main UI but before the first post-setup reload
-	// finishes.
+	// Keeps the loading overlay up between switching back to the main UI and the first post-setup reload finishing.
 	setupReloading bool
-	// skipLaunchDotsSyncOnce prevents a post-bootstrap reload from repeating a
-	// dot sync that the bootstrap flow just completed. The launch snapshot still
-	// hydrates dots status asynchronously.
+	// Invalidates the armed overlay timeout when the reload finishes or is dismissed before it fires.
+	setupReloadGen int
+	// Prevents a post-bootstrap reload from repeating the dot sync the bootstrap flow just completed.
 	skipLaunchDotsSyncOnce bool
-	// setupHostReturnStep is the setup step to restore if automatic host
-	// creation fails after the UI has advanced to the dotfile decision step.
+	// Step to restore if automatic host creation fails after the UI advanced to the dotfile decision step.
 	setupHostReturnStep int
 
-	// hostRequired is true when the config exists but no host entry matches
-	// this machine. All navigation is locked until a host is active.
+	// Config exists but no host entry matches this machine; all navigation is locked until a host is active.
 	hostRequired bool
 
-	// agents-use editor (active when editing the Agents row in settings)
 	editingAgents    bool
 	agentsEditRows   []app.AgentPickerRow
 	agentsEditCursor int
 
-	// provider priority editor (active when editing the Priority row in settings)
 	refreshScanErrors              []string
 	editingPriority                bool
 	priorityHolding                bool
@@ -463,7 +425,6 @@ type Model struct {
 	dashboardReconcileQueue        []dashboardReconcilePlanKind
 	dashboardReconcileErrors       []string
 
-	// file picker popup (reusable for any path selection)
 	dotsFilePicker       pathPickerModel
 	showFilePicker       bool
 	filePickerTitle      string
@@ -471,7 +432,6 @@ type Model struct {
 	filePickerForConfig  bool
 	settingsInput        textinput.Model // used by settings/group text inputs
 
-	// dots tab
 	dotsEntries            []app.DotStatus
 	dotsGitStatus          string
 	dotsHistory            []app.DotsHistoryEntry
@@ -521,16 +481,12 @@ type Model struct {
 	stowInstallPath        string
 	stowInstallVariant     dotsVariantRequest
 
-	// agents (skills) tab
 	agentsEnabled  bool
 	skillsEnabled  bool
 	mcpEnabled     bool
 	pluginsEnabled bool
 	agentsSummary  app.DashboardAgentsSummary
-	// *RowsKnown flags mark sections whose rows reflect reality — either
-	// seeded from the persisted cache or landed from a live load. Empty rows
-	// with the flag unset mean "not loaded yet" and must render as loading,
-	// not as the onboarding empty state.
+	// Unset with empty rows means "not loaded yet" — render as loading, not as the onboarding empty state.
 	skillsRowsKnown      bool
 	mcpRowsKnown         bool
 	pluginRowsKnown      bool
@@ -543,29 +499,40 @@ type Model struct {
 	agentsAllCursor      int
 	skillsMemberships    map[string][]string // source → current group memberships (picker draft)
 
-	// agentsOpKey identifies the agents-all row (see agentsRowRunKey) with an
-	// op in flight, mirroring rowOpKey's tools-tab row-spinner substitution.
+	// Agents-all row (see agentsRowRunKey) with an op in flight, mirroring rowOpKey's tools-tab row-spinner substitution.
 	agentsOpKey string
 
-	// agents-all row delete confirm (two-step, tools-tab style, spans all three features)
+	// Two-step confirm, tools-tab style, spanning all three features.
 	agentsDeleteConfirm   bool
 	agentsDeleteUninstall bool // skills orphan rows uninstall from disk, not manifest delete
 	agentsDeleteFeature   agentsSection
 	agentsDeleteName      string
 	agentsDeleteOpKey     string
 
-	// agents-all row ignore/unignore confirm (two-step, mirrors the delete confirm above)
+	// Two-step confirm mirroring the tools tab's listConfirmSyncAll: it claims unmanaged skills into the manifest.
+	agentsSyncAllConfirm bool
+
+	// Owns input while open, which is what frees the uppercase batch keys: lowercase u/l stay the row-scoped resolutions underneath.
+	agentsDriftPromptOpen  bool
+	agentsDriftPromptLines []string
+
+	// Two-step confirm on the modal's batch keys: it rewrites every drifted file at once, so it cannot be cheaper than the row-scoped resolve below.
+	agentsBulkResolveConfirm    bool
+	agentsBulkResolveUseManaged bool
+
+	// Two-step confirm: 'u' keeps omni's side, 'l' keeps the local one.
+	agentsResolveConfirm  bool
+	agentsResolveUseLocal bool
+	agentsResolveFeature  agentsSection
+	agentsResolveSource   string
+	agentsResolveOpKey    string
+
 	agentsIgnoreConfirm bool
 	agentsIgnoreFeature agentsSection
 	agentsIgnoreName    string
 	agentsIgnoreOpKey   string
 
-	// plugin claim's offer to also claim its undeclared marketplace: armed by
-	// pluginNeedsMarketplaceMsg, confirmed with Confirm/y, cancelled with
-	// Back/any other key (see handlePluginMarketplaceOfferConfirmKeyMsg). Not
-	// a same-key press-again pattern like the delete/ignore confirms above,
-	// since this is a genuine yes/no decision surfaced after an async
-	// round-trip rather than a second press of the triggering key.
+	// Armed by pluginNeedsMarketplaceMsg, confirmed with Confirm/y — a genuine yes/no after an async round-trip, not a press-again confirm.
 	pluginMarketplaceOfferConfirm bool
 	pluginMarketplaceOfferAgentID string
 	pluginMarketplaceOfferPlugin  app.InstalledPlugin
@@ -581,13 +548,11 @@ type Model struct {
 	skillTypeIdx                  int // 0=all, 1=skills, 2=mcp, 3=plugin
 	skillAgentIdx                 int // 0=all, 1+=installed agent IDs derived from row.Agents
 
-	// per-package agents picker popup
 	skillAgentsPicker bool
 	skillAgentsSource string
 	skillAgentsRows   []app.SkillAgentRow
 	skillAgentsCursor int
 
-	// mcp tab
 	mcpRows          []app.McpServerRow
 	mcpUnmanaged     map[string][]app.InstalledMcpServer
 	mcpCursor        int
@@ -597,16 +562,12 @@ type Model struct {
 	mcpDeleteConfirm bool
 	mcpDeleteName    string
 
-	// mcpCursorAgentID disambiguates which per-agent rendered row is selected
-	// when mcpCursor's item (localIdx) expands into multiple agent rows —
-	// see agentsChipRowPosition/agentsChipMoveRow in agents_all.go.
+	// Disambiguates which per-agent rendered row is selected when mcpCursor's localIdx expands into multiple agent rows.
 	mcpCursorAgentID string
 
-	// mcp per-server agents picker popup (reuses skillAgentsRows/skillAgentsCursor)
 	mcpAgentsPicker bool
 	mcpAgentsRow    app.McpServerRow
 
-	// plugin tab
 	pluginRows          []app.PluginRow
 	pluginUnmanaged     map[string][]app.InstalledPlugin
 	pluginCursor        int
@@ -616,14 +577,11 @@ type Model struct {
 	pluginDeleteConfirm bool
 	pluginDeleteName    string
 
-	// pluginCursorAgentID mirrors mcpCursorAgentID for the plugin chip.
 	pluginCursorAgentID string
 
-	// plugin per-item agents picker popup (reuses skillAgentsRows/skillAgentsCursor)
 	pluginAgentsPicker bool
 	pluginAgentsRow    app.PluginRow
 
-	// plugin add-form popup
 	pluginFormOpen        bool
 	pluginFormField       int // 0=name,1=marketplace,2=agents
 	pluginFormName        textinput.Model
@@ -631,7 +589,6 @@ type Model struct {
 	pluginFormAgents      textinput.Model
 	pluginFormErr         error
 
-	// marketplace tab
 	marketplaceRows          []app.MarketplaceRow
 	marketplaceUnmanaged     map[string][]app.InstalledMarketplace
 	marketplaceCursor        int
@@ -641,10 +598,8 @@ type Model struct {
 	marketplaceDeleteConfirm bool
 	marketplaceDeleteName    string
 
-	// marketplaceCursorAgentID mirrors pluginCursorAgentID for the marketplace chip.
 	marketplaceCursorAgentID string
 
-	// mcp add-form popup
 	mcpFormOpen      bool
 	mcpFormField     int // 0=name,1=transport,2=command/url,3=env,4=env_literal
 	mcpFormTransport int // 0=stdio,1=http,2=sse; cycles with ←/→
@@ -655,32 +610,23 @@ type Model struct {
 	mcpFormEnvLit    textinput.Model
 	mcpFormErr       error
 
-	// skill search/find flow
 	skillsSearchActive bool
 	skillFindResults   []app.FindResult
 	skillFindCursor    int
 	skillAddRunning    bool
 
-	// danger zone (settings tab)
 	dangerConfirmRow int // settings row awaiting inline confirmation; -1 = none
 
 	width  int
 	height int
 
-	// palette holds all colours and pre-built lipgloss styles for the active
-	// terminal theme. Initialised to the dark default in New(); rebuilt on
-	// tea.BackgroundColorMsg via applyTheme. Each Model owns its own palette
-	// so parallel test instances do not share mutable state.
+	// Each Model owns its palette so parallel test instances do not share mutable state.
 	palette palette
 
-	// isDark is true when the terminal reports a dark background colour.
-	// Detected once at startup via tea.RequestBackgroundColor; defaults to
-	// true (our palette is dark-optimised) until the terminal responds.
+	// Defaults to true (the palette is dark-optimised) until the terminal answers tea.RequestBackgroundColor.
 	isDark bool
 
-	// focused tracks whether the terminal window has focus.
-	// When false the spinner tick chain is suspended to avoid burning CPU
-	// in the background. Defaults to true until a BlurMsg is received.
+	// When false the spinner tick chain is suspended to avoid burning CPU in the background.
 	focused bool
 }
 
@@ -688,14 +634,12 @@ type listConfirmation struct {
 	action   string
 	name     string
 	provider string
-	// pinnedProvider carries an explicit provider pin for clear-override; provider
-	// stays the declared tool provider so row keys and prompt matching keep working.
+	// Explicit provider pin for clear-override; provider stays the declared tool provider so row keys and prompt matching keep working.
 	pinnedProvider string
 	installed      bool
 	installedWith  string
 }
 
-// New creates the initial Model.
 func New(ctx context.Context, a *app.App) Model {
 	if ctx == nil {
 		ctx = context.Background()
@@ -773,6 +717,7 @@ func New(ctx context.Context, a *app.App) Model {
 		pluginFormAgents:      pfa,
 		mode:                  viewStatus,
 		commandCursor:         -1,
+		commandOrigin:         viewList,
 		loading:               true,
 		cursor:                -1, // nothing selected until the user navigates
 		cursorHidden:          true,
@@ -784,10 +729,13 @@ func New(ctx context.Context, a *app.App) Model {
 		dotsIgnoreIdx:         -1,
 		dotsVariantIdx:        -1,
 		dangerConfirmRow:      -1,
-		isDark:                true,             // assume dark until terminal replies
-		focused:               true,             // assume focused until a BlurMsg says otherwise
-		palette:               defaultPalette(), // dark default; rebuilt on BackgroundColorMsg
-		doctorRunning:         true,             // Init fires doctor; prevents double-run on status tab
+		// Async results can land before the first WindowSizeMsg; without a sane size those frames overrun the real terminal.
+		width:         defaultTerminalWidth,
+		height:        defaultTerminalHeight,
+		isDark:        true,             // assume dark until terminal replies
+		focused:       true,             // assume focused until a BlurMsg says otherwise
+		palette:       defaultPalette(), // dark default; rebuilt on BackgroundColorMsg
+		doctorRunning: true,             // Init fires doctor; prevents double-run on status tab
 	}
 }
 
@@ -807,6 +755,8 @@ func (m *Model) shutdown() {
 	m.clearDotsProgressState()
 	m.searching = false
 	m.scanningProviders = nil
+	m.outdatedProviders = nil
+	m.outdatedTotal = 0
 	m.providerScanToolCounts = nil
 	m.providerScanToolDone = nil
 	m.providerScanLabels = nil
@@ -815,7 +765,6 @@ func (m *Model) shutdown() {
 	m.upgradingKeys = make(map[string]bool)
 }
 
-// Init kicks off the initial data load.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
@@ -825,10 +774,7 @@ func (m Model) Init() tea.Cmd {
 	)
 }
 
-// loadTools fetches tools, settings, taps, groups, and hosts from the DB
-// cache without probing providers. Returns immediately so the list renders
-// on the first frame. A background doRefreshInstalled cmd updates install
-// status afterwards.
+// Reads the DB cache without probing providers so the list renders on the first frame; a background doRefreshInstalled updates install status.
 func loadTools(a *app.App, ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
 		defer profile.Start("tui.load_tools.total")()
@@ -921,7 +867,6 @@ func (m *Model) setSettings(settings app.Settings) {
 	m.dotsSyncAvailCached = app.DotsSyncAvailabilityInSettings(settings)
 }
 
-// toolKey returns the composite key used to identify a tool in maps.
 func toolKey(name, provider string) string {
 	return name + "\x00" + provider
 }
@@ -965,7 +910,6 @@ func toolMembershipKey(t *app.ToolView) string {
 	return toolKey(t.Name, t.Provider)
 }
 
-// buildAllGroupNames returns the local host group plus reusable group names.
 func buildAllGroupNames(groupNames []string) []string {
 	return app.AllGroupNamesForCurrentMachine(groupNames)
 }
@@ -975,9 +919,7 @@ func (m *Model) displaySection(t *app.ToolView) section {
 	return sectionFromToolView(classification.Section)
 }
 
-// rebuildDiscoveredKeys rebuilds the discoveredKeys map from the current
-// discoveredTools slice. Call this whenever discoveredTools is reassigned;
-// do NOT call it from applyFilter (which runs on every keystroke).
+// Call whenever discoveredTools is reassigned; do NOT call from applyFilter, which runs on every keystroke.
 func (m *Model) rebuildDiscoveredKeys() {
 	m.discoveredKeys = make(map[string]bool, len(m.discoveredTools))
 	for _, t := range m.discoveredTools {
@@ -985,9 +927,7 @@ func (m *Model) rebuildDiscoveredKeys() {
 	}
 }
 
-// setGroupFilterFromIdx syncs m.groupFilter from m.groupTabIdx using the given
-// allGroups slice ([current-host, "work", ...]). groupTabIdx 0 means "all" and
-// clears the filter; any other index selects the corresponding group name.
+// groupTabIdx 0 means "all" and clears the filter; any other index selects that group name in allGroups.
 func (m *Model) setGroupFilterFromIdx(allGroups []string) {
 	if m.groupTabIdx == 0 {
 		m.groupFilter = ""
@@ -1031,10 +971,7 @@ func (m *Model) applyFilter() {
 	m.sectionCounts = counts
 }
 
-// filterHostInventoryTools drops tools that belong to the provider-inventory
-// group (auto-discovered system packages), identified by the hostInventory map.
-// Membership in a regular host group is a first-class, user-visible assignment
-// and is NOT filtered here.
+// Membership in a regular host group is a first-class user-visible assignment and is deliberately NOT filtered here.
 func filterHostInventoryTools(tools []*app.ToolView, hostInventory map[string]bool) []*app.ToolView {
 	filtered := make([]*app.ToolView, 0, len(tools))
 	for _, tool := range tools {
@@ -1101,13 +1038,12 @@ func (m *Model) clampToolCursor() {
 	m.clampProviderCandidateCursor()
 }
 
-// sectionOf is context-free; prefer displaySection when model state is available.
+// Context-free; prefer displaySection when model state is available.
 func sectionOf(t *app.ToolView) section {
 	classification := app.ClassifyToolView(t, app.ToolClassificationContext{})
 	return sectionFromToolView(classification.Section)
 }
 
-// syncStatusOf returns the out-of-sync sub-category for a tool in sectionOutOfSync.
 func (m *Model) syncStatusOf(t *app.ToolView) syncStatus {
 	return syncStatusFromToolView(app.ToolSyncStatusForTool(t, toolClassificationContext(*m, t)))
 }
@@ -1173,7 +1109,6 @@ func (m Model) effectiveNodeManagerLabel() string {
 	return "pnpm"
 }
 
-// selectedTool returns the currently highlighted tool or nil.
 func (m *Model) selectedTool() *app.ToolView {
 	if len(m.visibleTools) == 0 || m.cursor < 0 || m.cursor >= len(m.visibleTools) {
 		return nil
@@ -1229,7 +1164,6 @@ func providerCandidateOptions(m Model, t *app.ToolView) []app.ToolInstallSpec {
 	return out
 }
 
-// countSection returns the number of visible tools in a given section.
 func (m *Model) countSection(s section) int {
 	n := 0
 	for _, t := range m.visibleTools {
@@ -1320,9 +1254,7 @@ func (s spinnerActivityState) startedSince(before spinnerActivityState) bool {
 		s.upgradingKeys > before.upgradingKeys
 }
 
-// spinnerActivityActive reports whether any async activity that drives the
-// shared spinner is in flight. Every tick-rescheduling and spinner-gating
-// site must use this state so new action flags cannot miss either lifecycle.
+// Every tick-rescheduling and spinner-gating site must use this so new action flags cannot miss either lifecycle.
 func (m Model) spinnerActivityActive() bool {
 	return m.spinnerActivityState() != (spinnerActivityState{})
 }

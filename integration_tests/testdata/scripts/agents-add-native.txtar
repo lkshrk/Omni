@@ -1,0 +1,42 @@
+# agents add persists structured selectors through the native service.
+env HOME=$WORK/home
+env XDG_DATA_HOME=$WORK/data
+
+exec omni --config settings.json agents add ./source@one
+stdout 'added .*/source'
+exec omni --config settings.json agents skills sync --dry-run
+stdout '^install .*/source skills one for targets codex$'
+
+exec omni --config settings.json agents add ./source@two
+stdout 'added .*/source'
+exec omni --config settings.json agents skills sync --dry-run
+stdout '^install .*/source skills one,two for targets codex$'
+
+exec omni --config settings.json agents add ./source
+stdout 'added .*/source'
+exec omni --config settings.json agents skills sync --dry-run
+stdout '^install .*/source all discovered skills for targets codex$'
+exists $WORK/home/.codex/skills/one/SKILL.md
+exists $WORK/home/.codex/skills/two/SKILL.md
+
+! exec omni --config settings.json agents add ./missing
+stderr 'local skill source ".*/missing" is not an accessible directory'
+
+-- settings.json --
+{"version":20,"settings":{"agents_use":["codex"]}}
+
+-- source/skills/one/SKILL.md --
+---
+name: one
+description: First selected skill.
+---
+
+one
+
+-- source/skills/two/SKILL.md --
+---
+name: two
+description: Second selected skill.
+---
+
+two

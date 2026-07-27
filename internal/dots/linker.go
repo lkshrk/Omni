@@ -8,9 +8,7 @@ import (
 	"path/filepath"
 )
 
-// resolveSymlinkTarget returns the absolute, clean path that a symlink at
-// linkPath points to. Stow creates relative symlinks, so we resolve them
-// against the directory containing the link.
+// Stow writes relative symlinks, so resolve against the directory containing the link.
 func resolveSymlinkTarget(linkPath, target string) string {
 	if filepath.IsAbs(target) {
 		return filepath.Clean(target)
@@ -18,18 +16,12 @@ func resolveSymlinkTarget(linkPath, target string) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(linkPath), target))
 }
 
-// StowRelativeSymlinkTarget returns the relative symlink text GNU Stow itself
-// would write for a link at linkPath pointing at targetPath, i.e. targetPath
-// expressed relative to linkPath's own directory.
+// StowRelativeSymlinkTarget — The exact relative text GNU Stow would write: targetPath relative to linkPath's own directory.
 func StowRelativeSymlinkTarget(linkPath, targetPath string) (string, error) {
 	return filepath.Rel(filepath.Dir(linkPath), targetPath)
 }
 
-// WriteStowShapedSymlink replaces (or creates) the symlink at linkPath with
-// one shaped exactly as GNU Stow would write it, so a subsequent stow -R does
-// not reject it as "not owned by stow". linkPath's existing entry, if any,
-// must already be a symlink; the caller is responsible for confirming it
-// resolves to targetPath before calling this.
+// WriteStowShapedSymlink — Shaped as stow writes them so stow -R accepts them; the caller must confirm the link resolves to targetPath.
 func WriteStowShapedSymlink(linkPath, targetPath string) error {
 	if err := ValidateHomeTargetPath(linkPath); err != nil {
 		return fmt.Errorf("refusing to write symlink %q: %w", linkPath, err)
@@ -54,16 +46,7 @@ func WriteStowShapedSymlink(linkPath, targetPath string) error {
 	return nil
 }
 
-// ─── unlink helpers ───────────────────────────────────────────────────────────
-
-// unlinkEntry removes managed symlinks for entry e and copies the repo files
-// to the target, restoring a clean local state.
-//
-// It handles two layouts:
-//  1. Stow directory-level: TargetPath is itself a symlink → SourcePath.
-//     The symlink is removed and the source tree is copied to TargetPath.
-//  2. File-level (legacy): TargetPath is a real directory; individual file
-//     symlinks inside it are checked and replaced with real copies.
+// Two layouts: TargetPath itself a stow directory symlink, or a real directory of per-file symlinks.
 func unlinkEntry(e ResolvedEntry, opts UnlinkOptions) ([]Op, error) {
 	if opts.RemoveLocal {
 		if _, err := backupAndRemoveUnlinkedTarget(e); err != nil {
@@ -72,17 +55,14 @@ func unlinkEntry(e ResolvedEntry, opts UnlinkOptions) ([]Op, error) {
 		return []Op{{Kind: OpUnlink, Entry: e.Name, Src: e.SourcePath, Dst: e.TargetPath}}, nil
 	}
 
-	// If the source doesn't exist in the repo, there's nothing to unlink.
 	srcInfo, err := os.Lstat(e.SourcePath)
 	if err != nil {
 		return nil, nil
 	}
 
-	// Check if TargetPath itself is a stow-managed directory symlink.
 	if tgtInfo, tgtErr := os.Lstat(e.TargetPath); tgtErr == nil && tgtInfo.Mode()&os.ModeSymlink != 0 {
 		existing, readErr := os.Readlink(e.TargetPath)
 		if readErr == nil && resolveSymlinkTarget(e.TargetPath, existing) == filepath.Clean(e.SourcePath) {
-			// Our stow-managed directory link → remove and copy source tree.
 			if _, err := backupAndRemoveManagedLink(e.TargetPath); err != nil {
 				return nil, fmt.Errorf("remove stow symlink %q: %w", e.TargetPath, err)
 			}
@@ -91,11 +71,9 @@ func unlinkEntry(e ResolvedEntry, opts UnlinkOptions) ([]Op, error) {
 			}
 			return []Op{{Kind: OpUnlink, Entry: e.Name, Src: e.SourcePath, Dst: e.TargetPath}}, nil
 		}
-		// Symlink points elsewhere — not ours; nothing to do.
 		return []Op{{Kind: OpUnlinkSkip, Entry: e.Name, Src: e.SourcePath, Dst: e.TargetPath}}, nil
 	}
 
-	// TargetPath is not a directory symlink. Fall back to file-level walk.
 	if !srcInfo.IsDir() {
 		op, err := unlinkFile(e.Name, "", e.SourcePath, e.TargetPath, opts)
 		if err != nil {
@@ -168,8 +146,7 @@ func backupAndRemoveUnlinkedTarget(e ResolvedEntry) (string, error) {
 	if sourceErr == nil && sourceInfo.IsDir() && sourceInfo.Mode()&os.ModeSymlink == 0 && info.IsDir() {
 		hasLinks, walkErr := targetDirectoryHasManagedLinks(e)
 		if walkErr != nil {
-			// A walk error means we cannot confirm the directory is safe to
-			// clobber. Fail closed to avoid destroying managed symlinks.
+			// Fail closed: a walk error means we cannot confirm the directory is safe to clobber.
 			return "", fmt.Errorf("scan managed links in %q: %w", e.TargetPath, walkErr)
 		}
 		if hasLinks {
@@ -257,9 +234,7 @@ func backupManagedLinkContent(path string) (string, error) {
 	return backupPath, err
 }
 
-// unlinkFile handles one src→dst pair for the unlink operation.
-// Managed symlinks are replaced by a real file copy from src.
-// Non-managed real files are handled according to opts.ConflictOverwrite.
+// Managed symlinks become real copies of src; non-managed real files follow opts.ConflictOverwrite.
 func unlinkFile(entryName, rel, src, dst string, opts UnlinkOptions) (Op, error) {
 	fileLabel := rel
 	if fileLabel == "" {
@@ -268,7 +243,6 @@ func unlinkFile(entryName, rel, src, dst string, opts UnlinkOptions) (Op, error)
 
 	info, err := os.Lstat(dst)
 	if os.IsNotExist(err) {
-		// Target never existed — nothing to unlink.
 		return Op{Kind: OpUnlinkSkip, Entry: entryName, File: fileLabel, Src: src, Dst: dst}, nil
 	}
 	if err != nil {
@@ -278,10 +252,8 @@ func unlinkFile(entryName, rel, src, dst string, opts UnlinkOptions) (Op, error)
 	if info.Mode()&os.ModeSymlink != 0 {
 		existing, readErr := os.Readlink(dst)
 		if readErr != nil || resolveSymlinkTarget(dst, existing) != filepath.Clean(src) {
-			// Wrong symlink — not ours; skip.
 			return Op{Kind: OpUnlinkSkip, Entry: entryName, File: fileLabel, Src: src, Dst: dst}, nil
 		}
-		// Our managed symlink — replace with a real copy.
 		if _, err := backupAndRemoveManagedLink(dst); err != nil {
 			return Op{}, fmt.Errorf("remove symlink %q: %w", dst, err)
 		}
@@ -291,7 +263,6 @@ func unlinkFile(entryName, rel, src, dst string, opts UnlinkOptions) (Op, error)
 		return Op{Kind: OpUnlink, Entry: entryName, File: fileLabel, Src: src, Dst: dst}, nil
 	}
 
-	// Real file/dir at dst — conflict.
 	if opts.KeepExistingLocal {
 		return Op{Kind: OpUnlinkSkip, Entry: entryName, File: fileLabel, Src: src, Dst: dst}, nil
 	}
@@ -325,7 +296,6 @@ func unlinkFile(entryName, rel, src, dst string, opts UnlinkOptions) (Op, error)
 	}, nil
 }
 
-// copyFile copies src to dst, preserving the source file mode.
 func copyFile(src, dst string) error {
 	srcInfo, err := os.Lstat(src)
 	if err != nil {
@@ -379,7 +349,6 @@ func stagedCopyFile(src, dst string) (string, error) {
 	return tmpPath, nil
 }
 
-// copyDir recursively copies the directory tree at src to dst.
 func copyDir(src, dst string, ignores []string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

@@ -20,23 +20,17 @@ import (
 )
 
 func TestRecordPrivilegeError_NilDB(t *testing.T) {
-	t.Parallel(
-	// App with no DB initialised — readDB() returns nil.
-	// recordPrivilegeError must not panic.
-	)
+	t.Parallel()
 
 	a := &App{}
 	err := errors.New("sudo: a password is required")
 	a.recordPrivilegeError(context.Background(), "vim", "apt", "vim", err)
-	// If we get here without panic, the nil-guard works.
 }
 
 func TestRecordPrivilegeError_NonPrivilegeError(t *testing.T) {
-	t.Parallel(
-	// Non-privilege errors should be silently ignored (no DB access).
-	)
+	t.Parallel()
 
-	a := &App{} // nil DB — would panic if it tried to access DB
+	a := &App{}
 	err := errors.New("network timeout")
 	a.recordPrivilegeError(context.Background(), "vim", "apt", "vim", err)
 }

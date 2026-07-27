@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/lkshrk/omni/internal/agent"
 	"github.com/lkshrk/omni/internal/config"
 )
 
-func (a *App) doctorAgents(result *DoctorResult, cfg *config.RootConfig) {
+func (a *App) doctorAgents(ctx context.Context, result *DoctorResult, cfg *config.RootConfig) {
 	if !a.AgentsEnabled(cfg) {
 		result.addCheck("agents", "Agent features", DoctorStatusOK, "disabled (agents_disabled)")
 		return
@@ -28,51 +30,160 @@ func (a *App) doctorAgents(result *DoctorResult, cfg *config.RootConfig) {
 		summary = append(summary, name+" "+state)
 	}
 
-	g, healthy := a.doctorAgentsSkills(cfg)
+	g, healthy := a.doctorAgentsSkills(ctx, cfg)
 	appendGroup("skills", g, healthy)
-	g, healthy = a.doctorAgentsMcp(cfg)
+	g, healthy = a.doctorAgentsMcp(ctx, cfg)
 	appendGroup("mcp", g, healthy)
-	g, healthy = a.doctorAgentsPlugins(cfg)
+	g, healthy = a.doctorAgentsPlugins(ctx, cfg)
 	appendGroup("plugins", g, healthy)
 
 	check.Message = strings.Join(summary, ", ")
 	result.Checks = append(result.Checks, check)
 }
 
-func (a *App) doctorAgentsSkills(cfg *config.RootConfig) (DoctorDetailGroup, bool) {
+func (a *App) doctorAgentsSkills(ctx context.Context, cfg *config.RootConfig) (DoctorDetailGroup, bool) {
 	g := DoctorDetailGroup{Header: "skills"}
 	if !a.SkillsEnabled(cfg) {
 		g.Items = append(g.Items, "disabled (skills_disabled)")
 		return g, true
 	}
 	healthy := true
-	runner := skillRunner(nodeManager(cfg))
-	if _, err := lookPath(runner); err != nil {
-		g.Items = append(g.Items, fmt.Sprintf("runner %s: not found on PATH", runner))
+	needsGit := false
+	for _, pkg := range cfg.Agents.Packages {
+		if pkg.Ref != "" || agent.SourceRequiresGit(pkg.Source) {
+			needsGit = true
+			break
+		}
+	}
+	if !needsGit {
+		g.Items = append(g.Items, "git: not required")
+	} else if _, err := lookPath("git"); err != nil {
+		g.Items = append(g.Items, "git: not found on PATH")
 		healthy = false
 	} else {
-		g.Items = append(g.Items, fmt.Sprintf("runner %s: ok", runner))
+		g.Items = append(g.Items, "git: ok")
 	}
-	rows, err := a.SkillPackageRows(context.Background())
+	rows, err := a.SkillPackageRows(ctx)
 	if err != nil {
 		g.Items = append(g.Items, fmt.Sprintf("packages: %v", err))
 		return g, false
 	}
-	installed := 0
+	counts := classifySkillRows(rows)
+	g.Items = append(g.Items, fmt.Sprintf(
+		"packages: %d in manifest, %d installed, %d missing", len(rows), counts.Installed, len(counts.Missing)))
+	if len(counts.Missing) > 0 {
+		healthy = false
+	}
 	for _, r := range rows {
-		if r.Installed {
-			installed++
+		if r.Error != "" {
+			g.Items = append(g.Items, fmt.Sprintf("packages: %s: %s", r.Source, r.Error))
+			healthy = false
+			continue
+		}
+		for _, item := range skillDriftItems(r) {
+			g.Items = append(g.Items, item)
+			healthy = false
+		}
+		if w := r.UnknownAgentsWarning(); w != "" {
+			g.Items = append(g.Items, w)
+			healthy = false
 		}
 	}
-	missing := len(rows) - installed
-	g.Items = append(g.Items, fmt.Sprintf("packages: %d in manifest, %d installed, %d missing", len(rows), installed, missing))
-	if missing > 0 {
+	// An available update is not breakage, so it reports without flipping the group.
+	if item := skillOutdatedItem(rows); item != "" {
+		g.Items = append(g.Items, item)
+	}
+	// An unadopted legacy install is intent not yet expressed, not breakage.
+	if unmanaged, err := a.UnmanagedSkillPackages(ctx); err == nil && len(unmanaged) > 0 {
+		g.Items = append(g.Items, fmt.Sprintf(
+			"%d legacy skill package(s) not in manifest (\"omni agents skills import\" claims them)", len(unmanaged)))
+	}
+	// A hand-managed skill is somebody else's, not breakage.
+	if foreign, err := a.ForeignSkillEntries(); err == nil && len(foreign) > 0 {
+		g.Items = append(g.Items, foreignSkillEntriesItem(foreign))
+	}
+	report, err := a.skillStoreFix(ctx, cfg, true)
+	for _, item := range skillStoreItems(report) {
+		g.Items = append(g.Items, item)
+		healthy = false
+	}
+	if err != nil {
+		g.Items = append(g.Items, "store: "+err.Error())
 		healthy = false
 	}
 	return g, healthy
 }
 
-func (a *App) doctorAgentsMcp(cfg *config.RootConfig) (DoctorDetailGroup, bool) {
+const foreignSkillExamples = 3
+
+func foreignSkillEntriesItem(paths []string) string {
+	examples := paths
+	suffix := ""
+	if len(examples) > foreignSkillExamples {
+		examples = examples[:foreignSkillExamples]
+		suffix = ", …"
+	}
+	return fmt.Sprintf("%d foreign skill entr(ies) not managed by omni (other tools or manual installs): %s%s",
+		len(paths), strings.Join(examples, ", "), suffix)
+}
+
+// Each item carries its fix, so the remedy travels with the finding.
+func skillStoreItems(report SkillStoreFixReport) []string {
+	var items []string
+	if n := len(report.Debris); n > 0 {
+		items = append(items, fmt.Sprintf(
+			"store: %d leftover artifact(s) from an interrupted operation; \"omni doctor --fix\" removes them", n))
+	}
+	if n := len(report.DanglingLinks); n > 0 {
+		items = append(items, fmt.Sprintf(
+			"store: %d skill link(s) point at a removed package; \"omni doctor --fix\" removes them", n))
+	}
+	if n := len(report.OrphanedPackages); n > 0 {
+		items = append(items, fmt.Sprintf(
+			"store: %d installed package(s) no manifest entry references; \"omni doctor --fix\" removes them", n))
+	}
+	if n := len(report.RebuiltMetadata); n > 0 {
+		items = append(items, fmt.Sprintf(
+			"store: %d package(s) missing local install metadata; \"omni doctor --fix\" rebuilds it", n))
+	}
+	return items
+}
+
+// An unknown verdict is not a finding.
+func skillOutdatedItem(rows []SkillPackageRow) string {
+	var names []string
+	for _, r := range rows {
+		if r.Outdated == SkillOutdatedBehind {
+			names = append(names, r.Source)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	return fmt.Sprintf("%d package(s) behind their source (\"omni agents skills upgrade\" refreshes them): %s",
+		len(names), strings.Join(names, ", "))
+}
+
+func skillDriftItems(r SkillPackageRow) []string {
+	agents := make([]string, 0, len(r.PerAgentStatus))
+	for id, status := range r.PerAgentStatus {
+		if status == SkillStatusDrifted {
+			agents = append(agents, id)
+		}
+	}
+	sort.Strings(agents)
+	items := make([]string, 0, len(agents))
+	for _, id := range agents {
+		items = append(items, fmt.Sprintf(
+			"%s: drifted on %s; \"omni agents skills sync\" converges an identical copy, "+
+				"differing content needs %s or \"omni agents skills import\"",
+			r.Source, id, skillDriftRemedy))
+	}
+	return items
+}
+
+func (a *App) doctorAgentsMcp(ctx context.Context, cfg *config.RootConfig) (DoctorDetailGroup, bool) {
 	g := DoctorDetailGroup{Header: "mcp servers"}
 	if !a.McpEnabled(cfg) {
 		g.Items = append(g.Items, "disabled (mcp_disabled)")
@@ -80,10 +191,24 @@ func (a *App) doctorAgentsMcp(cfg *config.RootConfig) (DoctorDetailGroup, bool) 
 	}
 	healthy := doctorAdapterItems(&g, adapterAvailability(a.mcpAdapters()))
 	g.Items = append(g.Items, fmt.Sprintf("servers: %d in manifest", len(cfg.Agents.McpServers)))
+	rows, unmanaged, err := a.McpServerRows(ctx)
+	if err != nil {
+		g.Items = append(g.Items, fmt.Sprintf("servers: %v", err))
+		return g, false
+	}
+	for _, item := range mcpDriftItems(rows) {
+		g.Items = append(g.Items, item)
+		healthy = false
+	}
+	// A server another tool registered is intent not yet expressed, not breakage.
+	if item := unmanagedCountItem(
+		countUnmanaged(unmanaged), "mcp server(s) not in manifest", "omni agents mcp import"); item != "" {
+		g.Items = append(g.Items, item)
+	}
 	return g, healthy
 }
 
-func (a *App) doctorAgentsPlugins(cfg *config.RootConfig) (DoctorDetailGroup, bool) {
+func (a *App) doctorAgentsPlugins(ctx context.Context, cfg *config.RootConfig) (DoctorDetailGroup, bool) {
 	g := DoctorDetailGroup{Header: "plugins"}
 	if !a.PluginsEnabled(cfg) {
 		g.Items = append(g.Items, "disabled (plugins_disabled)")
@@ -91,10 +216,92 @@ func (a *App) doctorAgentsPlugins(cfg *config.RootConfig) (DoctorDetailGroup, bo
 	}
 	healthy := doctorAdapterItems(&g, adapterAvailability(a.pluginAdapters()))
 	g.Items = append(g.Items, fmt.Sprintf("plugins: %d in manifest, marketplaces: %d", len(cfg.Agents.Plugins), len(cfg.Agents.Marketplaces)))
+	rows, unmanaged, err := a.PluginRows(ctx)
+	if err != nil {
+		g.Items = append(g.Items, fmt.Sprintf("plugins: %v", err))
+		return g, false
+	}
+	for _, item := range pluginDriftItems(rows) {
+		g.Items = append(g.Items, item)
+		healthy = false
+	}
+	// An available update is not breakage, so it reports without flipping the group.
+	if item := pluginOutdatedItem(rows); item != "" {
+		g.Items = append(g.Items, item)
+	}
+	if item := unmanagedCountItem(
+		countUnmanaged(unmanaged), "plugin(s) not in manifest", "omni agents plugins import"); item != "" {
+		g.Items = append(g.Items, item)
+	}
 	if _, err := lookPath("claude"); err == nil {
 		g.Items = append(g.Items, doctorClaudeShaSourceItem())
 	}
 	return g, healthy
+}
+
+func countUnmanaged[T any](byAgent map[string][]T) int {
+	total := 0
+	for _, entries := range byAgent {
+		total += len(entries)
+	}
+	return total
+}
+
+func unmanagedCountItem(n int, label, verb string) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d %s (%q claims them)", n, label, verb)
+}
+
+func mcpDriftItems(rows []McpServerRow) []string {
+	var items []string
+	for _, r := range rows {
+		agents := make([]string, 0, len(r.DriftFields))
+		for id := range r.DriftFields {
+			agents = append(agents, id)
+		}
+		sort.Strings(agents)
+		for _, id := range agents {
+			items = append(items, fmt.Sprintf(
+				"%s: drifted on %s (%s differ from the manifest); resolve with %s",
+				r.Name, id, strings.Join(r.DriftFields[id], ", "), mcpDriftRemedy))
+		}
+	}
+	return items
+}
+
+func pluginDriftItems(rows []PluginRow) []string {
+	var items []string
+	for _, r := range rows {
+		agents := make([]string, 0, len(r.DriftMarketplaces))
+		for id := range r.DriftMarketplaces {
+			agents = append(agents, id)
+		}
+		sort.Strings(agents)
+		for _, id := range agents {
+			items = append(items, fmt.Sprintf(
+				"%s: drifted on %s (installed from %s, manifest declares %s); resolve with %s",
+				r.Name, id, r.DriftMarketplaces[id], r.Marketplace, pluginDriftRemedy))
+		}
+	}
+	return items
+}
+
+func pluginOutdatedItem(rows []PluginRow) string {
+	var names []string
+	for _, r := range rows {
+		if !r.Drifted && r.Outdated() {
+			names = append(names, r.Name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	// Plugin updates have no CLI verb yet, so the hint names the Agents tab rather than a command that does not exist.
+	return fmt.Sprintf("%d plugin(s) behind their marketplace (update them from the Agents tab): %s",
+		len(names), strings.Join(names, ", "))
 }
 
 func doctorClaudeShaSourceItem() string {

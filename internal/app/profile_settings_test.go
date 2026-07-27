@@ -15,8 +15,6 @@ import (
 	systemprovider "github.com/lkshrk/omni/internal/provider/system"
 )
 
-// ─── HostGroups ───────────────────────────────────────────────────────────────
-
 func TestHostGroups_HostWithAssignedGroup(t *testing.T) {
 	t.Parallel()
 	a, cfgPath := newImportApp(t)
@@ -121,19 +119,15 @@ func groupNamesForTest(groups []*config.GroupConfig) []string {
 	return names
 }
 
-// ─── SaveDisabledProviders ────────────────────────────────────────────────────
-
 func TestSaveDisabledProviders_PersistsList(t *testing.T) {
 	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
-	// Concrete names persist as-is.
 	want := []string{"brew", "npm"}
 	if err := a.SaveDisabledProviders(context.Background(), want); err != nil {
 		t.Fatalf("SaveDisabledProviders: %v", err)
 	}
 
-	// Reload config and verify.
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -174,9 +168,6 @@ func TestSetupProviderOptionsFromManagers(t *testing.T) {
 }
 
 func TestSetupProviderOptionsUsesResolvedProvidersAndAvailableManagers(t *testing.T) {
-	// augmentedEnv prepends $NVM_BIN, ~/.volta/bin, ~/.bun/bin, and nvm dirs
-	// to PATH, so stubbing PATH alone still leaks the developer machine's
-	// managers (e.g. pnpm) into probeAll. Isolate every discovery source.
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("NVM_DIR", "")
 	t.Setenv("NVM_BIN", "")
@@ -231,7 +222,6 @@ func TestApplySettingsChange_DraftSemantics(t *testing.T) {
 		t.Fatal("auto_import should toggle on")
 	}
 
-	// provider_priority is the single source of truth; node/python managers derive from it.
 	got, _, err = a.ApplySettingsChange(context.Background(), got, app.SetSettingValue("provider_priority", "brew,pnpm,npm,uv,pip,bogus"))
 	if err != nil {
 		t.Fatalf("ApplySettingsChange provider_priority: %v", err)
@@ -246,7 +236,6 @@ func TestApplySettingsChange_DraftSemantics(t *testing.T) {
 		t.Fatalf("derived python manager = %q, want uv", manager)
 	}
 
-	// The legacy per-ecosystem setters are no longer settable.
 	if _, _, err := a.ApplySettingsChange(context.Background(), got, app.SetSettingValue("node.manager", "bun")); err == nil {
 		t.Fatal("node.manager should no longer be settable")
 	}
@@ -274,11 +263,9 @@ func TestApplySettingsChange_SetProviderLayout_SetsOrderAndDisabled(t *testing.T
 	if want := "pnpm,bun,npm,uv,pip,brew"; strings.Join(got.ProviderPriority, ",") != want {
 		t.Errorf("provider_priority = %v, want %s", got.ProviderPriority, want)
 	}
-	// "bogus" filtered out; valid concretes kept in order.
 	if want := "bun,uv"; strings.Join(got.DisabledProviders, ",") != want {
 		t.Errorf("disabled = %v, want %s", got.DisabledProviders, want)
 	}
-	// pnpm leads node order and is enabled → node manager pnpm; uv disabled → python pip3.
 	if m := app.EffectiveEcosystemManager(got, provider.EcosystemNode); m != "pnpm" {
 		t.Errorf("node manager = %q, want pnpm", m)
 	}
@@ -536,7 +523,6 @@ func TestSaveSettingsChange_PersistsHostAndGlobalSettings(t *testing.T) {
 	if strings.Join(host.ProviderPriority, ",") != "bun,npm,uv,pip,brew" {
 		t.Fatalf("host provider_priority = %v, want [bun npm uv pip brew]", host.ProviderPriority)
 	}
-	// node manager derived from priority order (bun leads node).
 	if manager := app.EffectiveEcosystemManager(host, provider.EcosystemNode); manager != "bun" {
 		t.Fatalf("host node manager = %q, want bun (derived)", manager)
 	}
@@ -600,7 +586,6 @@ func TestSaveDisabledProviders_SecondCallOverwrites(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	got := cfg.HostSettings[testShortHostname()].DisabledProviders
-	// python family is expanded to its concrete members on write.
 	if want := "uv,pip"; strings.Join(got, ",") != want {
 		t.Errorf("DisabledProviders = %v after second call, want [uv pip]", got)
 	}
@@ -610,7 +595,6 @@ func TestSaveDisabledProviders_EmptyList(t *testing.T) {
 	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
-	// Start with something, then clear it.
 	if err := a.SaveDisabledProviders(context.Background(), []string{"system"}); err != nil {
 		t.Fatalf("first SaveDisabledProviders: %v", err)
 	}
@@ -642,7 +626,6 @@ func TestSaveDisabledProviders_EmptyList(t *testing.T) {
 func TestSaveDisabledProviders_ExpandsFamilyAndAcceptsConcrete(t *testing.T) {
 	t.Parallel()
 	a, cfgPath := newImportApp(t)
-	// A family name is expanded to its concrete members.
 	if err := a.SaveDisabledProviders(context.Background(), []string{provider.EcosystemNode}); err != nil {
 		t.Fatalf("SaveDisabledProviders(node): %v", err)
 	}
@@ -650,7 +633,6 @@ func TestSaveDisabledProviders_ExpandsFamilyAndAcceptsConcrete(t *testing.T) {
 	if got := cfg.HostSettings[testShortHostname()].DisabledProviders; strings.Join(got, ",") != "bun,pnpm,npm" {
 		t.Fatalf("disabled = %v, want [bun pnpm npm]", got)
 	}
-	// A concrete provider is accepted directly.
 	if err := a.SaveDisabledProviders(context.Background(), []string{"brew"}); err != nil {
 		t.Fatalf("SaveDisabledProviders(brew): %v", err)
 	}
@@ -658,13 +640,10 @@ func TestSaveDisabledProviders_ExpandsFamilyAndAcceptsConcrete(t *testing.T) {
 	if got := cfg.HostSettings[testShortHostname()].DisabledProviders; len(got) != 1 || got[0] != "brew" {
 		t.Fatalf("disabled = %v, want [brew]", got)
 	}
-	// An unknown name is rejected.
 	if err := a.SaveDisabledProviders(context.Background(), []string{"bogus-pm"}); err == nil {
 		t.Fatal("SaveDisabledProviders(bogus-pm) succeeded, want validation error")
 	}
 }
-
-// ─── SaveDotsDisabled ─────────────────────────────────────────────────────────
 
 func TestSaveDotsDisabled_True(t *testing.T) {
 	t.Parallel()
@@ -687,7 +666,6 @@ func TestSaveDotsDisabled_False(t *testing.T) {
 	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
-	// Set to true first, then explicitly set to false.
 	if err := a.SaveDotsDisabled(context.Background(), true); err != nil {
 		t.Fatalf("SaveDotsDisabled(true): %v", err)
 	}
@@ -817,15 +795,12 @@ func TestEnableDotsForHost_NoRepoClearsDisabled(t *testing.T) {
 	}
 }
 
-// ─── Effective managers ──────────────────────────────────────────────────────
-
 func TestAllAvailableManagers_SupersetOfEffective(t *testing.T) {
 	t.Parallel()
 	a, _ := newImportApp(t)
 	pyBin, nodeBin := a.EffectiveManagers()
 	pyBins, nodeBins := a.AllAvailableManagers()
 
-	// Every binary that EffectiveManagers returns must also appear in AllAvailableManagers.
 	if pyBin != "" {
 		found := false
 		for _, b := range pyBins {
@@ -902,7 +877,6 @@ func TestSetSetting_PersistsParsedValues(t *testing.T) {
 	if got := strings.Join(hostSettings.ProviderPriority, ","); got != "pnpm,npm,uv,pip,brew" {
 		t.Fatalf("provider_priority = %q, want pnpm,npm,uv,pip,brew", got)
 	}
-	// managers derived from priority order.
 	if got := app.EffectiveEcosystemManager(hostSettings, provider.EcosystemNode); got != "pnpm" {
 		t.Fatalf("node manager = %q, want pnpm (derived)", got)
 	}
@@ -952,7 +926,6 @@ func TestEnableDisableProvider_ValidatesAndPersists(t *testing.T) {
 	if len(enabled) != 0 {
 		t.Fatalf("enabled list = %v, want none disabled", enabled)
 	}
-	// Concrete providers are disablable under the provider-priority model.
 	concreteDisabled, err := a.DisableProvider(context.Background(), "brew")
 	if err != nil {
 		t.Fatalf("DisableProvider(brew): %v", err)
@@ -1001,10 +974,6 @@ func TestEffectiveManagers_UsesActiveNVMBin(t *testing.T) {
 	}
 }
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
-// shortHostnameForTest mirrors the app-internal shortHostname logic so tests
-// can derive the expected key without importing unexported symbols.
 func shortHostnameForTest(hostname string) string {
 	hostname = strings.ToLower(hostname)
 	if idx := strings.IndexByte(hostname, '.'); idx != -1 {

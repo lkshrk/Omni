@@ -41,7 +41,7 @@ func (s *importStubMcpAdapter) Add(_ context.Context, srv config.McpServer) erro
 }
 func (s *importStubMcpAdapter) Remove(_ context.Context, _ string) error { return nil }
 
-func newImportTestApp(t *testing.T, adapters []app.McpAdapter) *app.App {
+func newImportTestApp(t *testing.T, adapters []app.McpAdapter, opts ...func(*app.App)) *app.App {
 	t.Helper()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
@@ -49,7 +49,7 @@ func newImportTestApp(t *testing.T, adapters []app.McpAdapter) *app.App {
 	if err := config.Save(cfgPath, &root); err != nil {
 		t.Fatal(err)
 	}
-	a := app.New(cfgPath, app.WithMcpAdapters(adapters))
+	a := app.New(cfgPath, append([]func(*app.App){app.WithMcpAdapters(adapters)}, opts...)...)
 	if err := a.InitTestMode(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -100,10 +100,7 @@ func TestAgentsMcpImport_WithNameAdopts(t *testing.T) {
 	if !bytes.Contains([]byte(out), []byte("imported hand-added")) {
 		t.Fatalf("expected confirmation, got: %s", out)
 	}
-	// AddMcpServer now skips adapter.Add when List already reports the name
-	// present (the stub's listed field, above) — re-adding an
-	// already-installed server is not a safe assumption for the real
-	// claude/codex CLIs, so import must not call Add again here.
+	// Re-adding an already-listed server is not safe against the real claude/codex CLIs, so import must not call Add again.
 	if len(stub.addedServers) != 0 {
 		t.Fatalf("expected adapter Add not to be called for an already-installed hand-added, got %v", stub.addedServers)
 	}
@@ -161,5 +158,16 @@ func TestAgentsMcpImport_ConflictingHeadersErrors(t *testing.T) {
 	_, err := runAgentsMcpImport(t, a, "shared")
 	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("conflicting configuration")) {
 		t.Fatalf("error = %v, want conflicting configuration", err)
+	}
+}
+
+func TestAgentsFindCmd_OwnerFlagRegistered(t *testing.T) {
+	cmd := newAgentsFindCmd(&rootState{})
+	flag := cmd.Flags().Lookup("owner")
+	if flag == nil {
+		t.Fatal("--owner flag not registered on agents find")
+	}
+	if flag.Value.Type() != "string" {
+		t.Errorf("--owner type = %s, want string", flag.Value.Type())
 	}
 }

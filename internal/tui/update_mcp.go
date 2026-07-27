@@ -12,11 +12,7 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-// combineMcpErrors folds a top-level error with per-adapter errors so callers that
-// only track a single err field (as the mcp done-msg types do today) still surface
-// adapter failures instead of silently dropping them.
-// skippedUnavailableErr turns targeted-but-unavailable adapter skips into a
-// visible error on explicit user actions; bulk/adopt flows keep them silent.
+// Turns targeted-but-unavailable adapter skips into a visible error on explicit user actions; bulk/adopt flows keep them silent.
 func skippedUnavailableErr(err error, skipped []string) error {
 	if err != nil || len(skipped) == 0 {
 		return err
@@ -84,7 +80,6 @@ func (m *Model) doRemoveMcp(name string) tea.Cmd {
 	}
 }
 
-// doAddMcp registers a new server built from the add-server form.
 func (m *Model) doAddMcp(s app.McpServer) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -93,15 +88,7 @@ func (m *Model) doAddMcp(s app.McpServer) tea.Cmd {
 	}
 }
 
-// mcpUnmanagedAgentsFor returns every agent ID whose unmanaged map has an
-// entry named name, unioned with clickedAgentID, sorted for determinism.
-// Claiming one row of an unmanaged server that is installed under several
-// agents must declare all of them in the manifest's Agents field — declaring
-// only the clicked row's agent would make the other agents' installs
-// unmanaged-by-name-no-longer-true yet un-targeted, so they'd vanish from
-// every agents-tab view (see mcp_rows.go's unmanaged detection and
-// agents_all.go's skillExpandAgents, both of which key off Agents/manifest
-// presence, not actual install state).
+// Claiming one row of a server installed under several agents must declare all of them, or the others become neither unmanaged nor targeted and vanish from every agents-tab view.
 func mcpUnmanagedAgentsFor(unmanaged map[string][]app.InstalledMcpServer, name, clickedAgentID string) []string {
 	set := map[string]struct{}{clickedAgentID: {}}
 	for agentID, srvs := range unmanaged {
@@ -120,11 +107,7 @@ func mcpUnmanagedAgentsFor(unmanaged map[string][]app.InstalledMcpServer, name, 
 	return ids
 }
 
-// mcpUnmanagedConflict reports whether name is unmanaged under more than one
-// agent with a differing transport/command/URL, mirroring the CLI's
-// importMcpServerByName conflict guard in internal/cli/agents.go so the TUI
-// claim path refuses the same ambiguous case instead of silently picking one
-// agent's configuration to write to the manifest.
+// Mirrors the CLI's importMcpServerByName conflict guard so the TUI refuses the same ambiguous case instead of silently picking one agent's configuration.
 func mcpUnmanagedConflict(unmanaged map[string][]app.InstalledMcpServer, name string, first app.InstalledMcpServer) bool {
 	for _, srvs := range unmanaged {
 		for _, s := range srvs {
@@ -139,14 +122,7 @@ func mcpUnmanagedConflict(unmanaged map[string][]app.InstalledMcpServer, name st
 	return false
 }
 
-// doImportMcpServerWithGroup adopts one unmanaged server then assigns it to
-// group in one command, mirroring doAdoptSkillPackageWithGroup. Unlike
-// skills, SetMcpGroups assumes the target group already exists (it never
-// creates groups), matching the existing mcp group-membership picker's
-// behavior — the group-assignment step here does not create new groups.
-// Agents declares every agent unmanaged has this server under (not just
-// agentID) so claiming from one agent's row does not orphan the same server
-// installed under other agents; see mcpUnmanagedAgentsFor.
+// SetMcpGroups assumes the target group already exists; Agents declares every agent the server is unmanaged under so claiming from one row does not orphan the others (see mcpUnmanagedAgentsFor).
 func (m *Model) doImportMcpServerWithGroup(agentID string, srv app.InstalledMcpServer, group string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	unmanaged := m.mcpUnmanaged
@@ -175,9 +151,7 @@ func (m *Model) doImportMcpServerWithGroup(agentID string, srv app.InstalledMcpS
 	}
 }
 
-// doSetMcpAgents re-targets row's Agents via SetMcpServerAgents, which diffs against
-// the manifest's current targeting to add newly-selected adapters and remove
-// deselected ones (unlike a blanket AddMcpServer re-upsert, which never removes).
+// SetMcpServerAgents diffs against current targeting so deselected adapters are removed; a blanket AddMcpServer re-upsert never removes.
 func (m *Model) doSetMcpAgents(row app.McpServerRow, ids []string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -186,9 +160,7 @@ func (m *Model) doSetMcpAgents(row app.McpServerRow, ids []string) tea.Cmd {
 	}
 }
 
-// doInstallMcpServer re-installs a manifest server on one targeted-but-missing
-// agent via SetMcpServerAgents, which is idempotent for adapters that are
-// already correctly targeted and installs on the ones that are not.
+// SetMcpServerAgents is idempotent for correctly-targeted adapters and installs on the ones that are not.
 func (m *Model) doInstallMcpServer(name, agentID string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -210,8 +182,6 @@ func (m *Model) doInstallMcpServer(name, agentID string) tea.Cmd {
 
 type mcpGroupsSavedMsg struct{ err error }
 
-// doSetMcpGroupMemberships persists group membership for an mcp server via
-// App.SetMcpGroups, mirroring doSetSkillGroupMemberships's cmd shape.
 func (m *Model) doSetMcpGroupMemberships(name string, groups []string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -229,8 +199,7 @@ func contains(vals []string, v string) bool {
 	return false
 }
 
-// mcpUnmanagedEntry is one flattened row of an unmanaged server, ordered
-// deterministically (by agent ID then server name) for cursor indexing.
+// Ordered deterministically (by agent ID then server name) for cursor indexing.
 type mcpUnmanagedEntry struct {
 	agentID string
 	srv     app.InstalledMcpServer
@@ -253,14 +222,10 @@ func mcpUnmanagedFlat(unmanaged map[string][]app.InstalledMcpServer) []mcpUnmana
 	return out
 }
 
-// mcpTotalRows returns the count of cursor positions across managed and
-// unmanaged sections combined.
 func mcpTotalRows(m Model) int {
 	return len(m.mcpRows) + len(mcpUnmanagedFlat(m.mcpUnmanaged))
 }
 
-// mcpHighlightedUnmanaged returns the unmanaged server (and the agent it was
-// found on) at the current cursor position, if the cursor is in that section.
 func mcpHighlightedUnmanaged(m Model) (app.InstalledMcpServer, string, bool) {
 	if m.mcpCursor < len(m.mcpRows) {
 		return app.InstalledMcpServer{}, "", false
@@ -288,9 +253,7 @@ func clampMcpCursor(m *Model) {
 	}
 }
 
-// mcpGroupsStatusText summarizes a row's group memberships for the "g" key.
-// There is no app-layer method yet to edit an mcp server's group membership
-// (unlike skills' SetSkillGroupsWithState), so this is display-only.
+// Display-only: there is no app-layer method yet to edit an mcp server's group membership (unlike skills' SetSkillGroupsWithState).
 func mcpGroupsStatusText(row app.McpServerRow) string {
 	if len(row.Groups) == 0 {
 		return row.Name + ": no group memberships"
@@ -298,7 +261,6 @@ func mcpGroupsStatusText(row app.McpServerRow) string {
 	return row.Name + " groups: " + strings.Join(row.Groups, ", ")
 }
 
-// resetMcpForm clears the add-server form back to its initial state.
 func (m *Model) resetMcpForm() {
 	m.mcpFormField = 0
 	m.mcpFormTransport = 0
@@ -314,9 +276,7 @@ func (m *Model) resetMcpForm() {
 	m.mcpFormEnvLit.Blur()
 }
 
-// focusMcpFormField blurs every add-server field then focuses the one at
-// m.mcpFormField. Field 1 (transport) has no textinput of its own, so it
-// leaves everything blurred while it is selected.
+// Field 1 (transport) has no textinput of its own, so everything stays blurred while it is selected.
 func (m *Model) focusMcpFormField() {
 	m.mcpFormName.Blur()
 	m.mcpFormCommand.Blur()
@@ -339,8 +299,6 @@ func (m *Model) focusMcpFormField() {
 	}
 }
 
-// openMcpAgentsPicker builds an agents picker from a managed row's current
-// per-adapter status, reusing the skill-agents popup fields/rendering.
 func (m *Model) openMcpAgentsPicker(row app.McpServerRow) tea.Cmd {
 	ids := make([]string, 0, len(row.PerAgentStatus))
 	for id := range row.PerAgentStatus {

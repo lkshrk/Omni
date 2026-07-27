@@ -18,8 +18,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// ─── List / Search / Providers ───────────────────────────────────────────────
-
 type ToolListState string
 
 const (
@@ -97,8 +95,7 @@ func (a *App) ListTools(ctx context.Context, providerFilter string) ([]*database
 	return a.listToolsForDisplay(ctx, providerFilter, false)
 }
 
-// ListToolsForView returns configured tools for TUI/CLI table rendering,
-// including ignored tools so they can appear in the Ignored section.
+// ListToolsForView — Includes ignored tools so they can appear in the Ignored section.
 func (a *App) ListToolsForView(ctx context.Context, providerFilter string) ([]*ToolView, error) {
 	tools, err := a.listToolsForDisplay(ctx, providerFilter, true)
 	if err != nil {
@@ -598,7 +595,6 @@ func toolBinaryName(name string, spec config.ToolSpec) string {
 	return name
 }
 
-// executableInstalledOnPath reports whether binaryName is found on PATH.
 func executableInstalledOnPath(binaryName string) bool {
 	if binaryName == "" {
 		return false
@@ -607,10 +603,7 @@ func executableInstalledOnPath(binaryName string) bool {
 	return err == nil
 }
 
-// failedToolKey returns the map key used to identify a failed tool record.
-// Package is included so a failure on one variant (e.g. package "mytool@1")
-// does not suppress PATH detection for other variants of the same tool/provider.
-// pkg defaults to name when empty, matching tool_cache row semantics.
+// Package is in the key so a failure on one variant does not suppress PATH detection for another.
 func failedToolKey(name, provider, pkg string) string {
 	pkg = strings.TrimSpace(pkg)
 	if pkg == "" {
@@ -619,9 +612,7 @@ func failedToolKey(name, provider, pkg string) string {
 	return name + "\x00" + provider + "\x00" + pkg
 }
 
-// toolHasActiveFailure reports whether the tool has a failure record.
-// nil means the set could not be loaded — treated as "all failed" so PATH
-// detection is suppressed rather than risking clearing retry-failed state.
+// nil means the set could not be loaded, treated as all-failed so PATH detection stays suppressed.
 func toolHasActiveFailure(t config.ToolEntry, failedTools map[string]struct{}) bool {
 	if failedTools == nil {
 		return true // fail-safe: suppress PATH detection when set could not be loaded
@@ -630,10 +621,7 @@ func toolHasActiveFailure(t config.ToolEntry, failedTools map[string]struct{}) b
 	return ok
 }
 
-// loadFailedToolSet returns the (name, provider, package)-keyed set of tools
-// with active failures. On error it returns nil; callers must treat nil as
-// "all failed" — an empty map would incorrectly enable PATH detection for
-// retry-failed tools.
+// Returns nil on error; callers must treat nil as all-failed, since an empty map would enable PATH detection.
 func (a *App) loadFailedToolSet(ctx context.Context) (map[string]struct{}, error) {
 	failed, err := a.readDB().ListFailed(ctx)
 	if err != nil {
@@ -646,25 +634,18 @@ func (a *App) loadFailedToolSet(ctx context.Context) (map[string]struct{}, error
 	return set, nil
 }
 
-// executableDetectSingleTool probes PATH for t's binary and returns the upsert
-// row to write. installed is the current cached Installed value for this row
-// (false when no row exists yet). The second return is true when a row should
-// be written: positive (binary found, not failed) or negative (binary gone,
-// was previously marked installed so the stale row needs correcting).
+// Writes on a positive hit, or a negative one that corrects a stale installed row.
 func executableDetectSingleTool(t config.ToolEntry, cfg *config.RootConfig, failedTools map[string]struct{}, cachedInstalled bool) (*database.ToolCache, bool) {
 	if toolHasActiveFailure(t, failedTools) {
 		return nil, false
 	}
 	spec := cfg.Tools[t.Name]
-	// A configured fallback is a user-managed install mechanism with its own
-	// status lifecycle (unverified/verified/failed). PATH detection must not
-	// override it: the fallback state (gh?/gh/gh!) must remain visible.
+	// A configured fallback has its own status lifecycle (gh?/gh/gh!) that PATH detection must not override.
 	if spec.Fallback != nil && spec.Fallback.Status != "" {
 		return nil, false
 	}
 	onPath := executableInstalledOnPath(toolBinaryName(t.Name, spec))
 	if !onPath && !cachedInstalled {
-		// Binary absent and no stale positive row — nothing to write.
 		return nil, false
 	}
 	return &database.ToolCache{
@@ -678,8 +659,7 @@ func executableDetectSingleTool(t config.ToolEntry, cfg *config.RootConfig, fail
 }
 
 func (a *App) executableDetectProviderTools(ctx context.Context, cfg *config.RootConfig, tools []config.ToolEntry, failedTools map[string]struct{}) error {
-	// Build a map of currently-cached Installed values so we can clear stale
-	// positive rows when a previously-detected binary disappears from PATH.
+	// Lets stale positive rows be cleared when a previously-detected binary disappears from PATH.
 	cachedRows, err := a.readDB().ListByProvider(ctx, tools[0].Provider)
 	if err != nil {
 		cachedRows = nil // best-effort; treat all as not-cached
@@ -712,21 +692,7 @@ func toolStateMatches(state, filter ToolListState) bool {
 	return filter == ToolStateOutOfSync && (state == ToolStateMissing || state == ToolStateUnclaimed)
 }
 
-// RefreshInstalled updates the DB install status for every configured tool
-// using the provider's current state. Does not install missing tools.
-// Best-effort: errors on individual providers or tools are silently skipped.
-// The optional progress callback is called with provider scan progress
-// (e.g. "Scanning system/brew… (1/3)"); pass nil to omit progress.
-// scanInstalledBulkMaps probes every available provider's best bulk-installed
-// capability in parallel (MultiManager > Metadata > Simple via ProbeBulkInstalled)
-// and merges the results into a refreshLookupMaps in registry order, so output
-// stays deterministic. Providers implementing no bulk capability are skipped;
-// the per-tool resolution loop falls back to IsInstalled for them.
-//
-//   - multiMaps: provider → name → InstalledEntry (per-tool manager attribution).
-//   - installedMaps: provider → name → version (single-manager bulk path).
-//   - metadataMaps: provider → name → version plus provider metadata.
-//   - concreteForBulk: provider → concrete backend for BulkChecker providers.
+// Probes each available provider's best bulk capability in parallel and merges results in registry order.
 func (a *App) scanInstalledBulkMaps(ctx context.Context, available []provider.Provider, scanProgress *refreshInstalledScanProgress) refreshLookupMaps {
 	defer profile.Start("app.refresh.installed.bulk_maps")()
 	bulkMaps := refreshLookupMaps{
@@ -744,9 +710,7 @@ func (a *App) scanInstalledBulkMaps(ctx context.Context, available []provider.Pr
 		installedWith string
 	}
 
-	// refreshProviderTimeout caps each package-manager subprocess during a bulk
-	// scan. 2 minutes is generous for a single provider but prevents a hung
-	// subprocess from blocking wg.Wait() indefinitely.
+	// Caps each package-manager subprocess so a hung one cannot block wg.Wait indefinitely.
 	const refreshProviderTimeout = 2 * time.Minute
 
 	results := make([]providerBulkResult, len(available))
@@ -778,7 +742,6 @@ func (a *App) scanInstalledBulkMaps(ctx context.Context, available []provider.Pr
 					return
 				}
 				res.metadataMap = scan.Metadata
-				// Pre-computed here so the merge pass doesn't recompute from res.metadataMap.
 				m = installedMapFromMetadata(scan.Metadata)
 			case provider.BulkInstalledSimple:
 				if scanErr != nil {
@@ -857,9 +820,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		return err
 	}
 
-	// Resolve availability once in parallel; reuse the result for both the
-	// scanTotal count and the main scan loop below to avoid two Available
-	// passes per provider.
+	// Resolved once and reused for both the scan total and the loop, avoiding two Available passes.
 	stop = profile.Start("app.refresh.installed.available_providers")
 	available := a.availableProviders(ctx)
 	stop()
@@ -886,9 +847,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	return a.persistInstalledResults(ctx, tools, upserts, metadataUpdates)
 }
 
-// buildInstalledUpserts resolves each configured tool's installed state into
-// ToolCache upserts (+ metadata updates), using the pre-computed bulk maps where
-// possible and falling back to a per-tool IsInstalled / PATH probe otherwise.
+// Uses the pre-computed bulk maps where possible, falling back to a per-tool IsInstalled or PATH probe.
 func (a *App) buildInstalledUpserts(ctx context.Context, cfg *config.RootConfig, tools []config.ToolEntry, cachedOwners map[string]string, bulkMaps refreshLookupMaps, scanProgress *refreshInstalledScanProgress) ([]*database.ToolCache, []database.MetadataUpdate, error) {
 	defer profile.Start("app.refresh.installed.resolve_installed")()
 	// nil on error — treated as "all failed" to protect retry-failed state.
@@ -896,8 +855,7 @@ func (a *App) buildInstalledUpserts(ctx context.Context, cfg *config.RootConfig,
 	if err != nil {
 		failedTools = nil
 	}
-	// Used by PATH-detection branches to clear stale Installed=true rows when a
-	// binary disappears; built once here to avoid per-tool DB round-trips.
+	// Built once here to avoid per-tool DB round-trips when clearing stale rows.
 	allCached, cacheErr := a.readDB().List(ctx)
 	cachedInstalledByKey := make(map[string]bool, len(allCached))
 	if cacheErr == nil {
@@ -920,8 +878,7 @@ func (a *App) buildInstalledUpserts(ctx context.Context, cfg *config.RootConfig,
 				if upsert == nil {
 					continue
 				}
-				// A stale cached owner must not block rediscovery on the resolved
-				// route provider or other configured alternates.
+				// A stale cached owner must not block rediscovery on the resolved route provider.
 				if upsert.Installed {
 					upserts = append(upserts, upsert)
 					if metadataUpdate != nil {
@@ -932,7 +889,6 @@ func (a *App) buildInstalledUpserts(ctx context.Context, cfg *config.RootConfig,
 			}
 		}
 		if mm, hasMulti := bulkMaps.multiMaps[opProvider]; hasMulti && t.InstallWith == "" {
-			// Multi-manager path: per-tool InstalledWith from the manager that owns it.
 			entry := provider.LookupInstalledEntry(mm, keys) // zero InstalledEntry if tool not found in any backend
 			upserts = append(upserts, &database.ToolCache{
 				Name:          t.Name,
@@ -947,7 +903,6 @@ func (a *App) buildInstalledUpserts(ctx context.Context, cfg *config.RootConfig,
 		}
 
 		if m, hasBulk := bulkMaps.installedMaps[opProvider]; hasBulk && !(t.InstallWith != "" && opProvider == t.Provider) {
-			// Fast path: bulk map lookup (concrete providers with BulkChecker).
 			ver, installed := provider.LookupString(m, keys)
 			installedWith := bulkMaps.concreteForBulk[opProvider]
 			if !installed {
@@ -973,8 +928,6 @@ func (a *App) buildInstalledUpserts(ctx context.Context, cfg *config.RootConfig,
 			upserts = append(upserts, upsert)
 			continue
 		}
-		// Slow path: per-tool IsInstalled call.
-		// Used for providers that do not implement BulkChecker.
 		p, ok := a.registry.Get(opProvider)
 		if !ok {
 			// Provider not registered — probe PATH as a last resort.
@@ -1015,9 +968,7 @@ func (a *App) buildInstalledUpserts(ctx context.Context, cfg *config.RootConfig,
 	return upserts, metadataUpdates, nil
 }
 
-// persistInstalledResults writes the resolved installed rows and metadata, then
-// reconciles the resolved tool set. It runs on a non-cancellable context so a
-// cancelled refresh still commits the scan work it already completed.
+// Runs on a non-cancellable context so a cancelled refresh still commits the scan work it completed.
 func (a *App) persistInstalledResults(ctx context.Context, tools []config.ToolEntry, upserts []*database.ToolCache, metadataUpdates []database.MetadataUpdate) error {
 	defer profile.Start("app.refresh.installed.write_reconcile")()
 	writeCtx := context.WithoutCancel(ctx)
@@ -1120,19 +1071,12 @@ func (a *App) refreshInstalledScanLabel(ctx context.Context, t config.ToolEntry,
 	return opProvider
 }
 
-// RefreshProviderInstalled updates the DB install status for all configured tools
-// belonging to a single named provider. It mirrors the inner logic of
-// RefreshInstalled but scoped to one provider so callers can run providers in
-// parallel with independent timeouts. Best-effort provider failures are skipped,
-// but caller cancellation/deadline errors are returned so refresh state does not
-// silently go stale.
+// RefreshProviderInstalled — Scoped to one provider so callers can run providers in parallel; cancellation errors are returned so state does not silently go stale.
 func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) error {
 	return a.RefreshProviderInstalledWithProgress(ctx, provName, nil)
 }
 
-// flushProviderInstalledUpserts writes one provider's resolved installed rows +
-// metadata and enriches tool git metadata. ctx should be non-cancellable so a
-// cancelled refresh still commits the rows it already resolved.
+// ctx should be non-cancellable so a cancelled refresh still commits the rows it resolved.
 func (a *App) flushProviderInstalledUpserts(ctx context.Context, provName string, upserts []*database.ToolCache, metadataUpdates []database.MetadataUpdate) error {
 	if err := a.readDB().UpsertBatch(ctx, upserts); err != nil {
 		return fmt.Errorf("upserting installed status for %s: %w", provName, err)
@@ -1159,7 +1103,6 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 		return err
 	}
 
-	// Collect only the tools that belong to this provider.
 	var provTools []config.ToolEntry
 	for _, t := range tools {
 		if a.operationProviderName(t) == provName {
@@ -1178,8 +1121,7 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 
 	p, ok := a.registry.Get(provName)
 	if !ok {
-		// Provider not registered on this host — probe PATH for each tool as a
-		// last resort so tools present on PATH are not shown as out-of-sync.
+		// Provider not registered here, so probe PATH and avoid showing present tools as out-of-sync.
 		return a.executableDetectProviderTools(context.WithoutCancel(ctx), cfg, provTools, provFailedTools)
 	}
 	avail, err := p.Available(ctx)
@@ -1187,8 +1129,7 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 		return refreshContextErr(ctx, err)
 	}
 	if !avail {
-		// Provider registered but not available on this host (e.g. brew on Linux).
-		// Probe PATH as a last resort.
+		// Provider registered but unavailable here (e.g. brew on Linux), so probe PATH as a last resort.
 		return a.executableDetectProviderTools(context.WithoutCancel(ctx), cfg, provTools, provFailedTools)
 	}
 	providerLabel := ProviderScanDisplayLabel(provName, resolvedProviderConcreteName(ctx, p))
@@ -1268,9 +1209,7 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 		return flushUpserts()
 	}
 
-	// BulkChecker path: single backend, bulk map lookup.
-	// On error fall through to per-tool slow path so a partial failure (e.g. a
-	// provider family whose delegate doesn't support bulk) doesn't skip all tools.
+	// On error fall through to the per-tool path so a partial failure does not skip all tools.
 	if mbc, ok := p.(provider.MetadataBulkChecker); ok {
 		if metadata, err := mbc.InstalledMetadataMap(ctx); err == nil {
 			m := installedMapFromMetadata(metadata)
@@ -1367,11 +1306,8 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 		} else if err := refreshContextErr(ctx, err); err != nil {
 			return err
 		}
-		// InstalledMap failed — fall through to per-tool slow path.
 	}
 
-	// Slow path: per-tool IsInstalled. Used when provider has no BulkChecker,
-	// or when BulkChecker.InstalledMap returned an error.
 	for i, t := range provTools {
 		emitTool(i, t)
 		if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
@@ -1406,10 +1342,7 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 	return flushUpserts()
 }
 
-// RefreshDiscovered scans all available providers whose concrete delegates are
-// not already iterated separately, then stores locally-installed tools in the DB
-// as tracked=false entries. Config-tracked rows are never overwritten.
-// Best-effort: providers that error are silently skipped.
+// RefreshDiscovered — Config-tracked rows are never overwritten; providers that error are silently skipped.
 func (a *App) RefreshDiscovered(ctx context.Context) error {
 	return a.RefreshDiscoveredWithProgress(ctx, nil)
 }
@@ -1485,16 +1418,12 @@ func (a *App) discoverCLIToolSets(ctx context.Context) map[string]map[string]boo
 		}
 		set, err := cp.CLIToolSet(ctx)
 		if err != nil {
-			// Provider implements CLIToolProvider but failed to report its set:
-			// fail closed with an empty (non-nil) set rather than omitting the
-			// entry, which would fall back to allow-all in discoverCLIToolAllowed.
+			// Fail closed with an empty set: omitting the entry would fall back to allow-all.
 			cliSets[prov.Name()] = map[string]bool{}
 			continue
 		}
 		if set == nil {
-			// namedProvider.CLIToolSet returns (nil, nil) when the wrapped
-			// provider does not implement CLIToolProvider at all: treat as
-			// non-implementing (allow-all), not as an empty result.
+			// namedProvider.CLIToolSet returns (nil, nil) when the wrapped provider does not implement it at all.
 			continue
 		}
 		cliSets[prov.Name()] = set
@@ -1511,7 +1440,6 @@ func discoverCLIToolAllowed(cliSets map[string]map[string]bool, providerName, to
 }
 
 func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootConfig, progress func(RefreshDiscoveredProgressEvent)) []database.DiscoveredUpsert {
-	// Build name-only set of tools already declared in config.
 	configuredNames := make(map[string]struct{})
 	for name := range cfg.Tools {
 		configuredNames[name] = struct{}{}
@@ -1520,9 +1448,7 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 		configuredNames[name] = struct{}{}
 	}
 
-	// Build provider-family maps so discovered tools get the provider-family name
-	// as their config provider label while scope checks can use the resolved
-	// concrete manager for default ecosystem tools.
+	// Discovered tools get the family name while scope checks use the resolved concrete manager.
 	stop := profile.Start("app.refresh.discovered.resolve_ecosystems")
 	ecosystemProviders := a.ResolvedEcosystemProviders(ctx)
 	revEcosystem := reverseEcosystemProviders(ecosystemProviders)
@@ -1532,11 +1458,9 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 		return nil
 	}
 
-	// Collect discovered upserts across all available providers. Providers are
-	// processed serially after the availability pass, so no lock is needed.
+	// Providers are processed serially after the availability pass, so no lock is needed.
 	var discovered []database.DiscoveredUpsert
-	// Best-effort: per-provider errors are skipped so one bad provider
-	// doesn't prevent discovering the rest.
+	// Per-provider errors are skipped so one bad provider does not prevent discovering the rest.
 	disabled := make(map[string]struct{})
 	for _, name := range a.effectiveSettings(cfg).DisabledProviders {
 		disabled[name] = struct{}{}
@@ -1544,8 +1468,7 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 	providers := make([]provider.Provider, 0)
 	stop = profile.Start("app.refresh.discovered.available_providers")
 	for _, p := range a.availableProviders(ctx) {
-		// A global pip environment mixes applications with libraries. It is only
-		// authoritative for explicitly configured tools, never for auto-discovery.
+		// A global pip environment mixes applications with libraries, so it is never authoritative for discovery.
 		if p.Name() == "pip" {
 			continue
 		}
@@ -1565,8 +1488,7 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 
 		configProvider := discoveryConfigProvider(p.Name(), revEcosystem, scope)
 
-		// MultiManagerBulkChecker path: probe all backends to get per-tool
-		// concrete-manager attribution (e.g. pnpm vs npm vs bun).
+		// Probe all backends to get per-tool concrete-manager attribution (pnpm vs npm vs bun).
 		if mbc, ok := p.(provider.MultiManagerBulkChecker); ok {
 			entries, err := mbc.InstalledByManager(ctx)
 			if err != nil {
@@ -1592,7 +1514,6 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 			continue
 		}
 
-		// Standard path: ListInstalled returns tools without per-manager attribution.
 		installed, err := p.ListInstalled(ctx)
 		if err != nil {
 			continue // best-effort: skip erroring providers
@@ -1609,9 +1530,7 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 				continue // already in config; skip
 			}
 			if systemBaseline != nil && systemBaseline[t.Name] {
-				// Package predates the host's recorded baseline (image-build
-				// package or already observed): not a package the user just
-				// installed, so it stays out of discovery.
+				// Predates the host's recorded baseline, so not a package the user just installed.
 				continue
 			}
 			if !discoverCLIToolAllowed(cliSets, p.Name(), t.Name) {
@@ -1631,20 +1550,11 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 	return collapseSharedStoreDuplicates(discovered, ecosystemProviders)
 }
 
-// systemInventoryBaselineStateKey is the local_state key under which a
-// system package manager's baseline package set is recorded for this host.
 func systemInventoryBaselineStateKey(providerName string) string {
 	return "system-inventory-baseline:" + providerName
 }
 
-// systemInventoryBaseline returns the set of package names to treat as
-// pre-existing (not user-installed) for a system package manager on this
-// host. System package managers (apt, dnf, pacman, apk, zypper) report every
-// image-baked package as "manually installed" with no reliable marker to
-// distinguish those from packages a person actually installed later, so the
-// first time this host observes a given manager, its current installed set
-// is recorded as the baseline. Every later observation only ever surfaces
-// packages installed after that point as discovery candidates.
+// System PMs report every image-baked package as manually installed, so the first observation becomes the baseline.
 func (a *App) systemInventoryBaseline(ctx context.Context, providerName string, installed []provider.InstalledTool) (map[string]bool, error) {
 	key := systemInventoryBaselineStateKey(providerName)
 	stored, err := a.readDB().GetState(ctx, key)
@@ -1675,8 +1585,6 @@ func systemInventoryBaselineSet(stored string) map[string]bool {
 	return set
 }
 
-// ListDiscovered returns all tool entries that are installed locally but not
-// declared in config (tracked=false).
 func (a *App) ListDiscovered(ctx context.Context) ([]*ToolView, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -1737,9 +1645,7 @@ func (a *App) listToolsFromConfig(ctx context.Context, cfg *config.RootConfig, p
 	if cfg == nil {
 		return tools, nil
 	}
-	// Names with any raw cache row (even those filtered out below by scope) must
-	// not be re-synthesized as config-led rows; only tools with no cache state at
-	// all get a synthesized not-installed row.
+	// Only tools with no cache state at all get a synthesized not-installed row.
 	cachedNames := make(map[string]struct{}, len(tools))
 	for _, tc := range tools {
 		if tc != nil {
@@ -1755,14 +1661,9 @@ func (a *App) listToolsFromConfig(ctx context.Context, cfg *config.RootConfig, p
 	return a.appendConfigLedRows(ctx, cfg, tools, cachedNames, includeIgnored), nil
 }
 
-// appendConfigLedRows makes the tool list config-led: every resolved configured
-// tool appears even when it has no cache row yet (not refreshed, or unresolved
-// empty-provider tool). Such tools are synthesized as not-installed rows so they
-// surface as "needs sync" instead of silently vanishing from list and TUI.
+// Configured tools with no cache row are synthesized as not-installed so they surface as needs-sync instead of vanishing.
 func (a *App) appendConfigLedRows(ctx context.Context, cfg *config.RootConfig, tools []*database.ToolCache, cachedNames map[string]struct{}, includeIgnored bool) []*database.ToolCache {
-	// Dedup by logical tool name: a tool may be installed under a non-winner
-	// provider while config resolves it to a different priority winner, so a
-	// name already represented by any cache row must not be re-synthesized.
+	// A name already represented by any cache row must not be re-synthesized.
 	present := make(map[string]struct{}, len(tools)+len(cachedNames))
 	for name := range cachedNames {
 		present[name] = struct{}{}
@@ -2015,8 +1916,6 @@ func useCachedOwnerUpsert(upsert *database.ToolCache, metadataUpdate *database.M
 	return true
 }
 
-// lookupAlternateConfiguredInstall checks other configured provider candidates when
-// the resolved route provider does not have the tool installed locally.
 func (a *App) lookupAlternateConfiguredInstall(
 	cfg *config.RootConfig,
 	t config.ToolEntry,
@@ -2145,21 +2044,12 @@ func discoveredToolAllowed(tool *database.ToolCache, scope discoveryScope) bool 
 	return tool != nil && tool.Installed && scope.allowsDiscovered(tool.Provider, tool.InstalledWith)
 }
 
-// ecosystemSharesGlobalStore reports whether an ecosystem's managers install
-// into a shared global store, so the same package is reported by every manager.
 // Node (bun/pnpm/npm) and Python (uv/pip) share a store; system PMs do not.
 func ecosystemSharesGlobalStore(ecosystem string) bool {
 	return ecosystem == provider.EcosystemNode || ecosystem == provider.EcosystemPython
 }
 
-// collapseSharedStoreDuplicates reduces discovered upserts that resolve to the
-// same shared-store ecosystem and tool name down to a single entry. Because
-// node/python managers share a global store, discovery probes each manager and
-// reports the same globally-installed package once per manager — without this,
-// one package yields one row per manager (e.g. node(bun!)/node(npm!)/node(pnpm!)).
-// The surviving row prefers the ecosystem's effective manager so the tool is
-// shown under the single PM it is actually managed by; otherwise the first
-// reported entry wins.
+// Shared-store managers each report the same global package, which would otherwise yield one row per manager.
 func collapseSharedStoreDuplicates(discovered []database.DiscoveredUpsert, effective map[string]string) []database.DiscoveredUpsert {
 	out := discovered[:0]
 	idx := make(map[string]int)
@@ -2229,9 +2119,7 @@ type ProviderInfo struct {
 	Available   bool
 }
 
-// Search fans out to every provider that implements provider.Searcher.
-// Best-effort: errors on individual providers are collected and joined; partial
-// results from successful providers are still returned.
+// Search — Best-effort: per-provider errors are joined, and partial results are still returned.
 func (a *App) Search(ctx context.Context, query, providerFilter string) ([]provider.SearchResult, error) {
 	var results []provider.SearchResult
 	var errs []error
@@ -2266,10 +2154,7 @@ func (a *App) Search(ctx context.Context, query, providerFilter string) ([]provi
 	return results, errors.Join(errs...)
 }
 
-// SearchForDisplay returns search results for the CLI/TUI: collapsed across
-// shared-store managers (so a node package appears once, not per bun/pnpm/npm)
-// and sorted relevance-first. The raw Search results (used by provider-match
-// install discovery) keep every concrete provider as a candidate.
+// SearchForDisplay — The raw Search results keep every concrete provider as an install candidate.
 func (a *App) SearchForDisplay(ctx context.Context, query, providerFilter string) ([]provider.SearchResult, error) {
 	results, err := a.Search(ctx, query, providerFilter)
 	settings := config.Settings{}
@@ -2280,11 +2165,7 @@ func (a *App) SearchForDisplay(ctx context.Context, query, providerFilter string
 	return results, err
 }
 
-// dedupSearchResults collapses search hits that refer to the same logical package
-// within the same ecosystem — bun/pnpm/npm and the node family all return the
-// same npm package — down to one row (the highest-priority concrete provider),
-// and sorts by provider priority then name. rank maps a provider name to its
-// priority index (lower = higher priority); providers absent from rank sort last.
+// rank maps a provider to its priority index; providers absent from rank sort last.
 func dedupSearchResults(results []provider.SearchResult, rank map[string]int, query string) []provider.SearchResult {
 	rankOf := func(name string) int {
 		if r, ok := rank[name]; ok {
@@ -2296,10 +2177,7 @@ func dedupSearchResults(results []provider.SearchResult, rank map[string]int, qu
 	index := make(map[key]int, len(results))
 	out := make([]provider.SearchResult, 0, len(results))
 	for _, r := range results {
-		// Only collapse providers that share a global store (node: bun/pnpm/npm;
-		// python: uv/pip) — those return the same registry package N times. System
-		// PMs (brew/apt/…) are genuinely distinct install targets and must each
-		// survive, so they are keyed per-provider.
+		// Only shared-store providers collapse; system PMs are genuinely distinct install targets.
 		eco := ToolProviderEcosystem(r.Provider)
 		scope := r.Provider
 		if ecosystemSharesGlobalStore(eco) {
@@ -2315,9 +2193,7 @@ func dedupSearchResults(results []provider.SearchResult, rank map[string]int, qu
 		index[k] = len(out)
 		out = append(out, r)
 	}
-	// Relevance first (exact > prefix > substring), then host provider priority,
-	// then name — so typing a tool name surfaces that tool regardless of which
-	// package manager would install it.
+	// Relevance first so typing a tool name surfaces it regardless of which manager would install it.
 	sort.SliceStable(out, func(i, j int) bool {
 		si, sj := queryMatchScore(out[i].Name, query), queryMatchScore(out[j].Name, query)
 		if si != sj {
@@ -2332,7 +2208,6 @@ func dedupSearchResults(results []provider.SearchResult, rank map[string]int, qu
 	return out
 }
 
-// queryMatchScore ranks how closely a result name matches the search query:
 // 3 exact, 2 prefix, 1 substring, 0 none.
 func queryMatchScore(name, query string) int {
 	q := strings.ToLower(strings.TrimSpace(query))
@@ -2371,10 +2246,7 @@ func ClassifyProviderMatch(logicalName string, spec config.ToolSpec, result prov
 	if sameGitHubSource(spec.Git, result.Source) {
 		return ProviderMatchHigh
 	}
-	// A bare package-name match is only high-confidence on native system package
-	// managers (brew/apt/dnf/…), whose registries are curated. Language ecosystems
-	// (npm/pip/…) routinely carry same-named squatter/wrapper packages, so a name
-	// match there is weak unless corroborated by a source/git match.
+	// Language ecosystems carry same-named squatters, so a bare name match is weak there without a source match.
 	if providerNameMatch(logicalName, spec, resultName) && isNativeProvider(result.Provider) {
 		return ProviderMatchHigh
 	}
@@ -2396,15 +2268,10 @@ func providerNameMatch(logicalName string, spec config.ToolSpec, resultName stri
 	return false
 }
 
-// isNativeProvider reports whether name is a concrete system package manager
-// (brew/apt/dnf/apk/pacman/zypper) — the system ecosystem — as opposed to a
-// language ecosystem manager (npm/pip/…).
 func isNativeProvider(name string) bool {
 	return ToolProviderEcosystem(name) == provider.EcosystemSystem
 }
 
-// normalizedSourceRepoKey returns a lowercase "owner/repo" key for a GitHub
-// source hint, or "" when no usable repo can be derived.
 func normalizedSourceRepoKey(s provider.SourceMetadata) string {
 	if s.Type != provider.SourceTypeGitHub {
 		return ""
@@ -2422,12 +2289,7 @@ func normalizedSourceRepoKey(s provider.SourceMetadata) string {
 	return owner + "/" + repo
 }
 
-// promoteSourceConsensus raises weak name-matching matches to high when at least
-// two providers report the same upstream source repo for the tool. Agreement
-// across providers on a concrete repo is strong evidence the result is the real
-// tool, even on language ecosystems that lack a native curated registry. Only
-// name-matching results are eligible, so unrelated monorepo siblings sharing a
-// repo are not promoted.
+// Two providers agreeing on a repo is strong evidence; only name-matching results are eligible, so monorepo siblings are not promoted.
 func promoteSourceConsensus(logicalName string, spec config.ToolSpec, matches []ProviderMatch) {
 	counts := make(map[string]int, len(matches))
 	for _, m := range matches {
@@ -2451,12 +2313,7 @@ func promoteSourceConsensus(logicalName string, spec config.ToolSpec, matches []
 	}
 }
 
-// captureEmptyProviderInstalls inspects the installed-state maps gathered during
-// a refresh scan and, for each configured tool that has no concrete provider yet,
-// records every concrete provider that currently has the tool installed. It
-// returns captured provider entries per tool plus a backfilled GitHub source per
-// tool (from provider metadata) when one is available. No search or install is
-// performed — this only reflects what is already installed locally.
+// Reflects only what is already installed locally: no search or install is performed.
 func captureEmptyProviderInstalls(
 	ctx context.Context,
 	a *App,
@@ -2488,19 +2345,16 @@ func captureEmptyProviderInstalls(
 				}
 			}
 		}
-		// Per-tool concrete attribution for language ecosystems (npm/pip/…).
 		for _, mm := range multiMaps {
 			if entry := provider.LookupInstalledEntry(mm, keys); entry.ConcreteManager != "" {
 				add(entry.ConcreteManager, provider.SourceMetadata{})
 			}
 		}
-		// Bulk providers that report source metadata (e.g. brew).
 		for provName, mmeta := range metadataMaps {
 			if md, ok := provider.LookupInstalledMetadata(mmeta, keys); ok {
 				add(concreteForBulk[provName], md.Source)
 			}
 		}
-		// Plain bulk providers without metadata; skip those already handled above.
 		for provName, m := range installedMaps {
 			if _, isMeta := metadataMaps[provName]; isMeta {
 				continue
@@ -2512,10 +2366,7 @@ func captureEmptyProviderInstalls(
 				add(concreteForBulk[provName], provider.SourceMetadata{})
 			}
 		}
-		// Fallback: a tool installed as a dependency/cask/tap is absent from the
-		// bulk maps (e.g. brew's leaves --installed-on-request). Probe each
-		// available provider per-tool so configured-but-not-leaf tools still
-		// capture their concrete provider.
+		// A tool installed as a dependency, cask or tap is absent from the bulk maps, so probe per-tool.
 		if len(seen) == 0 {
 			for _, p := range available {
 				installed, _, err := a.isInstalledWithEntry(ctx, p, p.Name(), t)
@@ -2529,9 +2380,7 @@ func captureEmptyProviderInstalls(
 	return captured, gitByTool
 }
 
-// persistCapturedProviders writes captured provider entries (ordered by host
-// provider priority) and backfilled git into config and saves it. Returns the
-// updated config, or nil when nothing changed.
+// A nil result means no config change.
 func (a *App) persistCapturedProviders(cfg *config.RootConfig, captured map[string][]config.ToolInstallSpec, gitByTool map[string]string) (*config.RootConfig, error) {
 	if len(captured) == 0 {
 		return nil, nil
@@ -2579,14 +2428,10 @@ func sortByProviderRank(provs []config.ToolInstallSpec, rank map[string]int) {
 	})
 }
 
-// providerSearchMissTTL bounds how long a "no high-confidence provider match"
-// result is cached, so sync skips re-searching registries for the same
-// unresolved tool until the window expires.
+// Bounds how long a no-match verdict is cached so sync skips re-searching the same tool.
 const providerSearchMissTTL = 6 * time.Hour
 
-// recentProviderSearchMiss reports whether a recent discovery search for
-// logicalName found no usable match. Cached as a package_availability row with an
-// empty provider (the "search" sentinel).
+// Cached as a package_availability row with an empty provider (the search sentinel).
 func (a *App) recentProviderSearchMiss(ctx context.Context, name string) bool {
 	db := a.readDB()
 	if db == nil {

@@ -9,8 +9,6 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// loaderFor returns a WriteConfig load func backed by config.Load — the
-// include-only default the app layer wraps with its own migrations.
 func loaderFor(path string) func() (*config.RootConfig, error) {
 	return func() (*config.RootConfig, error) { return config.Load(path) }
 }

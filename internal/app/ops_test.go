@@ -16,7 +16,6 @@ import (
 	syncprogress "github.com/lkshrk/omni/internal/sync"
 )
 
-// searchStub extends stubProvider with the optional Searcher interface.
 type searchStub struct {
 	stubProvider
 	results []provider.SearchResult
@@ -124,8 +123,6 @@ func hasTool(cfg *config.RootConfig, name, providerName string) bool {
 	}
 	return false
 }
-
-// ─── Install ─────────────────────────────────────────────────────────────────
 
 func TestInstall_PostInstallVerificationFailureDoesNotMarkInstalled(t *testing.T) {
 	t.Parallel()
@@ -275,8 +272,6 @@ func TestInstallWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 		t.Fatalf("Tools = %+v, want installed ripgrep/brew", result.Tools)
 	}
 }
-
-// ─── Uninstall ───────────────────────────────────────────────────────────────
 
 func TestUninstall_RemovesConfiguredToolFromFile(t *testing.T) {
 	t.Parallel()
@@ -691,8 +686,6 @@ func TestRemoveToolFromConfig_RejectsProviderTool(t *testing.T) {
 	}
 }
 
-// ─── Upgrade ─────────────────────────────────────────────────────────────────
-
 func TestUpgradeInstalled_UsesCachedInstalledOwner(t *testing.T) {
 	t.Parallel()
 	node := &managerUpgradeStub{stubProvider: stubProvider{name: "node", available: true}, verifyInstalled: true}
@@ -966,8 +959,6 @@ func TestUpgrade_VerificationFailureKeepsOutdatedState(t *testing.T) {
 	}
 }
 
-// ─── UpgradeAll ───────────────────────────────────────────────────────────────
-
 func TestUpgradeAllDetailedWithStateReturnsUpdatedTools(t *testing.T) {
 	t.Parallel()
 	node := &clearingManagerUpgradeStub{
@@ -1117,7 +1108,7 @@ func TestReconcile_SyncsAndUpgradesTools(t *testing.T) {
 			},
 		},
 	}
-	a, cfgPath := newImportApp(t, stub)
+	a, cfgPath := newReconcileApp(t, stub)
 	if err := config.Save(cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"fd":      {Providers: []config.ToolInstallSpec{{Provider: "brew"}}},
@@ -1185,7 +1176,7 @@ func TestReconcile_SyncsAndUpgradesTools(t *testing.T) {
 
 func TestReconcile_SkipsDotfilesWhenDisabled(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
-	a, cfgPath := newImportApp(t)
+	a, cfgPath := newReconcileApp(t)
 	if err := config.Save(cfgPath, &config.RootConfig{
 		Settings: config.Settings{
 			DotsRepo:     t.TempDir(),
@@ -1329,8 +1320,6 @@ func TestUpgradeAll_ContinuesAfterToolFailure(t *testing.T) {
 		t.Fatal("failed tool should remain outdated")
 	}
 }
-
-// ─── Search ───────────────────────────────────────────────────────────────────
 
 func TestSearch_FansOut(t *testing.T) {
 	t.Parallel()
@@ -1542,8 +1531,6 @@ func TestProviderMatches_SortsHighConfidenceByProviderPriority(t *testing.T) {
 
 func TestSync_CachesProviderSearchMiss(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
-	// brew search never matches "ghost" → discovery finds no high-confidence
-	// provider, which should be cached so a second sync skips the registry search.
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		results:      []provider.SearchResult{{Name: "prettier", Provider: "brew"}},
@@ -1581,7 +1568,6 @@ func TestSearchForDisplay_DedupsSharedStoreAndSorts(t *testing.T) {
 			results:      []provider.SearchResult{{Name: "prettier", Provider: name}},
 		}
 	}
-	// bun/pnpm/npm share the node store; brew is a separate ecosystem.
 	a, _ := newImportApp(t, mk("bun"), mk("pnpm"), mk("npm"), mk("brew"))
 	if err := a.SaveSettings(context.Background(), config.Settings{ProviderPriority: []string{"brew", "bun", "pnpm", "npm"}}); err != nil {
 		t.Fatalf("SaveSettings: %v", err)
@@ -1591,11 +1577,9 @@ func TestSearchForDisplay_DedupsSharedStoreAndSorts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SearchForDisplay: %v", err)
 	}
-	// node managers collapse to one row; brew stays distinct → 2 rows.
 	if len(results) != 2 {
 		t.Fatalf("SearchForDisplay returned %d rows, want 2: %+v", len(results), results)
 	}
-	// brew has the highest priority rank → first; node row keeps its winner (bun).
 	if results[0].Provider != "brew" {
 		t.Errorf("first = %q, want brew (priority winner)", results[0].Provider)
 	}
@@ -1655,7 +1639,6 @@ func TestProviderMatches_ConsensusSourcePromotesEcosystemToHigh(t *testing.T) {
 	if err := a.SaveSettings(context.Background(), config.Settings{ProviderPriority: []string{"npm", "brew"}}); err != nil {
 		t.Fatalf("SaveSettings: %v", err)
 	}
-	// Tool has no git; two providers agreeing on the same source repo is the only signal.
 	matches, err := a.ProviderMatches(context.Background(), "prettier", config.ToolSpec{}, "")
 	if err != nil {
 		t.Fatalf("ProviderMatches: %v", err)
@@ -2724,8 +2707,6 @@ func TestSearch_SkipsNonSearcher(t *testing.T) {
 	}
 }
 
-// ─── ListTools ────────────────────────────────────────────────────────────────
-
 func TestListTools_Empty(t *testing.T) {
 	t.Parallel()
 	a, _ := newImportApp(t)
@@ -2789,8 +2770,6 @@ func TestQueryTools_ProviderFilterMatchesInstalledWith(t *testing.T) {
 	}
 }
 
-// ─── Providers ────────────────────────────────────────────────────────────────
-
 func TestProviders_ListsAll(t *testing.T) {
 	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
@@ -2815,8 +2794,6 @@ func TestProviders_ListsAll(t *testing.T) {
 		t.Error("npm should not be available")
 	}
 }
-
-// ─── LoadSettings / SaveSettings ─────────────────────────────────────────────
 
 func TestLoadSettings_MissingConfig(t *testing.T) {
 	t.Parallel()
@@ -2851,7 +2828,6 @@ func TestLoadSettings_WithConfig(t *testing.T) {
 func TestSaveSettings_PreservesTools(t *testing.T) {
 	t.Parallel()
 	a, cfgPath := newImportApp(t)
-	// Write tools to the current host group.
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep")},
@@ -2863,7 +2839,6 @@ func TestSaveSettings_PreservesTools(t *testing.T) {
 		t.Fatalf("SaveSettings: %v", err)
 	}
 
-	// Tools must still be present in settings.json.
 	updated, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("loading config: %v", err)
@@ -2872,7 +2847,6 @@ func TestSaveSettings_PreservesTools(t *testing.T) {
 	if len(tools) != 1 || tools[0].Name != "ripgrep" {
 		t.Errorf("tools lost after SaveSettings: got %v, want [ripgrep]", tools)
 	}
-	// Node manager is host-specific — verify via EffectiveSettings (LoadSettings).
 	s, err := a.LoadSettings()
 	if err != nil {
 		t.Fatalf("LoadSettings: %v", err)
@@ -2890,7 +2864,6 @@ func TestSaveSettings_CreatesConfigWhenMissing(t *testing.T) {
 		t.Fatalf("SaveSettings: %v", err)
 	}
 
-	// Python manager is host-specific — verify via EffectiveSettings (LoadSettings).
 	s, err := a.LoadSettings()
 	if err != nil {
 		t.Fatalf("LoadSettings: %v", err)
@@ -2927,14 +2900,11 @@ func TestSaveSettings_NormalizesDotsRepoUnderHome(t *testing.T) {
 	}
 }
 
-// ─── ResetSettings ───────────────────────────────────────────────────────────
-
 func TestResetSettings_ClearsSettings(t *testing.T) {
 	t.Parallel()
 	a, _ := newImportApp(t)
 	ctx := context.Background()
 
-	// Start with non-zero settings.
 	if err := a.SaveSettings(ctx, testSettingsWithNodePython("bun", "uv")); err != nil {
 		t.Fatalf("SaveSettings: %v", err)
 	}
@@ -2957,7 +2927,6 @@ func TestResetSettings_PreservesTools(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	ctx := context.Background()
 
-	// Write settings.json with one tool.
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{{
@@ -2974,7 +2943,6 @@ func TestResetSettings_PreservesTools(t *testing.T) {
 		t.Fatalf("ResetSettings: %v", err)
 	}
 
-	// Tools must survive the settings reset.
 	updated, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
@@ -2985,8 +2953,6 @@ func TestResetSettings_PreservesTools(t *testing.T) {
 	}
 }
 
-// ─── ResetCache ───────────────────────────────────────────────────────────────
-
 func TestResetCache_DBIsUsableAfterReset(t *testing.T) {
 	t.Parallel()
 	a, _ := newImportApp(t)
@@ -2996,12 +2962,10 @@ func TestResetCache_DBIsUsableAfterReset(t *testing.T) {
 		t.Fatalf("ResetCache: %v", err)
 	}
 
-	// Listing tools should work without error on a freshly reset cache.
 	tools, err := a.ListTools(ctx, "")
 	if err != nil {
 		t.Fatalf("ListTools after ResetCache: %v", err)
 	}
-	// No tools configured, so the list should be empty (not nil-err).
 	_ = tools
 }
 
@@ -3010,7 +2974,6 @@ func TestResetCache_IdempotentOnEmptyDB(t *testing.T) {
 	a, _ := newImportApp(t)
 	ctx := context.Background()
 
-	// Two resets in a row should both succeed.
 	if err := a.ResetCache(ctx); err != nil {
 		t.Fatalf("first ResetCache: %v", err)
 	}
@@ -3019,12 +2982,8 @@ func TestResetCache_IdempotentOnEmptyDB(t *testing.T) {
 	}
 }
 
-// ─── ResolveProvider ─────────────────────────────────────────────────────────
-
 func TestResolveProvider_DefaultOrder(t *testing.T) {
-	t.Parallel(
-	// Only "node" is available; brew is registered but unavailable.
-	)
+	t.Parallel()
 
 	brew := &stubProvider{name: "brew", available: false}
 	node := &stubProvider{name: "node", available: true}
@@ -3045,7 +3004,6 @@ func TestResolveProvider_CustomPriority(t *testing.T) {
 	node := &stubProvider{name: "node", available: true}
 	a, _ := newImportApp(t, brew, node)
 
-	// Caller prefers node over brew.
 	got, err := a.ResolveProvider(context.Background(), []string{"node", "brew"})
 	if err != nil {
 		t.Fatalf("ResolveProvider: %v", err)
@@ -3067,9 +3025,7 @@ func TestResolveProvider_NoneAvailable(t *testing.T) {
 }
 
 func TestResolveProvider_UnregisteredSkipped(t *testing.T) {
-	t.Parallel(
-	// Priority list names a provider that isn't registered; falls through.
-	)
+	t.Parallel()
 
 	node := &stubProvider{name: "node", available: true}
 	a, _ := newImportApp(t, node)
@@ -3083,14 +3039,11 @@ func TestResolveProvider_UnregisteredSkipped(t *testing.T) {
 	}
 }
 
-// ─── Install (auto-resolve) ───────────────────────────────────────────────────
-
 func TestInstall_AutoResolve(t *testing.T) {
 	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, brew)
 
-	// No provider specified — should auto-select "brew" via default priority.
 	if err := a.Install(context.Background(), "ripgrep", ""); err != nil {
 		t.Fatalf("Install with empty provider: %v", err)
 	}
@@ -3105,7 +3058,7 @@ func TestInstall_AutoResolve(t *testing.T) {
 
 func TestInstall_AutoResolveNoneAvailable(t *testing.T) {
 	t.Parallel()
-	a, _ := newImportApp(t) // no providers registered
+	a, _ := newImportApp(t)
 	if err := a.Install(context.Background(), "ripgrep", ""); err == nil {
 		t.Error("expected error when no provider available, got nil")
 	}
@@ -3117,7 +3070,6 @@ func TestInstall_AutoResolveFromSettings(t *testing.T) {
 	npm := &stubProvider{name: "npm", available: true}
 	a, _ := newImportApp(t, brew, npm)
 
-	// Configure settings to prefer "npm".
 	settings := config.Settings{ProviderPriority: []string{"npm", "brew"}}
 	if err := a.SaveSettings(context.Background(), settings); err != nil {
 		t.Fatalf("SaveSettings: %v", err)

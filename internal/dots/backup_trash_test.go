@@ -53,7 +53,6 @@ func TestTrashLocalPath_UnlinksSymlinkWithoutTrashing(t *testing.T) {
 	if _, err := os.Lstat(link); !os.IsNotExist(err) {
 		t.Fatalf("symlink should be unlinked: %v", err)
 	}
-	// The link's target must be untouched, and nothing should be trashed.
 	if body, err := os.ReadFile(realFile); err != nil || string(body) != "keep me" {
 		t.Fatalf("symlink target changed: body=%q err=%v", body, err)
 	}

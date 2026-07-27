@@ -11,7 +11,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// stubProvider is a fake provider for import tests.
 type stubProvider struct {
 	name      string
 	available bool
@@ -68,6 +67,20 @@ func newImportApp(t *testing.T, providers ...provider.Provider) (*app.App, strin
 	return a, cfgPath
 }
 
+func newReconcileApp(t *testing.T, providers ...provider.Provider) (*app.App, string) {
+	t.Helper()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	a := app.New(cfgPath,
+		app.WithMcpAdapters([]app.McpAdapter{}),
+		app.WithPluginAdapters([]app.PluginAdapter{}))
+	if err := a.InitTestMode(context.Background(), providers...); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	return a, cfgPath
+}
+
 func installedTool(name, ver string, prov string) provider.InstalledTool {
 	return provider.InstalledTool{
 		Tool:    provider.Tool{Name: name, Provider: prov},
@@ -99,7 +112,6 @@ func TestImport_AddsNewTools(t *testing.T) {
 		t.Errorf("Skipped = %d, want 0", len(result.Skipped))
 	}
 
-	// Config file should contain both tools.
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("loading config: %v", err)
@@ -129,7 +141,6 @@ func TestImport_SkipsAlreadyConfigured(t *testing.T) {
 	}
 	a, cfgPath := newImportApp(t, stub)
 
-	// Pre-populate config with git already declared.
 	existing := &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("git", "brew")),
 		Groups: []*config.GroupConfig{testHostToolGroup("git")},
@@ -173,7 +184,6 @@ func TestImport_DryRunDoesNotWriteConfig(t *testing.T) {
 		t.Errorf("Added = %d, want 1", len(result.Added))
 	}
 
-	// Config file must not exist — dry run should not write it.
 	if _, err := os.Stat(cfgPath); !os.IsNotExist(err) {
 		t.Error("dry run should not create config file")
 	}
@@ -233,11 +243,7 @@ func TestImport_UnavailableProviderSkipped(t *testing.T) {
 }
 
 func TestImport_EcosystemProvidersWithRegisteredDelegatesSkipped(t *testing.T) {
-	t.Parallel(
-	// system is the provider family whose ListInstalled output is a subset of
-	// its concrete delegates. It must be skipped during a full import to
-	// prevent duplicate config entries.
-	)
+	t.Parallel()
 
 	brewStub := &stubProvider{
 		name:      "brew",
@@ -256,7 +262,6 @@ func TestImport_EcosystemProvidersWithRegisteredDelegatesSkipped(t *testing.T) {
 		t.Fatalf("Import: %v", err)
 	}
 
-	// Only the concrete provider (brew) should contribute; system is skipped.
 	if len(result.Added) != 1 {
 		t.Errorf("Added = %d, want 1 (brew only, system provider family skipped)", len(result.Added))
 	}
@@ -305,10 +310,7 @@ func TestImport_ResolvedDefaultConcreteDoesNotWriteInstallWith(t *testing.T) {
 }
 
 func TestImport_EcosystemProviderExplicitFilter(t *testing.T) {
-	t.Parallel(
-	// When the user explicitly requests a provider family via --provider,
-	// the skip set is bypassed and the provider family IS iterated.
-	)
+	t.Parallel()
 
 	system := &stubProvider{
 		name:      "system",
@@ -327,10 +329,7 @@ func TestImport_EcosystemProviderExplicitFilter(t *testing.T) {
 }
 
 func TestImport_TapQualifiedPackageSkipped(t *testing.T) {
-	t.Parallel(
-	// A tool with package = "homebrew/tap/tool" must be recognised as already
-	// configured when ListInstalled returns just the plain name "tool".
-	)
+	t.Parallel()
 
 	stub := &stubProvider{
 		name:      "brew",
@@ -339,7 +338,6 @@ func TestImport_TapQualifiedPackageSkipped(t *testing.T) {
 	}
 	a, cfgPath := newImportApp(t, stub)
 
-	// Pre-populate config with tap-qualified entry.
 	existing := &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalToolPackage("mytool", "brew", "homebrew/tap/mytool")),
 		Groups: []*config.GroupConfig{testHostToolGroup("mytool")},
@@ -371,11 +369,9 @@ func TestImport_NoDuplicatesAcrossRuns(t *testing.T) {
 	}
 	a, cfgPath := newImportApp(t, stub)
 
-	// First import.
 	if _, err := a.Import(context.Background(), app.ImportOptions{}); err != nil {
 		t.Fatalf("first Import: %v", err)
 	}
-	// Second import — git is now in config, should be skipped.
 	result, err := a.Import(context.Background(), app.ImportOptions{})
 	if err != nil {
 		t.Fatalf("second Import: %v", err)

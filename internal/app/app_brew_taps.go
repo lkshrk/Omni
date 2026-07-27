@@ -9,8 +9,6 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// BrewTapBackfill records a single config entry whose bare brew package was
-// rewritten to its tap-qualified form.
 type BrewTapBackfill struct {
 	Name       string
 	OldPackage string
@@ -18,8 +16,7 @@ type BrewTapBackfill struct {
 	Tap        string
 }
 
-// brewTapResolver is satisfied by the brew provider; declared here to avoid
-// importing the brew package from the app layer.
+// Declared here to avoid importing the brew package from the app layer.
 type brewTapResolver interface {
 	Available(ctx context.Context) (bool, error)
 	ResolveTap(ctx context.Context, name string) (fullName string, tap string, ok bool)
@@ -33,13 +30,7 @@ type brewTapResolution struct {
 
 type brewTapResolveFunc func(name string) brewTapResolution
 
-// BackfillBrewTaps rewrites brew tool entries stored with a bare package name
-// (e.g. "quarkdown") to their tap-qualified form ("quarkdown-labs/quarkdown/
-// quarkdown") and records the tap on the spec. Bare names lose the tap origin,
-// so omni cannot trust the tap up front and Homebrew 5.2+ then hides the
-// formula from the scan. Only formulae that brew reports as tap-backed are
-// touched; core formulae and casks are left alone. dryRun computes the changes
-// without writing config.
+// BackfillBrewTaps — A bare name loses the tap origin, so Homebrew 5.2+ hides the formula from the scan.
 func (a *App) BackfillBrewTaps(ctx context.Context, dryRun bool) ([]BrewTapBackfill, error) {
 	brewProv, ok := a.registry.Get("brew")
 	if !ok {
@@ -91,9 +82,7 @@ func (a *App) BackfillBrewTaps(ctx context.Context, dryRun bool) ([]BrewTapBackf
 	return backfilled, nil
 }
 
-// backfillBrewTapsInConfig mutates cfg in place (in dry-run the mutation is
-// harmless because the config is not persisted) and returns the rewrites
-// performed.
+// Mutates cfg in place; harmless in dry-run because the config is not persisted.
 func backfillBrewTapsInConfig(cfg *config.RootConfig, resolve brewTapResolveFunc) []BrewTapBackfill {
 	if cfg == nil {
 		return nil
@@ -137,8 +126,6 @@ func rewriteBrewInstallSpec(install *config.ToolInstallSpec, spec *config.ToolSp
 	return true
 }
 
-// isBareBrewPackage reports whether pkg is a non-empty name without a tap
-// qualifier (no "/"), i.e. a candidate for backfill.
 func isBareBrewPackage(pkg string) bool {
 	return pkg != "" && !strings.Contains(pkg, "/")
 }

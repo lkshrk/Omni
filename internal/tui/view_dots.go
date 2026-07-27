@@ -10,7 +10,6 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-// truncatePath clips s to maxW runes, appending "…" if truncated.
 func truncatePath(s string, maxW int) string {
 	if len(s) <= maxW {
 		return s
@@ -25,7 +24,6 @@ func truncatePath(s string, maxW int) string {
 	return string(runes[:maxW-1]) + "…"
 }
 
-// filteredDotsEntries returns entries matching the active group and search filter.
 func filteredDotsEntries(m Model) []app.DotStatus {
 	q := ""
 	if m.dotsSearchActive {
@@ -134,15 +132,11 @@ func renderDots(m Model) string {
 	p := m.palette
 	var sb strings.Builder
 
-	// ── Startup snapshot not landed ───────────────────────────────────────────
-	// Zero-value cached availability means nothing is loaded yet; render
-	// nothing rather than flashing the onboarding screen before the cache
-	// arrives.
+	// Zero-value cached availability means nothing is loaded yet; render nothing rather than flashing the onboarding screen before the cache arrives.
 	if m.dotsSyncAvailCached.Reason == "" && !m.dotsSyncAvailCached.Configured {
 		return ""
 	}
 
-	// ── Disabled ──────────────────────────────────────────────────────────────
 	if dotsViewDisabled(m) {
 		sb.WriteString("\n")
 		sb.WriteString(p.styleHelp.Render("  Dotfile sync is disabled for this machine.") + "\n\n")
@@ -152,7 +146,6 @@ func renderDots(m Model) string {
 		return sb.String()
 	}
 
-	// ── Not configured ────────────────────────────────────────────────────────
 	if dotsViewUnconfigured(m) {
 		sb.WriteString("\n")
 		sb.WriteString(p.styleNormal.Render("  No dotfiles repo configured yet.") + "\n\n")
@@ -163,11 +156,9 @@ func renderDots(m Model) string {
 		return sb.String()
 	}
 
-	// ── Empty state ───────────────────────────────────────────────────────────
 	if len(m.dotsEntries) == 0 {
 		sb.WriteString("\n")
-		// m.loading: the startup snapshot (which carries the cached dots
-		// state) hasn't landed yet — "No dotfiles tracked yet" would be a lie.
+		// m.loading: the startup snapshot carrying the cached dots state has not landed, so "No dotfiles tracked yet" would be a lie.
 		if m.dotsPreparing || m.loading {
 			return ""
 		}
@@ -177,18 +168,15 @@ func renderDots(m Model) string {
 		return sb.String()
 	}
 
-	// ── Scrollable content ────────────────────────────────────────────────────
 	var buf scrollBuf
 	write := buf.write
 	sections := newListSectionWriter(p, m.width, write)
 	hintPrefix := listHintPrefixWithGap(listWideIconGapWidth)
 
-	// ── Top controls ──────────────────────────────────────────────────────────
 	if m.dotsSearchActive {
 		write(renderDotsSearchControl(m) + "\n")
 	}
 
-	// ── Repo status (compact, not a list section) ───────────────────────────
 	if repoPath := dotsRepoPathForView(m); repoPath != "" {
 		var gitPart string
 		if m.dotsGitStatus == "" {
@@ -222,8 +210,6 @@ func renderDots(m Model) string {
 	if cols.group > 0 {
 		rightW += dotsGapW + cols.group
 	}
-	// Layout inside the row prefix:
-	// icon + name + target ... status ratio [ignored] [group]
 	fixedW := dotsIconW + dotsIconNameGapW + cols.name + dotsGapW + rightW + dotsGapW
 	targetWidth := max(contentW-fixedW, 1)
 	splitDotsRow := func(left, right string) string {
@@ -319,8 +305,7 @@ func renderDots(m Model) string {
 		sections.Header(section.Title)
 		for _, e := range section.Statuses {
 			iconStyle, icon, statusLabel := dotStateDisplay(p, app.DotStatusState(e))
-			// Synthesized container entries in the Ignored section (not
-			// explicitly ignored themselves) get muted "-" status.
+			// Synthesized container entries in the Ignored section are not explicitly ignored themselves, so they get muted "-" status.
 			ignoredContainer := inIgnoredSection && !app.DotStatusHasAction(e, app.DotActionUnignore)
 			if ignoredContainer {
 				statusLabel = "-"
@@ -770,9 +755,7 @@ func dotRightColumns(p palette, selected bool, status string, statusStyle lipglo
 	return right + strings.Repeat(" ", dotsGapW) + groupCol
 }
 
-// dotEntryGroups returns the full group memberships for a dots entry,
-// falling back to its legacy single-group field when it has no membership
-// record (e.g. entries not yet migrated onto the multi-group model).
+// Falls back to the legacy single-group field for entries not yet migrated onto the multi-group model.
 func dotEntryGroups(m Model, entry app.DotStatus) []string {
 	if groups, ok := m.dotMemberships[entry.Name]; ok {
 		return groups
@@ -851,9 +834,7 @@ func dotSyncedStyle(p palette, selected bool) lipgloss.Style {
 	return style
 }
 
-// renderDotsLastError shows the recorded failure reason for the selected
-// out-of-sync entry, wrapped so multi-line tool output (e.g. stow stderr)
-// stays readable instead of being truncated into a transient status line.
+// Wrapped so multi-line tool output (e.g. stow stderr) stays readable instead of being truncated into a transient status line.
 func renderDotsLastError(m Model, e app.DotStatus, width int) string {
 	text := strings.Join(strings.Fields(e.LastError), " ")
 	if text == "" {

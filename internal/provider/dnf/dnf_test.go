@@ -19,8 +19,6 @@ func tool(name string) provider.Tool {
 	return provider.Tool{Name: name, Provider: "dnf", Package: name}
 }
 
-// --- Available ---
-
 func TestAvailable_True(t *testing.T) {
 	p, _ := newDNF(executor.MockCall{Stdout: "dnf 4.14.0"})
 	ok, err := p.Available(context.Background())
@@ -36,8 +34,6 @@ func TestAvailable_False(t *testing.T) {
 		t.Errorf("Available() = (%v, %v), want (false, nil)", ok, err)
 	}
 }
-
-// --- Install ---
 
 func TestInstall_Success(t *testing.T) {
 	p, m := newDNF(executor.MockCall{Stdout: "Installed: ripgrep"})
@@ -64,8 +60,6 @@ func TestInstall_ErrorPropagates(t *testing.T) {
 	}
 }
 
-// --- Name / Description ---
-
 func TestName(t *testing.T) {
 	p, _ := newDNF()
 	if p.Name() != "dnf" {
@@ -79,8 +73,6 @@ func TestDescription(t *testing.T) {
 		t.Error("Description() should not be empty")
 	}
 }
-
-// --- Uninstall ---
 
 func TestUninstall_Success(t *testing.T) {
 	p, m := newDNF(executor.MockCall{})
@@ -99,8 +91,6 @@ func TestUninstall_Error(t *testing.T) {
 	}
 }
 
-// --- Upgrade ---
-
 func TestUpgrade_Success(t *testing.T) {
 	p, m := newDNF(executor.MockCall{})
 	if err := p.Upgrade(context.Background(), tool("ripgrep")); err != nil {
@@ -118,8 +108,6 @@ func TestUpgrade_Error(t *testing.T) {
 	}
 }
 
-// --- IsInstalled ---
-
 func TestIsInstalled_Found(t *testing.T) {
 	p, _ := newDNF(executor.MockCall{Stdout: "14.1.1-4.fc44"})
 	ok, ver, err := p.IsInstalled(context.Background(), tool("ripgrep"))
@@ -135,8 +123,6 @@ func TestIsInstalled_NotFound(t *testing.T) {
 		t.Errorf("IsInstalled() = (%v, _, %v), want (false, nil)", ok, err)
 	}
 }
-
-// --- ListInstalled ---
 
 func TestListInstalled(t *testing.T) {
 	output := "ripgrep\t14.1.1-4.fc44\nbash\t5.2.15-3.fc44\n"
@@ -160,8 +146,6 @@ func TestListInstalled(t *testing.T) {
 	}
 }
 
-// --- InstalledMap ---
-
 func TestInstalledMap(t *testing.T) {
 	output := "Ripgrep\t14.1.1-4.fc44\nBash\t5.2.15-3.fc44\n"
 	p, _ := newDNF(executor.MockCall{Stdout: output})
@@ -173,8 +157,6 @@ func TestInstalledMap(t *testing.T) {
 		t.Errorf("expected ripgrep in map, got %v", m)
 	}
 }
-
-// --- parseRPMLine ---
 
 func TestParseRPMLine(t *testing.T) {
 	tests := []struct {

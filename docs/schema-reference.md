@@ -214,6 +214,21 @@ inside a managed entry.
 The matching protected host group is active implicitly and should not appear in
 the reusable group list.
 
+## `agents`
+
+`agents.packages` is the sole durable skill manifest.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `source` | string | Normalized Git, well-known HTTP, `file://`, or local directory locator. Required. |
+| `ref` | string | Optional Git branch, tag, or commit. |
+| `skills` | array | Selected skill names. Omitted means every discovered skill. |
+| `agents` | array | Target Agent IDs. Omitted means the host's enabled targets. |
+
+Source shorthand such as `owner/repo#main@review` is normalized into
+`source`, `ref`, and `skills`. Source paths and locators remain portable;
+resolved hashes, timestamps, and cache paths are never stored here.
+
 ## `ignore`
 
 ```json
@@ -243,7 +258,7 @@ Global ignore lists keep known-noisy entries visible but unmanaged.
 ```
 
 Lists agent-managed skills, MCP servers, plugins, and marketplaces skipped
-during restore/sync, mirroring the top-level `ignore` list for tools and dots.
+during sync, mirroring the top-level `ignore` list for tools and dots.
 
 ## Config Version Migrations
 
@@ -258,5 +273,6 @@ supported value. Notable steps since older tagged releases:
 | 15 | Adds optional `groups[].marketplaces` membership refs. |
 | 16 | Adds `agents.ignore.marketplaces`. |
 | 17 | Adds optional tool source, recipe, and `bin_dir` fields plus `$include` support. |
+| 20 | Adds structured `agents.packages[].skills`, makes packages the sole durable skill manifest, and preserves legacy per-skill names during migration. |
 
 See [GitHub Releases](https://github.com/lkshrk/omni/releases) for release notes.

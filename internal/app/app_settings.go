@@ -10,11 +10,7 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// ─── Settings ─────────────────────────────────────────────────────────────────
-
-// LoadSettings returns the effective settings for this machine.
-// Global settings are merged with host-specific overrides from host_settings[shortHostname].
-// Returns zero-value Settings when the file does not exist.
+// LoadSettings — Global settings merged with host_settings[shortHostname]; zero value when the file does not exist.
 func (a *App) LoadSettings() (config.Settings, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -95,9 +91,7 @@ func ToggleSettingBool(key string) SettingsChange {
 	return SettingsChange{Kind: SettingsChangeToggleBool, Key: CanonicalSettingKey(key)}
 }
 
-// SetProviderLayout sets both the provider-priority order and the full set of
-// disabled concrete providers in one change (the TUI priority editor commits
-// reorder + enable/disable together).
+// SetProviderLayout — The TUI priority editor commits reorder and enable/disable together.
 func SetProviderLayout(priority, disabled []string) SettingsChange {
 	return SettingsChange{
 		Kind:     SettingsChangeSetProviderPriority,

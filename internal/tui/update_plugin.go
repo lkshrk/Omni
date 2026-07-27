@@ -13,8 +13,6 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-// combinePluginErrors folds a top-level error with per-adapter errors,
-// mirroring combineMcpErrors in update_mcp.go.
 func combinePluginErrors(err error, adapterErrs []app.PluginError) error {
 	if err == nil && len(adapterErrs) == 0 {
 		return nil
@@ -29,7 +27,6 @@ func combinePluginErrors(err error, adapterErrs []app.PluginError) error {
 	return errors.Join(all...)
 }
 
-// pluginWarningsText flattens non-fatal adapter warnings into one status line.
 func pluginWarningsText(warnings []app.PluginError) string {
 	if len(warnings) == 0 {
 		return ""
@@ -58,16 +55,11 @@ type pluginRemoveDoneMsg struct {
 type pluginImportAdoptDoneMsg struct {
 	pluginName string
 	err        error
-	// reloadMarketplaces is set when this claim also added a marketplace (the
-	// combined offer flow), so the caller reloads marketplace rows too — a
-	// plain plugin claim never changes marketplace rows.
+	// Set when this claim also added a marketplace, so the caller reloads marketplace rows; a plain plugin claim never changes them.
 	reloadMarketplaces bool
 }
 
-// pluginNeedsMarketplaceMsg is returned instead of pluginImportAdoptDoneMsg
-// when the plugin's marketplace is not yet declared in the manifest and a
-// real source was found, so the TUI can offer to claim both rather than
-// hard-failing like AddPlugin does on its own.
+// Returned instead of pluginImportAdoptDoneMsg when the marketplace is not yet declared, so the TUI can offer to claim both rather than hard-failing like AddPlugin.
 type pluginNeedsMarketplaceMsg struct {
 	agentID         string
 	plugin          app.InstalledPlugin
@@ -102,12 +94,7 @@ func (m *Model) doRemovePlugin(name string) tea.Cmd {
 	}
 }
 
-// pluginUnmanagedAgentsFor returns every agent ID whose unmanaged map has an
-// entry named name, unioned with clickedAgentID, sorted for determinism.
-// Mirrors mcpUnmanagedAgentsFor's rationale in update_mcp.go: claiming one
-// row of a plugin unmanaged under several agents must declare all of them,
-// or the other agents' installs vanish from every agents-tab view once the
-// name is no longer "unmanaged" but also not targeted.
+// Claiming one row of a plugin unmanaged under several agents must declare all of them, or the other agents' installs vanish from every agents-tab view.
 func pluginUnmanagedAgentsFor(unmanaged map[string][]app.InstalledPlugin, name, clickedAgentID string) []string {
 	set := map[string]struct{}{clickedAgentID: {}}
 	for agentID, plugins := range unmanaged {
@@ -126,11 +113,7 @@ func pluginUnmanagedAgentsFor(unmanaged map[string][]app.InstalledPlugin, name, 
 	return ids
 }
 
-// pluginUnmanagedConflict reports whether name is unmanaged under more than
-// one agent with a differing marketplace, mirroring the CLI's
-// importPluginByName conflict guard in internal/cli/agents.go so the TUI
-// claim path refuses the same ambiguous case instead of silently picking one
-// agent's marketplace to write to the manifest.
+// Mirrors the CLI's importPluginByName conflict guard so the TUI refuses the same ambiguous case instead of silently picking one agent's marketplace.
 func pluginUnmanagedConflict(unmanaged map[string][]app.InstalledPlugin, name string, first app.InstalledPlugin) bool {
 	for _, plugins := range unmanaged {
 		for _, p := range plugins {
@@ -145,20 +128,7 @@ func pluginUnmanagedConflict(unmanaged map[string][]app.InstalledPlugin, name st
 	return false
 }
 
-// doImportPluginWithGroup adopts one unmanaged plugin then assigns it to
-// group in one command, mirroring doImportMcpServerWithGroup. SetPluginGroups
-// assumes the target group already exists, matching the existing plugin
-// group-membership picker's behavior. Agents declares every agent unmanaged
-// has this plugin under (not just agentID), see pluginUnmanagedAgentsFor.
-//
-// Marketplace declaration is checked here, inside the async cmd, rather than
-// at picker-confirm keypress time: m.marketplaceRows is a cached snapshot
-// that may be stale or not yet loaded, so the only reliable check is a fresh
-// read through App at execution time (mirrors the CLI's importPluginByName in
-// internal/cli/agents.go). If the marketplace is undeclared but a real source
-// is discoverable, this returns pluginNeedsMarketplaceMsg instead of erroring
-// so the caller can offer to claim both; AddPlugin's own hard error only
-// surfaces when no source can be found at all.
+// The marketplace check runs inside the async cmd, not at picker-confirm time: m.marketplaceRows is a cached snapshot that may be stale, so only a fresh read through App is reliable.
 func (m *Model) doImportPluginWithGroup(agentID string, p app.InstalledPlugin, group string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	unmanaged := m.pluginUnmanaged
@@ -192,9 +162,6 @@ func (m *Model) doImportPluginWithGroup(agentID string, p app.InstalledPlugin, g
 	}
 }
 
-// doAdoptPlugin performs the AddPlugin + optional SetPluginGroups step,
-// factored out of doImportPluginWithGroup so doClaimPluginAndMarketplace can
-// reuse it after claiming the marketplace first.
 func doAdoptPlugin(a *app.App, ctx context.Context, p app.InstalledPlugin, agentIDs []string, group string) pluginImportAdoptDoneMsg {
 	res, err := a.AddPlugin(ctx, pluginFromInstalled(p, agentIDs))
 	if err := combinePluginErrors(err, res.Errors); err != nil {
@@ -208,13 +175,7 @@ func doAdoptPlugin(a *app.App, ctx context.Context, p app.InstalledPlugin, agent
 	return pluginImportAdoptDoneMsg{pluginName: p.Name}
 }
 
-// findMarketplaceSourceForClaim resolves a real source for an undeclared
-// marketplace being claimed alongside a plugin, mirroring the CLI's
-// importPluginByName: prefer the agents-tab unmanaged marketplace map (same
-// data the standalone marketplace claim flow uses, see
-// marketplaceUnmanagedAgentsFor in update_marketplace.go); fall back to
-// App.FindUndeclaredMarketplace when the marketplace isn't present there at
-// all (e.g. the marketplace rows haven't loaded but the plugin rows have).
+// Prefers the agents-tab unmanaged marketplace map, falling back to App.FindUndeclaredMarketplace when the marketplace rows have not loaded but the plugin rows have.
 func findMarketplaceSourceForClaim(a *app.App, ctx context.Context, unmanagedMarketplaces map[string][]app.InstalledMarketplace, name string, agentIDs []string) (source string, ok bool, err error) {
 	for _, marketplaces := range unmanagedMarketplaces {
 		for _, mk := range marketplaces {
@@ -226,14 +187,7 @@ func findMarketplaceSourceForClaim(a *app.App, ctx context.Context, unmanagedMar
 	return a.FindUndeclaredMarketplace(ctx, name, agentIDs)
 }
 
-// doClaimPluginAndMarketplace claims the marketplace first (mirroring the
-// standalone marketplace claim in doImportMarketplaceWithGroup: Agents is the
-// sorted union of agents carrying it, via marketplaceUnmanagedAgentsFor),
-// then the plugin, in one async cmd chain. If the marketplace claim succeeds
-// but the plugin claim fails, that partial state is intentional — the
-// marketplace claim is a complete, real unit of work on its own — so the
-// error message says the marketplace was added and the plugin failed rather
-// than attempting any rollback.
+// If the marketplace claim succeeds but the plugin claim fails, that partial state is intentional — the marketplace claim is a complete unit of work — so nothing is rolled back.
 func (m *Model) doClaimPluginAndMarketplace(agentID string, p app.InstalledPlugin, group, marketplaceName, source string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	unmanaged := m.pluginUnmanaged
@@ -266,8 +220,6 @@ func (m *Model) doClaimPluginAndMarketplace(agentID string, p app.InstalledPlugi
 	}
 }
 
-// armPluginMarketplaceOffer stores msg's payload and arms the confirm state,
-// called from the update.go handler for pluginNeedsMarketplaceMsg.
 func (m *Model) armPluginMarketplaceOffer(msg pluginNeedsMarketplaceMsg) tea.Cmd {
 	m.pluginMarketplaceOfferConfirm = true
 	m.pluginMarketplaceOfferAgentID = msg.agentID
@@ -278,12 +230,7 @@ func (m *Model) armPluginMarketplaceOffer(msg pluginNeedsMarketplaceMsg) tea.Cmd
 	return m.armConfirmationTimeout()
 }
 
-// handlePluginMarketplaceOfferConfirmKeyMsg resolves the "claim both?" offer
-// armed by pluginNeedsMarketplaceMsg. Confirm/y claims the marketplace (using
-// the source resolved when the offer was armed) then the plugin; any other
-// key (Back/esc included) cancels the whole claim with a neutral status
-// message and writes nothing, mirroring how the standalone group picker's
-// cancel path (m.cancelGroupPicker) leaves no partial state.
+// Any other key (Back/esc included) cancels the whole claim and writes nothing, mirroring m.cancelGroupPicker leaving no partial state.
 func (m *Model) handlePluginMarketplaceOfferConfirmKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	m.cancelConfirmationTimeout()
 	agentID := m.pluginMarketplaceOfferAgentID
@@ -316,7 +263,6 @@ func (m *Model) doSetPluginAgents(row app.PluginRow, ids []string) tea.Cmd {
 
 type pluginUpdateDoneMsg struct{ err error }
 
-// doUpdatePlugin updates a manifest plugin on every targeted, available adapter.
 func (m *Model) doUpdatePlugin(name string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -325,8 +271,6 @@ func (m *Model) doUpdatePlugin(name string) tea.Cmd {
 	}
 }
 
-// doInstallPlugin re-installs a manifest plugin on one targeted-but-missing
-// agent via SetPluginAgents, mirroring doInstallMcpServer.
 func (m *Model) doInstallPlugin(name, agentID string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -348,8 +292,6 @@ func (m *Model) doInstallPlugin(name, agentID string) tea.Cmd {
 
 type pluginGroupsSavedMsg struct{ err error }
 
-// doSetPluginGroupMemberships persists group membership for a plugin via
-// App.SetPluginGroups, mirroring doSetMcpGroupMemberships.
 func (m *Model) doSetPluginGroupMemberships(name string, groups []string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -418,9 +360,6 @@ func pluginGroupsStatusText(row app.PluginRow) string {
 	return row.Name + " groups: " + strings.Join(row.Groups, ", ")
 }
 
-// openPluginAgentsPicker builds an agents picker from a managed row's current
-// per-adapter status, reusing the skill-agents popup fields, exactly as
-// openMcpAgentsPicker does.
 func (m *Model) openPluginAgentsPicker(row app.PluginRow) tea.Cmd {
 	ids := make([]string, 0, len(row.PerAgentStatus))
 	for id := range row.PerAgentStatus {
@@ -455,18 +394,13 @@ func (m *Model) openPluginAgentsPicker(row app.PluginRow) tea.Cmd {
 	return nil
 }
 
-// pluginFromInstalled builds a app.Plugin for AddPlugin from an unmanaged
-// InstalledPlugin, targeting agentIDs (every agent unmanaged reports this
-// plugin under, unioned with the clicked row's agent — see
-// pluginUnmanagedAgentsFor), mirroring how the mcp import path in
-// update_keys.go's "i" case builds a app.McpServer inline.
+// Targets every agent unmanaged reports this plugin under, unioned with the clicked row's agent (see pluginUnmanagedAgentsFor).
 func pluginFromInstalled(p app.InstalledPlugin, agentIDs []string) app.Plugin {
 	return app.Plugin{Name: p.Name, Marketplace: p.Marketplace, Agents: agentIDs}
 }
 
 type pluginAddDoneMsg struct{ err error }
 
-// doAddPlugin registers a new plugin built from the add-plugin form.
 func (m *Model) doAddPlugin(p app.Plugin) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -475,7 +409,6 @@ func (m *Model) doAddPlugin(p app.Plugin) tea.Cmd {
 	}
 }
 
-// resetPluginForm clears the add-plugin form back to its initial state.
 func (m *Model) resetPluginForm() {
 	m.pluginFormField = 0
 	m.pluginFormName.SetValue("")
@@ -486,8 +419,6 @@ func (m *Model) resetPluginForm() {
 	m.pluginFormAgents.Blur()
 }
 
-// focusPluginFormField blurs every add-plugin field then focuses the one at
-// m.pluginFormField, mirroring focusMcpFormField.
 func (m *Model) focusPluginFormField() {
 	m.pluginFormName.Blur()
 	m.pluginFormMarketplace.Blur()
@@ -502,9 +433,7 @@ func (m *Model) focusPluginFormField() {
 	}
 }
 
-// buildPluginFromForm validates and constructs a app.Plugin from the
-// add-plugin form's current field values. Name and marketplace are required;
-// agents is an optional comma-separated list (empty means all MVP agents).
+// Name and marketplace are required; agents is an optional comma-separated list (empty means all MVP agents).
 func (m *Model) buildPluginFromForm() (app.Plugin, error) {
 	name := strings.TrimSpace(m.pluginFormName.Value())
 	if name == "" {

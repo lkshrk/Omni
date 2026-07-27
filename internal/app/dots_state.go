@@ -229,9 +229,7 @@ func (a *App) DotsResolveConflictPathWithState(ctx context.Context, name, relPat
 	})
 }
 
-// DotsForceResolveAllWithState runs a full sync that force-resolves every
-// conflicting entry with the given strategy (the bulk equivalent of
-// `dots sync --use-repo|--use-local`), returning the refreshed dots state.
+// DotsForceResolveAllWithState — The bulk equivalent of dots sync --use-repo or --use-local.
 func (a *App) DotsForceResolveAllWithState(ctx context.Context, strategy DotsResolveStrategy) (*DotsOperationStateResult, error) {
 	conflictStrategy := ""
 	switch strategy {

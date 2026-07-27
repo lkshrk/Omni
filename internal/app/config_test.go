@@ -13,12 +13,9 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// ─── HasConfig / CreateEmptyConfig ───────────────────────────────────────────
-
 func TestHasConfig_False(t *testing.T) {
 	t.Parallel()
 	a, _ := newImportApp(t)
-	// No settings.json written yet.
 	if a.HasConfig() {
 		t.Error("HasConfig should be false before any config is created")
 	}
@@ -52,14 +49,12 @@ func TestCreateEmptyConfig_CreatesFile(t *testing.T) {
 func TestCreateEmptyConfig_Noop(t *testing.T) {
 	t.Parallel()
 	a, cfgPath := newImportApp(t)
-	// Write an existing non-empty config.
 	existing := &config.RootConfig{
 		Groups: []*config.GroupConfig{{Name: "base"}},
 	}
 	if err := saveAppConfig(t, cfgPath, existing); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
-	// Second call should not overwrite the file.
 	if err := a.CreateEmptyConfig(); err != nil {
 		t.Fatalf("CreateEmptyConfig (noop): %v", err)
 	}
@@ -350,8 +345,6 @@ func TestImportConfigFile_RejectsActiveConfigSource(t *testing.T) {
 	}
 }
 
-// ─── LoadTaps ─────────────────────────────────────────────────────────────────
-
 func TestLoadTaps_Empty(t *testing.T) {
 	t.Parallel()
 	a, _ := newImportApp(t)
@@ -382,13 +375,10 @@ func TestLoadTaps_ReturnsUnion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTaps: %v", err)
 	}
-	// Union across 2 groups; hashicorp/tap is deduplicated.
 	if len(taps) != 3 {
 		t.Errorf("LoadTaps = %v (len %d), want 3 unique taps", taps, len(taps))
 	}
 }
-
-// ─── ActiveHostInfo ───────────────────────────────────────────────────────────
 
 func TestActiveHostInfo_NoConfig(t *testing.T) {
 	t.Parallel()
@@ -527,12 +517,9 @@ func TestSetToolQuarantine_PersistsToolOverride(t *testing.T) {
 	}
 }
 
-// ─── RefreshOutdated ──────────────────────────────────────────────────────────
-
-// outdatedStub is a provider that also implements OutdatedChecker.
 type outdatedStub struct {
 	stubProvider
-	outdated map[string]string // lowercase name → latest version
+	outdated map[string]string
 }
 
 func (o *outdatedStub) OutdatedMap(_ context.Context) (map[string]string, error) {
@@ -576,9 +563,7 @@ func TestRefreshOutdated_SetsOutdatedFlag(t *testing.T) {
 }
 
 func TestRefreshOutdated_NoOutdatedChecker(t *testing.T) {
-	t.Parallel(
-	// Provider without OutdatedChecker should be silently skipped.
-	)
+	t.Parallel()
 
 	stub := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, stub)
@@ -590,14 +575,11 @@ func TestRefreshOutdated_NoOutdatedChecker(t *testing.T) {
 	if err := a.RefreshOutdated(ctx, false, nil); err != nil {
 		t.Fatalf("RefreshOutdated (no checker): %v", err)
 	}
-	// Tool should remain not-outdated.
 	tools, _ := a.ListTools(ctx, "")
 	if len(tools) > 0 && tools[0].Outdated {
 		t.Error("tool should not be outdated when provider has no OutdatedChecker")
 	}
 }
-
-// ─── Registry ─────────────────────────────────────────────────────────────────
 
 func TestRegistry_ReturnsNonNil(t *testing.T) {
 	t.Parallel()
@@ -623,13 +605,10 @@ func TestRegistry_ContainsRegisteredProviders(t *testing.T) {
 	}
 }
 
-// ─── Init ─────────────────────────────────────────────────────────────────────
-
 func TestInit_CreatesCacheDir(t *testing.T) {
 	configDir := t.TempDir()
 	cfgPath := filepath.Join(configDir, "settings.json")
 	cacheDir := t.TempDir()
-	// Set env var so Init uses our temp dir for the cache.
 	t.Setenv("OMNI_CACHE_DIR", cacheDir)
 
 	a := app.New(cfgPath)
@@ -654,7 +633,7 @@ func TestInit_CacheDirOverride(t *testing.T) {
 	cacheDir := t.TempDir()
 
 	a := app.New(cfgPath)
-	a.CacheDir = cacheDir // explicit override — env var not needed
+	a.CacheDir = cacheDir
 	ctx := context.Background()
 	if err := a.Init(ctx); err != nil {
 		t.Fatalf("Init with CacheDir set: %v", err)
@@ -666,6 +645,5 @@ func TestInit_CacheDirOverride(t *testing.T) {
 	}
 }
 
-// Compile-time check that outdatedStub satisfies both interfaces.
 var _ provider.Provider = (*outdatedStub)(nil)
 var _ provider.OutdatedChecker = (*outdatedStub)(nil)

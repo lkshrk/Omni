@@ -193,7 +193,6 @@ func TestSendAdminTerminalOutputPreservesRecentOutputWhenBufferFull(t *testing.T
 func TestSendAdminTerminalOutputPreservesDoneMsg(t *testing.T) {
 	t.Parallel()
 	events := make(chan tea.Msg, adminTerminalEventBuffer)
-	// Fill channel completely with output messages.
 	for i := range adminTerminalEventBuffer {
 		events <- adminTerminalOutputMsg{id: 1, chunk: fmt.Sprintf("line %d\n", i)}
 	}
@@ -201,13 +200,11 @@ func TestSendAdminTerminalOutputPreservesDoneMsg(t *testing.T) {
 	<-events
 	events <- adminTerminalDoneMsg{id: 1, state: adminTerminalState{id: 1}}
 
-	// Now the channel is full with a mix of output + one doneMsg at the end.
 	// Send more output — this should drain output messages but never the doneMsg.
 	for range 10 {
 		sendAdminTerminalOutput(events, adminTerminalOutputMsg{id: 1, chunk: "new\n"})
 	}
 
-	// Drain and verify the doneMsg survived.
 	foundDone := false
 	for len(events) > 0 {
 		msg := <-events

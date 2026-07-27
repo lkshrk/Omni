@@ -19,14 +19,7 @@ import (
 	isync "github.com/lkshrk/omni/internal/sync"
 )
 
-// ─── Sync ─────────────────────────────────────────────────────────────────────
-
-// Sync installs bootstrap providers first, then syncs taps and tools. When
-// AutoImport is enabled it also runs Import so newly installed tools are
-// captured in the config.
-// opts.Group restricts the sync to one named group.
-// When opts.Group is empty, the active host's special group plus assigned
-// reusable groups are synced.
+// Sync — opts.Group restricts the sync to one group; empty syncs the host group plus its assigned reusable groups.
 func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -68,8 +61,7 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 		}
 		result = pass1
 
-		// A manager installed by a script in pass 1 may land in a dir not yet on
-		// PATH; refresh before any provider-sensitive tool planning begins.
+		// A manager installed by a script in pass 1 may land in a dir not yet on PATH.
 		refreshPathAfterScriptInstalls(ctx, a.newExecutor(), pass1, func(p string) {
 			if err := os.Setenv("PATH", p); err != nil {
 				// best effort: dependents fall back to the existing PATH
@@ -94,15 +86,10 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 		}
 	}
 
-	// Resolve once and derive both the entry list (for the syncer) and the
-	// detailed view (for tap collection) from the same pass.
+	// Resolve once so the entry list and the detailed view come from the same pass.
 	resolvedDetailed, warnings := a.resolveTools(ctx, cfg, groups, false)
 
-	// For tools whose every configured provider is unavailable on this host,
-	// attempt a high-confidence provider search across currently available
-	// providers before giving up. This handles the case where a tool spec only
-	// lists a provider that is absent on the current platform (e.g. brew on
-	// Linux) but another provider can supply the same tool.
+	// Covers a spec listing only a provider absent on this platform when another can supply the tool.
 	if !opts.DryRun {
 		if searched, searchWarnings := a.addProviderSearchForUnavailableTools(ctx, cfg, groups, resolvedDetailed, opts.Provider, opts.Progress); searched {
 			cfg, err = a.loadConfig()
@@ -127,12 +114,9 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 		return nil, err
 	}
 
-	// Build a flat config view for the syncer; logical tools are deduplicated
-	// by the resolver across group memberships.
 	flatCfg := &config.Config{Tools: resolvedTools, Settings: cfg.Settings}
 
-	// Pass 2 keeps bootstrap providers in the desired set so prune does not
-	// treat the providers installed during preflight as orphans.
+	// Keeps bootstrap providers in the desired set so prune does not treat them as orphans.
 	if len(providerTools) > 0 {
 		pass2Tools := unionToolEntries(resolvedTools, providerTools)
 		flatCfg = &config.Config{Tools: pass2Tools, Settings: cfg.Settings}
@@ -144,7 +128,6 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 	}
 
 	if result == nil {
-		// No provider tools — single-pass behaviour (no providers configured).
 		result = pass2
 	} else {
 		result = mergeProviderResults(result, pass2, providerTools)
@@ -153,16 +136,13 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 	result.Warnings = append(result.Warnings, warnings...)
 
 	if !opts.DryRun {
+		a.recordInstalledGitHubRecipeVersions(ctx, result, resolvedDetailed)
 		if opts.Group == "" {
-			// Collect installed tools not covered by the active host and
-			// append them to the machine group so nothing is lost.
 			if err := a.syncOrphansToMachineGroup(ctx, activeGroups); err != nil {
 				result.Warnings = append(result.Warnings,
 					fmt.Sprintf("syncing orphans to machine group: %v", err))
 			}
 
-			// Report non-active groups that are now fully installed so the CLI
-			// can prompt the user to add them to the host.
 			activeNames := groupBaseNames(activeGroups)
 			if satisfied, e := a.CheckSatisfiedGroups(ctx, activeNames); e == nil {
 				result.SatisfiedGroups = satisfied
@@ -199,8 +179,7 @@ func (a *App) addMissingProviderMatchesForGroups(ctx context.Context, cfg *confi
 			if !ok || len(spec.Providers) > 0 || spec.Fallback != nil {
 				continue
 			}
-			// Skip re-searching registries for a tool whose discovery recently
-			// found no usable match (within the TTL).
+			// Skip re-searching registries for a tool whose discovery recently found nothing (TTL-guarded).
 			if a.recentProviderSearchMiss(ctx, name) {
 				continue
 			}
@@ -251,21 +230,11 @@ func (a *App) syncNativeUnavailableFallbacks(ctx context.Context, tools []resolv
 			continue
 		}
 		tool := provider.Tool{Name: entry.Name, Provider: entry.Provider, Package: entry.EffectivePackage(), Options: entry.Options}
-		// Capture the original route kind before any promotion so the RetryFailed
-		// guard below can distinguish a tool that genuinely came in as
-		// installRouteFallbackEligible (and should respect RetryFailed) from one
-		// that was just promoted from installRouteUnavailable (and must not be sent
-		// back to the native syncer, which cannot install it).
+		// Captures the pre-promotion kind so RetryFailed cannot send an unavailable-route tool back to the native syncer.
 		originalRouteKind := resolved.route.Kind
 		if resolved.route.Kind == installRouteUnavailable {
-			// When every skip is provider-unavailable and a fallback is
-			// configured, treat the tool as fallback-eligible rather than
-			// immediately failing. This covers the case where a tool spec lists
-			// only a provider that is absent on the current platform (e.g. brew
-			// on Linux) and no available native provider was found by search.
+			// Covers a spec listing only a provider absent on this platform, with no available native alternative.
 			if resolved.route.FallbackConfigured && allInstallRouteSkipsAreProviderUnavailable(resolved.route.Skipped, len(resolved.route.Skipped)) {
-				// Fall through to the fallback handling below by rewriting the
-				// route kind in our local copy so the subsequent code can handle it.
 				resolved = resolvedTool{
 					entry:       resolved.entry,
 					memberships: resolved.memberships,
@@ -285,16 +254,12 @@ func (a *App) syncNativeUnavailableFallbacks(ctx context.Context, tools []resolv
 				continue
 			}
 		}
-		// RetryFailed sends fallback-eligible tools back to the native syncer so
-		// they get a fresh attempt. Skip this for tools promoted from
-		// installRouteUnavailable: their configured providers are absent on this
-		// system, so the native syncer cannot help them regardless of retry state.
+		// Tools promoted from unavailable are skipped: their configured providers are absent, so a retry cannot help.
 		if opts.RetryFailed && originalRouteKind != installRouteUnavailable && !a.cachedFailureExists(ctx, entry) {
 			filtered = append(filtered, resolved)
 			continue
 		}
-		// A failed upgrade retains the previously installed fallback. Verify that
-		// existing binary before applying eligibility rules for a new install.
+		// A failed upgrade retains the previously installed fallback, so verify that binary first.
 		if !opts.DryRun {
 			if installed, version := a.fallbackInstalledCached(ctx, entry); installed {
 				ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpAlreadyInstalled, Version: version})
@@ -590,10 +555,7 @@ type discoveredClaim struct {
 	tool           provider.Tool
 }
 
-// ClaimInstallWith returns the install_with value to record when claiming a
-// single discovered/orphan tool, mirroring the bulk-claim resolution so a
-// TUI/CLI single claim pins the same concrete manager (e.g. bun) as
-// `tools sync --all`. Returns "" when no explicit pin is needed.
+// ClaimInstallWith — Mirrors the bulk-claim resolution so a single claim pins the same concrete manager; empty when no pin is needed.
 func (a *App) ClaimInstallWith(ctx context.Context, configProvider, installedWith string) string {
 	resolved := a.ResolvedEcosystemProviders(ctx)
 	installWith := configInstallWithForConcreteProvider(configProvider, installedWith, resolved)
@@ -673,9 +635,6 @@ func (a *App) addDiscoveredClaimsToConfig(groupName string, claims []discoveredC
 	})
 }
 
-// ─── Install / Uninstall / Upgrade ───────────────────────────────────────────
-
-// resolveProvider returns the first available provider from priority.
 // Falls back to the registry/catalog install priority when priority is empty.
 func (a *App) resolveProvider(ctx context.Context, priority []string, disabledProviders ...[]string) (string, error) {
 	if len(priority) == 0 {
@@ -704,8 +663,6 @@ func (a *App) resolveProvider(ctx context.Context, priority []string, disabledPr
 	return "", fmt.Errorf("no available provider found in priority list %v", priority)
 }
 
-// ResolveProvider returns the first available provider from priority,
-// falling back to the built-in default order when priority is empty.
 func (a *App) ResolveProvider(ctx context.Context, priority []string) (string, error) {
 	return a.resolveProvider(ctx, priority)
 }
@@ -765,6 +722,13 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 		ver, err := verifyInstalledAfterInstall(ctx, prov, tool, t.InstallWith, opProvider)
 		if err != nil {
 			return err
+		}
+		if ver == "" {
+			recorded, recordErr := a.recordConfiguredGitHubRecipeVersion(ctx, t.Name, resolved.route.ConfiguredInstall)
+			if recordErr != nil {
+				return recordErr
+			}
+			ver = recorded
 		}
 		installedWith := installedWithForOperation(ctx, prov, opProvider, t.InstallWith)
 		if err := a.readDB().Upsert(ctx, &database.ToolCache{
@@ -895,12 +859,7 @@ func (a *App) configuredOperationResolvedTool(ctx context.Context, name, provide
 		matches = append(matches, t)
 	}
 	if len(matches) == 0 {
-		// currentResolvedTools only carries the single auto-picked candidate per
-		// tool (planInstallRoute stops at the first available one), so an
-		// explicit --provider request for a different configured candidate
-		// (e.g. a secondary "bun" entry when brew is the auto-picked default)
-		// would otherwise find nothing here. Search every configured candidate
-		// before concluding the tool has no match for providerName.
+		// planInstallRoute stops at the first available candidate, so an explicit --provider request must search them all.
 		if providerName != "" {
 			if spec, ok := cfg.Tools[name]; ok {
 				if route, found := a.findConfiguredInstallRoute(ctx, name, spec, providerName); found {
@@ -921,12 +880,7 @@ func (a *App) configuredOperationResolvedTool(ctx context.Context, name, provide
 	return resolved, opProvider, true, nil
 }
 
-// configuredToolHasSpec reports whether name has any logical spec in config,
-// regardless of whether it's ignored, host-restricted, or group-membership
-// filtered out of currentResolvedTools. Used to gate the literal-name install
-// fallback: that fallback must only fire for tools with zero configured
-// entries, never for a configured tool whose requested provider just failed
-// to match.
+// Gates the literal-name install fallback so it only fires for tools with zero configured entries.
 func (a *App) configuredToolHasSpec(name string) (bool, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -1057,8 +1011,7 @@ func (a *App) UninstallWithState(ctx context.Context, name, providerName string)
 	})
 }
 
-// RemoveToolFromConfig removes a configured tool without calling a package
-// manager. Use for tools that are configured but not installed locally.
+// RemoveToolFromConfig — For tools that are configured but not installed locally.
 func (a *App) RemoveToolFromConfig(ctx context.Context, name, providerName string) error {
 	if err := a.rejectProviderToolDelete(name); err != nil {
 		return err
@@ -1149,12 +1102,10 @@ func (a *App) removeToolFromConfig(name, providerName string) error {
 	})
 }
 
-// Upgrade upgrades a single tool in-place.
 func (a *App) Upgrade(ctx context.Context, name, providerName string) error {
 	return a.UpgradeWithOptions(ctx, name, providerName, UpgradeOptions{})
 }
 
-// UpgradeInstalled upgrades a single installed tool using the local cache owner.
 func (a *App) UpgradeInstalled(ctx context.Context, name string) error {
 	return a.UpgradeInstalledWithOptions(ctx, name, UpgradeOptions{})
 }
@@ -1282,6 +1233,16 @@ func (a *App) UpgradeWithOptions(ctx context.Context, name, providerName string,
 	if !installed {
 		return fmt.Errorf("verify %s after upgrade: not installed", name)
 	}
+	if configuredResolved != nil {
+		// An unpinned recipe just pulled the current latest release; the previously recorded version is now stale.
+		recorded, recordErr := a.recordConfiguredGitHubRecipeVersion(ctx, name, configuredResolved.route.ConfiguredInstall)
+		if recordErr != nil {
+			return recordErr
+		}
+		if recorded != "" {
+			ver = recorded
+		}
+	}
 	installedOwner := installedWithForLifecycle(opProvider, manager)
 	if err := a.readDB().Upsert(ctx, &database.ToolCache{
 		Name:          name,
@@ -1380,9 +1341,7 @@ func isInstalledTool(ctx context.Context, prov provider.Provider, tool provider.
 	return prov.IsInstalled(ctx, tool)
 }
 
-// UpgradeAll upgrades every outdated tool in the DB.
-// progress is called with a status string before each upgrade (may be nil).
-// All upgrades are attempted; per-tool errors are joined and returned together.
+// UpgradeAll — All upgrades are attempted; per-tool errors are joined and returned together.
 func (a *App) UpgradeAll(ctx context.Context, progress func(string)) error {
 	_, err := a.UpgradeAllDetailed(ctx, progress, nil)
 	return err
@@ -1462,8 +1421,7 @@ func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(s
 				continue
 			}
 		}
-		// upgradeToolTimeout caps a single tool upgrade. One hung package-manager
-		// must not stall every remaining tool in the loop.
+		// One hung package manager must not stall every remaining tool in the loop.
 		const upgradeToolTimeout = 10 * time.Minute
 		upgradeCtx, upgradeCancel := context.WithTimeout(ctx, upgradeToolTimeout)
 		upgradeErr := a.UpgradeWithOptions(upgradeCtx, t.Name, t.Provider, UpgradeOptions{Force: opts.Force})
@@ -1504,10 +1462,7 @@ func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(s
 	return result, errors.Join(errs...)
 }
 
-// isUnupgradeableManagerSelf reports whether an upgrade failure is a package
-// manager that cannot upgrade itself in an externally managed Python (PEP 668).
-// Switching pip to uv does not apply to the pip package itself, so this is a
-// graceful skip rather than a failure.
+// Switching pip to uv does not apply to pip itself, so this is a graceful skip rather than a failure.
 func isUnupgradeableManagerSelf(t *database.ToolCache, err error) bool {
 	if t == nil || !provider.HasErrorCode(err, provider.ErrorExternallyManagedPython) {
 		return false
@@ -1548,15 +1503,11 @@ func (a *App) UpgradeAllDetailedWithState(ctx context.Context, progress func(str
 	return &UpgradeAllStateResult{Result: result, Tools: state.Tools, State: state.State}, err
 }
 
-// ─── Config helpers ───────────────────────────────────────────────────────────
-
-// HasConfig reports whether settings.json exists.
 func (a *App) HasConfig() bool {
 	_, err := os.Stat(a.ConfigPath)
 	return err == nil
 }
 
-// CreateEmptyConfig writes an empty settings.json (noop if already exists).
 func (a *App) CreateEmptyConfig() error {
 	if a.HasConfig() {
 		return nil
@@ -1564,7 +1515,6 @@ func (a *App) CreateEmptyConfig() error {
 	return config.Save(a.ConfigPath, &config.RootConfig{})
 }
 
-// LoadTaps returns the union of all taps declared across all groups.
 func (a *App) LoadTaps() ([]string, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -1573,7 +1523,6 @@ func (a *App) LoadTaps() ([]string, error) {
 	return collectTaps(cfg.Groups), nil
 }
 
-// Groups returns all GroupConfigs from settings.json in display order.
 func (a *App) Groups(_ context.Context) ([]*config.GroupConfig, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -1604,8 +1553,6 @@ func (a *App) GroupSummaries(ctx context.Context) ([]GroupSummary, error) {
 	return summaries, nil
 }
 
-// ─── Add ──────────────────────────────────────────────────────────────────────
-
 type AddToolOptions struct {
 	ProviderName string
 	Package      string
@@ -1616,8 +1563,7 @@ type AddToolOptions struct {
 	AssignHosts  []string
 }
 
-// Add appends a tool to the named group (empty = current host group).
-// For brew tap packages like "hashicorp/tap/terraform", the tap is auto-added.
+// Add — For brew tap packages like hashicorp/tap/terraform, the tap is auto-added.
 func (a *App) Add(ctx context.Context, providerName, pkg, name, groupName, installWith string, optionMaps ...map[string]string) error {
 	if providerName == "" {
 		return fmt.Errorf("provider is required")
@@ -1672,9 +1618,7 @@ func (a *App) Add(ctx context.Context, providerName, pkg, name, groupName, insta
 	if err := a.enrichToolGitFromCachedMetadata(ctx, name, entry.Provider, entry.Package); err != nil {
 		return err
 	}
-	// Promote any existing orphan DB row to config-tracked so the UI reflects
-	// the claim immediately without waiting for the next full loadTools cycle.
-	// No-op if the row doesn't exist yet.
+	// Promotes an existing orphan row so the UI reflects the claim without waiting for the next loadTools.
 	return a.readDB().MarkTracked(ctx, name, entry.Provider, entry.Package)
 }
 
@@ -1854,10 +1798,7 @@ func (a *App) providerSupportsTaps(providerName, installWith string) bool {
 	return false
 }
 
-// currentHostname returns the machine's hostname for host matching.
-// OMNI_HOSTNAME overrides os.Hostname() — useful for tests and containers.
-// Hostnames are always lower-cased so they compare and key consistently
-// regardless of how the OS or env reports their case.
+// OMNI_HOSTNAME overrides os.Hostname; always lower-cased so hostnames key consistently.
 func currentHostname() string {
 	if h := strings.TrimSpace(os.Getenv("OMNI_HOSTNAME")); h != "" {
 		return strings.ToLower(h)
@@ -1866,8 +1807,6 @@ func currentHostname() string {
 	return strings.ToLower(strings.TrimSpace(h))
 }
 
-// shortHostname returns the first label of hostname (strips domain suffix),
-// lower-cased. "MacBook.corp.local" → "macbook", "macbook" → "macbook".
 func shortHostname(hostname string) string {
 	hostname = strings.ToLower(strings.TrimSpace(hostname))
 	if hostname == "" {
@@ -1879,8 +1818,7 @@ func shortHostname(hostname string) string {
 	return hostname
 }
 
-// tapFromPackage extracts "owner/repo" from a tap-qualified package path.
-// "hashicorp/tap/terraform" → "hashicorp/tap", "git" → ""
+// "hashicorp/tap/terraform" becomes "hashicorp/tap"; "git" becomes "".
 func tapFromPackage(pkg string) string {
 	parts := strings.Split(pkg, "/")
 	if len(parts) == 3 {
@@ -1898,12 +1836,7 @@ func containsToolMembership(tools []config.ToolEntry, name string) bool {
 	return false
 }
 
-// ─── Provider-first helpers ───────────────────────────────────────────────────
-
-// buildProviderTools resolves Settings.Providers (via effectiveSettings, which
-// applies host overrides) into syncer tool entries in list order, reusing the
-// install-spec resolver so host overrides, variants, and availability caching
-// all apply.
+// Reuses the install-spec resolver so host overrides, variants, and availability caching all apply.
 func (a *App) buildProviderTools(ctx context.Context, cfg *config.RootConfig) []config.ToolEntry {
 	settings := a.effectiveSettings(cfg)
 	providers := settings.Providers
@@ -1920,11 +1853,7 @@ func (a *App) buildProviderTools(ctx context.Context, cfg *config.RootConfig) []
 	return tools
 }
 
-// unionToolEntries returns base followed by any extra entries whose Name is
-// not already present in base. Name alone is used for deduplication because
-// provider-tool names are unique (each provider has exactly one name) and
-// the provider/package fields may differ between the resolved group entry and
-// the provider-tools entry (the provider-tool entry wins via base).
+// Dedup on Name alone: provider-tool names are unique, and the other fields may differ between entries.
 func unionToolEntries(base, extra []config.ToolEntry) []config.ToolEntry {
 	if len(extra) == 0 {
 		out := make([]config.ToolEntry, len(base))
@@ -1948,10 +1877,7 @@ func unionToolEntries(base, extra []config.ToolEntry) []config.ToolEntry {
 	return out
 }
 
-// mergeProviderResults concatenates pass-1 (provider) ops with pass-2 (group)
-// ops, dropping any pass-2 op whose tool name matches a bootstrap provider
-// (pass-1 already owns that identity). Warnings from both passes are
-// concatenated; SatisfiedGroups comes from pass 2 (group membership context).
+// Pass-2 ops for a bootstrap provider are dropped; pass 1 already owns that identity.
 func mergeProviderResults(pass1, pass2 *isync.SyncResult, providerTools []config.ToolEntry) *isync.SyncResult {
 	// Index provider names; dedup on Name only (see unionToolEntries rationale).
 	providerNames := make(map[string]struct{}, len(providerTools))
@@ -1962,7 +1888,6 @@ func mergeProviderResults(pass1, pass2 *isync.SyncResult, providerTools []config
 	merged.Ops = append(merged.Ops, pass1.Ops...)
 	for _, op := range pass2.Ops {
 		if _, ok := providerNames[op.Tool.Name]; ok {
-			// Pass 1 already recorded this provider's outcome; skip the duplicate.
 			continue
 		}
 		merged.Ops = append(merged.Ops, op)
@@ -1974,9 +1899,7 @@ func mergeProviderResults(pass1, pass2 *isync.SyncResult, providerTools []config
 	return merged
 }
 
-// refreshPathAfterScriptInstalls re-reads the login shell's PATH and applies it
-// via setenv when pass 1 installed a script-provider tool, so pass-2 dependents
-// see a manager the script placed in a dir not yet on the process PATH.
+// Pass-2 dependents must see a manager a pass-1 script placed in a dir not yet on the process PATH.
 func refreshPathAfterScriptInstalls(ctx context.Context, exec executor.Executor, pass1 *isync.SyncResult, setenv func(string)) {
 	if runtime.GOOS == "windows" || !pass1InstalledScriptTool(pass1) {
 		return
@@ -2017,12 +1940,7 @@ func lastNonEmptyLine(s string) string {
 	return ""
 }
 
-// ResetCache closes the current DB connection, deletes the DB file, and
-// reopens + re-migrates it so the user starts with a clean cache.
-//
-// The entire Close → nil → Open → assign cycle is performed under dbMu write
-// lock so no concurrent goroutine can observe a nil a.db or operate on a
-// partially-reset connection. Callers that read a.db should use a.readDB().
+// ResetCache — The whole Close, nil, Open, assign cycle runs under the dbMu write lock so no goroutine observes a nil a.db.
 func (a *App) ResetCache(ctx context.Context) error {
 	a.dbMu.Lock()
 	defer a.dbMu.Unlock()
@@ -2036,7 +1954,7 @@ func (a *App) ResetCache(ctx context.Context) error {
 	if err := os.Remove(a.DBPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("reset cache: remove db: %w", err)
 	}
-	db, err := database.Open(a.DBPath)
+	db, err := database.OpenContext(ctx, a.DBPath)
 	if err != nil {
 		return fmt.Errorf("reset cache: open db: %w", err)
 	}
@@ -2047,17 +1965,7 @@ func (a *App) ResetCache(ctx context.Context) error {
 	return nil
 }
 
-// addProviderSearchForUnavailableTools searches available providers for
-// high-confidence matches for tools whose every configured provider is
-// unavailable on the current host. It is called during Sync after the initial
-// addMissingProviderMatchesForGroups pass (which only searches tools with no
-// providers configured at all). This handles the codex-on-Linux shape where
-// the tool spec has exactly one provider (brew) that is absent, but another
-// provider (node/npm) can supply the same package.
-//
-// Returns (searched bool, warnings []string). searched is true when at least
-// one tool had a high-confidence alternative found and persisted, signalling
-// that the caller should reload config and re-resolve before continuing.
+// Complements addMissingProviderMatchesForGroups; searched is true when the caller must reload and re-resolve.
 func (a *App) addProviderSearchForUnavailableTools(
 	ctx context.Context,
 	cfg *config.RootConfig,
@@ -2070,8 +1978,6 @@ func (a *App) addProviderSearchForUnavailableTools(
 		return false, nil
 	}
 
-	// Build a name set of tools that are resolved as provider-unavailable with
-	// all configured providers unavailable (not package-unavailable).
 	unavailableNames := make(map[string]struct{})
 	for _, rt := range resolved {
 		if rt.route.Kind != installRouteUnavailable {
@@ -2084,9 +1990,7 @@ func (a *App) addProviderSearchForUnavailableTools(
 		if !allInstallRouteSkipsAreProviderUnavailable(skips, len(skips)) {
 			continue
 		}
-		// Only act when the tool actually has configured providers (this function
-		// is the complement to addMissingProviderMatchesForGroups, not a
-		// replacement for it).
+		// The complement to addMissingProviderMatchesForGroups: act only on tools that do have configured providers.
 		spec, ok := cfg.Tools[rt.entry.Name]
 		if !ok || len(spec.Providers) == 0 {
 			continue
@@ -2097,7 +2001,6 @@ func (a *App) addProviderSearchForUnavailableTools(
 		return false, nil
 	}
 
-	// Deduplicate across group memberships so each tool is searched once.
 	var warnings []string
 	searched := false
 	seen := make(map[string]struct{})
@@ -2125,8 +2028,7 @@ func (a *App) addProviderSearchForUnavailableTools(
 			if !ok {
 				continue
 			}
-			// Report which providers were skipped so the user understands why
-			// we are attempting a broader search (I5).
+			// Report which providers were skipped so the user understands the broader search.
 			if progress != nil {
 				skippedProviders := make([]string, 0, len(spec.Providers))
 				for _, p := range spec.Providers {
@@ -2158,17 +2060,12 @@ func (a *App) addProviderSearchForUnavailableTools(
 				a.recordProviderSearchMiss(ctx, name)
 				continue
 			}
-			// Persist the alternative providers in priority order (I2). Prepend
-			// them as additional candidates so that: (a) the existing configured
-			// providers are preserved in the spec (they may become available on a
-			// future run), (b) the available alternatives are tried first on this
-			// host.
+			// Prepended so the configured providers survive for future runs while available alternatives win here.
 			if err := a.withConfig(func(c *config.RootConfig) error {
 				s, ok := c.Tools[name]
 				if !ok {
 					return fmt.Errorf("tool %q not found", name)
 				}
-				// Avoid duplicates: only add candidates not already present.
 				existing := make(map[string]struct{}, len(s.Providers))
 				for _, p := range s.Providers {
 					existing[p.Provider] = struct{}{}

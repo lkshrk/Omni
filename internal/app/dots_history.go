@@ -15,8 +15,7 @@ import (
 	textutil "github.com/lkshrk/omni/internal/text"
 )
 
-// dotsHistoryIDCounter ensures unique IDs even when two operations
-// occur within the same nanosecond.
+// Ensures unique IDs even when two operations occur within the same nanosecond.
 var dotsHistoryIDCounter atomic.Uint64
 
 const (
@@ -28,9 +27,7 @@ type dotsHistorySuppressKey struct{}
 
 type dotsHistorySuppressUnchangedKey struct{}
 
-// DotsHistoryEntry is a machine-local recovery trail for a dotfile operation.
-// It intentionally lives in the cache DB instead of settings.json because it
-// can contain absolute local paths and host-specific errors.
+// DotsHistoryEntry — Lives in the cache DB, not settings.json: it can contain absolute local paths and host-specific errors.
 type DotsHistoryEntry struct {
 	ID        string          `json:"id"`
 	Time      time.Time       `json:"time"`
@@ -43,7 +40,6 @@ type DotsHistoryEntry struct {
 	Ops       []DotsHistoryOp `json:"ops,omitempty"`
 }
 
-// DotsHistoryOp is a JSON-safe summary of one low-level dots operation.
 type DotsHistoryOp struct {
 	Kind  string `json:"kind"`
 	Entry string `json:"entry,omitempty"`
@@ -91,7 +87,6 @@ func DotsDisableDetail(ops []dots.Op) string {
 	return detail
 }
 
-// RecentDotsHistory returns recent dotfile operation records, newest first.
 func (a *App) RecentDotsHistory(ctx context.Context, limit int) ([]DotsHistoryEntry, error) {
 	entries, err := a.readDotsHistory(ctx)
 	if err != nil {
@@ -198,9 +193,7 @@ func readDotsHistoryFrom(ctx context.Context, db *database.DB) ([]DotsHistoryEnt
 	return entries, nil
 }
 
-// dotsHistoryStatus classifies the outcome of a dots operation.
-// ops contains the operations that completed before the error (if any);
-// a non-nil opErr with completed ops means partial success.
+// A non-nil opErr with completed ops means partial success.
 func dotsHistoryStatus(ops []dots.Op, opErr error) string {
 	if opErr == nil {
 		return "success"

@@ -11,7 +11,6 @@ import (
 	"github.com/lkshrk/omni/internal/executor"
 )
 
-// NvmManagedMigrationItem records one successful nvm-managed migration.
 type NvmManagedMigrationItem struct {
 	Name         string
 	FromProvider string
@@ -19,13 +18,11 @@ type NvmManagedMigrationItem struct {
 	Removed      bool
 }
 
-// NvmManagedMigrationFailure records one failed nvm-managed migration.
 type NvmManagedMigrationFailure struct {
 	Name string
 	Err  error
 }
 
-// NvmManagedMigrationBatchResult is the outcome of migrating one or more tools.
 type NvmManagedMigrationBatchResult struct {
 	Items    []NvmManagedMigrationItem
 	Failures []NvmManagedMigrationFailure
@@ -35,15 +32,13 @@ func (r *NvmManagedMigrationBatchResult) HasFailures() bool {
 	return r != nil && len(r.Failures) > 0
 }
 
-// NvmManagedMigrationStateResult includes refreshed tool-list state for the TUI.
 type NvmManagedMigrationStateResult struct {
 	Batch      *NvmManagedMigrationBatchResult
 	Tools      []*ToolView
 	NvmManaged map[string]bool
 }
 
-// ToolResolvesViaNvm reports whether the active binary for toolName resolves
-// under an nvm Node version directory (honouring fallback binary overrides).
+// ToolResolvesViaNvm — Honours fallback binary overrides.
 func ToolResolvesViaNvm(toolName string, spec config.ToolSpec) bool {
 	bin := toolBinaryNameForNvm(toolName, spec)
 	if bin == "" || !executor.CommandAvailable(bin) {
@@ -60,9 +55,7 @@ func toolBinaryNameForNvm(name string, spec config.ToolSpec) string {
 	return name
 }
 
-// RemoveNvmRuntimeFromConfigWithState drops a brew/apt-managed node runtime
-// entry from config when nvm owns the active binary. Provider-tool delete
-// guards are intentionally bypassed for this nvm handoff path.
+// RemoveNvmRuntimeFromConfigWithState — Provider-tool delete guards are intentionally bypassed for this nvm handoff path.
 func (a *App) RemoveNvmRuntimeFromConfigWithState(ctx context.Context, name, providerName string) (*ToolGroupMutationState, error) {
 	if name != "node" {
 		return nil, fmt.Errorf("remove nvm runtime from config: tool %q is not the Node runtime", name)
@@ -89,8 +82,6 @@ func (a *App) removeNvmRuntimeFromConfig(ctx context.Context, name, providerName
 	return nil
 }
 
-// NvmManagedSystemToolNames returns configured system-provider tools whose
-// active binary resolves via nvm. Used by the TUI to classify out-of-sync rows.
 func (a *App) NvmManagedSystemToolNames(ctx context.Context) (map[string]bool, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -114,9 +105,7 @@ func (a *App) NvmManagedSystemToolNames(ctx context.Context) (map[string]bool, e
 	return out, nil
 }
 
-// MigrateNvmManagedTool moves a system-provider tool off the system ecosystem
-// when nvm owns the active binary. The Node runtime is removed from omni config;
-// other tools switch to the effective node package manager.
+// MigrateNvmManagedTool — The Node runtime is removed from config; other tools switch to the effective node package manager.
 func (a *App) MigrateNvmManagedTool(ctx context.Context, name string) (*SwitchResult, error) {
 	result, err := a.MigrateNvmManagedToolWithState(ctx, name)
 	if err != nil {
@@ -128,8 +117,6 @@ func (a *App) MigrateNvmManagedTool(ctx context.Context, name string) (*SwitchRe
 	return nil, nil
 }
 
-// MigrateNvmManagedToolWithState migrates one system+nvm tool and returns
-// refreshed tool list state for the TUI.
 func (a *App) MigrateNvmManagedToolWithState(ctx context.Context, name string) (*ProviderRepairStateResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -157,8 +144,6 @@ func (a *App) MigrateNvmManagedToolWithState(ctx context.Context, name string) (
 	return a.SwitchWithState(ctx, name, fromProvider, target)
 }
 
-// MigrateAllNvmManagedTools migrates every configured system-provider tool whose
-// active binary resolves via nvm.
 func (a *App) MigrateAllNvmManagedTools(ctx context.Context) (*NvmManagedMigrationBatchResult, error) {
 	names, err := a.NvmManagedSystemToolNames(ctx)
 	if err != nil {
@@ -167,7 +152,6 @@ func (a *App) MigrateAllNvmManagedTools(ctx context.Context) (*NvmManagedMigrati
 	return a.MigrateNvmManagedTools(ctx, sortedNvmManagedNames(names, nil))
 }
 
-// MigrateNvmManagedTools migrates the named tools when they are nvm-managed.
 func (a *App) MigrateNvmManagedTools(ctx context.Context, names []string) (*NvmManagedMigrationBatchResult, error) {
 	if len(names) == 0 {
 		return &NvmManagedMigrationBatchResult{}, nil
@@ -211,7 +195,6 @@ func (a *App) MigrateNvmManagedTools(ctx context.Context, names []string) (*NvmM
 	return result, errors.Join(errs...)
 }
 
-// MigrateNvmManagedToolsWithState migrates tools and returns refreshed list state.
 func (a *App) MigrateNvmManagedToolsWithState(ctx context.Context, names []string) (*NvmManagedMigrationStateResult, error) {
 	batch, err := a.MigrateNvmManagedTools(ctx, names)
 	state, stateErr := a.nvmManagedMigrationState(ctx)
@@ -222,7 +205,6 @@ func (a *App) MigrateNvmManagedToolsWithState(ctx context.Context, names []strin
 	return state, err
 }
 
-// MigrateAllNvmManagedToolsWithState migrates all nvm-managed tools and returns refreshed list state.
 func (a *App) MigrateAllNvmManagedToolsWithState(ctx context.Context) (*NvmManagedMigrationStateResult, error) {
 	names, err := a.NvmManagedSystemToolNames(ctx)
 	if err != nil {
@@ -263,7 +245,6 @@ func sortedNvmManagedNames(managed map[string]bool, ignored map[string]bool) []s
 	return names
 }
 
-// NvmManagedMigrationSummaryText formats a batch migration result for CLI output.
 func NvmManagedMigrationSummaryText(result *NvmManagedMigrationBatchResult) string {
 	if result == nil {
 		return "no nvm-managed tools to migrate"

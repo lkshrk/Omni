@@ -5,7 +5,6 @@ import (
 	"sync"
 )
 
-// MockCall records one invocation or configures one response.
 type MockCall struct {
 	Name   string
 	Args   []string
@@ -14,9 +13,7 @@ type MockCall struct {
 	Err    error
 }
 
-// MockExecutor is a test-double for Executor.
-// Pre-configure Responses in order; each Run consumes the next response.
-// All calls are recorded in Calls for assertion. Thread-safe.
+// MockExecutor — Pre-configure Responses in order; each Run consumes the next response.
 type MockExecutor struct {
 	mu        sync.Mutex
 	Calls     []MockCall
@@ -24,8 +21,6 @@ type MockExecutor struct {
 	index     int
 }
 
-// Run records the call and returns the next pre-configured response.
-// If no response is left it returns empty strings and nil error.
 func (m *MockExecutor) Run(_ context.Context, name string, args ...string) (string, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -38,7 +33,6 @@ func (m *MockExecutor) Run(_ context.Context, name string, args ...string) (stri
 	return "", "", nil
 }
 
-// Reset clears recorded calls and resets the response pointer.
 func (m *MockExecutor) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

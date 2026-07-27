@@ -24,10 +24,7 @@ func TestMcpAgentRowStatus_Installed(t *testing.T) {
 	}
 }
 
-// TestMcpAgentRowStatus_Shadowed covers the plugin-shadow case: a server
-// absent from the agent's own config but provided by an installed plugin
-// must render as installed/shadowed, not as a real missing gap (see
-// app.McpStatusShadowed's doc comment).
+// A server absent from the agent's own config but provided by an installed plugin must render as installed/shadowed, not a real missing gap.
 func TestMcpAgentRowStatus_Shadowed(t *testing.T) {
 	t.Parallel()
 	status, mark := mcpAgentRowStatus(app.McpStatusShadowed)
@@ -84,43 +81,82 @@ func TestPluginAgentRowStatus_Installed(t *testing.T) {
 
 func TestSkillPackageRowStatus_NotInstalledIsOutOfSync(t *testing.T) {
 	t.Parallel()
-	status, mark := skillPackageRowStatus(false, false)
+	status, mark := skillPackageRowStatus(false, false, false, false, false)
 	if status != agentsStatusOutOfSync || mark != agentsMarkMissing {
-		t.Fatalf("skillPackageRowStatus(false, false) = (%v, %v), want (agentsStatusOutOfSync, agentsMarkMissing)", status, mark)
+		t.Fatalf("skillPackageRowStatus(false, false, false, false) = (%v, %v), want (agentsStatusOutOfSync, agentsMarkMissing)", status, mark)
 	}
 }
 
 func TestSkillPackageRowStatus_Installed(t *testing.T) {
 	t.Parallel()
-	status, mark := skillPackageRowStatus(true, false)
+	status, mark := skillPackageRowStatus(true, false, false, false, false)
 	if status != agentsStatusInstalled || mark != agentsMarkNone {
-		t.Fatalf("skillPackageRowStatus(true, false) = (%v, %v), want (agentsStatusInstalled, agentsMarkNone)", status, mark)
+		t.Fatalf("skillPackageRowStatus(true, false, false, false) = (%v, %v), want (agentsStatusInstalled, agentsMarkNone)", status, mark)
 	}
 }
 
-// TestSkillPackageRowStatus_ShadowedTakesPrecedence mirrors
-// TestMcpAgentRowStatus's shadow case: a plugin-shadowed package must render
-// as installed/shadowed even when not installed, since the plugin already
-// provides it — not as a real missing gap.
+// An installed package behind its source lands in Updates, while one also missing or drifted keeps the mark for the gap that closes first.
+func TestSkillPackageRowStatus_OutdatedOnlyOnAHealthyRow(t *testing.T) {
+	t.Parallel()
+	status, mark := skillPackageRowStatus(true, false, false, false, true)
+	if status != agentsStatusUpdates || mark != agentsMarkNone {
+		t.Fatalf("installed+outdated = (%v, %v), want (agentsStatusUpdates, agentsMarkNone)", status, mark)
+	}
+	status, mark = skillPackageRowStatus(false, false, false, false, true)
+	if status != agentsStatusOutOfSync || mark != agentsMarkMissing {
+		t.Fatalf("missing+outdated = (%v, %v), want (agentsStatusOutOfSync, agentsMarkMissing)", status, mark)
+	}
+	status, mark = skillPackageRowStatus(false, false, false, true, true)
+	if status != agentsStatusOutOfSync || mark != agentsMarkDrifted {
+		t.Fatalf("drifted+outdated = (%v, %v), want (agentsStatusOutOfSync, agentsMarkDrifted)", status, mark)
+	}
+}
+
+// A plugin-shadowed package renders installed/shadowed even when not installed, since the plugin already provides it.
 func TestSkillPackageRowStatus_ShadowedTakesPrecedence(t *testing.T) {
 	t.Parallel()
-	status, mark := skillPackageRowStatus(false, true)
+	status, mark := skillPackageRowStatus(false, true, false, false, false)
 	if status != agentsStatusInstalled || mark != agentsMarkShadowed {
-		t.Fatalf("skillPackageRowStatus(false, true) = (%v, %v), want (agentsStatusInstalled, agentsMarkShadowed)", status, mark)
+		t.Fatalf("skillPackageRowStatus(false, true, false, false) = (%v, %v), want (agentsStatusInstalled, agentsMarkShadowed)", status, mark)
 	}
 }
 
-// TestFlattenOrder_GroupsByStatusThenFeatureThenName builds a mixed universe
-// across skills/mcp/plugin with varied per-agent statuses and asserts the
-// flattened list comes out grouped Updates -> OutOfSync -> Installed ->
-// Available, and every (feature, localIdx) pair from the pre-sort universe
-// still appears post-sort (rows are expanded per-agent, not lost).
+func TestSkillPackageRowStatus_PackageShadowedIsInstalledAndSelectable(t *testing.T) {
+	t.Parallel()
+	status, mark := skillPackageRowStatus(false, false, true, false, false)
+	if status != agentsStatusInstalled || mark != agentsMarkPackageShadowed {
+		t.Fatalf("package-shadowed = (%v, %v), want (agentsStatusInstalled, agentsMarkPackageShadowed)", status, mark)
+	}
+}
+
+func TestAgentsPackageShadowDoesNotHideMissingAgent(t *testing.T) {
+	t.Parallel()
+	m := agentsAllModel(
+		[]app.SkillPackageRow{{
+			Name:   "partly-shadowed",
+			Source: "o/partly-shadowed",
+			Agents: []string{"claude", "codex"},
+			PerAgentStatus: map[string]app.SkillStatus{
+				"claude": app.SkillStatusShadowed,
+				"codex":  app.SkillStatusMissing,
+			},
+		}},
+		nil, nil,
+	)
+	m.enabledAgents = []string{"claude", "codex"}
+	e := agentsAllRowsList(m)[0]
+	if e.status != agentsStatusOutOfSync || e.mark != agentsMarkMissing {
+		t.Fatalf("row = (%v, %v), want out-of-sync/missing", e.status, e.mark)
+	}
+}
+
+// Asserts the flatten groups Updates, OutOfSync, Installed, Available, and that every (feature, localIdx) pair survives the sort.
 func TestFlattenOrder_GroupsByStatusThenFeatureThenName(t *testing.T) {
 	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{
-			{Name: "zeta-skill", Source: "o/zeta-skill", Installed: true, Agents: []string{"claude"}, PerAgentStatus: map[string]bool{"claude": true}},
-			{Name: "alpha-skill", Source: "o/alpha-skill", Installed: false, Agents: []string{"claude"}, PerAgentStatus: map[string]bool{"claude": false}},
+			{Name: "zeta-skill", Source: "o/zeta-skill", Installed: true, Agents: []string{"claude"}, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled}},
+			{Name: "alpha-skill", Source: "o/alpha-skill", Installed: false, Agents: []string{"claude"}, PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusMissing}},
 		},
 		[]app.McpServerRow{
 			{Name: "zeta-mcp", Agents: []string{"claude"}, PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusInstalled}},
@@ -233,10 +269,7 @@ func TestAgentsRowCells_Mcp_Shadowed_ShowsViaPlugin(t *testing.T) {
 	}
 }
 
-// TestSkillDetailLines_Shadowed_StripsOwnerPrefix confirms
-// skillPackageRepoNameDisplay strips the "owner/" prefix so the detail line
-// names the plugin the way it's actually known (bare repo segment), not the
-// full owner/repo source string.
+// skillPackageRepoNameDisplay strips the "owner/" prefix so the detail line names the plugin the way it is actually known.
 func TestSkillDetailLines_Shadowed_StripsOwnerPrefix(t *testing.T) {
 	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
@@ -268,9 +301,7 @@ func TestAgentsRowDetailLines_Mcp_Shadowed_ShowsProvidedByPlugin(t *testing.T) {
 	}
 }
 
-// TestAgentsAllRowsList_ShadowedSkill_SurvivesToMark proves the app-layer
-// ShadowedByPlugin flag flows through agentsAllRowsList into the flattened
-// row's mark, rather than being lost or misclassified as agentsMarkMissing.
+// The app-layer ShadowedByPlugin flag must reach the flattened row's mark rather than being lost or misclassified as agentsMarkMissing.
 func TestAgentsAllRowsList_ShadowedSkill_SurvivesToMark(t *testing.T) {
 	t.Parallel()
 	m := agentsAllModel(
@@ -297,9 +328,7 @@ func TestAgentsAllRowsList_ShadowedSkill_SurvivesToMark(t *testing.T) {
 	}
 }
 
-// TestAgentsAllRowsList_ShadowedMcp_SurvivesToMark mirrors the skills case
-// for the mcp branch: a McpStatusShadowed per-agent status must produce
-// agentsMarkShadowed on the flattened row, not agentsMarkMissing.
+// A McpStatusShadowed per-agent status must produce agentsMarkShadowed, not agentsMarkMissing.
 func TestAgentsAllRowsList_ShadowedMcp_SurvivesToMark(t *testing.T) {
 	t.Parallel()
 	m := agentsAllModel(

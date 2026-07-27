@@ -23,8 +23,6 @@ func anyToolInstalled(tools []*database.ToolCache) bool {
 	})
 }
 
-// ─── ListDiscovered ───────────────────────────────────────────────────────────
-
 func TestListDiscovered_EmptyInitially(t *testing.T) {
 	t.Parallel()
 	a, _ := newImportApp(t)
@@ -125,8 +123,6 @@ func TestListTools_ShowsConfiguredToolWithoutCacheRow(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	// No refresh has run, so there is no cache row. The tool is config-led and
-	// must still appear as a not-installed row rather than vanishing.
 	tools, err := a.ListTools(context.Background(), "")
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)

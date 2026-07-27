@@ -4,16 +4,16 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
-// CurrentVersion is the latest settings.json format version understood by omni.
-// Version 0 is the legacy unversioned format.
-const CurrentVersion = 19
+// CurrentVersion — Version 0 is the legacy unversioned format.
+const CurrentVersion = 20
 
 const (
-	// FallbackSourceGitHub identifies a fallback recipe sourced from a GitHub repository.
 	FallbackSourceGitHub = "github"
 
 	// FallbackStatusUnresolved means a source is known but no usable recipe exists yet.
@@ -27,14 +27,10 @@ const (
 	// FallbackStatusFailed means a recipe was attempted and failed.
 	FallbackStatusFailed = "failed"
 
-	// FallbackRecipeGitHubReleaseAsset installs from a matched GitHub release asset.
 	FallbackRecipeGitHubReleaseAsset = "github_release_asset"
-	// FallbackRecipeRawCommands runs user-editable shell commands.
-	FallbackRecipeRawCommands = "raw_commands"
-	// FallbackRecipeCurlInstallScript downloads and runs a remote install script.
-	FallbackRecipeCurlInstallScript = "curl_install_script"
-	// FallbackRecipeAptRepo configures an apt repository then installs packages.
-	FallbackRecipeAptRepo = "apt_repo"
+	FallbackRecipeRawCommands        = "raw_commands"
+	FallbackRecipeCurlInstallScript  = "curl_install_script"
+	FallbackRecipeAptRepo            = "apt_repo"
 
 	// AgentRefPackages expands to every agents.packages[].source value.
 	AgentRefPackages = "@agents.packages"
@@ -46,10 +42,7 @@ const (
 	AgentRefMarketplaces = "@agents.marketplaces"
 )
 
-// ToolEntry is the resolved execution form for a logical tool.
-//
-// Persisted group memberships use only Name and marshal as a JSON string. The
-// provider/package fields remain for the app/sync internal flat view.
+// ToolEntry — Group memberships persist as a bare name string; the provider/package fields serve the app/sync flat view only.
 type ToolEntry struct {
 	Name        string            `json:"name"`
 	Provider    string            `json:"provider"`
@@ -59,8 +52,7 @@ type ToolEntry struct {
 	Options     map[string]string `json:"options,omitempty"`
 }
 
-// UnmarshalJSON accepts the new logical membership form ("ripgrep") and rejects
-// the old group-owned object form so invalid settings fail at load time.
+// UnmarshalJSON — Rejects the old group-owned object form so invalid settings fail at load time.
 func (e *ToolEntry) UnmarshalJSON(data []byte) error {
 	var name string
 	if err := json.Unmarshal(data, &name); err == nil {
@@ -79,12 +71,10 @@ func (e *ToolEntry) UnmarshalJSON(data []byte) error {
 	return fmt.Errorf("tool membership must be a string")
 }
 
-// MarshalJSON writes only the logical tool name for group memberships.
 func (e ToolEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(e.Name)
 }
 
-// BoolVal safely dereferences a *bool, returning false for nil.
 func BoolVal(b *bool) bool {
 	if b == nil {
 		return false
@@ -92,11 +82,8 @@ func BoolVal(b *bool) bool {
 	return *b
 }
 
-// BoolPtr returns a pointer to the given bool value.
 func BoolPtr(b bool) *bool { return &b }
 
-// EffectivePackage returns the package identifier to pass to the provider.
-// Falls back to the tool name when no explicit package is set.
 func (e ToolEntry) EffectivePackage() string {
 	if e.Package != "" {
 		return e.Package
@@ -104,7 +91,6 @@ func (e ToolEntry) EffectivePackage() string {
 	return e.Name
 }
 
-// ToolInstallSpec is a concrete install candidate for a logical tool.
 type ToolInstallSpec struct {
 	Provider    string            `json:"provider"`
 	Package     string            `json:"package,omitempty"`
@@ -116,7 +102,6 @@ type ToolInstallSpec struct {
 	BinDir      string            `json:"bin_dir,omitempty"`
 }
 
-// EffectivePackage returns the package identifier for logicalName.
 func (s ToolInstallSpec) EffectivePackage(logicalName string) string {
 	if s.Package != "" {
 		return s.Package
@@ -124,7 +109,6 @@ func (s ToolInstallSpec) EffectivePackage(logicalName string) string {
 	return logicalName
 }
 
-// FallbackSource describes where a fallback recipe came from.
 type FallbackSource struct {
 	Type  string `json:"type"`
 	Owner string `json:"owner,omitempty"`
@@ -132,16 +116,12 @@ type FallbackSource struct {
 	URL   string `json:"url,omitempty"`
 }
 
-// FallbackRecipe describes structured metadata used to build install commands.
 type FallbackRecipe struct {
 	Type         string `json:"type,omitempty"`
 	AssetPattern string `json:"asset_pattern,omitempty"`
 	BinaryPath   string `json:"binary_path,omitempty"`
 	Checksum     string `json:"checksum,omitempty"`
-	// ChecksumAssetID records the release asset that Checksum was verified
-	// against. A stored checksum is trusted only while it still matches the
-	// asset currently being installed; a rotated or newer asset re-verifies
-	// from the release's checksums file rather than trusting a stale digest.
+	// Checksum is trusted only while this matches the asset being installed; a rotated asset re-verifies from the release checksums file.
 	ChecksumAssetID  string `json:"checksum_asset_id,omitempty"`
 	ReleaseID        string `json:"release_id,omitempty"`
 	TagName          string `json:"tag_name,omitempty"`
@@ -149,20 +129,16 @@ type FallbackRecipe struct {
 	AssetID          string `json:"asset_id,omitempty"`
 	AssetName        string `json:"asset_name,omitempty"`
 	AssetDownloadURL string `json:"asset_download_url,omitempty"`
-	// InstalledVersion is the normalized version string recorded at install/upgrade
-	// time (e.g. "2.93.0"). Used to detect when a newer release is available
-	// without relying solely on published_at timestamps.
+	// Normalized version recorded at install time; upgrade detection uses it rather than published_at alone.
 	InstalledVersion string `json:"installed_version,omitempty"`
 }
 
-// FallbackPlatform overrides release-asset matching for one OS/architecture key.
 type FallbackPlatform struct {
 	AssetPattern string `json:"asset_pattern,omitempty"`
 	BinaryPath   string `json:"binary_path,omitempty"`
 	Checksum     string `json:"checksum,omitempty"`
 }
 
-// FallbackCommands contains user-editable shell commands for fallback lifecycle actions.
 type FallbackCommands struct {
 	Install   string `json:"install,omitempty"`
 	Check     string `json:"check,omitempty"`
@@ -171,7 +147,7 @@ type FallbackCommands struct {
 	Version   string `json:"version,omitempty"`
 }
 
-// FallbackSpec defines a best-effort non-provider install recipe for a system tool.
+// FallbackSpec is a best-effort install recipe used when no provider can install a system tool.
 type FallbackSpec struct {
 	Source         FallbackSource              `json:"source"`
 	Status         string                      `json:"status,omitempty"`
@@ -183,9 +159,7 @@ type FallbackSpec struct {
 	Commands       FallbackCommands            `json:"commands,omitempty"`
 }
 
-// ToolSpec defines one logical tool and its default install spec.
 type ToolSpec struct {
-	Type        string                     `json:"type,omitempty"`
 	Providers   []ToolInstallSpec          `json:"providers,omitempty"`
 	Provider    string                     `json:"provider,omitempty"`
 	Package     string                     `json:"package,omitempty"`
@@ -200,7 +174,6 @@ type ToolSpec struct {
 	Fallback    *FallbackSpec              `json:"fallback,omitempty"`
 }
 
-// DefaultInstallSpec returns the default install candidate for this logical tool.
 func (s ToolSpec) DefaultInstallSpec() ToolInstallSpec {
 	if len(s.Providers) > 0 {
 		return s.Providers[0]
@@ -208,7 +181,6 @@ func (s ToolSpec) DefaultInstallSpec() ToolInstallSpec {
 	return ToolInstallSpec{Provider: s.Provider, Package: s.Package, InstallWith: s.InstallWith, Options: s.Options}
 }
 
-// ToToolEntry resolves this spec into the syncer's flat tool shape.
 func (s ToolSpec) ToToolEntry(logicalName string, install ToolInstallSpec) ToolEntry {
 	packageName := install.EffectivePackage(logicalName)
 	if install.Package == "" && s.Package != "" {
@@ -224,10 +196,7 @@ func (s ToolSpec) ToToolEntry(logicalName string, install ToolInstallSpec) ToolE
 	}
 }
 
-// ProviderEntry is a self-contained, ordered bootstrap provider. It mirrors
-// ToolSpec (default spec + Variants + Hosts) but carries its own Name, since
-// Settings.Providers is a list (not a name-keyed map like Tools). Unlike
-// ToolEntry, ProviderEntry serializes as a full object.
+// ProviderEntry — Carries its own Name and serializes as a full object because Settings.Providers is a list, not a name-keyed map like Tools.
 type ProviderEntry struct {
 	Name        string                     `json:"name"`
 	Provider    string                     `json:"provider"`
@@ -238,8 +207,7 @@ type ProviderEntry struct {
 	Hosts       map[string]ToolInstallSpec `json:"hosts,omitempty"`
 }
 
-// ToToolSpec adapts a provider entry to the ToolSpec resolution shape so it can
-// reuse the tool install-spec resolver (Hosts → Variants-by-availability → default).
+// ToToolSpec — Adapts to ToolSpec to reuse the install-spec resolver (Hosts → Variants-by-availability → default).
 func (p ProviderEntry) ToToolSpec() ToolSpec {
 	return ToolSpec{
 		Provider:    p.Provider,
@@ -258,91 +226,61 @@ type EcosystemSettings struct {
 
 // Settings holds user-configurable options stored in settings.json.
 type Settings struct {
-	// AutoImport adds newly discovered installed tools to the config on every sync.
 	AutoImport bool `json:"auto_import,omitempty"`
-	// UpdateQuarantine defers updates until the package-manager reported
-	// availability timestamp is older than this duration (for example "2d").
+	// Defers updates until the reported availability timestamp is older than this duration (for example "2d").
 	UpdateQuarantine string `json:"update_quarantine,omitempty"`
-	// ProviderUpdateQuarantine overrides UpdateQuarantine by logical provider,
-	// concrete provider, or concrete manager. Concrete values win in app logic.
+	// Overrides UpdateQuarantine per provider or manager; concrete values win over logical ones.
 	ProviderUpdateQuarantine map[string]string `json:"provider_update_quarantine,omitempty"`
-	// Ecosystems holds legacy provider-family settings for system, node, and
-	// python.
-	Ecosystems map[string]EcosystemSettings `json:"ecosystems,omitempty"`
-	// FallbackBinDir is the default directory for fallback-installed binaries.
-	FallbackBinDir string `json:"fallback_bin_dir,omitempty"`
-	// DotsRepo is the per-machine path to the dotfiles git repository.
+	// Legacy provider-family settings for system, node, and python.
+	Ecosystems     map[string]EcosystemSettings `json:"ecosystems,omitempty"`
+	FallbackBinDir string                       `json:"fallback_bin_dir,omitempty"`
+	// Per-machine path to the dotfiles git repository.
 	DotsRepo string `json:"dots_repo,omitempty"`
-	// DotsDisabled is true when the user has explicitly opted out of dotfile sync
-	// on this machine. Stored in host_settings, not global settings.
-	// Using *bool so that an absent host entry (nil) is distinguished from an
-	// explicit false — a nil host value must not silently override a global true.
+	// Host-scoped; *bool so an absent host entry (nil) never overrides a global true.
 	DotsDisabled *bool `json:"dots_disabled,omitempty"`
-	// AgentsDisabled turns the agent-skills feature off on this machine. *bool so
-	// an absent value (nil) means enabled-by-default, distinct from explicit false.
+	// *bool so nil (absent) means enabled-by-default, distinct from an explicit false.
 	AgentsDisabled *bool `json:"agents_disabled,omitempty"`
-	// SkillsDisabled / McpDisabled / PluginsDisabled turn one agent feature
-	// off on this machine; agents_disabled remains the master switch.
+	// Per-feature switches; agents_disabled remains the master switch.
 	SkillsDisabled  *bool `json:"skills_disabled,omitempty"`
 	McpDisabled     *bool `json:"mcp_disabled,omitempty"`
 	PluginsDisabled *bool `json:"plugins_disabled,omitempty"`
-	// AgentsUse lists the agent identifiers (skills-CLI names like "claude-code",
-	// "codex") that skills are installed to on this machine. Stored in
-	// host_settings since installed agents differ per machine. A nil host value
-	// means "inherit global"; an explicit empty list means "no agents".
-	AgentsUse []string `json:"agents_use,omitempty"`
-	// DotsGit controls git behaviour for the dots repo.
-	DotsGit DotsGitConfig `json:"dots_git"`
-	// DisabledProviders lists provider-family names ("system", "node", "python")
-	// that are disabled on this machine. Stored in host_settings, not global settings.
+	// Host-scoped agent identifiers ("claude-code", "codex"): nil inherits global, an explicit empty list means no agents.
+	AgentsUse []string      `json:"agents_use,omitempty"`
+	DotsGit   DotsGitConfig `json:"dots_git"`
+	// Host-scoped provider-family names ("system", "node", "python") disabled on this machine.
 	DisabledProviders []string `json:"disabled_providers,omitempty"`
-	// ProviderPriority ranks concrete providers for this host.
-	ProviderPriority []string `json:"provider_priority,omitempty"`
-	// Providers is an ordered list of bootstrap providers installed before the
-	// rest of a sync, in list order. Each entry is self-contained.
+	ProviderPriority  []string `json:"provider_priority,omitempty"`
+	// Bootstrap providers installed before the rest of a sync, in list order.
 	Providers []ProviderEntry `json:"providers,omitempty"`
 }
 
-// DotsGitConfig controls how the dots git wrapper behaves.
 type DotsGitConfig struct {
-	// AutoCommit runs "git commit" automatically after add/remove operations.
 	AutoCommit bool `json:"auto_commit,omitempty"`
-	// AutoPush runs "git push" (including an implicit commit) after add/remove.
-	// Implies AutoCommit.
+	// AutoPush implies AutoCommit.
 	AutoPush bool `json:"auto_push,omitempty"`
 }
 
-// DotVariant selects a host-specific stow package for a logical dot entry.
 type DotVariant struct {
-	// Package is the stow package directory for this host variant. When empty,
-	// the dot entry's default package is used.
+	// Empty means the dot entry's default package.
 	Package string `json:"package,omitempty"`
 }
 
-// DotEntry is one [[dots]] entry declaring a config file/dir to be managed.
 type DotEntry struct {
-	// Name is the logical dotfile identity used for groups, ignore rules, and UI
-	// rows. It is also the default stow package name when Package is empty.
+	// Also the default stow package name when Package is empty.
 	Name string `json:"name"`
-	// Path is the original filesystem location being managed (e.g. "~/.config/nvim").
-	// Used for display, health checks, and onboarding adoption.
+	// The original filesystem location being managed (e.g. "~/.config/nvim"), not the repo copy.
 	Path string `json:"path,omitempty"`
-	// Package is the default stow package directory. Empty means Name.
-	Package string `json:"package,omitempty"`
-	// Hosts maps short hostnames to host-specific package variants.
-	Hosts map[string]DotVariant `json:"hosts,omitempty"`
+	// Empty means Name.
+	Package string                `json:"package,omitempty"`
+	Hosts   map[string]DotVariant `json:"hosts,omitempty"`
 	// Ignored keeps the entry visible while preventing sync/discovery from managing it.
 	Ignored bool `json:"ignored,omitempty"`
 	// Ignore holds glob patterns for files to skip within this entry.
 	Ignore []string `json:"ignore,omitempty"`
-	// OnConflict sets an automatic conflict resolution for this entry during sync.
-	// Empty means manual resolution (sync errors on conflict). "use_repo" relinks
-	// the repo version over the local target; "use_local" adopts the local content
-	// into the repo. Useful for files an external tool constantly rewrites.
+	// Empty means manual resolution (sync errors on conflict); "use_repo" relinks the repo version, "use_local" adopts local content.
 	OnConflict string `json:"on_conflict,omitempty"`
 }
 
-// EffectivePackage returns the default stow package directory for this dot.
 func (e DotEntry) EffectivePackage() string {
 	if strings.TrimSpace(e.Package) != "" {
 		return e.Package
@@ -350,8 +288,7 @@ func (e DotEntry) EffectivePackage() string {
 	return e.Name
 }
 
-// PackageForHost returns the stow package directory for host, falling back to
-// the default package. Host names are matched exactly; callers own normalization.
+// PackageForHost — Host names are matched exactly; callers own normalization.
 func (e DotEntry) PackageForHost(host string) string {
 	if strings.TrimSpace(host) != "" && e.Hosts != nil {
 		if variant, ok := e.Hosts[host]; ok && strings.TrimSpace(variant.Package) != "" {
@@ -361,22 +298,18 @@ func (e DotEntry) PackageForHost(host string) string {
 	return e.EffectivePackage()
 }
 
-// GlobalIgnore lists tools and dotfiles skipped across all hosts.
 type GlobalIgnore struct {
 	Tools []string `json:"tools,omitempty"`
 	Dots  []string `json:"dots,omitempty"`
 }
 
-// HostAssignment is the in-memory UI/app view of one host's reusable group
-// assignments plus the global tool ignore list exposed for the active host.
+// HostAssignment is an in-memory app view; it is never persisted in this shape.
 type HostAssignment struct {
 	Groups []string `json:"groups,omitempty"`
 	Ignore []string `json:"ignore,omitempty"`
 }
 
-// GroupConfig is a named collection of tools, dots, and taps.
 type GroupConfig struct {
-	// Name is the group identifier.
 	Name         string      `json:"name,omitempty"`
 	Special      string      `json:"special,omitempty"`
 	Description  string      `json:"description,omitempty"`
@@ -384,7 +317,7 @@ type GroupConfig struct {
 	Tools        []ToolEntry `json:"tools,omitempty"`
 	Dots         []DotEntry  `json:"dots,omitempty"`
 	Skills       []string    `json:"skills,omitempty"`
-	McpServers   []string    `json:"mcp_servers,omitempty"` // server names active on this group's hosts
+	McpServers   []string    `json:"mcp_servers,omitempty"`
 	Plugins      []string    `json:"plugins,omitempty"`
 	Marketplaces []string    `json:"marketplaces,omitempty"`
 	Ignore       []string    `json:"-"`
@@ -392,67 +325,48 @@ type GroupConfig struct {
 
 const SystemInventoryGroup = "provider-inventory"
 
-// IsHost reports whether this is the physical special group for a hostname.
 func (g *GroupConfig) IsHost() bool { return g != nil && g.Special == "host" }
 
-// IsSystemInventory marks provider inventory that is excluded from user tool views.
+// IsSystemInventory — System inventory is excluded from user-facing tool views.
 func (g *GroupConfig) IsSystemInventory() bool {
 	return g != nil && g.Special == SystemInventoryGroup
 }
 
-// GroupName returns the display name.
 func (g *GroupConfig) GroupName() string { return g.Name }
 
-// BaseName returns the identifier used for filtering and display.
 func (g *GroupConfig) BaseName() string {
 	return g.Name
 }
 
-// RootConfig is the top-level settings.json struct.
-// It holds all omni configuration: settings, host assignments, and groups.
 type RootConfig struct {
-	// Schema holds the "$schema" URI injected on every write for editor support.
-	// It is read back on load but never acted on by the application.
+	// Injected on every write for editor support; read back on load but never acted on.
 	Schema string `json:"$schema,omitempty"`
-	// Include lists additional settings fragments merged into this file on load.
-	// Paths are relative to the directory containing the main settings file.
-	// The field is stripped before save.
+	// Fragment paths relative to the main settings file's directory; stripped before save.
 	Include []string `json:"$include,omitempty"`
-	// MergeNotices collects advisory messages produced while merging $include
-	// fragments (e.g. duplicate definitions where the fragment wins). Populated
-	// on load, surfaced by settings lint, never persisted.
+	// Advisory messages from $include merging; populated on load, surfaced by settings lint, never persisted.
 	MergeNotices []string `json:"-"`
-	// Version identifies the settings.json format. Missing/zero is treated as the
-	// legacy unversioned format and migrated to CurrentVersion on load.
+	// Missing/zero means the legacy unversioned format and is migrated to CurrentVersion on load.
 	Version  int                 `json:"version"`
 	Settings Settings            `json:"settings"`
 	Tools    map[string]ToolSpec `json:"tools,omitempty"`
 	Hosts    map[string][]string `json:"hosts,omitempty"`
 	Ignore   GlobalIgnore        `json:"ignore,omitempty"`
 	Groups   []*GroupConfig      `json:"groups,omitempty"`
-	// HostSettings holds per-machine setting overrides, keyed by short hostname.
-	// Fields set here override the global Settings block for that machine.
-	// Host-specific fields: Ecosystems, DotsRepo, DotsDisabled,
-	// DisabledProviders.
-	// Global fields (not overridable here): AutoImport, DotsGit.
+	// Per-machine overrides keyed by short hostname; AutoImport and DotsGit are global-only.
 	HostSettings map[string]Settings `json:"host_settings,omitempty"`
 	Agents       AgentsConfig        `json:"agents,omitempty"`
 }
 
-// AgentsConfig holds omni-managed AI-agent resources. Packages are restored by
-// driving the upstream `skills` CLI; this is omni's own declarative manifest.
 type AgentsConfig struct {
 	Packages     []SkillPackage `json:"packages,omitempty"`
 	McpServers   []McpServer    `json:"mcp_servers,omitempty"`
 	Marketplaces []Marketplace  `json:"marketplaces,omitempty"`
 	Plugins      []Plugin       `json:"plugins,omitempty"`
-	// Skills is the legacy per-skill manifest, retained only so a one-time
-	// migration can fold it into Packages. Never written back.
+	// Legacy per-skill manifest kept only for one-time migration into Packages; never written back.
 	Skills []ManifestSkill `json:"skills,omitempty"`
 	Ignore AgentsIgnore    `json:"ignore,omitempty"`
 }
 
-// AgentsIgnore lists agent resources skipped during restore/sync.
 type AgentsIgnore struct {
 	Skills       []string `json:"skills,omitempty"`
 	McpServers   []string `json:"mcp_servers,omitempty"`
@@ -460,22 +374,15 @@ type AgentsIgnore struct {
 	Marketplaces []string `json:"marketplaces,omitempty"`
 }
 
-// SkillPackage is a source repo of agent skills, tracked as one unit. The
-// repo (Source) is the identity; we do not split it into individual skills.
+// SkillPackage — Missing Skills means every skill discovered from the source.
 type SkillPackage struct {
 	Source string   `json:"source"`
 	Ref    string   `json:"ref,omitempty"`
+	Skills []string `json:"skills,omitempty"`
 	Agents []string `json:"agents,omitempty"`
 }
 
-// McpServer is one MCP server entry in the omni manifest.
-// Transport must be "stdio", "http", or "sse".
-// stdio requires Command; http/sse require URL. Mixing is rejected at validation.
-// Env holds env var names resolved from the calling environment at restore time.
-// EnvLiteral holds non-secret inline values forwarded verbatim.
-// Headers holds HTTP headers for remote transports. Exact ${VAR} values may
-// be stored as environment-backed headers by adapters that support them.
-// Agents lists target agent IDs (e.g. "claude-code", "codex"); empty means all.
+// McpServer — Transport "stdio" requires Command, "http"/"sse" require URL; Env names resolve from the environment at restore time and empty Agents means all.
 type McpServer struct {
 	Name       string            `json:"name"`
 	Transport  string            `json:"transport"`
@@ -487,26 +394,21 @@ type McpServer struct {
 	Agents     []string          `json:"agents,omitempty"`
 }
 
-// Marketplace is one plugin marketplace entry in the omni manifest. Source is
-// whatever form the agent CLIs accept for `plugins marketplace add` / `plugin
-// marketplace add` (owner/repo or URL) — verified against the probe transcript
-// in specs/plugin-cli-probe.md.
+// Marketplace — Source is whatever form the agent CLIs accept for marketplace add (owner/repo or URL).
 type Marketplace struct {
 	Name   string   `json:"name"`
 	Source string   `json:"source"`
 	Agents []string `json:"agents,omitempty"`
 }
 
-// Plugin is one plugin entry in the omni manifest. Marketplace must reference
-// a declared Marketplace.Name — validated as a hard error, since a dangling
-// reference makes restore impossible.
+// Plugin — Marketplace must reference a declared Marketplace.Name; a dangling reference makes restore impossible.
 type Plugin struct {
 	Name        string   `json:"name"`
 	Marketplace string   `json:"marketplace"`
 	Agents      []string `json:"agents,omitempty"`
 }
 
-// ManifestSkill is the legacy per-skill entry, kept for migration only.
+// ManifestSkill — Legacy per-skill entry, kept for migration only.
 type ManifestSkill struct {
 	Name      string   `json:"name"`
 	Source    string   `json:"source"`
@@ -515,33 +417,61 @@ type ManifestSkill struct {
 	Agents    []string `json:"agents,omitempty"`
 }
 
-// MigrateSkillPackages folds the legacy per-skill agents.skills manifest into
-// package-level agents.packages (deduped by source, ungrouped) and clears the
-// legacy field. Idempotent: a no-op once agents.skills is empty.
 func MigrateSkillPackages(cfg *RootConfig) {
 	if len(cfg.Agents.Skills) == 0 {
 		return
 	}
-	seen := make(map[string]struct{}, len(cfg.Agents.Packages))
-	for _, p := range cfg.Agents.Packages {
-		seen[p.Source] = struct{}{}
+	index := make(map[string]int, len(cfg.Agents.Packages))
+	existing := make(map[string]bool, len(cfg.Agents.Packages))
+	for i, p := range cfg.Agents.Packages {
+		index[p.Source] = i
+		existing[p.Source] = true
 	}
 	for _, s := range cfg.Agents.Skills {
 		if s.Source == "" {
 			continue
 		}
-		if _, ok := seen[s.Source]; ok {
-			// first occurrence wins; later duplicates with a different ref are dropped
+		i, ok := index[s.Source]
+		if !ok {
+			skills := []string(nil)
+			if s.Name != "" {
+				skills = []string{s.Name}
+			}
+			cfg.Agents.Packages = append(cfg.Agents.Packages, SkillPackage{
+				Source: s.Source,
+				Ref:    s.Ref,
+				Skills: skills,
+				Agents: s.Agents,
+			})
+			index[s.Source] = len(cfg.Agents.Packages) - 1
 			continue
 		}
-		seen[s.Source] = struct{}{}
-		cfg.Agents.Packages = append(cfg.Agents.Packages, SkillPackage{Source: s.Source, Ref: s.Ref, Agents: s.Agents})
+		p := &cfg.Agents.Packages[i]
+		if p.Ref == "" {
+			p.Ref = s.Ref
+		}
+		for _, agent := range s.Agents {
+			if !slices.Contains(p.Agents, agent) {
+				p.Agents = append(p.Agents, agent)
+			}
+		}
+		if s.Name == "" || (existing[s.Source] && len(p.Skills) == 0) {
+			continue
+		}
+		found := false
+		for _, name := range p.Skills {
+			if name == s.Name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			p.Skills = append(p.Skills, s.Name)
+		}
 	}
 	cfg.Agents.Skills = nil
 }
 
-// EffectiveSettings returns the merged settings for a specific machine.
-// Global settings provide the base; host-specific settings override individual fields.
 func (c *RootConfig) EffectiveSettings(shortHostname string) Settings {
 	s := cloneSettings(c.Settings)
 	if len(c.HostSettings) == 0 {
@@ -566,8 +496,6 @@ func (c *RootConfig) EffectiveSettings(shortHostname string) Settings {
 	if hs.DotsRepo != "" {
 		s.DotsRepo = hs.DotsRepo
 	}
-	// DotsDisabled / AgentsDisabled: only override when the host has explicitly
-	// set it (non-nil). A nil pointer means "not configured here — inherit global".
 	if hs.DotsDisabled != nil {
 		s.DotsDisabled = hs.DotsDisabled
 	}
@@ -583,37 +511,30 @@ func (c *RootConfig) EffectiveSettings(shortHostname string) Settings {
 	if hs.PluginsDisabled != nil {
 		s.PluginsDisabled = hs.PluginsDisabled
 	}
-	// DisabledProviders: nil means "inherit global"; an explicit empty list
-	// means "enable all provider families on this host".
 	if hs.DisabledProviders != nil {
 		s.DisabledProviders = cloneStringSlice(hs.DisabledProviders)
 	}
 	if hs.ProviderPriority != nil {
 		s.ProviderPriority = cloneStringSlice(hs.ProviderPriority)
 	}
-	// AgentsUse: nil host list means "inherit global"; a non-nil host list
-	// (including empty) replaces the global list entirely.
+	// A non-nil host list, including empty, replaces the global list entirely.
 	if hs.AgentsUse != nil {
 		s.AgentsUse = cloneStringSlice(hs.AgentsUse)
 	}
-	// Providers: nil host list means "inherit global"; a non-nil host list
-	// (including empty) replaces the global list entirely.
 	if hs.Providers != nil {
 		s.Providers = cloneProviders(hs.Providers)
 	}
 	return s
 }
 
-// Config is a flat view of tools and settings used by the syncer.
-// It is not persisted directly — it is built from RootConfig at sync time.
+// Config is a flat syncer view built from RootConfig at sync time; it is never persisted.
 type Config struct {
 	Settings Settings    `json:"settings"`
 	Taps     []string    `json:"taps,omitempty"`
 	Tools    []ToolEntry `json:"tools"`
 }
 
-// ValidationError is a semantic config validation error with a JSON path.
-// Warn marks soft advisory problems that do not block config loading.
+// ValidationError — Warn marks soft advisory problems that do not block config loading.
 type ValidationError struct {
 	Path    string
 	Message string
@@ -640,16 +561,14 @@ func (errs ValidationErrors) Error() string {
 	return strings.Join(parts, "\n")
 }
 
-// ProviderValidation describes the provider identities accepted by semantic
-// config validation without coupling config to the provider registry package.
+// ProviderValidation carries provider identities so config need not import the provider registry.
 type ProviderValidation struct {
 	Known              []string
 	Ecosystems         []string
 	ConcreteEcosystems map[string]string
 }
 
-// ValidateRoot checks the normalized logical-tool settings model.
-// Pass a zero ProviderValidation to skip provider validation.
+// ValidateRoot — Pass a zero ProviderValidation to skip provider validation.
 func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationError {
 	if cfg == nil {
 		return nil
@@ -666,13 +585,15 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 		var errs []ValidationError
 		if spec.Provider == "script" {
 			if spec.Recipe != nil && strings.TrimSpace(spec.Recipe.Type) != "" {
-				errs = append(errs, validateRecipeInstallSpec(path, spec)...)
-				errs = append(errs, validateScriptUpdateOptions(path, spec)...)
-				return errs
+				return validateRecipeInstallSpec(path, spec)
 			}
 			return validateScriptSpec(path, spec)
 		}
 		if spec.Provider == "apt_repo" {
+			// A recipe supplies setup and packages only once materialized, so validate the recipe instead.
+			if spec.Recipe != nil && strings.TrimSpace(spec.Recipe.Type) != "" {
+				return validateRecipeInstallSpec(path, spec)
+			}
 			return validateAptRepoSpec(path, spec)
 		}
 		if spec.Provider == "" {
@@ -733,6 +654,7 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 			errs = append(errs, ValidationError{Path: path + ".source", Message: "skill package source is required"})
 			continue
 		}
+		errs = append(errs, validateSkillSelector(path, pkg.Skills)...)
 		pkgSources[pkg.Source] = struct{}{}
 	}
 	errs = append(errs, validateMcpServers(cfg.Agents.McpServers, "$.agents.mcp_servers")...)
@@ -941,6 +863,25 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 	return errs
 }
 
+// An empty selector means "every skill in the package", so a blank entry is never the narrowing the author wrote it to express.
+func validateSkillSelector(path string, skills []string) []ValidationError {
+	var errs []ValidationError
+	seen := make(map[string]struct{}, len(skills))
+	for i, skill := range skills {
+		name := strings.TrimSpace(skill)
+		if name == "" {
+			errs = append(errs, ValidationError{Path: fmt.Sprintf("%s.skills[%d]", path, i), Message: "skill name is required"})
+			continue
+		}
+		if _, dup := seen[name]; dup {
+			errs = append(errs, ValidationError{Path: fmt.Sprintf("%s.skills[%d]", path, i), Message: fmt.Sprintf("duplicate skill %q", name), Warn: true})
+			continue
+		}
+		seen[name] = struct{}{}
+	}
+	return errs
+}
+
 func validateMcpServers(servers []McpServer, path string) []ValidationError {
 	var errs []ValidationError
 	seen := make(map[string]struct{}, len(servers))
@@ -1024,9 +965,7 @@ func validateMarketplaces(marketplaces []Marketplace, names map[string]struct{},
 	return errs
 }
 
-// validatePlugins requires every plugin's Marketplace to reference a declared
-// marketplace name — a hard error, unlike the warn-level group refs, because a
-// dangling marketplace reference makes restore impossible.
+// validatePlugins rejects dangling marketplace references because they make restore impossible.
 func validatePlugins(plugins []Plugin, marketplaceNames map[string]struct{}, path string) []ValidationError {
 	var errs []ValidationError
 	seen := make(map[string]struct{}, len(plugins))
@@ -1058,15 +997,18 @@ func validateFallback(path string, fallback *FallbackSpec) []ValidationError {
 	case "":
 		errs = append(errs, ValidationError{Path: path + ".source.type", Message: "fallback source type is required"})
 	case FallbackSourceGitHub:
-		// owner/repo locate the release to download. raw_commands installs via
-		// its own commands, so the github source is just metadata and needs
-		// neither; every other recipe (release-asset, or unset) requires them.
+		// raw_commands uses its own installer; other recipes need owner/repo to locate the release.
 		if fallback.Recipe.Type != FallbackRecipeRawCommands &&
 			(strings.TrimSpace(fallback.Source.Owner) == "" || strings.TrimSpace(fallback.Source.Repo) == "") {
 			errs = append(errs, ValidationError{Path: path + ".source", Message: "github fallback source requires owner and repo"})
 		}
 	default:
 		errs = append(errs, ValidationError{Path: path + ".source.type", Message: fmt.Sprintf("unknown fallback source type %q", fallback.Source.Type)})
+	}
+
+	// FallbackSpec.Recipe is a distinct type, so validateRecipeInstallSpec never reaches this URL.
+	if downloadURL := strings.TrimSpace(fallback.Recipe.AssetDownloadURL); downloadURL != "" && !IsHTTPSURL(downloadURL) {
+		errs = append(errs, ValidationError{Path: path + ".recipe.asset_download_url", Message: errAssetDownloadURLScheme})
 	}
 
 	status := fallback.Status
@@ -1078,8 +1020,7 @@ func validateFallback(path string, fallback *FallbackSpec) []ValidationError {
 	default:
 		errs = append(errs, ValidationError{Path: path + ".status", Message: fmt.Sprintf("unknown fallback status %q", fallback.Status)})
 	}
-	// Native release-asset recipes verify via the downloaded binary; only
-	// shell-driven recipes need an explicit check command.
+	// Native release-asset recipes verify through the binary; shell recipes need an explicit check.
 	if fallback.Recipe.Type != FallbackRecipeGitHubReleaseAsset &&
 		status != FallbackStatusUnresolved && status != FallbackStatusUnsupported &&
 		strings.TrimSpace(fallback.Commands.Check) == "" {
@@ -1101,10 +1042,7 @@ func validateDotPackageName(name string) error {
 	return nil
 }
 
-// validateProviderSpec validates one bootstrap-provider install spec. Unlike the
-// tool validateInstall closure, it accepts concrete providers (brew, uv, bun):
-// providers install through concrete managers, so the ecosystem-only rule does
-// not apply.
+// validateProviderSpec accepts concrete bootstrap providers because they install through concrete managers.
 func validateProviderSpec(path string, spec ToolInstallSpec, providerSet map[string]struct{}) []ValidationError {
 	if spec.Provider == "script" {
 		return validateScriptSpec(path, spec)
@@ -1125,6 +1063,21 @@ func validateProviderSpec(path string, spec ToolInstallSpec, providerSet map[str
 	return errs
 }
 
+const (
+	errAptRepoKeyURLScheme        = "options.key_url must use https; the key is fetched and trusted by the root apt keyring, so plain http lets an on-path attacker choose it"
+	errCurlInstallScriptURLScheme = "options.url must use https; the response is piped straight into a shell, so plain http lets an on-path attacker run arbitrary code"
+	errAssetDownloadURLScheme     = "recipe.asset_download_url must use https; the asset is downloaded and made executable, so plain http lets an on-path attacker choose the binary"
+)
+
+// IsHTTPSURL gates executed or trusted content with no loopback or file exception.
+func IsHTTPSURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Scheme, "https") && parsed.Host != ""
+}
+
 func validateRecipeInstallSpec(path string, spec ToolInstallSpec) []ValidationError {
 	var errs []ValidationError
 	if spec.Recipe == nil || strings.TrimSpace(spec.Recipe.Type) == "" {
@@ -1133,10 +1086,16 @@ func validateRecipeInstallSpec(path string, spec ToolInstallSpec) []ValidationEr
 	}
 	switch spec.Recipe.Type {
 	case FallbackRecipeCurlInstallScript:
-		if optionValue(spec.Options, "url") == "" && (spec.Source == nil || strings.TrimSpace(spec.Source.URL) == "") {
+		switch scriptURL := curlInstallScriptURL(spec); {
+		case scriptURL == "":
 			errs = append(errs, ValidationError{Path: path + ".options.url", Message: "curl_install_script requires options.url or source.url"})
+		case !IsHTTPSURL(scriptURL):
+			errs = append(errs, ValidationError{Path: path + ".options.url", Message: errCurlInstallScriptURLScheme})
 		}
 	case FallbackRecipeGitHubReleaseAsset:
+		if downloadURL := strings.TrimSpace(spec.Recipe.AssetDownloadURL); downloadURL != "" && !IsHTTPSURL(downloadURL) {
+			errs = append(errs, ValidationError{Path: path + ".recipe.asset_download_url", Message: errAssetDownloadURLScheme})
+		}
 		if spec.Source == nil || spec.Source.Type != FallbackSourceGitHub {
 			errs = append(errs, ValidationError{Path: path + ".source", Message: "github_release_asset requires source.type github"})
 		} else if strings.TrimSpace(spec.Source.Owner) == "" || strings.TrimSpace(spec.Source.Repo) == "" {
@@ -1146,14 +1105,22 @@ func validateRecipeInstallSpec(path string, spec ToolInstallSpec) []ValidationEr
 			errs = append(errs, ValidationError{Path: path + ".recipe.asset_pattern", Message: "github_release_asset requires recipe.asset_pattern"})
 		}
 	case FallbackRecipeAptRepo:
-		if optionValue(spec.Options, "key_url") == "" {
+		keyURL := optionValue(spec.Options, "key_url")
+		switch {
+		case keyURL == "":
 			errs = append(errs, ValidationError{Path: path + ".options.key_url", Message: "apt_repo requires options.key_url"})
+		case !IsHTTPSURL(keyURL):
+			errs = append(errs, ValidationError{Path: path + ".options.key_url", Message: errAptRepoKeyURLScheme})
 		}
 		if optionValue(spec.Options, "signed_by") == "" {
 			errs = append(errs, ValidationError{Path: path + ".options.signed_by", Message: "apt_repo requires options.signed_by"})
 		}
 		if optionValue(spec.Options, "sources_format") == "" {
 			errs = append(errs, ValidationError{Path: path + ".options.sources_format", Message: "apt_repo requires options.sources_format"})
+		}
+		// Without this the recipe path falls back to the logical tool name and installs the wrong package.
+		if optionValue(spec.Options, "packages") == "" && strings.TrimSpace(spec.Package) == "" {
+			errs = append(errs, ValidationError{Path: path + ".options.packages", Message: "apt_repo requires options.packages"})
 		}
 	default:
 		errs = append(errs, ValidationError{Path: path + ".recipe.type", Message: fmt.Sprintf("unknown install recipe type %q", spec.Recipe.Type)})
@@ -1172,8 +1139,7 @@ func validateAptRepoSpec(path string, spec ToolInstallSpec) []ValidationError {
 	return errs
 }
 
-// validateScriptSpec enforces the script provider's install, detection, and
-// optional version/latest command contract.
+// validateScriptSpec leaves options.latest unconstrained because its version sources do not exist yet at validation time.
 func validateScriptSpec(path string, spec ToolInstallSpec) []ValidationError {
 	var errs []ValidationError
 	if strings.TrimSpace(spec.Options["install"]) == "" {
@@ -1186,18 +1152,6 @@ func validateScriptSpec(path string, spec ToolInstallSpec) []ValidationError {
 		errs = append(errs, ValidationError{
 			Path:    path + ".options",
 			Message: "script provider requires options.detect or options.check",
-		})
-	}
-	errs = append(errs, validateScriptUpdateOptions(path, spec)...)
-	return errs
-}
-
-func validateScriptUpdateOptions(path string, spec ToolInstallSpec) []ValidationError {
-	var errs []ValidationError
-	if strings.TrimSpace(spec.Options["latest"]) != "" && strings.TrimSpace(spec.Options["version"]) == "" {
-		errs = append(errs, ValidationError{
-			Path:    path + ".options.latest",
-			Message: "script provider options.latest requires options.version",
 		})
 	}
 	return errs

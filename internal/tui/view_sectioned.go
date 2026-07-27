@@ -24,7 +24,8 @@ type sectionedTabRow struct {
 
 func renderSectionedTab(m Model, tab sectionedTab) string {
 	var buf scrollBuf
-	write := buf.write
+	// A badge arriving from an async result can overrun the last known width, and an over-wide line soft-wraps and desynchronises bubbletea's frame diff, so clip every line on the way out.
+	write := func(s string) { buf.write(clipLines(s, m.width)) }
 	sections := newListSectionWriter(m.palette, m.width, write)
 
 	if tab.leadingBlank {

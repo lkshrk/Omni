@@ -7,9 +7,40 @@ Omni has two durable sources of truth and one disposable local cache.
 | Config | `~/.config/omni/settings.json` | yes | Tools, groups, hosts, settings, and dotfile declarations. |
 | Dotfiles repo | configured by `settings.dots_repo` | yes | Git repo containing GNU Stow packages. |
 | Cache | `~/.cache/omni/omni.db` | no | Observed installed tools, outdated state, PM update-date metadata, privilege metadata, and local history. |
+| Skill content | `$XDG_DATA_HOME/omni/skills`, else `~/.local/share/omni/skills` | no | Reconstructible canonical skill content linked into Agent Target directories. The `.lock` file inside it is an advisory flock serializing concurrent omni processes; it is empty, held only while a process runs, and safe to leave in place. |
 
 If those sources disagree, prefer `settings.json` and the dotfiles repo. The
 cache can be rebuilt.
+
+For agent skills, `agents.packages` is desired state. Resolved fingerprints,
+content hashes, catalog cache entries, the recorded source probe behind the
+outdated verdict, and check timestamps stay machine-local. Deleting local skill
+content or cache data does not change portable settings; the next sync
+reacquires missing content, and the outdated verdict resets to unknown until
+something reacquires the package or an explicit check probes its source.
+
+The legacy skill lockfile is read only to surface explicit import/adopt
+candidates. Omni does not mutate, delete, or dual-write it. It lives at
+`$XDG_STATE_HOME/skills/.skill-lock.json` when `XDG_STATE_HOME` is set and at
+`~/.agents/.skill-lock.json` otherwise; the `XDG_STATE_HOME` branch wins
+outright, so inspect that path first on a machine that exports the variable.
+
+Adopting a legacy CLI-managed installation — replacing those directories with
+links into the canonical package store — happens only through
+`omni agents skills import`. Sync, upgrade, and add never overwrite a
+legacy-managed directory. One lossless exception: when a directory at a target
+path is byte-identical to the manifest package Omni would install, reconcile
+converges it into a managed link (reported as `adopted identical unmanaged
+copy`). If a legacy directory holds content that differs from the package Omni
+would install, the reconcile skips that target and reports it as drift rather
+than overwriting it; only an explicit `agents add` of a new package fails with
+`skill "<name>" already exists for target <id>`.
+`omni agents skills resolve --use-managed` is the way through for content any
+tool owns (it stages the directory aside, so a failed install rewinds it), and
+`omni agents skills import` for a legacy install the lockfile still attributes.
+`--use-local` writes only to the manifest, narrowing it so Omni stops expecting
+its own content at that entry. Bootstrap offers the import when it detects
+legacy installs, so a migrating machine can adopt them during setup.
 
 ## Path Resolution
 
@@ -37,6 +68,16 @@ The CLI flag overrides the default cache directory for one invocation:
 omni --cache-dir /tmp/omni-cache doctor
 ```
 
+Omni resolves the canonical skill store in this order:
+
+1. `$XDG_DATA_HOME/omni/skills`
+2. `$HOME/.local/share/omni/skills`
+
+Omni resolves the legacy skill lockfile it imports from in this order:
+
+1. `$XDG_STATE_HOME/skills/.skill-lock.json`
+2. `$HOME/.agents/.skill-lock.json`
+
 ## Environment Variables
 
 | Variable | Effect |
@@ -48,6 +89,8 @@ omni --cache-dir /tmp/omni-cache doctor
 | `NO_EMOJI` | Forces ASCII-only CLI/TUI output when set. |
 | `XDG_CONFIG_HOME` | Base directory used when `OMNI_CONFIG` is unset. |
 | `XDG_CACHE_HOME` | Base directory used when `OMNI_CACHE_DIR` is unset. |
+| `XDG_DATA_HOME` | Base directory for the canonical skill store (`$XDG_DATA_HOME/omni/skills`); defaults to `~/.local/share`. |
+| `XDG_STATE_HOME` | When set, relocates the legacy skill lockfile Omni reads to `$XDG_STATE_HOME/skills/.skill-lock.json` instead of `~/.agents/.skill-lock.json`. |
 
 Host names are stored as short hostnames. Set `OMNI_HOSTNAME` in tests,
 containers, or CI when `hostname -s` is unstable:
@@ -77,6 +120,17 @@ Config writes are designed to avoid partial `settings.json` files:
 - the temporary file is renamed into place after a successful write
 - config directories are created when needed
 - when `settings.json` is a symlink, Omni writes to the resolved target
+
+Read-only commands never write `settings.json`. Reporting commands — `status`,
+`upgrade --check`, every `--dry-run`, `doctor` — leave the file byte-identical
+even when it is in an older format. Older formats are migrated in memory on
+every load, and that migrated form is written out by the first command that
+changes something. A config left untouched for several releases stays on its
+old version on disk until you actually edit it, and reads keep working the
+whole time.
+
+Startup still repairs a host entry that names this machine but is not assigned
+to it; that is a real change, so it does write.
 
 On normal app startup, Omni also writes a best-effort backup next to the config:
 

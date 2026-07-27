@@ -19,17 +19,19 @@ func newDotsCmd(state *rootState) *cobra.Command {
 		Long: `dots manages config symlinks declared in your settings.json.
 Source files live in the dotfiles/ stow subtree inside the configured git repo;
 symlinks are created at the target paths. Mutating commands (sync, add, resolve,
-delete) require GNU Stow (stow) on PATH.
+remove) require GNU Stow (stow) on PATH.
 
 Set the repo path via 'omni ui' (Dots tab) or settings.dots_repo in settings.json.`,
 	}
+	remove := newDotsRemoveCmd(state)
 	cmd.AddCommand(
 		newDotsSyncCmd(state),
 		newDotsDiscoverCmd(state),
 		newDotsAddCmd(state),
 		newDotsGroupsCmd(state),
 		newDotsVariantCmd(state),
-		newDotsDeleteCmd(state),
+		remove,
+		deprecatedAlias(remove, "delete <name>", nil),
 		newDotsResolveCmd(state),
 		newDotsExtractCmd(state),
 		newDotsIgnoreCmd(state),
@@ -124,8 +126,6 @@ func ensureDotsStowForCLI(cmd *cobra.Command, state *rootState) error {
 	return nil
 }
 
-// ─── dots sync ────────────────────────────────────────────────────────────────
-
 func newDotsSyncCmd(state *rootState) *cobra.Command {
 	var dryRun bool
 	var useRepo bool
@@ -133,8 +133,11 @@ func newDotsSyncCmd(state *rootState) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "sync [name]",
-		Short: "Create or repair dotfile symlinks",
-		Args:  cobra.MaximumNArgs(1),
+		Short: "Link the repo's dotfiles onto this host",
+		Long: "Move the entries this host's groups declare from the dots repo onto the machine: " +
+			"create the missing symlinks, repair broken ones, and leave correct ones alone. Adopting " +
+			"an untracked local file runs the other way — see add --adopt.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
@@ -186,16 +189,18 @@ func newDotsSyncCmd(state *rootState) *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be done without making changes")
 	cmd.Flags().BoolVar(&useRepo, "use-repo", false, "Force-resolve every conflict by keeping the repo version")
 	cmd.Flags().BoolVar(&useLocal, "use-local", false, "Force-resolve every conflict by adopting the local version")
+	cmd.Flags().BoolVar(&useRepo, "use-managed", false, "Alias for --use-repo")
 	return cmd
 }
-
-// ─── dots discover ────────────────────────────────────────────────────────────
 
 func newDotsDiscoverCmd(state *rootState) *cobra.Command {
 	var format string
 	cmd := &cobra.Command{
 		Use:   "discover",
-		Short: "List untracked dotfile candidates",
+		Short: "List local config paths no dots entry declares",
+		Long: "List config paths this machine has that no dots entry declares. Adopting one into " +
+			"the repo is `dots add <path> --adopt`; declaring it without moving files is " +
+			"`dots add <path> --discovered`.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
@@ -225,8 +230,6 @@ func newDotsDiscoverCmd(state *rootState) *cobra.Command {
 	return cmd
 }
 
-// ─── dots add ─────────────────────────────────────────────────────────────────
-
 func newDotsAddCmd(state *rootState) *cobra.Command {
 	var name string
 	var group string
@@ -236,8 +239,11 @@ func newDotsAddCmd(state *rootState) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "add <path>",
-		Short: "Add a config path to dots management",
-		Args:  cobra.ExactArgs(1),
+		Short: "Declare a config path as a dots entry",
+		Long: "Record a path as a dots entry in the chosen group. With --adopt the existing local " +
+			"file is moved into the dots repo and replaced by a managed symlink, which is how an " +
+			"untracked file becomes managed; with --discovered only the declaration is written.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
@@ -290,8 +296,6 @@ func newDotsAddCmd(state *rootState) *cobra.Command {
 	_ = cmd.RegisterFlagCompletionFunc("group", completeGroupNames(state))
 	return cmd
 }
-
-// ─── dots variant ────────────────────────────────────────────────────────────
 
 func newDotsVariantCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
@@ -427,8 +431,6 @@ func newDotsVariantRemoveCmd(state *rootState) *cobra.Command {
 	return cmd
 }
 
-// ─── dots groups ──────────────────────────────────────────────────────────────
-
 func newDotsGroupsCmd(state *rootState) *cobra.Command {
 	var moveGroup string
 	var removeGroups []string
@@ -508,9 +510,7 @@ func newDotsGroupsCmd(state *rootState) *cobra.Command {
 	return cmd
 }
 
-// requireAtMostOneReusableGroup returns an error naming the conflicting
-// reusable groups if more than one of the supplied groups is reusable
-// (non-host). Mirrors the invariant enforced by config.ValidateRoot.
+// Mirrors the at-most-one-reusable-group invariant enforced by config.ValidateRoot.
 func requireAtMostOneReusableGroup(state *rootState, dotName string, groups []string) error {
 	reusableNames, err := state.app.ReusableGroupNames()
 	if err != nil {
@@ -532,17 +532,26 @@ func requireAtMostOneReusableGroup(state *rootState, dotName string, groups []st
 	return nil
 }
 
-// ─── dots delete ──────────────────────────────────────────────────────────────
-
-func newDotsDeleteCmd(state *rootState) *cobra.Command {
+// The repo package is the entry, so it always goes; --keep-local only decides whether the target survives locally.
+func newDotsRemoveCmd(state *rootState) *cobra.Command {
 	var keepLocal bool
+	var purge bool
 	cmd := &cobra.Command{
-		Use:   "delete <name>",
-		Short: "Delete a dots entry from management",
-		Args:  cobra.ExactArgs(1),
+		Use:   "remove <name>",
+		Short: "Undeclare a dots entry and drop its repo package",
+		Long: "Remove a dots entry from config and delete its package from the dots repo. The " +
+			"managed symlinks become real local files so this machine keeps working; pass --purge " +
+			"to delete those local targets too.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
+			}
+			if purge && cmd.Flags().Changed("keep-local") && keepLocal {
+				return fmt.Errorf("choose at most one of --purge or --keep-local")
+			}
+			if purge {
+				keepLocal = false
 			}
 			memberships, err := state.app.DotMembershipMap(cmd.Context())
 			if err != nil {
@@ -568,13 +577,12 @@ func newDotsDeleteCmd(state *rootState) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&keepLocal, "keep-local", true, "Keep local files after deleting the repo files")
+	cmd.Flags().BoolVar(&purge, "purge", false, "Also delete the local targets instead of keeping real copies")
 	cmd.ValidArgsFunction = completeDotNames(state)
 	return cmd
 }
 
-// runDotsDeleteDiscoveredLocal deletes the local path behind a discovered
-// local-only candidate. Returns handled=false when nameOrPath matches no such
-// candidate so the tracked-entry flow can produce its usual error.
+// Returns handled=false when nameOrPath matches no discovered candidate, so the tracked-entry flow can raise its usual error.
 func runDotsDeleteDiscoveredLocal(cmd *cobra.Command, state *rootState, nameOrPath string) (bool, error) {
 	status, found, err := state.app.FindDiscoveredDotStatus(cmd.Context(), nameOrPath)
 	if !found || app.DotStatusState(status) != dots.StateLocalOnly {
@@ -594,15 +602,16 @@ func runDotsDeleteDiscoveredLocal(cmd *cobra.Command, state *rootState, nameOrPa
 	return true, nil
 }
 
-// ─── dots resolve ─────────────────────────────────────────────────────────────
-
 func newDotsResolveCmd(state *rootState) *cobra.Command {
 	var useRepo bool
 	var useLocal bool
 	cmd := &cobra.Command{
 		Use:   "resolve <name>",
-		Short: "Resolve a dots conflict with an explicit side",
-		Args:  cobra.ExactArgs(1),
+		Short: "Settle a dots entry whose local file diverged from the repo",
+		Long: "Settle an entry where a real local file sits where the managed symlink belongs. " +
+			"--use-repo (--use-managed) replaces the local target with the repo version; --use-local " +
+			"copies the local content into the repo and relinks it.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
@@ -630,11 +639,11 @@ func newDotsResolveCmd(state *rootState) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&useRepo, "use-repo", false, "Keep the repo version and replace the local target")
 	cmd.Flags().BoolVar(&useLocal, "use-local", false, "Copy the local target into the repo and relink it")
+	// --use-managed is the cross-domain spelling; on dots the managed side is the repo, so it aliases --use-repo.
+	cmd.Flags().BoolVar(&useRepo, "use-managed", false, "Alias for --use-repo")
 	cmd.ValidArgsFunction = completeDotNames(state)
 	return cmd
 }
-
-// ─── dots extract ─────────────────────────────────────────────────────────────
 
 func newDotsExtractCmd(state *rootState) *cobra.Command {
 	var group string
@@ -666,8 +675,6 @@ func newDotsExtractCmd(state *rootState) *cobra.Command {
 	cmd.ValidArgsFunction = completeDotNames(state)
 	return cmd
 }
-
-// ─── dots ignore ─────────────────────────────────────────────────────────────
 
 func newDotsIgnoreCmd(state *rootState) *cobra.Command {
 	var entry bool
@@ -733,8 +740,6 @@ func newDotsUnignoreCmd(state *rootState) *cobra.Command {
 	return cmd
 }
 
-// ─── dots list ────────────────────────────────────────────────────────────────
-
 func newDotsListCmd(state *rootState) *cobra.Command {
 	var stateFilter string
 	var format string
@@ -778,15 +783,16 @@ func newDotsListCmd(state *rootState) *cobra.Command {
 	return cmd
 }
 
-// ─── dots status ──────────────────────────────────────────────────────────────
-
 func newDotsStatusCmd(state *rootState) *cobra.Command {
 	var stateFilter string
 	var format string
 	cmd := &cobra.Command{
 		Use:   "status [name]",
-		Short: "Show dots symlink health and git repo status",
-		Args:  cobra.MaximumNArgs(1),
+		Short: "Show each entry's declared, repo, and on-disk state",
+		Long: "Report where every dots entry stands across all three stores: what config declares, " +
+			"what the dots repo holds, and what the local path actually is, plus the repo's git " +
+			"status.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
@@ -821,8 +827,6 @@ func newDotsStatusCmd(state *rootState) *cobra.Command {
 	cmd.ValidArgsFunction = completeDotNames(state)
 	return cmd
 }
-
-// ─── dots enable / disable ───────────────────────────────────────────────────
 
 func newDotsEnableCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
@@ -878,8 +882,6 @@ func newDotsDisableCmd(state *rootState) *cobra.Command {
 	return cmd
 }
 
-// ─── dots pull ────────────────────────────────────────────────────────────────
-
 func newDotsPullCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "pull",
@@ -899,8 +901,6 @@ func newDotsPullCmd(state *rootState) *cobra.Command {
 		},
 	}
 }
-
-// ─── dots push ────────────────────────────────────────────────────────────────
 
 func newDotsPushCmd(state *rootState) *cobra.Command {
 	var message string

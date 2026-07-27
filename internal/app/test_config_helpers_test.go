@@ -75,7 +75,6 @@ func testShortHostname() string {
 	if hostname == "" {
 		hostname, _ = os.Hostname()
 	}
-	// Mirror production shortHostname: hostnames are always lower-cased.
 	hostname = strings.ToLower(hostname)
 	if idx := strings.IndexByte(hostname, '.'); idx != -1 {
 		return hostname[:idx]
@@ -141,7 +140,6 @@ func groupTools(names ...string) []config.ToolEntry {
 	return tools
 }
 
-// installTracker wraps stubProvider and records Install calls.
 type installTracker struct {
 	stubProvider
 	installed     []provider.InstalledTool

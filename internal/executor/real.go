@@ -11,35 +11,30 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// RealExecutor runs commands via os/exec.
-// PATH is transparently augmented with node version manager directories
-// (nvm, volta) so that npm/pnpm/bun are found even when the process was
-// launched outside an initialised shell session.
-//
-// The augmented PATH is passed per-command via cmd.Env rather than mutating
-// the process-global PATH via os.Setenv. This keeps commands hermetic and
-// avoids data races in parallel tests.
+// Grace period between killing a cancelled command and abandoning its output pipes.
+var waitDelay = 5 * time.Second
+
+// RealExecutor — PATH augmentation is per-command via cmd.Env, never os.Setenv: hermetic, race-free.
 type RealExecutor struct{}
 
-// New returns a RealExecutor.
 func New() *RealExecutor {
 	return &RealExecutor{}
 }
 
-// Run executes name with args and captures stdout/stderr.
-// It returns a non-nil error when the process exits with a non-zero code.
-// Each subprocess receives a copy of the current environment with the
-// augmented PATH (nvm/volta bin dirs prepended) injected via cmd.Env.
 func (r *RealExecutor) Run(ctx context.Context, name string, args ...string) (string, string, error) {
 	resolved, env := ResolveCommand(name)
 
 	cmd := exec.CommandContext(ctx, resolved, args...)
 	cmd.Env = env
+	// Wait blocks on pipe-copy goroutines, so a grandchild holding a pipe open can outlive cancellation.
+	cmd.WaitDelay = waitDelay
 	var stdout, stderr bytes.Buffer
-	stdoutWriter := &outputWriter{ctx: ctx, dst: io.Writer(&stdout)}
-	stderrWriter := &outputWriter{ctx: ctx, dst: io.Writer(&stderr)}
+	limit := outputLimit(ctx)
+	stdoutWriter := &outputWriter{ctx: ctx, dst: io.Writer(&stdout), limit: limit}
+	stderrWriter := &outputWriter{ctx: ctx, dst: io.Writer(&stderr), limit: limit}
 	cmd.Stdout = stdoutWriter
 	cmd.Stderr = stderrWriter
 	err := cmd.Run()
@@ -51,15 +46,31 @@ func (r *RealExecutor) Run(ctx context.Context, name string, args ...string) (st
 type outputWriter struct {
 	ctx     context.Context
 	dst     io.Writer
+	limit   int
+	written int
 	pending []byte
 }
 
+// Bytes past the limit are dropped because a short write would fail the command.
 func (w *outputWriter) Write(p []byte) (int, error) {
-	n, err := w.dst.Write(p)
+	keep := p
+	if w.limit > 0 {
+		if remaining := w.limit - w.written; remaining < len(keep) {
+			keep = keep[:max(remaining, 0)]
+		}
+	}
+	if len(keep) > 0 {
+		if _, err := w.dst.Write(keep); err != nil {
+			return 0, err
+		}
+		w.written += len(keep)
+	}
 	observer := outputObserver(w.ctx)
-	for _, b := range p[:n] {
+	for _, b := range p {
 		if b != '\n' && b != '\r' {
-			w.pending = append(w.pending, b)
+			if w.limit == 0 || len(w.pending) < w.limit {
+				w.pending = append(w.pending, b)
+			}
 			continue
 		}
 		if line := sanitizeOutputLine(w.pending); observer != nil && line != "" {
@@ -67,7 +78,7 @@ func (w *outputWriter) Write(p []byte) (int, error) {
 		}
 		w.pending = w.pending[:0]
 	}
-	return n, err
+	return len(p), nil
 }
 
 func (w *outputWriter) flush() {
@@ -78,10 +89,7 @@ func (w *outputWriter) flush() {
 	}
 }
 
-// ResolveCommand returns the executable path and environment used by
-// RealExecutor. exec.CommandContext resolves binaries using the current process
-// PATH, not cmd.Env, so callers that build their own exec.Cmd must pre-resolve
-// names through the same augmented PATH.
+// ResolveCommand — exec.CommandContext resolves against the process PATH, not cmd.Env — pre-resolve here.
 func ResolveCommand(name string) (string, []string) {
 	env := augmentedEnv()
 	if resolved, ok := lookupInEnv(name, env); ok {
@@ -90,15 +98,11 @@ func ResolveCommand(name string) (string, []string) {
 	return name, env
 }
 
-// CommandAvailable reports whether name resolves to an executable through the
-// same augmented PATH RealExecutor uses for subprocesses.
 func CommandAvailable(name string) bool {
 	_, ok := lookupInEnv(name, augmentedEnv())
 	return ok
 }
 
-// CommandAvailable reports whether name resolves to an executable through the
-// same augmented PATH this executor uses for subprocesses.
 func (r *RealExecutor) CommandAvailable(name string) bool {
 	return CommandAvailable(name)
 }
@@ -130,10 +134,6 @@ func isExecutableFile(path string) bool {
 	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
 }
 
-// ── PATH augmentation ────────────────────────────────────────────────────────
-
-// augmentedEnv returns a copy of os.Environ() with nvm/volta bin dirs
-// prepended to PATH. The original process environment is never modified.
 func augmentedEnv() []string {
 	extra := discoverNodeManagerPaths()
 	env := os.Environ()
@@ -152,12 +152,9 @@ func augmentedEnv() []string {
 			return env
 		}
 	}
-	// No PATH entry found — append one.
 	return append(env, "PATH="+prefix)
 }
 
-// discoverNodeManagerPaths returns bin directories for node version managers,
-// in the order they should appear at the front of PATH.
 func discoverNodeManagerPaths() []string {
 	if runtime.GOOS == "windows" {
 		return nil // nvm/volta use different layouts on Windows
@@ -180,25 +177,14 @@ func discoverNodeManagerPaths() []string {
 	}
 	// nvm: honour the currently selected shell version first.
 	addPath(os.Getenv("NVM_BIN"))
-	// Volta: single fixed location, manages shims itself.
 	addPath(filepath.Join(home, ".volta", "bin"))
 	// nvm: resolve the default alias chain as the non-interactive fallback.
 	addPath(nvmDefaultBinDir(home))
-	// bun: fixed location ~/.bun/bin.
 	addPath(filepath.Join(home, ".bun", "bin"))
 	return paths
 }
 
-// nvmDefaultBinDir resolves $NVM_DIR/alias/default (or ~/.nvm/alias/default
-// when NVM_DIR is unset, matching nvm.sh's own default) through the alias
-// chain to a concrete installed-version bin directory.
-// Handles three alias formats:
-//   - Concrete version: "v22.16.0" → direct lookup.
-//   - LTS alias chain: "lts/*" → "lts/iron" → "v20.x.y".
-//   - Bare major version: "22" → newest installed v22.x.y (nvm convention).
-//
-// Falls back to the newest installed version overall when the chain cannot be
-// resolved (e.g. a stale alias pointing to an uninstalled version).
+// Mirrors nvm.sh: $NVM_DIR, else ~/.nvm. Aliases are concrete, an "lts/*" chain, or a bare major.
 func nvmDefaultBinDir(home string) string {
 	nvmDir := os.Getenv("NVM_DIR")
 	if nvmDir == "" {
@@ -215,21 +201,16 @@ func nvmDefaultBinDir(home string) string {
 		}
 	}
 
-	// resolveNvmAlias could not follow the chain (e.g. bare major version "22"
-	// has no corresponding alias file). Read the raw default value and try to
-	// match it as a major version integer before falling back to newest overall.
+	// A bare major like "22" has no alias file, so match the raw value instead.
 	if raw, err := os.ReadFile(filepath.Join(nvmDir, "alias", "default")); err == nil {
 		if d := nvmMajorVersionBinDir(versionsDir, strings.TrimSpace(string(raw))); d != "" {
 			return d
 		}
 	}
 
-	// Last resort: newest installed version.
 	return nvmNewestBinDir(versionsDir)
 }
 
-// resolveNvmAlias follows the nvm alias chain (default → lts/* → lts/krypton →
-// v18.x.y). Returns the version string (e.g. "v22.16.0") or "" if unresolvable.
 func resolveNvmAlias(nvmDir, alias string, maxHops int) string {
 	for i := 0; i < maxHops; i++ {
 		raw, err := os.ReadFile(filepath.Join(nvmDir, "alias", alias))
@@ -238,20 +219,17 @@ func resolveNvmAlias(nvmDir, alias string, maxHops int) string {
 		}
 		val := strings.TrimSpace(string(raw))
 		if strings.HasPrefix(val, "v") {
-			return val // concrete version found
+			return val
 		}
 		// Reject path traversal; allow lts/* which is a valid nvm alias prefix.
 		if strings.ContainsAny(val, "/\\") && !strings.HasPrefix(val, "lts/") {
 			return ""
 		}
-		alias = val // follow the next hop (e.g. "lts/*" or "lts/krypton")
+		alias = val
 	}
 	return ""
 }
 
-// nvmMajorVersionBinDir returns the bin dir of the newest installed nvm version
-// whose major component equals the given string (e.g. "22" → newest v22.x.y).
-// Returns "" when major is not a positive integer or no matching version exists.
 func nvmMajorVersionBinDir(versionsDir, major string) string {
 	maj, err := strconv.Atoi(major)
 	if err != nil || maj <= 0 {
@@ -298,8 +276,6 @@ func nvmMajorVersionBinDir(versionsDir, major string) string {
 	return ""
 }
 
-// nvmNewestBinDir picks the bin dir of the highest semver installed under
-// nodeVersionsDir (e.g. ~/.nvm/versions/node/).
 func nvmNewestBinDir(nodeVersionsDir string) string {
 	entries, err := os.ReadDir(nodeVersionsDir)
 	if err != nil {

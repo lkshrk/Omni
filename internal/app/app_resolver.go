@@ -10,7 +10,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// ToolKey is the canonical identity for a resolved physical tool.
 type ToolKey struct {
 	Name     string
 	Provider string
@@ -165,16 +164,12 @@ func (a *App) resolveInstallSpecWithAvailability(ctx context.Context, logicalNam
 	return a.planInstallRoute(ctx, logicalName, spec, availability).Install
 }
 
-// resolveInstallSpecWithSettings is the loop-friendly variant: callers resolving
-// many tools in a row pass a settings snapshot they loaded once, avoiding a
-// per-tool config.Load + ValidateRoot on the hot list path.
+// Loop-friendly variant: callers pass a settings snapshot to avoid a per-tool config load and validate.
 func (a *App) resolveInstallSpecWithSettings(ctx context.Context, logicalName string, spec config.ToolSpec, availability map[string]bool, settings config.Settings) config.ToolInstallSpec {
 	return a.planInstallRouteWithSettings(ctx, logicalName, spec, availability, settings).Install
 }
 
-// planInstallRoute loads settings once for a single-tool resolution. Callers in a
-// loop must instead resolve settings once and call planInstallRouteWithSettings,
-// so config is not re-read and re-validated per tool.
+// Loop callers must use planInstallRouteWithSettings so config is not re-read per tool.
 func (a *App) planInstallRoute(ctx context.Context, logicalName string, spec config.ToolSpec, availability map[string]bool) installRoute {
 	settings, _ := a.LoadSettings()
 	return a.planInstallRouteWithSettings(ctx, logicalName, spec, availability, settings)
@@ -268,8 +263,7 @@ func sortInstallCandidatesByPriority(candidates []config.ToolInstallSpec, priori
 	})
 }
 
-// configuredInstallRoutes returns every candidate that can apply on this host,
-// preserving both its authored recipe and its materialized provider options.
+// Preserves both the authored recipe and the materialized provider options.
 func (a *App) configuredInstallRoutes(logicalName string, spec config.ToolSpec) []installRoute {
 	hostname := currentHostname()
 	var candidates []config.ToolInstallSpec
@@ -297,9 +291,7 @@ func (a *App) configuredInstallRoutes(logicalName string, spec config.ToolSpec) 
 	return routes
 }
 
-// findConfiguredInstallRoute searches every candidate for one whose Provider
-// or InstallWith matches providerName. Unlike planInstallRoute, it does not
-// stop at the first available candidate.
+// Unlike planInstallRoute, does not stop at the first available candidate.
 func (a *App) findConfiguredInstallRoute(ctx context.Context, logicalName string, spec config.ToolSpec, providerName string) (installRoute, bool) {
 	if providerName == "" {
 		return installRoute{}, false
@@ -324,9 +316,7 @@ func allInstallRouteSkipsArePackageUnavailable(skipped []installRouteSkip, candi
 	return true
 }
 
-// allInstallRouteSkipsAreProviderUnavailable reports whether every skip in the
-// list is due to the provider itself being absent on the current system. A
-// non-empty list is required (zero skips are not "all provider-unavailable").
+// A non-empty list is required: zero skips are not all-provider-unavailable.
 func allInstallRouteSkipsAreProviderUnavailable(skipped []installRouteSkip, candidates int) bool {
 	if len(skipped) != candidates || candidates == 0 {
 		return false
@@ -358,8 +348,7 @@ func (a *App) installCandidateUsableCached(ctx context.Context, logicalName stri
 		}
 		return false, installRouteSkip{Install: candidate, Reason: installRouteSkipPackageUnavailable, Detail: cached.Reason}
 	}
-	// Only an explicit unavailable package probe blocks a candidate. Missing or
-	// unreadable availability should still try native before considering fallback.
+	// Missing or unreadable availability should still try native before considering fallback.
 	return true, installRouteSkip{}
 }
 

@@ -61,15 +61,17 @@ Before broad repairs, read the [Safety Model](docs/safety.md).
 
 ## Agent skills
 
-Omni restores AI-agent skills from a tracked manifest by driving the
-[`skills`](https://github.com/vercel-labs/skills) CLI (`npx`/`bunx`). Declare
-skills under `agents.skills` in your config, or capture already-installed ones,
-then restore the set on any machine. Also available as the **Skills** TUI tab.
+Omni natively acquires and syncs AI-agent skills from Git, well-known HTTP
+catalogs, or local directories. Declare desired packages under
+`agents.packages`; `skills` selectors are optional, and omission installs every
+discovered skill. Legacy lockfile-only installs can be imported explicitly.
+Also available from the **Skills** TUI tab.
 
 ```sh
-omni agents skills import            # capture installed skills into the manifest
-omni agents skills restore           # install the manifest skill set on this host
-omni agents skills restore --dry-run # preview the skills add commands
+omni agents find react               # search the skills.sh catalog
+omni agents skills import            # capture legacy lockfile installs
+omni agents skills sync              # install the manifest skill set on this host
+omni agents skills sync --dry-run    # preview native network/filesystem actions
 ```
 
 ## Docs

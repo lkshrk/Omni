@@ -638,14 +638,9 @@ func TestSync_SkipsUnsupportedFallbackWhenNativePackageUnavailable(t *testing.T)
 	}
 }
 
-// TestSync_UsesFallbackWhenProviderUnavailableAndNoNativeAlternative verifies
-// HCL-22 acceptance criterion A3: when all configured providers are unavailable
-// AND no native provider search finds a high-confidence alternative, a usable
-// configured Git/GitHub fallback is attempted as the last resort.
 func TestSync_UsesFallbackWhenProviderUnavailableAndNoNativeAlternative(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	// apt is unavailable; no other provider is registered to find alternatives.
 	apt := &stubProvider{name: "apt", available: false}
 	fallbackExec := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c install rg", Response: executor.MockCall{}},
@@ -679,8 +674,6 @@ func TestSync_UsesFallbackWhenProviderUnavailableAndNoNativeAlternative(t *testi
 		t.Fatalf("Sync: %v", err)
 	}
 
-	// With HCL-22: fallback IS attempted as last resort after provider-unavailable
-	// + no native search alternatives. The fallback install+check commands run.
 	if fallbackExec.CallCount() == 0 {
 		t.Errorf("fallback was not attempted; ops = %+v", result.Ops)
 	}

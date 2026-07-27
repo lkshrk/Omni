@@ -26,7 +26,7 @@ exec test -f .omni-cache/fake-brew/black
 exec grep '"provider": "brew"' settings.json
 stdout '"provider": "brew"'
 
-exec omni -y --config settings.json tools delete black --provider brew
+exec omni -y --config settings.json tools remove --purge black --provider brew
 stdout 'deleted black'
 exec test ! -f .omni-cache/fake-brew/black
 ! exec grep '"black"' settings.json

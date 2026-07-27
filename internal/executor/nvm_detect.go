@@ -7,8 +7,6 @@ import (
 	"strings"
 )
 
-// ResolvedUnderNvm reports whether absPath lives under an nvm Node version bin
-// directory (NVM_BIN, the default alias chain, or any installed version).
 func ResolvedUnderNvm(absPath string) bool {
 	if absPath == "" || runtime.GOOS == "windows" {
 		return false
@@ -26,7 +24,6 @@ func ResolvedUnderNvm(absPath string) bool {
 	return false
 }
 
-// nvmBinDirs returns every nvm bin directory omni may prepend to PATH.
 func nvmBinDirs() []string {
 	if runtime.GOOS == "windows" {
 		return nil

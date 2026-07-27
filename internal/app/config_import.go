@@ -9,7 +9,6 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// ImportConfigFile imports an existing settings.json into this app's config path.
 func (a *App) ImportConfigFile(sourcePath string) error {
 	sourcePath = strings.TrimSpace(sourcePath)
 	if sourcePath == "" {

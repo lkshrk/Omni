@@ -39,9 +39,7 @@ func (a *App) DotsResolveConflict(ctx context.Context, name string, strategy Dot
 		return nil, err
 	}
 	state, _ := dots.ClassifyEntry(entry)
-	// Modified entries resolve the same two ways a conflict does: use-local
-	// adopts the diverged local content into the repo, use-repo discards it
-	// and restores the repo version.
+	// Modified entries resolve the same two ways a conflict does.
 	if state != dots.StateConflict && state != dots.StateModified {
 		return nil, fmt.Errorf("dots resolve %q: state %q does not require conflict resolution", name, state)
 	}
@@ -55,8 +53,7 @@ func (a *App) DotsResolveConflict(ctx context.Context, name string, strategy Dot
 	}
 }
 
-// DotsResolveConflictPath resolves one selected path inside a dots entry
-// without restowing or replacing its siblings.
+// DotsResolveConflictPath — Resolves one path without restowing or replacing its siblings.
 func (a *App) DotsResolveConflictPath(ctx context.Context, name, relPath string, strategy DotsResolveStrategy) (ops []dots.Op, err error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, fmt.Errorf("dots resolve path: entry name is required")
@@ -160,5 +157,3 @@ func resolveDotUseRepoWith(ctx context.Context, exec executor.Executor, entry do
 func resolveDotUseLocalWith(ctx context.Context, exec executor.Executor, repoPath, packageRoot string, entry dots.ResolvedEntry, relink func() error) ([]dots.Op, error) {
 	return dots.ResolveUseLocalWith(ctx, exec, repoPath, packageRoot, entry, relink)
 }
-
-// ─── stow availability ────────────────────────────────────────────────────────

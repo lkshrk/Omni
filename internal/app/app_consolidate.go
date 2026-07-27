@@ -13,8 +13,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// ─── Consolidation ────────────────────────────────────────────────────────────
-
 type ConsolidateTool struct {
 	Name         string
 	FromProvider string
@@ -62,8 +60,7 @@ func (a *App) ConsolidateOptions() []EcosystemMigration {
 	return opts
 }
 
-// ConsolidateToProvider moves every tool not already on targetProvider to it.
-// Install failures are non-fatal and collected in result.Failed.
+// ConsolidateToProvider — Install failures are non-fatal and collected in result.Failed.
 func (a *App) ConsolidateToProvider(ctx context.Context, targetProvider string, dryRun bool, progress func(string)) (*ConsolidateResult, error) {
 	configProvider, targetInstallWith := a.logicalInstallTarget(targetProvider)
 	targetOpProvider := configProvider
@@ -198,12 +195,10 @@ func (a *App) uninstallInstallSpec(ctx context.Context, install config.ToolInsta
 	return uninstallWithProvider(ctx, srcProv, srcTool, install.InstallWith)
 }
 
-// ConsolidatePlan returns what would be migrated without making any changes.
 func (a *App) ConsolidatePlan(ctx context.Context, ecosystem, manager string) (*ConsolidateResult, error) {
 	return a.runConsolidate(ctx, ecosystem, manager, true, nil)
 }
 
-// Consolidate switches all tools in ecosystem to manager.
 func (a *App) Consolidate(ctx context.Context, ecosystem, manager string, progress func(string)) (*ConsolidateResult, error) {
 	return a.runConsolidate(ctx, ecosystem, manager, false, progress)
 }

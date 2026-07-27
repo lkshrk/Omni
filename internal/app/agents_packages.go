@@ -1,29 +1,46 @@
 package app
 
 import (
+	"slices"
 	"sort"
 
+	"github.com/lkshrk/omni/internal/agent"
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// resolvedPackage is a package selected for the active host with the active
-// group memberships that selected it (for display badges).
 type resolvedPackage struct {
 	config.SkillPackage
 	Groups []string
 }
 
-// resolveSkillPackages returns the packages to restore on hostname: every
-// ungrouped package (referenced by no group) plus every package referenced by
-// a group active on the host. Deduped by source, first-seen order preserved.
-func resolveSkillPackages(cfg *config.RootConfig, hostname string) []resolvedPackage {
+func normalizeConfiguredSkillPackage(pkg config.SkillPackage) config.SkillPackage {
+	parsed, err := agent.ParseSkillSource(pkg.Source)
+	if err != nil {
+		return pkg
+	}
+	pkg.Source = parsed.Source
+	if pkg.Ref == "" {
+		pkg.Ref = parsed.Ref
+	}
+	if len(parsed.Skills) > 0 {
+		for _, skill := range parsed.Skills {
+			if !slices.Contains(pkg.Skills, skill) {
+				pkg.Skills = append(pkg.Skills, skill)
+			}
+		}
+	}
+	return pkg
+}
+
+// Every ungrouped package plus every package a host-active group references, deduped by source.
+func (a *App) resolveSkillPackages(cfg *config.RootConfig, hostname string) []resolvedPackage {
 	groupedSources := make(map[string]struct{})
 	for _, g := range cfg.Groups {
 		if g == nil {
 			continue
 		}
 		for _, src := range g.Skills {
-			groupedSources[src] = struct{}{}
+			groupedSources[a.skillSourceIdentity(src)] = struct{}{}
 		}
 	}
 
@@ -41,14 +58,22 @@ func resolveSkillPackages(cfg *config.RootConfig, hostname string) []resolvedPac
 			continue
 		}
 		for _, src := range g.Skills {
-			activeRefs[src] = append(activeRefs[src], g.BaseName())
+			source := a.skillSourceIdentity(src)
+			activeRefs[source] = append(activeRefs[source], g.BaseName())
 		}
 	}
 
-	out := make([]resolvedPackage, 0, len(cfg.Agents.Packages))
+	normalized := make([]config.SkillPackage, 0, len(cfg.Agents.Packages))
 	for _, p := range cfg.Agents.Packages {
-		_, grouped := groupedSources[p.Source]
-		groups, active := activeRefs[p.Source]
+		p = normalizeConfiguredSkillPackage(p)
+		normalized, _ = upsertPackage(normalized, p)
+	}
+
+	out := make([]resolvedPackage, 0, len(normalized))
+	for _, p := range normalized {
+		identity := a.skillSourceIdentity(p.Source)
+		_, grouped := groupedSources[identity]
+		groups, active := activeRefs[identity]
 		if grouped && !active {
 			continue
 		}

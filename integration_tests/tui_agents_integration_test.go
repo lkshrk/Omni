@@ -28,13 +28,11 @@ func TestTUIAgentsTabInstallsMissingPluginWithFakeClaudeStub(t *testing.T) {
 		t.Fatalf("create fake bin dir: %v", err)
 	}
 	writeFakeClaudeStub(t, binDir)
-	// InstalledAgents detects claude-code by the presence of ~/.claude, not by
-	// PATH, so the agents tab needs this directory to expand any rows for it.
+	// InstalledAgents detects claude-code by ~/.claude existing, not by PATH.
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatalf("create fake ~/.claude dir: %v", err)
 	}
-	// PATH is replaced, not prepended, so no real codex binary on the host
-	// leaks in and turns this claude-only fixture into a two-agent scenario.
+	// PATH is replaced, not prepended, so a real codex on the host cannot turn this claude-only fixture into two agents.
 	env = append(env,
 		"PATH="+binDir+":/usr/bin:/bin",
 		"OMNI_TEST_CLAUDE_PLUGIN_STATE="+installedMarker,

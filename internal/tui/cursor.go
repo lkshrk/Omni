@@ -1,10 +1,6 @@
 package tui
 
-// cursorMove returns cur shifted by delta over a list of count items. When
-// count <= 0 it returns 0. When wrap is true the result wraps modulo count
-// in both directions (matching bubbletea's existing keyboard j/k behavior
-// on the tools and dots lists); when wrap is false it clamps to [0, count-1]
-// (matching picker/popup behavior, which never wraps).
+// wrap true wraps modulo count in both directions (the tools/dots list j/k behavior); wrap false clamps to [0, count-1] (picker/popup behavior). count <= 0 returns 0.
 func cursorMove(cur, delta, count int, wrap bool) int {
 	if count <= 0 {
 		return 0

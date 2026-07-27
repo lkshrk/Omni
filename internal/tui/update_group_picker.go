@@ -53,7 +53,6 @@ func (m *Model) handleGroupPickerKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	return cmds
 }
 
-// cancelGroupPicker closes the picker and drains the reassign queue (user pressed Escape).
 func (m *Model) cancelGroupPicker() {
 	m.pendingGroupReassign = nil
 	m.reassignCreatedGroups = nil
@@ -86,7 +85,6 @@ func (m *Model) closeGroupPicker() {
 		m.mode = viewList
 	}
 	m.pickerGroups = nil
-	// If this was a reassignment and more tools are queued, open next picker.
 	if wasReassign && len(m.pendingGroupReassign) > 0 {
 		m.openNextReassignPicker()
 	} else if wasReassign {
@@ -94,8 +92,7 @@ func (m *Model) closeGroupPicker() {
 	}
 }
 
-// startGroupReassignQueue begins iterating through claimed tools with group
-// pickers so the user can move them out of the machine hostname group.
+// Lets the user move claimed tools out of the machine hostname group.
 func (m *Model) startGroupReassignQueue(names []string) {
 	if len(names) == 0 {
 		return
@@ -109,13 +106,11 @@ func (m *Model) openNextReassignPicker() {
 	if len(m.pendingGroupReassign) == 0 {
 		return
 	}
-	// Carry forward any groups created in previous reassign pickers.
 	for _, g := range m.pickerCreatedGroups {
 		m.reassignCreatedGroups = appendUniqueString(m.reassignCreatedGroups, g)
 	}
 	name := m.pendingGroupReassign[0]
 	m.pendingGroupReassign = m.pendingGroupReassign[1:]
-	// Find the tool in allTools to set as pickerActionTool.
 	for _, t := range m.allTools {
 		if t != nil && t.Name == name {
 			m.pickerActionTool = *t
@@ -125,8 +120,7 @@ func (m *Model) openNextReassignPicker() {
 	}
 	m.mode = viewGroupPicker
 	groups := prioritizedPickerGroups(*m)
-	// Include groups created during earlier reassign pickers that may not
-	// yet appear in m.groupNames (the async groupChangedMsg hasn't arrived).
+	// Groups created during earlier reassign pickers may not be in m.groupNames yet (the async groupChangedMsg has not arrived).
 	for _, g := range m.reassignCreatedGroups {
 		if !slices.Contains(groups, g) {
 			groups = append(groups, g)
@@ -185,9 +179,7 @@ func (m *Model) runGroupPickerAction(group string, cmds *[]tea.Cmd) bool {
 		if !ok {
 			return true
 		}
-		// Don't set m.loading — the move is fire-and-forget so the next
-		// reassign picker can accept input immediately. A stale
-		// groupChangedMsg from this op must not block the next picker.
+		// Fire-and-forget so the next reassign picker accepts input immediately; a stale groupChangedMsg from this op must not block it.
 		*cmds = append(*cmds, m.doSetToolGroupMembership(t.Name, group, true))
 		return true
 	}
@@ -198,7 +190,7 @@ func (m *Model) runGroupPickerAction(group string, cmds *[]tea.Cmd) bool {
 	if !ok {
 		return true
 	}
-	m.loading = true
+	m.beginLoading(loadingOwnerLocalOp)
 	if m.pickerPurposeClaim || m.pickerPurposeInstall {
 		claimGroup := group
 		if isProtectedGroupName(claimGroup) {
@@ -230,12 +222,7 @@ func (m *Model) runGroupPickerAction(group string, cmds *[]tea.Cmd) bool {
 	return true
 }
 
-// runAgentsClaimGroupPickerAction dispatches the adopt-then-group-assign
-// command for an agents-tab orphan row, re-deriving the skill/mcp/plugin
-// identity from m.pickerClaimAgentsRow the same way agentsRowClaim used to
-// look it up before adopting immediately. Mirrors runGroupPickerAction's
-// tools claim branch: sets the running flag, starts the spinner, and closes
-// the picker so the manifest reload lands on the underlying list view.
+// Closes the picker so the manifest reload lands on the underlying list view.
 func (m *Model) runAgentsClaimGroupPickerAction(group string, cmds *[]tea.Cmd) bool {
 	e := m.pickerClaimAgentsRow
 	claimGroup := group
@@ -352,8 +339,7 @@ func (m *Model) handleGroupMembershipKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		if m.selectedPickerGroupIsNewSentinel() {
 			m.openPickerNewGroupInput(&cmds)
 		} else {
-			// Toggle membership in place and stay in the picker so multiple
-			// groups can be selected; Confirm persists the accumulated set.
+			// Stay in the picker so multiple groups can be selected; Confirm persists the accumulated set.
 			cmds = append(cmds, m.selectGroupMembership()...)
 		}
 	case key.Matches(msg, m.keys.Confirm):
@@ -371,9 +357,6 @@ func (m *Model) closeGroupMembershipPicker() {
 	m.finishGroupMembershipPicker()
 }
 
-// agentsClaimMembershipKind maps an agentsAllRow's feature to the
-// pickerMembershipKind constant identifying which adopt+group call to
-// dispatch on confirm.
 func agentsClaimMembershipKind(feature agentsSection) string {
 	switch feature {
 	case agentsSectionSkills:
@@ -387,9 +370,7 @@ func agentsClaimMembershipKind(feature agentsSection) string {
 	}
 }
 
-// openAgentsClaimGroupPicker opens the group picker in claim mode for an
-// agents-tab orphan row, mirroring openGroupPicker(true) for tools: no
-// adoption happens here, only on confirm (runGroupPickerAction).
+// No adoption happens here, only on confirm (runGroupPickerAction).
 func (m *Model) openAgentsClaimGroupPicker(e agentsAllRow) {
 	m.mode = viewGroupPicker
 	m.pickerGroups = append(prioritizedPickerGroups(*m), groupPickerNewSentinel)
@@ -439,8 +420,6 @@ func (m *Model) skillPickerMemberships() []string {
 	return m.skillsMemberships[m.pickerMembershipName]
 }
 
-// openMcpGroupMembershipPicker opens the group-membership picker for the
-// managed mcp row at m.mcpCursor, mirroring openSkillGroupMembershipPicker.
 func (m *Model) openMcpGroupMembershipPicker() {
 	if m.mcpCursor < 0 || m.mcpCursor >= len(m.mcpRows) {
 		return
@@ -468,8 +447,6 @@ func (m *Model) mcpPickerMemberships() []string {
 	return m.mcpMemberships[m.pickerMembershipName]
 }
 
-// openPluginGroupMembershipPicker opens the group-membership picker for the
-// managed plugin row at m.pluginCursor, mirroring openMcpGroupMembershipPicker.
 func (m *Model) openPluginGroupMembershipPicker() {
 	if m.pluginCursor < 0 || m.pluginCursor >= len(m.pluginRows) {
 		return
@@ -497,9 +474,6 @@ func (m *Model) pluginPickerMemberships() []string {
 	return m.pluginMemberships[m.pickerMembershipName]
 }
 
-// openMarketplaceGroupMembershipPicker opens the group-membership picker for
-// the managed marketplace row at m.marketplaceCursor, mirroring
-// openPluginGroupMembershipPicker.
 func (m *Model) openMarketplaceGroupMembershipPicker() {
 	if m.marketplaceCursor < 0 || m.marketplaceCursor >= len(m.marketplaceRows) {
 		return
@@ -536,8 +510,7 @@ func (m *Model) finishGroupMembershipPicker() {
 		nextMode = viewSkills
 	}
 	if m.pickerDotExtractParent != "" && m.pickerMembershipName != "" {
-		// Drop the phantom draft seeded for the pending child extract so a
-		// not-yet-created entry never lingers in the membership map.
+		// Drop the phantom draft seeded for the pending child extract so a not-yet-created entry never lingers in the membership map.
 		delete(m.dotMemberships, m.pickerMembershipName)
 	}
 	m.mode = nextMode
@@ -719,10 +692,7 @@ func (m *Model) selectGroupMembership() []tea.Cmd {
 	if isNewGroupSentinel(group) {
 		return nil
 	}
-	// Dots may belong to any number of host groups but at most one reusable
-	// group; tools and agent-kinds (skill/mcp/plugin/marketplace) are free
-	// multi-select. m.groupNames holds the reusable names; groups created
-	// during this picker session are reusable too.
+	// Dots may belong to any number of host groups but at most one reusable group; tools and agent-kinds are free multi-select.
 	var next []string
 	if app.MembershipCapsReusable(m.pickerMembershipKind) {
 		reusable := app.ReusablePredicate(m.groupNames, m.pickerCreatedGroups)
@@ -753,9 +723,7 @@ func (m *Model) submitGroupMembershipNewGroup() {
 	if !ok {
 		return
 	}
-	// A freshly created group is reusable. For dots, adding it evicts any
-	// other reusable membership but keeps host-group memberships intact;
-	// tools and agent-kinds are free multi-select.
+	// A freshly created group is reusable: for dots it evicts any other reusable membership but keeps host-group memberships intact.
 	var next []string
 	if app.MembershipCapsReusable(m.pickerMembershipKind) {
 		reusable := app.ReusablePredicate(m.groupNames, m.pickerCreatedGroups)
@@ -841,7 +809,7 @@ func (m *Model) saveGroupMembershipPicker(cmds *[]tea.Cmd) {
 	case pickerMembershipMarketplace:
 		*cmds = append(*cmds, m.doSetMarketplaceGroupMemberships(name, next))
 	default:
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		startOp(m, "Updating groups for "+name+"…")
 		*cmds = append(*cmds, m.spinner.Tick, m.doSetToolGroupMemberships(name, m.pickerOriginalGroups, next, created, host))
 	}
@@ -944,7 +912,7 @@ func (m *Model) saveScopePickerSelection(cmds *[]tea.Cmd) {
 			m.scopeOptions = nil
 			return
 		}
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		startOp(m, "Updating ignore scope for "+t.Name+"…")
 		*cmds = append(*cmds, m.spinner.Tick, m.doSaveIgnoreScopes(t.Name, m.scopeOptions))
 	case viewProviderScope:
@@ -953,7 +921,7 @@ func (m *Model) saveScopePickerSelection(cmds *[]tea.Cmd) {
 			*cmds = append(*cmds, setStatus(m, "✗ select a provider scope with space", true))
 			return
 		}
-		m.loading = true
+		m.beginLoading(loadingOwnerLocalOp)
 		startOp(m, "Pinning provider for "+t.Name+"…")
 		toolCopy := t
 		*cmds = append(*cmds, m.spinner.Tick, m.doSetProviderScope(t.Name, opt, &toolCopy))

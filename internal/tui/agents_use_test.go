@@ -40,7 +40,6 @@ func TestAgentsUse_EditorRenderWithRows(t *testing.T) {
 			t.Errorf("render missing %q", display)
 		}
 	}
-	// Enabled rows show [x], disabled rows show [ ]
 	lines := strings.Split(out, "\n")
 	checkMark := func(display, wantMark string) {
 		for _, line := range lines {
@@ -105,25 +104,21 @@ func TestAgentsUse_CursorMove(t *testing.T) {
 	}
 	m.agentsEditCursor = 0
 
-	// j moves down
 	got := drive(m, pressRune('j'))
 	if got.agentsEditCursor != 1 {
 		t.Errorf("agentsEditCursor after j = %d, want 1", got.agentsEditCursor)
 	}
 
-	// k moves up
 	got = drive(got, pressRune('k'))
 	if got.agentsEditCursor != 0 {
 		t.Errorf("agentsEditCursor after k = %d, want 0", got.agentsEditCursor)
 	}
 
-	// up at 0 clamps
 	got = drive(got, tea.KeyPressMsg{Code: tea.KeyUp})
 	if got.agentsEditCursor != 0 {
 		t.Errorf("agentsEditCursor after up at 0 = %d, want 0 (clamped)", got.agentsEditCursor)
 	}
 
-	// down arrow also works
 	got = drive(m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if got.agentsEditCursor != 1 {
 		t.Errorf("agentsEditCursor after down arrow = %d, want 1", got.agentsEditCursor)
@@ -204,7 +199,6 @@ func TestAgentsUse_ValFn(t *testing.T) {
 	})
 }
 
-// TestDoToggleAgents_NilAppReturnsNil verifies the nil-app guard.
 func TestDoToggleAgents_NilAppReturnsNil(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -214,15 +208,12 @@ func TestDoToggleAgents_NilAppReturnsNil(t *testing.T) {
 	}
 }
 
-// TestDoToggleAgents_SuccessFlipsEnabled verifies the toggle persists the
-// per-host agents_disabled flag and reports the flipped enabled state.
 func TestDoToggleAgents_SuccessFlipsEnabled(t *testing.T) {
 	t.Parallel()
 	a := newScanPlanTestApp(t)
 	m := baseModel(nil)
 	m.app = a
 
-	// enabled → disable
 	m.agentsEnabled = true
 	msg := m.doToggleAgents()()
 	got, ok := msg.(agentsToggledMsg)
@@ -243,7 +234,6 @@ func TestDoToggleAgents_SuccessFlipsEnabled(t *testing.T) {
 		t.Error("expected agents_disabled=true persisted to host settings")
 	}
 
-	// disabled → enable
 	m.agentsEnabled = false
 	got2 := m.doToggleAgents()().(agentsToggledMsg)
 	if got2.err != nil {
@@ -254,8 +244,6 @@ func TestDoToggleAgents_SuccessFlipsEnabled(t *testing.T) {
 	}
 }
 
-// TestDoToggleAgents_ErrorPropagates verifies a config save failure lands in
-// agentsToggledMsg.err.
 func TestDoToggleAgents_ErrorPropagates(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)

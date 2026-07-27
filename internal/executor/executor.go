@@ -7,8 +7,7 @@ import (
 
 type outputObserverKey struct{}
 
-// WithOutputObserver reports sanitized subprocess output as it is produced.
-// stdout and stderr may invoke observer concurrently.
+// WithOutputObserver — stdout and stderr may invoke observer concurrently.
 func WithOutputObserver(ctx context.Context, observer func(string)) context.Context {
 	if ctx == nil || observer == nil {
 		return ctx
@@ -24,12 +23,28 @@ func outputObserver(ctx context.Context) func(string) {
 	return observer
 }
 
+type outputLimitKey struct{}
+
+// WithOutputLimit caps captured bytes without stopping the command, preserving early version output.
+func WithOutputLimit(ctx context.Context, limit int) context.Context {
+	if ctx == nil || limit <= 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, outputLimitKey{}, limit)
+}
+
+func outputLimit(ctx context.Context) int {
+	if ctx == nil {
+		return 0
+	}
+	limit, _ := ctx.Value(outputLimitKey{}).(int)
+	return limit
+}
+
 func sanitizeOutputLine(line []byte) string {
 	return strings.TrimSpace(redactTraceText(string(line)))
 }
 
-// Executor abstracts shell command execution.
-// Inject a mock in tests to avoid touching the real system.
 type Executor interface {
 	Run(ctx context.Context, name string, args ...string) (stdout, stderr string, err error)
 }
