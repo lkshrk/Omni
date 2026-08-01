@@ -5,6 +5,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,6 +69,16 @@ func (p *okProvider) PrivilegeCommand(action provider.PrivilegeAction, tool prov
 	default:
 		return "", nil, false
 	}
+}
+
+type outdatedWarningProvider struct{ okProvider }
+
+func (p *outdatedWarningProvider) RefreshMetadata(context.Context) error {
+	return errors.New("metadata stale")
+}
+
+func (p *outdatedWarningProvider) OutdatedMap(context.Context) (map[string]string, error) {
+	return nil, nil
 }
 
 type searchOKProvider struct {
@@ -3443,6 +3454,238 @@ func TestDoCheckProviderOutdated_ReturnsMsg(t *testing.T) {
 	if got.provider != "brew" {
 		t.Errorf("provider = %q, want brew", got.provider)
 	}
+}
+
+func TestDoCheckProviderOutdated_SurfacesObservedWarningInStatus(t *testing.T) {
+	prov := &outdatedWarningProvider{okProvider{name: "brew"}}
+	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
+	m := modelForCmds(a)
+
+	var msg tea.Msg
+	stderr := captureStderr(t, func() {
+		msg = m.doCheckProviderOutdated("brew", 9)()
+	})
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want warning captured by providerOutdatedCheckedMsg", stderr)
+	}
+
+	got, ok := msg.(providerOutdatedCheckedMsg)
+	if !ok {
+		t.Fatalf("expected providerOutdatedCheckedMsg, got %T", msg)
+	}
+	const want = "warning: omni: refresh brew metadata: metadata stale"
+	if got.warning != want {
+		t.Fatalf("providerOutdatedCheckedMsg warning = %q, want %q", got.warning, want)
+	}
+
+	m.scanGen = got.gen
+	m.outdatedProviders = map[string]bool{"brew": true}
+	const activity = "Checking updates for brew…"
+	setActivityStatus(&m, activity)
+	cmds := m.handleProviderOutdatedCheckedMsg(got)
+	if m.statusMsg != "" {
+		t.Fatalf("statusMsg = %q before final snapshot, want deferred warning", m.statusMsg)
+	}
+	if m.progressText != activity {
+		t.Fatalf("progressText = %q before final snapshot, want %q", m.progressText, activity)
+	}
+	if len(cmds) != 1 {
+		t.Fatalf("provider completion cmds = %d, want only the final snapshot command", len(cmds))
+	}
+
+	clearCmd := m.handleOutdatedProvidersDoneMsg(outdatedProvidersDoneMsg{gen: got.gen})
+	if clearCmd == nil {
+		t.Fatal("final snapshot should start the warning status timer")
+	}
+	if m.progressText != "" {
+		t.Fatalf("progressText = %q after final snapshot, want cleared", m.progressText)
+	}
+	if m.statusMsg != want {
+		t.Fatalf("statusMsg = %q, want %q", m.statusMsg, want)
+	}
+}
+
+func TestOutdatedProviderIssues_DeferStatusAndPreferErrorOverLaterWarning(t *testing.T) {
+	m := baseModel(nil)
+	m.scanGen = 12
+	m.outdatedProviders = map[string]bool{"brew": true, "pip": true}
+	m.outdatedTotal = 2
+	const activity = "Checking updates… 0/2"
+	setActivityStatus(&m, activity)
+
+	providerErr := errors.New("outdated command failed")
+	cmds := m.handleProviderOutdatedCheckedMsg(providerOutdatedCheckedMsg{
+		gen: 12, provider: "brew", err: providerErr,
+	})
+	const firstProgress = "Checking updates… 1/2: pip"
+	if len(cmds) != 0 || m.statusMsg != "" || m.progressText != firstProgress {
+		t.Fatalf("first provider completion started status early: cmds=%d status=%q progress=%q", len(cmds), m.statusMsg, m.progressText)
+	}
+
+	const warning = "warning: omni: pip metadata stale"
+	cmds = m.handleProviderOutdatedCheckedMsg(providerOutdatedCheckedMsg{
+		gen: 12, provider: "pip", warning: warning,
+	})
+	if len(cmds) != 1 {
+		t.Fatalf("last provider completion cmds = %d, want only the final snapshot command", len(cmds))
+	}
+	if m.statusMsg != "" || m.progressText != firstProgress {
+		t.Fatalf("last provider completion started status early: status=%q progress=%q", m.statusMsg, m.progressText)
+	}
+
+	statusCmd := m.handleOutdatedProvidersDoneMsg(outdatedProvidersDoneMsg{gen: 12})
+	if statusCmd == nil {
+		t.Fatal("final snapshot should start the deferred status timer")
+	}
+	want := app.ProviderScanFailureStatus("brew", providerErr)
+	if m.statusMsg != want || !m.statusIsErr {
+		t.Fatalf("final status = (%q, err=%v), want provider error %q over warning", m.statusMsg, m.statusIsErr, want)
+	}
+	if m.progressText != "" {
+		t.Fatalf("progressText = %q after final snapshot, want cleared", m.progressText)
+	}
+}
+
+func TestRefreshIssues_WaitForAllLegsAndPreferSnapshotError(t *testing.T) {
+	t.Run("provider snapshot error beats later warning", func(t *testing.T) {
+		m := baseModel(nil)
+		m.scanGen = 12
+		m.providerSnapshotRefreshing = true
+		m.outdatedProviders = map[string]bool{"brew": true}
+
+		snapshotErr := errors.New("snapshot failed")
+		if cmd := m.handleAllProvidersDoneMsg(allProvidersDoneMsg{gen: 12, err: snapshotErr}); cmd != nil {
+			t.Fatal("snapshot error timer started before the update check settled")
+		}
+		if m.statusMsg != "" {
+			t.Fatalf("statusMsg = %q before update check settles, want empty", m.statusMsg)
+		}
+
+		cmds := m.handleProviderOutdatedCheckedMsg(providerOutdatedCheckedMsg{
+			gen: 12, provider: "brew", warning: "warning: omni: metadata stale",
+		})
+		if len(cmds) != 1 {
+			t.Fatalf("provider completion cmds = %d, want final snapshot command", len(cmds))
+		}
+		if cmd := m.handleOutdatedProvidersDoneMsg(outdatedProvidersDoneMsg{gen: 12}); cmd == nil {
+			t.Fatal("final refresh leg should start the deferred status timer")
+		}
+		want := "refresh failed: " + snapshotErr.Error()
+		if m.statusMsg != want {
+			t.Fatalf("statusMsg = %q, want snapshot error %q", m.statusMsg, want)
+		}
+	})
+
+	t.Run("discovery progress keeps warning deferred", func(t *testing.T) {
+		m := baseModel(nil)
+		m.scanGen = 13
+		m.discoveryGen = 7
+		m.discoveryRefreshing = true
+		m.outdatedSnapshotRefreshing = true
+		m.rememberRefreshIssue("warning: omni: metadata stale", refreshIssueWarning)
+		const activity = "Finding local tools…"
+		setActivityStatus(&m, activity)
+
+		if cmd := m.handleOutdatedProvidersDoneMsg(outdatedProvidersDoneMsg{gen: 13}); cmd != nil {
+			t.Fatal("warning timer started while discovery remained active")
+		}
+		if m.statusMsg != "" || m.progressText != activity {
+			t.Fatalf("outdated completion exposed hidden status: status=%q progress=%q", m.statusMsg, m.progressText)
+		}
+
+		if cmd := m.handleDiscoveredRefreshedMsg(discoveredRefreshedMsg{gen: 7}); cmd == nil {
+			t.Fatal("final discovery leg should start the warning status timer")
+		}
+		if m.statusMsg != "warning: omni: metadata stale" || m.progressText != "" {
+			t.Fatalf("final status=%q progress=%q, want visible warning", m.statusMsg, m.progressText)
+		}
+	})
+
+	t.Run("description result invalidates buffered progress", func(t *testing.T) {
+		m := baseModel(nil)
+		m.descRefreshGen = 8
+		m.descRefreshing = true
+		m.rememberRefreshIssue("warning: omni: metadata stale", refreshIssueWarning)
+		ch := make(chan progressUpdate, 1)
+		m.progressCh = ch
+		m.descriptionProgressCh = ch
+		m.progressGen = 4
+
+		if cmd := m.handleDescRefreshDoneMsg(descRefreshDoneMsg{gen: 8}); cmd == nil {
+			t.Fatal("final description leg should start the warning status timer")
+		}
+		if m.progressCh != nil || m.descriptionProgressCh != nil || m.progressGen != 5 {
+			t.Fatalf("description stream not invalidated: progressCh=%v owned=%v gen=%d", m.progressCh, m.descriptionProgressCh, m.progressGen)
+		}
+		if m.statusMsg != "warning: omni: metadata stale" {
+			t.Fatalf("statusMsg = %q, want visible warning", m.statusMsg)
+		}
+	})
+}
+
+func TestRefreshFinalSnapshotFinishesSetupReload(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(*Model) tea.Cmd
+	}{
+		{
+			name: "provider snapshot error",
+			run: func(m *Model) tea.Cmd {
+				m.providerSnapshotRefreshing = true
+				return m.handleAllProvidersDoneMsg(allProvidersDoneMsg{err: errors.New("snapshot failed")})
+			},
+		},
+		{
+			name: "outdated snapshot",
+			run: func(m *Model) tea.Cmd {
+				m.outdatedSnapshotRefreshing = true
+				m.rememberRefreshIssue("warning: omni: metadata stale", refreshIssueWarning)
+				return m.handleOutdatedProvidersDoneMsg(outdatedProvidersDoneMsg{})
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := baseModel(nil)
+			m.setupReloading = true
+			m.loading = true
+
+			if cmd := tt.run(&m); cmd == nil {
+				t.Fatal("final refresh issue should start its status timer")
+			}
+			if m.loading || m.setupReloading {
+				t.Fatalf("final refresh leg left gates set: loading=%v setupReloading=%v", m.loading, m.setupReloading)
+			}
+			if m.statusMsg == "" {
+				t.Fatal("deferred refresh issue was lost")
+			}
+		})
+	}
+}
+
+func captureStderr(t *testing.T, run func()) string {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	original := os.Stderr
+	os.Stderr = writer
+	func() {
+		defer func() { os.Stderr = original }()
+		run()
+	}()
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close stderr writer: %v", err)
+	}
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close stderr reader: %v", err)
+	}
+	return string(output)
 }
 
 // Must always return a discoveredRefreshedMsg, never nil and never an error type.

@@ -411,6 +411,32 @@ func (a *App) PrivilegedToolCommand(ctx context.Context, view *ToolView, action 
 	}, true
 }
 
+// PrivilegedInstalledUpgradeCommand plans an installed upgrade that must run in an interactive terminal.
+func (a *App) PrivilegedInstalledUpgradeCommand(ctx context.Context, name string, opts UpgradeOptions) (PrivilegedToolCommand, bool, error) {
+	t, err := a.installedUpgradeTarget(ctx, name)
+	if err != nil {
+		return PrivilegedToolCommand{}, false, err
+	}
+	if ignored, err := a.configuredToolIgnored(name); err != nil {
+		return PrivilegedToolCommand{}, false, err
+	} else if ignored {
+		return PrivilegedToolCommand{}, false, fmt.Errorf("tool %q is ignored", name)
+	}
+	if err := a.validateUpgradeQuarantine(ctx, name, t, opts); err != nil {
+		return PrivilegedToolCommand{}, false, err
+	}
+	view := toolViewFromCache(t)
+	plan, err := a.ToolPrivilegePlan(ctx, view, provider.PrivilegeActionUpgrade)
+	if err != nil || !plan.RequiresPrivilege() {
+		return PrivilegedToolCommand{}, false, err
+	}
+	command, ok := a.PrivilegedToolCommand(ctx, view, provider.PrivilegeActionUpgrade, plan)
+	if !ok {
+		return PrivilegedToolCommand{}, false, fmt.Errorf("admin approval required; unsupported provider command")
+	}
+	return command, true, nil
+}
+
 func (a *App) privilegedToolCommandProvider(ctx context.Context, t *database.ToolCache, action provider.PrivilegeAction, plan provider.PrivilegePlan) string {
 	if t.InstalledWith != "" && t.InstalledWith != t.Provider {
 		return t.InstalledWith
@@ -432,7 +458,8 @@ func brewCaskMayPromptForPassword(plan provider.PrivilegePlan) bool {
 	return strings.Contains(reason, "brew cask") &&
 		(strings.Contains(reason, "pkgutil") ||
 			strings.Contains(reason, "installer") ||
-			strings.Contains(reason, "launchctl"))
+			strings.Contains(reason, "launchctl") ||
+			strings.Contains(reason, "delete"))
 }
 
 // Legitimate package names and option values never begin with "-".

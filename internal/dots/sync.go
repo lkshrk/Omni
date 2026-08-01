@@ -121,7 +121,9 @@ func (f dotSyncFailures) Error() string {
 func syncResolvedDotEntry(ctx context.Context, exec executor.Executor, repoPath, stowPath string, entry ResolvedEntry, opts SyncOptions, failUnsyncable bool) ([]Op, error) {
 	// Drop ignored repo sources first so stow never links legacy files committed before their pattern existed.
 	if !opts.DryRun {
-		purgeIgnoredRepoSources(ctx, exec, repoPath, entry)
+		if _, err := purgeIgnoredRepoSources(ctx, exec, repoPath, entry); err != nil {
+			return nil, err
+		}
 		if err := SelfHealDotEntryLinkShape(entry); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: omni: self-heal symlink shape for %s: %v\n", entry.Name, err)
 		}
@@ -269,8 +271,8 @@ func syncModifiedDotEntry(ctx context.Context, exec executor.Executor, repoPath,
 	if PathExists(entry.SourcePath) {
 		gt := NewGit(repoPath, exec)
 		if gt.IsRepo() {
-			if err := gt.SnapshotAll(ctx, "dots: pre-sync "+entry.Name); err != nil {
-				return nil, fmt.Errorf("pre-commit repo state: %w", err)
+			if err := gt.BackupAll(ctx, "dots: pre-sync "+entry.Name); err != nil {
+				return nil, fmt.Errorf("backup repo state: %w", err)
 			}
 		}
 	}
@@ -560,13 +562,13 @@ func restorePreparedDirectoryTargetAfterFailedRestow(ctx context.Context, exec e
 	})
 }
 
-func purgeIgnoredRepoSources(ctx context.Context, exec executor.Executor, repoPath string, entry ResolvedEntry) int {
+func purgeIgnoredRepoSources(ctx context.Context, exec executor.Executor, repoPath string, entry ResolvedEntry) (int, error) {
 	if len(entry.Ignore) == 0 {
-		return 0
+		return 0, nil
 	}
 	srcInfo, err := os.Lstat(entry.SourcePath)
 	if err != nil || !srcInfo.IsDir() {
-		return 0
+		return 0, nil
 	}
 	var candidates []string
 	if walkErr := filepath.WalkDir(entry.SourcePath, func(path string, d os.DirEntry, walkErr error) error {
@@ -595,13 +597,13 @@ func purgeIgnoredRepoSources(ctx context.Context, exec executor.Executor, repoPa
 		fmt.Fprintf(os.Stderr, "warning: omni: purging dot files in %s: %v\n", entry.SourcePath, walkErr)
 	}
 	if len(candidates) == 0 {
-		return 0
+		return 0, nil
 	}
-	// Snapshot first so purged files stay recoverable from git history; the trash move is the second layer.
+	// Back up first so purged files stay recoverable from git history; the trash move is the second layer.
 	gt := NewGit(repoPath, exec)
 	if gt.IsRepo() {
-		if err := gt.SnapshotAll(ctx, "dots: pre-purge "+entry.Name); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: omni: pre-purge snapshot for %s: %v\n", entry.Name, err)
+		if err := gt.BackupAll(ctx, "dots: pre-purge "+entry.Name); err != nil {
+			return 0, fmt.Errorf("back up %s before purging ignored repo sources: %w", entry.Name, err)
 		}
 	}
 	var purged int
@@ -612,7 +614,7 @@ func purgeIgnoredRepoSources(ctx context.Context, exec executor.Executor, repoPa
 		}
 		purged++
 	}
-	return purged
+	return purged, nil
 }
 
 // ResolveUseRepo — Discards diverged local content and relinks to the repo version, restoring the prior target on failure.
@@ -657,8 +659,8 @@ func ResolveUseLocalWith(ctx context.Context, exec executor.Executor, repoPath, 
 	if PathExists(entry.SourcePath) {
 		gt := NewGit(repoPath, exec)
 		if gt.IsRepo() {
-			if err := gt.SnapshotAll(ctx, "dots: pre-resolve "+entry.Name); err != nil {
-				return nil, fmt.Errorf("dots resolve %q: pre-commit repo state: %w", entry.Name, err)
+			if err := gt.BackupAll(ctx, "dots: pre-resolve "+entry.Name); err != nil {
+				return nil, fmt.Errorf("dots resolve %q: backup repo state: %w", entry.Name, err)
 			}
 		}
 	}

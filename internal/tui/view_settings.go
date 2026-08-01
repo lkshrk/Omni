@@ -124,7 +124,7 @@ var settingsRows = []settingsRowMeta{
 			return settingsServiceVal(m.palette, m.dotsWatchService != nil && m.dotsWatchService.Installed, m.dotsWatchServiceErr)
 		},
 		helpFn: func(m Model) string {
-			return settingsServiceHelp(m.palette, "watch", m.dotsWatchService != nil && m.dotsWatchService.Installed, m.dotsWatchServiceErr, "Install a native watcher that syncs links after changes; it does not commit or push.", dotsViewUnconfigured(m))
+			return settingsServiceHelp(m.palette, "watch", m.dotsWatchService != nil && m.dotsWatchService.Installed, m.dotsWatchServiceErr, "Install a native watcher that syncs links after changes; it never commits the current branch or pushes.", dotsViewUnconfigured(m))
 		},
 	},
 	settingsRowDotsWatchDebounce: {

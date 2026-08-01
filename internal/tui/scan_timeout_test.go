@@ -102,11 +102,19 @@ func TestProviderScan_WedgedProviderClearsLoadingState(t *testing.T) {
 		}
 	}
 
-	if m.statusMsg == "" || !m.statusIsErr {
-		t.Fatalf("timed-out provider not surfaced: statusMsg=%q isErr=%v", m.statusMsg, m.statusIsErr)
+	if m.statusMsg != "" {
+		t.Fatalf("timed-out provider surfaced before refresh settled: statusMsg=%q", m.statusMsg)
 	}
-	m = drive(m, allProvidersDoneMsg{gen: m.scanGen})
+	m = drive(m,
+		allProvidersDoneMsg{gen: m.scanGen},
+		discoveredRefreshedMsg{gen: m.discoveryGen},
+		providerOutdatedCheckedMsg{gen: m.scanGen, provider: "brew"},
+		outdatedProvidersDoneMsg{gen: m.scanGen},
+	)
 	if m.providerSnapshotRefreshing {
 		t.Fatal("provider snapshot still marked refreshing after allProvidersDoneMsg")
+	}
+	if m.statusMsg == "" || !m.statusIsErr {
+		t.Fatalf("settled provider timeout not surfaced: statusMsg=%q isErr=%v", m.statusMsg, m.statusIsErr)
 	}
 }

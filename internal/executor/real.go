@@ -25,7 +25,15 @@ func New() *RealExecutor {
 }
 
 func (r *RealExecutor) Run(ctx context.Context, name string, args ...string) (string, string, error) {
-	resolved, env := ResolveCommand(name)
+	return r.run(ctx, nil, name, args...)
+}
+
+func (r *RealExecutor) RunEnv(ctx context.Context, overlay []string, name string, args ...string) (string, string, error) {
+	return r.run(ctx, overlay, name, args...)
+}
+
+func (r *RealExecutor) run(ctx context.Context, overlay []string, name string, args ...string) (string, string, error) {
+	resolved, env := resolveCommandWithEnv(name, overlay)
 
 	cmd := exec.CommandContext(ctx, resolved, args...)
 	cmd.Env = env
@@ -91,11 +99,53 @@ func (w *outputWriter) flush() {
 
 // ResolveCommand — exec.CommandContext resolves against the process PATH, not cmd.Env — pre-resolve here.
 func ResolveCommand(name string) (string, []string) {
-	env := augmentedEnv()
+	return resolveCommandWithEnv(name, nil)
+}
+
+func resolveCommandWithEnv(name string, overlay []string) (string, []string) {
+	env := mergeEnv(augmentedEnv(), overlay)
 	if resolved, ok := lookupInEnv(name, env); ok {
 		return resolved, env
 	}
 	return name, env
+}
+
+func mergeEnv(base, overlay []string) []string {
+	merged := append([]string(nil), base...)
+	positions := make(map[string]int, len(merged))
+	for i, entry := range merged {
+		positions[envKey(entry)] = i
+	}
+	for _, entry := range overlay {
+		key := envKey(entry)
+		i, exists := positions[key]
+		if !strings.Contains(entry, "=") {
+			if !exists {
+				continue
+			}
+			merged = append(merged[:i], merged[i+1:]...)
+			positions = make(map[string]int, len(merged))
+			for j, current := range merged {
+				positions[envKey(current)] = j
+			}
+			continue
+		}
+		if exists {
+			merged[i] = entry
+			continue
+		}
+		positions[key] = len(merged)
+		merged = append(merged, entry)
+	}
+	return merged
+}
+
+func envKey(entry string) string {
+	key, _, _ := strings.Cut(entry, "=")
+	if runtime.GOOS == "windows" {
+		return strings.ToUpper(key)
+	}
+	return key
 }
 
 func CommandAvailable(name string) bool {

@@ -1147,8 +1147,8 @@ func rowOperationStatusLine(m Model, t *app.ToolView, prefix string) string {
 		return ""
 	}
 	status := m.palette.styleStatus.Render(m.rowOpStatus)
-	cancel := renderActionHintText(m.palette, []hintItem{rawHint("ctrl+c", "cancel")})
-	return prefix + hintJoin(m.palette, status, cancel)
+	quit := renderActionHintText(m.palette, []hintItem{rawHint("ctrl+c", "quit")})
+	return prefix + hintJoin(m.palette, status, quit)
 }
 
 func listConfirmationHintsLine(m Model, t *app.ToolView, prefix string) string {

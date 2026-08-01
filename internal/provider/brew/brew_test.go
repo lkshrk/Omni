@@ -478,6 +478,24 @@ func TestPrivilegePlan_CaskInstallerRequiresPrivilegeOnInstall(t *testing.T) {
 	}
 }
 
+func TestPrivilegePlan_OBSUpgradeRequiresPrivilege(t *testing.T) {
+	output := `{"formulae":[],"casks":[` +
+		`{"token":"obs","installed":"32.2.1","artifacts":[{"preflight":null},{"uninstall":[{"delete":"/Library/CoreMediaIO/Plug-Ins/DAL/obs-mac-virtualcam.plugin"}]},{"app":["OBS.app"],"target":"/Applications/OBS.app"},{"binary":["/opt/homebrew/Caskroom/obs/32.2.1/obs.wrapper.sh",{"target":"obs"}],"target":"/opt/homebrew/bin/obs"}]}` +
+		`]}`
+	p, _ := newBrew(executor.MockCall{Stdout: output})
+
+	plan, err := p.PrivilegePlan(context.Background(), provider.PrivilegeActionUpgrade, tool("obs"))
+	if err != nil {
+		t.Fatalf("PrivilegePlan: %v", err)
+	}
+	if plan.Requirement != provider.PrivilegeMaybe {
+		t.Fatalf("PrivilegePlan = %+v, want maybe for OBS system file cleanup", plan)
+	}
+	if !strings.Contains(plan.Reason, "delete") {
+		t.Fatalf("reason = %q, want delete mention", plan.Reason)
+	}
+}
+
 func TestPrivilegePlan_CaskLaunchctlRequiresPrivilegeOnUninstall(t *testing.T) {
 	output := `{"formulae":[],"casks":[` +
 		`{"token":"stats","installed":"2.0","artifacts":[{"app":["Stats.app"]},{"uninstall":[{"launchctl":"eu.exelban.Stats.SMC.Helper","quit":"eu.exelban.Stats"}]}]}` +

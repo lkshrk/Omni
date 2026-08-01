@@ -44,6 +44,7 @@ GEMINI.md
 .leankg/
 .wolf/
 .agent-progress.md
+.worktrees/
 docs/superpowers
 docs/research
 vendor/

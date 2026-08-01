@@ -796,8 +796,7 @@ func runTUI(t *testing.T, bin, dir string, env []string, args []string, interact
 	waitDone = startTUIWait(func() error { return term.Wait(cmd) })
 
 	screen := interact(term)
-	// One ctrl+c may cancel the single active operation; the next two quit.
-	writeTUIKeys(t, term, "\x03", "\x03", "\x03")
+	writeTUIKeys(t, term, "\x03", "\x03")
 
 	if err, ok := awaitTUIWait(waitDone, tuiQuitTimeout); ok {
 		waited = true
@@ -810,7 +809,7 @@ func runTUI(t *testing.T, bin, dir string, env []string, args []string, interact
 	failureScreen := currentScreenText(term)
 	_ = cmd.Process.Kill()
 	_, waited = awaitTUIWait(waitDone, tuiQuitTimeout)
-	t.Fatalf("TUI did not quit after confirmation keys; screen:\n%s", failureScreen)
+	t.Fatalf("TUI did not quit after Ctrl+C; screen:\n%s", failureScreen)
 	return ""
 }
 

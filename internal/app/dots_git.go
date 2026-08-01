@@ -63,3 +63,14 @@ func (a *App) DotsCommit(ctx context.Context, message string) (err error) {
 	}
 	return g.CommitAll(ctx, message)
 }
+
+func (a *App) DotsBackup(ctx context.Context, message string) (err error) {
+	pf, err := a.dotService().preflight()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		a.recordDotsHistoryResult(ctx, "backup", "", pf.repoPath, nil, err, false)
+	}()
+	return newGitForRepo(pf.repoPath, a.newExecutor()).BackupAll(ctx, message)
+}

@@ -62,8 +62,8 @@ func TestReconcileSummaryCountsToolsDotsAndIssues(t *testing.T) {
 			Upgraded: []string{"git", "go"},
 			Failures: []app.BulkToolError{{Name: "node", Provider: "node"}},
 		},
-		DotsOps:       []dots.Op{{Kind: dots.OpLink}, {Kind: dots.OpSkip}},
-		DotsCommitted: true,
+		DotsOps:      []dots.Op{{Kind: dots.OpLink}, {Kind: dots.OpSkip}},
+		DotsBackedUp: true,
 		DotsEntries: []app.DotStatus{
 			{Health: app.HealthConflict},
 			{Health: app.HealthMissing},
@@ -73,8 +73,8 @@ func TestReconcileSummaryCountsToolsDotsAndIssues(t *testing.T) {
 	}
 
 	summary := app.SummarizeReconcile(result)
-	if summary.Installed != 1 || summary.Claimed != 1 || summary.Upgraded != 2 || summary.DotOps != 2 || !summary.DotsCommitted {
-		t.Fatalf("SummarizeReconcile = %+v, want installed=1 claimed=1 upgraded=2 dotOps=2 committed", summary)
+	if summary.Installed != 1 || summary.Claimed != 1 || summary.Upgraded != 2 || summary.DotOps != 2 || !summary.DotsBackedUp {
+		t.Fatalf("SummarizeReconcile = %+v, want installed=1 claimed=1 upgraded=2 dotOps=2 backed up", summary)
 	}
 
 	issues := app.SummarizeReconcileIssues(result)

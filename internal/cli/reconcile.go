@@ -19,7 +19,7 @@ func newReconcileCmd(state *rootState) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "reconcile",
-		Short: "Sync, upgrade, sync agent resources, repair dotfiles, and commit dotfile changes",
+		Short: "Sync, upgrade, sync agent resources, repair dotfiles, and back up dotfile changes",
 		Long:  actions.MustLongDescription(actions.Reconcile),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -29,7 +29,7 @@ func newReconcileCmd(state *rootState) *cobra.Command {
 			}
 			out := cmdOut(cmd)
 			result, err := state.app.Reconcile(cmd.Context(), app.ReconcileOptions{
-				CommitMessage:  message,
+				BackupMessage:  message,
 				SkipPrivileged: skipPrivileged,
 				Force:          force,
 				Progress: func(msg string) {
@@ -55,7 +55,7 @@ func newReconcileCmd(state *rootState) *cobra.Command {
 			return err
 		},
 	}
-	cmd.Flags().StringVarP(&message, "message", "m", "", "Dotfile commit message (default: auto-generated)")
+	cmd.Flags().StringVarP(&message, "message", "m", "", "Dotfile backup message")
 	cmd.Flags().BoolVar(&skipPrivileged, "skip-privileged", false, "skip package actions that need sudo/root access")
 	cmd.Flags().BoolVar(&force, "force", false, "bypass update quarantine for tool upgrades")
 	return cmd

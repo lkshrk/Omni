@@ -578,13 +578,13 @@ func TestReconcileSummaryText(t *testing.T) {
 			SyncResult:   &isync.SyncResult{Ops: []isync.SyncOp{{Kind: isync.OpInstall}}},
 			ClaimedNames: []string{"fd", "fzf"},
 		},
-		UpgradeAll:    &UpgradeAllResult{Upgraded: []string{"git"}},
-		DotsOps:       []dots.Op{{Kind: dots.OpLink}},
-		DotsCommitted: true,
+		UpgradeAll:   &UpgradeAllResult{Upgraded: []string{"git"}},
+		DotsOps:      []dots.Op{{Kind: dots.OpLink}},
+		DotsBackedUp: true,
 	}
 
 	got := ReconcileSummaryText(result, "Reconcile complete")
-	want := "Reconcile complete — 1 installed, 2 added to config, 1 upgraded, 1 dotfile op, dotfiles committed"
+	want := "Reconcile complete — 1 installed, 2 added to config, 1 upgraded, 1 dotfile op, dotfile changes backed up"
 	if got != want {
 		t.Fatalf("ReconcileSummaryText = %q, want %q", got, want)
 	}

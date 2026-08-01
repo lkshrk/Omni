@@ -1066,39 +1066,6 @@ func TestModel_ConfirmQuit(t *testing.T) {
 		}
 	})
 
-	t.Run("first ctrl+c sets confirmQuit", func(t *testing.T) {
-		m := drive(baseModel(nil), pressCtrlC())
-		if !m.confirmQuit {
-			t.Error("confirmQuit should be true after first ctrl+c")
-		}
-		if m.quitConfirmKey != "ctrl+c" {
-			t.Errorf("quitConfirmKey = %q, want ctrl+c", m.quitConfirmKey)
-		}
-	})
-
-	t.Run("ctrl+c cancels active package action instead of quitting", func(t *testing.T) {
-		m := baseModel(threeTools())
-		m.loading = true
-		cancelled := false
-		m.activeActionCancel = func() { cancelled = true }
-		m.startRowOperation("git", "brew", "Deleting git…")
-		m.upgradingKeys = map[string]bool{"git\x00brew": true}
-
-		got := drive(m, pressCtrlC())
-		if !cancelled {
-			t.Fatal("active action cancel func was not called")
-		}
-		if got.confirmQuit {
-			t.Fatal("ctrl+c should not arm quit confirmation while an action is cancellable")
-		}
-		if got.loading || got.rowOpKey != "" || len(got.upgradingKeys) != 0 {
-			t.Fatalf("active action state not cleared: loading=%v row=%q upgrades=%v", got.loading, got.rowOpKey, got.upgradingKeys)
-		}
-		if got.statusMsg != "cancelled" || got.statusIsErr {
-			t.Fatalf("status = %q err=%v, want cancelled non-error", got.statusMsg, got.statusIsErr)
-		}
-	})
-
 	t.Run("any other key resets confirmQuit and clears prompt", func(t *testing.T) {
 		m := drive(baseModel(nil), pressRune('q'), pressRune('j'))
 		if m.confirmQuit {

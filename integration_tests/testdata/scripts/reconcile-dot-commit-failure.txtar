@@ -1,4 +1,4 @@
-# omni reconcile surfaces dotfile commit failures after syncing dotfiles
+# omni reconcile backs up dirty dotfiles without using the user's signing config
 # @requires: stow
 env HOME=$WORK/home
 mkdir $WORK/home
@@ -18,13 +18,17 @@ exec git -C $WORK/home/dotfiles config gpg.format ssh
 exec git -C $WORK/home/dotfiles config user.signingkey $WORK/missing-signing-key.pub
 exec git -C $WORK/home/dotfiles config commit.gpgsign true
 
-! exec omni --yes --config settings.json reconcile --skip-privileged -m 'dots: reconcile commit'
+exec omni --yes --config settings.json reconcile --skip-privileged -m 'dots: reconcile backup'
 stdout 'syncing tools'
 stdout 'syncing dotfiles'
-stdout 'committing dotfiles'
-stdout 'Reconcile complete .* 0 installed, 0 added to config, 0 upgraded, .* dotfile op\.'
-stderr 'commit dotfiles:'
-! stdout 'dotfiles committed'
+stdout 'backing up dotfile changes'
+stdout 'Reconcile complete .* 0 installed, 0 added to config, 0 upgraded, .* dotfile op, dotfile changes backed up\.'
+exec git -C $WORK/home/dotfiles log -1 --pretty=%s omni/backup
+stdout 'dots: reconcile backup'
+exec git -C $WORK/home/dotfiles log -1 --pretty=%s HEAD
+stdout 'seed'
+exec git -C $WORK/home/dotfiles status --short
+stdout 'dotfiles/nvim/.config/nvim/init.lua'
 
 -- bin/brew --
 #!/bin/sh

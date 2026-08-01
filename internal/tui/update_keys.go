@@ -22,13 +22,12 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		return *m, tea.Batch(cmds...)
 	}
 
-	if m.dashboardReconcilePlanOpen && !isCtrlC(msg) {
+	if m.dashboardReconcilePlanOpen {
 		cmds = append(cmds, m.handleDashboardReconcilePlanKeyMsg(msg)...)
 		return *m, tea.Batch(cmds...)
 	}
 
-	// ctrl+c stays reachable: the modal opens on its own, so it must not be able to trap the interrupt key.
-	if m.agentsDriftPromptOpen && !isCtrlC(msg) {
+	if m.agentsDriftPromptOpen {
 		cmds = append(cmds, m.handleAgentsDriftPromptKeyMsg(msg)...)
 		return *m, tea.Batch(cmds...)
 	}
@@ -45,20 +44,13 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		return *m, nil
 	}
 
-	if isCtrlC(msg) {
-		if cmd := m.cancelActiveAction(); cmd != nil {
-			cmds = append(cmds, cmd)
-			return *m, tea.Batch(cmds...)
-		}
-	}
-
-	if key.Matches(msg, m.keys.Quit) && (!m.focusedTextInputActive() || isCtrlC(msg)) {
-		if m.confirmQuit {
+	if key.Matches(msg, m.keys.Quit) && !m.focusedTextInputActive() {
+		if m.confirmQuit && (m.quitConfirmKey == "" || m.quitConfirmKey == "q") {
 			m.shutdown()
 			return *m, tea.Quit
 		}
 		m.confirmQuit = true
-		m.quitConfirmKey = quitKeyLabel(msg)
+		m.quitConfirmKey = "q"
 		clearStatus(m)
 		cmds = append(cmds, m.armConfirmationTimeout())
 		return *m, tea.Batch(cmds...)
@@ -216,15 +208,8 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 	return *m, tea.Batch(cmds...)
 }
 
-func quitKeyLabel(msg tea.KeyPressMsg) string {
-	if isCtrlC(msg) {
-		return "ctrl+c"
-	}
-	return "q"
-}
-
 func isCtrlC(msg tea.KeyPressMsg) bool {
-	return msg.Mod == tea.ModCtrl && msg.Code == 'c'
+	return msg.Mod&^lockMods == tea.ModCtrl && msg.Code == 'c'
 }
 
 func (m *Model) focusedTextInputActive() bool {

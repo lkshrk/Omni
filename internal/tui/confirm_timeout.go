@@ -15,6 +15,10 @@ type confirmTimeoutMsg struct {
 	gen int
 }
 
+type ctrlCConfirmTimeoutMsg struct {
+	gen int
+}
+
 func (m *Model) armConfirmationTimeout() tea.Cmd {
 	m.confirmGen++
 	gen := m.confirmGen
@@ -26,6 +30,28 @@ func (m *Model) armConfirmationTimeout() tea.Cmd {
 
 func (m *Model) cancelConfirmationTimeout() {
 	m.confirmGen++
+}
+
+func (m *Model) armCtrlCConfirmationTimeout() tea.Cmd {
+	m.ctrlCConfirmGen++
+	gen := m.ctrlCConfirmGen
+	return func() tea.Msg {
+		time.Sleep(confirmTimeout)
+		return ctrlCConfirmTimeoutMsg{gen: gen}
+	}
+}
+
+func (m *Model) clearCtrlCConfirmation() {
+	m.ctrlCConfirm = false
+	m.ctrlCConfirmGen++
+}
+
+func (m *Model) handleCtrlCConfirmTimeoutMsg(msg ctrlCConfirmTimeoutMsg) []tea.Cmd {
+	if msg.gen != m.ctrlCConfirmGen || !m.ctrlCConfirm {
+		return nil
+	}
+	m.clearCtrlCConfirmation()
+	return []tea.Cmd{setStatus(m, "quit confirmation expired — press ctrl+c again", false)}
 }
 
 func (m *Model) hasActiveConfirmation() bool {

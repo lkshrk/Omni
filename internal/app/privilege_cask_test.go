@@ -16,6 +16,7 @@ func TestBrewCaskMayPromptForPassword(t *testing.T) {
 		{"brew cask parsec uses pkgutil uninstall", true},
 		{"brew cask battle-net runs an installer that may need sudo", true},
 		{"brew cask stats unloads a launchctl service", true},
+		{"brew cask obs deletes system files during uninstall", true},
 		{"brew formula ripgrep needs sudo", false},
 		{"", false},
 	}

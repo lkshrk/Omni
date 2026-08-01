@@ -498,8 +498,8 @@ func ReconcileSummaryText(result *ReconcileResult, prefix string) string {
 	if summary.NvmRemoved > 0 {
 		status += ", " + textutil.PluralCount(summary.NvmRemoved, "runtime removed from config", "runtimes removed from config")
 	}
-	if summary.DotsCommitted {
-		status += ", dotfiles committed"
+	if summary.DotsBackedUp {
+		status += ", dotfile changes backed up"
 	} else if summary.DotsSkipped != "" {
 		status += ", " + summary.DotsSkipped
 	}

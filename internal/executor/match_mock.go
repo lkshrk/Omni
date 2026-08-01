@@ -36,6 +36,14 @@ func (m *MatchMockExecutor) AddRule(rule MatchRule) {
 }
 
 func (m *MatchMockExecutor) Run(_ context.Context, name string, args ...string) (string, string, error) {
+	return m.run(name, args, nil)
+}
+
+func (m *MatchMockExecutor) RunEnv(_ context.Context, env []string, name string, args ...string) (string, string, error) {
+	return m.run(name, args, env)
+}
+
+func (m *MatchMockExecutor) run(name string, args, env []string) (string, string, error) {
 	key := name
 	if len(args) > 0 {
 		key = name + " " + strings.Join(args, " ")
@@ -43,7 +51,7 @@ func (m *MatchMockExecutor) Run(_ context.Context, name string, args ...string) 
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.Calls = append(m.Calls, MockCall{Name: name, Args: args})
+	m.Calls = append(m.Calls, MockCall{Name: name, Args: args, Env: env})
 
 	for _, rule := range m.rules {
 		if strings.HasPrefix(key, rule.Pattern) {

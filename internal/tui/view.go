@@ -81,7 +81,15 @@ func (m Model) viewString() string {
 	}
 
 	if m.err != nil && (!m.startupLoadErr || m.mode == viewStatus) {
-		return p.styleErr.Render("Error: "+m.err.Error()) + "\n" + p.styleHelp.Render("Press q to quit.")
+		quit := "Press q to quit."
+		if m.ctrlCConfirm {
+			quit = "Press ctrl+c again to quit."
+		} else if m.confirmQuit {
+			quit = "Press " + quitConfirmKeyLabel(m.quitConfirmKey) + " again to quit."
+		} else if strings.HasPrefix(m.statusMsg, "quit confirmation expired — ") {
+			quit = m.statusMsg
+		}
+		return p.styleErr.Render("Error: "+m.err.Error()) + "\n" + p.styleHelp.Render(quit)
 	}
 
 	if m.editingPriority {

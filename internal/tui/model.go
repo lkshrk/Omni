@@ -205,9 +205,11 @@ type Model struct {
 	loading             bool
 	loadingOwner        loadingOwner    // who raised m.loading; see loading_gate.go
 	loadingGen          int             // bumped on every raise; stamped onto opCompleteMsg
-	confirmQuit         bool            // true after first quit key; second press exits
-	quitConfirmKey      string          // key used to arm confirmQuit ("q" or "ctrl+c")
+	confirmQuit         bool            // true after the first q; a matching second press exits
+	quitConfirmKey      string          // key used to arm confirmQuit ("q")
 	confirmGen          int             // increments whenever a timed confirmation is armed
+	ctrlCConfirm        bool            // independent quit overlay; must not disturb action confirmations
+	ctrlCConfirmGen     int             // invalidates only the ctrl+c confirmation timer
 	upgradingKeys       map[string]bool // set of in-flight upgrade keys ("name\x00provider" or "*")
 	bulkPendingKeys     map[string]bool // tool keys waiting for their turn in a bulk operation
 	rowOpKey            string          // selected row operation key ("name\x00provider") for install/delete/reinstall work
@@ -239,6 +241,8 @@ type Model struct {
 	scanningProviders      map[string]bool
 	outdatedProviders      map[string]bool
 	outdatedTotal          int
+	refreshIssue           string
+	refreshIssuePriority   int
 	providerScanToolCounts map[string]int
 	providerScanToolDone   map[string]int
 	providerScanLabels     map[string]string
@@ -248,7 +252,9 @@ type Model struct {
 	// Owned by the scan fan-out, so no producer may close it; handleProviderScannedMsg closes this rather than m.progressCh, which may belong to a newer stream.
 	scanProgressCh chan progressUpdate
 	// The orphan scan closes its own channel before its result message lands, so the model must release m.progressCh on that message; waiting for progressStreamClosedMsg would leave the description phase without a stream.
-	discoveryProgressCh        chan progressUpdate
+	discoveryProgressCh chan progressUpdate
+	// Description results can race their buffered progress messages too; keep ownership explicit so the result invalidates only its own stream.
+	descriptionProgressCh      chan progressUpdate
 	discoveryGen               int
 	providerSnapshotRefreshing bool
 	outdatedSnapshotRefreshing bool
@@ -740,6 +746,8 @@ func New(ctx context.Context, a *app.App) Model {
 }
 
 func (m *Model) shutdown() {
+	m.closeAdminTerminalSession()
+	m.adminTerminalQueue = nil
 	m.cancelSearch()
 	m.cancelDotsOperation()
 	if m.activeActionCancel != nil {
@@ -757,9 +765,12 @@ func (m *Model) shutdown() {
 	m.scanningProviders = nil
 	m.outdatedProviders = nil
 	m.outdatedTotal = 0
+	m.refreshIssue = ""
+	m.refreshIssuePriority = 0
 	m.providerScanToolCounts = nil
 	m.providerScanToolDone = nil
 	m.providerScanLabels = nil
+	m.descriptionProgressCh = nil
 	m.refreshToolDone = 0
 	m.refreshToolTotal = 0
 	m.upgradingKeys = make(map[string]bool)

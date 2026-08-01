@@ -12,7 +12,7 @@ import (
 )
 
 type ReconcileOptions struct {
-	CommitMessage  string
+	BackupMessage  string
 	SkipPrivileged bool
 	Force          bool
 	Progress       func(string)
@@ -26,21 +26,21 @@ type ReconcileResult struct {
 	Agents             *AgentsSyncAllResult // nil when agent features are off for this host
 	FixedIgnoreEntries []string
 	DotsOps            []dots.Op
-	DotsCommitted      bool
+	DotsBackedUp       bool
 	DotsSkipped        string
 	DotsEntries        []DotStatus // post-reconcile dots health snapshot
 }
 
 type ReconcileSummary struct {
-	NvmManaged    int
-	NvmRemoved    int
-	Installed     int
-	Claimed       int
-	Upgraded      int
-	Quarantined   int
-	DotOps        int
-	DotsCommitted bool
-	DotsSkipped   string
+	NvmManaged   int
+	NvmRemoved   int
+	Installed    int
+	Claimed      int
+	Upgraded     int
+	Quarantined  int
+	DotOps       int
+	DotsBackedUp bool
+	DotsSkipped  string
 }
 
 type ReconcileIssueSummary struct {
@@ -58,11 +58,11 @@ func SummarizeReconcile(result *ReconcileResult) ReconcileSummary {
 	}
 	syncSummary := SummarizeSyncAll(result.SyncAll)
 	summary := ReconcileSummary{
-		Installed:     syncSummary.Installed,
-		Claimed:       syncSummary.Claimed,
-		DotOps:        len(result.DotsOps),
-		DotsCommitted: result.DotsCommitted,
-		DotsSkipped:   result.DotsSkipped,
+		Installed:    syncSummary.Installed,
+		Claimed:      syncSummary.Claimed,
+		DotOps:       len(result.DotsOps),
+		DotsBackedUp: result.DotsBackedUp,
+		DotsSkipped:  result.DotsSkipped,
 	}
 	if result.NvmManaged != nil {
 		for _, item := range result.NvmManaged.Items {
@@ -118,7 +118,7 @@ func (s ReconcileIssueSummary) HasIssues() bool {
 	return s.Total() > 0
 }
 
-// Reconcile — Sync tools, upgrade, sync agent resources, sync dotfiles, then commit the dots repo.
+// Reconcile — Sync tools, upgrade, sync agent resources, sync dotfiles, then back up dirty repo state.
 func (a *App) Reconcile(ctx context.Context, opts ReconcileOptions) (*ReconcileResult, error) {
 	result := &ReconcileResult{}
 	var errs []error
@@ -187,11 +187,15 @@ func (a *App) Reconcile(ctx context.Context, opts ReconcileOptions) (*ReconcileR
 	}
 	result.DotsEntries = status.Entries
 	if strings.TrimSpace(status.GitStatus) != "" {
-		a.reconcileProgress(opts, "committing dotfiles...")
-		if err := a.DotsCommit(ctx, opts.CommitMessage); err != nil {
-			errs = append(errs, fmt.Errorf("commit dotfiles: %w", err))
+		a.reconcileProgress(opts, "backing up dotfile changes...")
+		message := opts.BackupMessage
+		if strings.TrimSpace(message) == "" {
+			message = "dots: reconcile"
+		}
+		if err := a.DotsBackup(ctx, message); err != nil {
+			errs = append(errs, fmt.Errorf("backup dotfiles: %w", err))
 		} else {
-			result.DotsCommitted = true
+			result.DotsBackedUp = true
 		}
 	}
 
