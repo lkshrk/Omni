@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/charmbracelet/x/term v0.2.2
-	github.com/charmbracelet/x/vttest v0.0.0-20260719004043-bb9a97036f23
+	github.com/charmbracelet/x/vttest v0.0.0-20260730164118-7e2d3e6c5238
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/rogpeppe/go-internal v1.15.0
