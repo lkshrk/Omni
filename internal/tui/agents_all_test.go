@@ -17,6 +17,7 @@ func agentsAllModel(skills []app.SkillPackageRow, mcpRows []app.McpServerRow, pl
 	m := baseModel(nil)
 	m.pluginFormName = textinput.New()
 	m.pluginFormMarketplace = textinput.New()
+	m.pluginFormSource = textinput.New()
 	m.pluginFormAgents = textinput.New()
 	m.mode = viewSkills
 	m.agentsEnabled = true

@@ -937,7 +937,10 @@ func agentsRowDetailLines(m Model, e agentsAllRow) []string {
 	case agentsSectionPlugins:
 		if e.localIdx < len(m.pluginRows) {
 			r := m.pluginRows[e.localIdx]
-			summary := "marketplace: " + r.Marketplace
+			summary := "source: " + r.Source
+			if r.Marketplace != "" {
+				summary = "marketplace: " + r.Marketplace
+			}
 			if r.Version != "" {
 				summary += "  version: " + r.Version
 			} else if r.Sha != "" {

@@ -590,9 +590,10 @@ type Model struct {
 	pluginAgentsRow    app.PluginRow
 
 	pluginFormOpen        bool
-	pluginFormField       int // 0=name,1=marketplace,2=agents
+	pluginFormField       int // 0=name,1=marketplace,2=source,3=agents
 	pluginFormName        textinput.Model
 	pluginFormMarketplace textinput.Model
+	pluginFormSource      textinput.Model
 	pluginFormAgents      textinput.Model
 	pluginFormErr         error
 
@@ -696,6 +697,10 @@ func New(ctx context.Context, a *app.App) Model {
 	pfm.Placeholder = "caveman"
 	pfm.CharLimit = 256
 
+	pfs := textinput.New()
+	pfs.Placeholder = "owner/repo or Git URL"
+	pfs.CharLimit = 512
+
 	pfa := textinput.New()
 	pfa.Placeholder = "claude-code,codex"
 	pfa.CharLimit = 256
@@ -721,6 +726,7 @@ func New(ctx context.Context, a *app.App) Model {
 		mcpFormEnvLit:         mfl,
 		pluginFormName:        pfn,
 		pluginFormMarketplace: pfm,
+		pluginFormSource:      pfs,
 		pluginFormAgents:      pfa,
 		mode:                  viewStatus,
 		commandCursor:         -1,

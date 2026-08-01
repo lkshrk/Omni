@@ -23,7 +23,7 @@ cmp settings.json settings.json.orig
 # A command that actually writes migrates the file on its way out.
 exec omni --config settings.json -y agents skills remove ./source
 exec grep '"version"' settings.json
-stdout '"version": 20'
+stdout '"version": 21'
 ! exec grep '"skills"' settings.json
 
 -- settings.json --

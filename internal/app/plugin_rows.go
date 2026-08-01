@@ -52,6 +52,7 @@ func foreignPluginCopy(listed []InstalledPlugin, declared config.Plugin) (Instal
 type PluginRow struct {
 	Name           string
 	Marketplace    string
+	Source         string
 	Groups         []string
 	Agents         []string
 	PerAgentStatus map[string]PluginStatus
@@ -193,10 +194,14 @@ func (a *App) PluginRows(ctx context.Context) (managed []PluginRow, unmanaged ma
 	manifestNames := make(map[string]struct{}, len(cfg.Agents.Plugins))
 	for _, p := range cfg.Agents.Plugins {
 		manifestNames[p.Name] = struct{}{}
-		entry := pluginManifestEntry(pluginMarketplaceManifestPath(home, p.Marketplace), p.Name)
+		var entry marketplaceManifestEntry
+		if p.Marketplace != "" {
+			entry = pluginManifestEntry(pluginMarketplaceManifestPath(home, p.Marketplace), p.Name)
+		}
 		row := PluginRow{
 			Name:           p.Name,
 			Marketplace:    p.Marketplace,
+			Source:         p.Source,
 			Groups:         pluginGroupsForName(cfg, p.Name),
 			Agents:         append([]string(nil), p.Agents...),
 			PerAgentStatus: make(map[string]PluginStatus),
@@ -205,7 +210,7 @@ func (a *App) PluginRows(ctx context.Context) (managed []PluginRow, unmanaged ma
 		}
 		for _, adapter := range a.pluginAdapters() {
 			// Restore and "plugins resolve" both ignore untargeted adapters, so reporting drift there would be a finding no verb can clear.
-			if !pluginTargetsAdapter(p, adapter.ID()) {
+			if !pluginTargetsAdapter(p, adapter.ID()) || !adapterSupportsPlugin(adapter, p) {
 				continue
 			}
 			if !adapter.Available() {

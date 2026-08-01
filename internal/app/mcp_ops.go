@@ -164,6 +164,12 @@ func mcpIdentityDriftLine(agentID, name string, fields []string) string {
 }
 
 func updateMcpServer(ctx context.Context, adapter McpAdapter, desired config.McpServer, previous InstalledMcpServer) error {
+	if updater, ok := adapter.(agent.McpInPlaceUpdater); ok {
+		if err := updater.UpdateMcpServer(ctx, desired); err != nil {
+			return fmt.Errorf("update in place: %w", err)
+		}
+		return nil
+	}
 	if err := adapter.Remove(ctx, desired.Name); err != nil {
 		return fmt.Errorf("remove before header update: %w", err)
 	}

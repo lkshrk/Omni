@@ -761,6 +761,22 @@ func TestAgentsRowDetailLines_PluginRowShowsMarketplaceAndVersion(t *testing.T) 
 	}
 }
 
+func TestAgentsRowDetailLines_DirectPluginShowsSource(t *testing.T) {
+	t.Parallel()
+	m := agentsAllModel(nil, nil, []app.PluginRow{{
+		Name: "hermes-plugin", Source: "owner/repo", PerAgentStatus: map[string]app.PluginStatus{"hermes-agent": app.PluginStatusInstalled},
+	}})
+	m.enabledAgents = []string{"hermes-agent"}
+	rows := agentsAllRowsList(m)
+	if len(rows) != 1 {
+		t.Fatalf("rows=%d", len(rows))
+	}
+	got := stripANSIEscapeSequences(agentsRowDetailLines(m, rows[0])[0])
+	if !strings.Contains(got, "source: owner/repo") || strings.Contains(got, "marketplace:") {
+		t.Fatalf("detail=%q", got)
+	}
+}
+
 func TestAgentsRowDetailLines_UnmanagedRowShowsSummary(t *testing.T) {
 	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)

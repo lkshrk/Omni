@@ -36,6 +36,11 @@ type stubPluginAdapter struct {
 	updateMarketplacesCalls int
 }
 
+type directPluginStubAdapter struct{ *stubPluginAdapter }
+
+func (*directPluginStubAdapter) SupportsMarketplaces() bool  { return false }
+func (*directPluginStubAdapter) SupportsDirectSources() bool { return true }
+
 type recordingPluginExecutor struct {
 	names []string
 	args  [][]string
@@ -119,6 +124,97 @@ func loadPluginTestConfig(t *testing.T, a *app.App) *config.RootConfig {
 		t.Fatal(err)
 	}
 	return cfg
+}
+
+func TestRestorePlugins_DirectSourceTargetsOnlyCapableAdapter(t *testing.T) {
+	direct := &stubPluginAdapter{id: "hermes-agent", available: true}
+	marketplace := &stubPluginAdapter{id: "claude-code", available: true}
+	a := newPluginTestApp(t, config.AgentsConfig{Plugins: []config.Plugin{{
+		Name: "hermes-plugin", Source: "owner/repo",
+	}}}, app.WithPluginAdapters([]app.PluginAdapter{marketplace, &directPluginStubAdapter{direct}}))
+
+	res, err := a.RestorePlugins(context.Background(), app.RestorePluginOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 || len(direct.installedPlugin) != 1 || direct.installedPlugin[0].Source != "owner/repo" {
+		t.Fatalf("result=%+v direct installs=%+v", res, direct.installedPlugin)
+	}
+	if len(marketplace.installedPlugin) != 0 || direct.updateMarketplacesCalls != 0 {
+		t.Fatalf("marketplace installs=%+v direct refreshes=%d", marketplace.installedPlugin, direct.updateMarketplacesCalls)
+	}
+}
+
+func TestRestorePlugins_UnusedDirectAdapterDoesNotWarn(t *testing.T) {
+	direct := &stubPluginAdapter{id: "hermes-agent"}
+	marketplace := &stubPluginAdapter{id: "claude-code", available: true}
+	a := newPluginTestApp(t, config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "market", Source: "owner/market"}},
+		Plugins:      []config.Plugin{{Name: "plugin", Marketplace: "market", Agents: []string{"claude-code"}}},
+	}, app.WithPluginAdapters([]app.PluginAdapter{marketplace, &directPluginStubAdapter{direct}}))
+
+	res, err := a.RestorePlugins(context.Background(), app.RestorePluginOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Warnings) != 0 || direct.listCalls != 0 {
+		t.Fatalf("warnings=%v direct list calls=%d", res.Warnings, direct.listCalls)
+	}
+}
+
+func TestAddPlugin_DirectSourcePersistsWithoutMarketplace(t *testing.T) {
+	direct := &stubPluginAdapter{id: "hermes-agent", available: true}
+	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters([]app.PluginAdapter{
+		&directPluginStubAdapter{direct},
+	}))
+	p := config.Plugin{Name: "hermes-plugin", Source: "owner/repo", Agents: []string{"hermes-agent"}}
+
+	res, err := a.AddPlugin(context.Background(), p)
+	if err != nil || len(res.Errors) != 0 {
+		t.Fatalf("AddPlugin: res=%+v err=%v", res, err)
+	}
+	if len(direct.installedPlugin) != 1 || direct.installedPlugin[0].Name != p.Name || direct.installedPlugin[0].Source != p.Source || !slices.Equal(direct.installedPlugin[0].Agents, p.Agents) {
+		t.Fatalf("installed=%+v, want %+v", direct.installedPlugin, p)
+	}
+	got := loadPluginTestConfig(t, a).Agents.Plugins
+	if len(got) != 1 || got[0].Name != p.Name || got[0].Source != p.Source || !slices.Equal(got[0].Agents, p.Agents) {
+		t.Fatalf("manifest plugins=%+v, want %+v", got, p)
+	}
+}
+
+func TestUpdatePlugin_DirectSourceSkipsMarketplaceRefresh(t *testing.T) {
+	direct := &stubPluginAdapter{id: "hermes-agent", available: true}
+	a := newPluginTestApp(t, config.AgentsConfig{Plugins: []config.Plugin{{
+		Name: "hermes-plugin", Source: "owner/repo", Agents: []string{"hermes-agent"},
+	}}}, app.WithPluginAdapters([]app.PluginAdapter{&directPluginStubAdapter{direct}}))
+
+	res, err := a.UpdatePlugin(context.Background(), "hermes-plugin")
+	if err != nil || len(res.Errors) != 0 {
+		t.Fatalf("UpdatePlugin: res=%+v err=%v", res, err)
+	}
+	if !slices.Equal(direct.updatedNames, []string{"hermes-plugin"}) || direct.updateMarketplacesCalls != 0 {
+		t.Fatalf("updates=%v marketplace refreshes=%d", direct.updatedNames, direct.updateMarketplacesCalls)
+	}
+}
+
+func TestAddMarketplace_SkipsDirectSourceAdapters(t *testing.T) {
+	direct := &stubPluginAdapter{id: "hermes-agent", available: true}
+	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters([]app.PluginAdapter{
+		&directPluginStubAdapter{direct},
+	}))
+	m := config.Marketplace{Name: "market", Source: "owner/market"}
+
+	res, err := a.AddMarketplace(context.Background(), m)
+	if err != nil || len(res.Errors) != 0 {
+		t.Fatalf("AddMarketplace: res=%+v err=%v", res, err)
+	}
+	if len(direct.addedMarkets) != 0 {
+		t.Fatalf("direct adapter received marketplace add: %+v", direct.addedMarkets)
+	}
+	got := loadPluginTestConfig(t, a).Agents.Marketplaces
+	if len(got) != 1 || got[0].Name != m.Name || got[0].Source != m.Source {
+		t.Fatalf("marketplaces=%+v, want %+v", got, m)
+	}
 }
 
 func TestProductionPluginAdaptersUseFallbackExecutorSetAfterNew(t *testing.T) {

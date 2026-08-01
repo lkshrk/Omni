@@ -137,6 +137,9 @@ func (m *Model) doImportPluginWithGroup(agentID string, p app.InstalledPlugin, g
 			return pluginImportAdoptDoneMsg{pluginName: p.Name, err: fmt.Errorf("plugin %q is unmanaged under multiple agents with conflicting marketplaces; import each manually", p.Name)}
 		}
 		agentIDs := pluginUnmanagedAgentsFor(unmanaged, p.Name, agentID)
+		if p.Marketplace == "" {
+			return pluginImportAdoptDoneMsg{pluginName: p.Name, err: fmt.Errorf("plugin %q has no discoverable install source; add it with --source from the CLI", p.Name)}
+		}
 		marketplaces, err := a.Marketplaces()
 		if err != nil {
 			return pluginImportAdoptDoneMsg{pluginName: p.Name, err: err}
@@ -413,15 +416,18 @@ func (m *Model) resetPluginForm() {
 	m.pluginFormField = 0
 	m.pluginFormName.SetValue("")
 	m.pluginFormMarketplace.SetValue("")
+	m.pluginFormSource.SetValue("")
 	m.pluginFormAgents.SetValue("")
 	m.pluginFormName.Blur()
 	m.pluginFormMarketplace.Blur()
+	m.pluginFormSource.Blur()
 	m.pluginFormAgents.Blur()
 }
 
 func (m *Model) focusPluginFormField() {
 	m.pluginFormName.Blur()
 	m.pluginFormMarketplace.Blur()
+	m.pluginFormSource.Blur()
 	m.pluginFormAgents.Blur()
 	switch m.pluginFormField {
 	case 0:
@@ -429,19 +435,22 @@ func (m *Model) focusPluginFormField() {
 	case 1:
 		m.pluginFormMarketplace.Focus()
 	case 2:
+		m.pluginFormSource.Focus()
+	case 3:
 		m.pluginFormAgents.Focus()
 	}
 }
 
-// Name and marketplace are required; agents is an optional comma-separated list (empty means all MVP agents).
+// Name plus exactly one origin is required; agents is an optional comma-separated list.
 func (m *Model) buildPluginFromForm() (app.Plugin, error) {
 	name := strings.TrimSpace(m.pluginFormName.Value())
 	if name == "" {
 		return app.Plugin{}, errors.New("name is required")
 	}
 	marketplace := strings.TrimSpace(m.pluginFormMarketplace.Value())
-	if marketplace == "" {
-		return app.Plugin{}, errors.New("marketplace is required")
+	source := strings.TrimSpace(m.pluginFormSource.Value())
+	if (marketplace == "") == (source == "") {
+		return app.Plugin{}, errors.New("enter exactly one of marketplace or source")
 	}
 	var agents []string
 	raw := strings.TrimSpace(m.pluginFormAgents.Value())
@@ -453,5 +462,5 @@ func (m *Model) buildPluginFromForm() (app.Plugin, error) {
 			}
 		}
 	}
-	return app.Plugin{Name: name, Marketplace: marketplace, Agents: agents}, nil
+	return app.Plugin{Name: name, Marketplace: marketplace, Source: source, Agents: agents}, nil
 }

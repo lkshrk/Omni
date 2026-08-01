@@ -36,6 +36,7 @@ func agentsAllProgressModel(t *testing.T, cfg *config.RootConfig, skillsRows []a
 	m := modelForCmds(a)
 	m.pluginFormName = textinput.New()
 	m.pluginFormMarketplace = textinput.New()
+	m.pluginFormSource = textinput.New()
 	m.pluginFormAgents = textinput.New()
 	m.mode = viewSkills
 	m.agentsEnabled = true

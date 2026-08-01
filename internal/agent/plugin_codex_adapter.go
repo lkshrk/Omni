@@ -21,6 +21,9 @@ func NewCodexPluginAdapter(
 
 func (a *codexPluginAdapter) ID() string { return "codex" }
 
+func (a *codexPluginAdapter) SupportsMarketplaces() bool  { return true }
+func (a *codexPluginAdapter) SupportsDirectSources() bool { return false }
+
 func (a *codexPluginAdapter) Available() bool {
 	_, err := lookPath("codex")
 	return err == nil

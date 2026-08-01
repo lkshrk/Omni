@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkshrk/omni/internal/agent"
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 )
@@ -26,6 +27,21 @@ type stubMcpAdapter struct {
 	addedServers []config.McpServer
 	removedNames []string
 	listCalls    int
+}
+
+type trackingInPlaceMcpAdapter struct {
+	app.McpAdapter
+	updater agent.McpInPlaceUpdater
+	removes int
+}
+
+func (a *trackingInPlaceMcpAdapter) UpdateMcpServer(ctx context.Context, server config.McpServer) error {
+	return a.updater.UpdateMcpServer(ctx, server)
+}
+
+func (a *trackingInPlaceMcpAdapter) Remove(ctx context.Context, name string) error {
+	a.removes++
+	return a.McpAdapter.Remove(ctx, name)
 }
 
 type recordingMcpExecutor struct {
@@ -307,6 +323,60 @@ func TestRestoreMcpServers_UpdatesChangedHeaders(t *testing.T) {
 	}
 	if len(res.Updated) != 1 || res.Updated[0] != "codex/grafana" {
 		t.Fatalf("Updated = %v, want [codex/grafana]", res.Updated)
+	}
+}
+
+func TestRestoreMcpServers_HermesHeaderUpdatePreservesExtendedConfig(t *testing.T) {
+	hermesHome := t.TempDir()
+	t.Setenv("HERMES_HOME", hermesHome)
+	binDir := t.TempDir()
+	writeTestExecutable(t, binDir, "hermes")
+	t.Setenv("PATH", binDir)
+	path := filepath.Join(hermesHome, "config.yaml")
+	original := []byte(`# root comment
+mcp_servers:
+  grafana:
+    url: https://mcp.example.com
+    headers:
+      X-Key: old
+    enabled: false # enabled comment
+    timeout: 42
+    tools:
+      include: [query]
+    custom: keep
+`)
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	realAdapter := agent.NewHermesMcpAdapter(nil, os.LookupEnv)
+	tracked := &trackingInPlaceMcpAdapter{
+		McpAdapter: realAdapter,
+		updater:    realAdapter.(agent.McpInPlaceUpdater),
+	}
+	desired := config.McpServer{
+		Name: "grafana", Transport: "http", URL: "https://mcp.example.com",
+		Headers: map[string]string{"X-Key": "new"}, Agents: []string{"hermes-agent"},
+	}
+	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{desired}}, app.WithMcpAdapters([]app.McpAdapter{tracked}))
+	res, err := a.RestoreMcpServers(context.Background(), app.RestoreMcpOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tracked.removes != 0 {
+		t.Fatalf("Remove calls = %d, want 0", tracked.removes)
+	}
+	if len(res.Errors) != 0 || !slices.Equal(res.Updated, []string{"hermes-agent/grafana"}) {
+		t.Fatalf("Restore result = %+v", res)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{"# root comment", "# enabled comment", "X-Key: new", "enabled: false", "timeout: 42", "include: [query]", "custom: keep"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("config missing %q:\n%s", want, text)
+		}
 	}
 }
 

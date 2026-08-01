@@ -24,6 +24,9 @@ func NewGrokPluginAdapter(
 
 func (a *grokPluginAdapter) ID() string { return "grok" }
 
+func (a *grokPluginAdapter) SupportsMarketplaces() bool  { return true }
+func (a *grokPluginAdapter) SupportsDirectSources() bool { return false }
+
 func (a *grokPluginAdapter) Available() bool {
 	_, err := lookPath("grok")
 	return err == nil

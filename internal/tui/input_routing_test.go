@@ -181,7 +181,7 @@ func focusedInputCases() []focusedInputCase {
 		settingsInputCase("group tools search", viewGroupTools, func(m *Model) { m.groupToolsEditor.searchActive = true }),
 		settingsInputCase("group dots search", viewGroupDots, func(m *Model) { m.groupDotsEditor.searchActive = true }),
 	}
-	for field, name := range []string{"name", "marketplace", "agents"} {
+	for field, name := range []string{"name", "marketplace", "source", "agents"} {
 		field := field
 		cases = append(cases, focusedInputCase{
 			name: "plugin " + name,
@@ -191,6 +191,7 @@ func focusedInputCases() []focusedInputCase {
 				m.pluginFormOpen = true
 				m.pluginFormName = textinput.New()
 				m.pluginFormMarketplace = textinput.New()
+				m.pluginFormSource = textinput.New()
 				m.pluginFormAgents = textinput.New()
 				m.pluginFormField = field
 				m.focusPluginFormField()
@@ -202,6 +203,8 @@ func focusedInputCases() []focusedInputCase {
 					return m.pluginFormName.Value()
 				case 1:
 					return m.pluginFormMarketplace.Value()
+				case 2:
+					return m.pluginFormSource.Value()
 				default:
 					return m.pluginFormAgents.Value()
 				}

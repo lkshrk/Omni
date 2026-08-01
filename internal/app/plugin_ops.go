@@ -68,6 +68,19 @@ func pluginTargetsAdapter(p config.Plugin, adapterID string) bool {
 	return false
 }
 
+func adapterSupportsMarketplaces(adapter PluginAdapter) bool {
+	capabilities, ok := adapter.(agent.PluginAdapterCapabilities)
+	return !ok || capabilities.SupportsMarketplaces()
+}
+
+func adapterSupportsPlugin(adapter PluginAdapter, p config.Plugin) bool {
+	capabilities, ok := adapter.(agent.PluginAdapterCapabilities)
+	if p.Source != "" {
+		return ok && capabilities.SupportsDirectSources()
+	}
+	return !ok || capabilities.SupportsMarketplaces()
+}
+
 // Ungrouped plugins restore everywhere; grouped ones restore when the group is active on the host.
 func resolvePlugins(cfg *config.RootConfig, hostname string) []config.Plugin {
 	activeHostNames, _ := activeHostGroupNames(cfg, hostname)
@@ -172,11 +185,18 @@ func (a *App) restorePlugins(ctx context.Context, opts RestorePluginOptions, ref
 	plugins := resolvePlugins(cfg, currentMachineGroupName())
 	var res RestorePluginResult
 	for _, adapter := range a.pluginAdapters() {
+		if _, explicitCapabilities := adapter.(agent.PluginAdapterCapabilities); explicitCapabilities {
+			if !slices.ContainsFunc(plugins, func(p config.Plugin) bool {
+				return pluginTargetsAdapter(p, adapter.ID()) && adapterSupportsPlugin(adapter, p)
+			}) {
+				continue
+			}
+		}
 		if !adapter.Available() {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("agent %s not available, skipping", adapter.ID()))
 			continue
 		}
-		if !opts.DryRun && refreshMarketplaces {
+		if !opts.DryRun && refreshMarketplaces && adapterSupportsMarketplaces(adapter) {
 			if refreshErr := adapter.UpdateMarketplaces(ctx); refreshErr != nil {
 				res.Warnings = append(res.Warnings, fmt.Sprintf("agent %s: refresh marketplaces failed, continuing: %v", adapter.ID(), refreshErr))
 			}
@@ -196,6 +216,9 @@ func (a *App) restorePlugins(ctx context.Context, opts RestorePluginOptions, ref
 				res.Skipped = append(res.Skipped, adapter.ID()+"/"+p.Name)
 				continue
 			}
+			if !adapterSupportsPlugin(adapter, p) {
+				continue
+			}
 			_, present := alreadyInstalled[pluginIdentity(p.Name, p.Marketplace)]
 			// The identity match would otherwise read a foreign-marketplace copy as not installed.
 			if live, found := foreignPluginCopy(installed, p); !present && found {
@@ -212,14 +235,16 @@ func (a *App) restorePlugins(ctx context.Context, opts RestorePluginOptions, ref
 				}
 				continue
 			}
-			if _, done := addedMarketplace[p.Marketplace]; !done {
-				if m := findMarketplace(cfg.Agents.Marketplaces, p.Marketplace); m != nil {
-					if mErr := ensureMarketplace(ctx, adapter, *m); mErr != nil {
-						res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: p.Name, Err: fmt.Errorf("marketplace %s: %w", m.Name, mErr)})
-						continue
+			if p.Marketplace != "" {
+				if _, done := addedMarketplace[p.Marketplace]; !done {
+					if m := findMarketplace(cfg.Agents.Marketplaces, p.Marketplace); m != nil {
+						if mErr := ensureMarketplace(ctx, adapter, *m); mErr != nil {
+							res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: p.Name, Err: fmt.Errorf("marketplace %s: %w", m.Name, mErr)})
+							continue
+						}
 					}
+					addedMarketplace[p.Marketplace] = struct{}{}
 				}
-				addedMarketplace[p.Marketplace] = struct{}{}
 			}
 			if present {
 				res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
@@ -263,7 +288,7 @@ func (a *App) UpdateMarketplaces(ctx context.Context) (UpdateMarketplacesResult,
 	}
 	var res UpdateMarketplacesResult
 	for _, adapter := range a.pluginAdapters() {
-		if !adapter.Available() {
+		if !adapter.Available() || !adapterSupportsMarketplaces(adapter) {
 			continue
 		}
 		if refreshErr := adapter.UpdateMarketplaces(ctx); refreshErr != nil {
@@ -307,11 +332,11 @@ func (a *App) updatePlugins(ctx context.Context, names []string, progress func(n
 	adapters := a.pluginAdapters()
 	if refreshMarketplaces {
 		for _, adapter := range adapters {
-			if !adapter.Available() {
+			if !adapter.Available() || !adapterSupportsMarketplaces(adapter) {
 				continue
 			}
 			targeted := slices.ContainsFunc(targets, func(t *config.Plugin) bool {
-				return pluginTargetsAdapter(*t, adapter.ID())
+				return pluginTargetsAdapter(*t, adapter.ID()) && adapterSupportsPlugin(adapter, *t)
 			})
 			if !targeted {
 				continue
@@ -326,7 +351,7 @@ func (a *App) updatePlugins(ctx context.Context, names []string, progress func(n
 			progress(names[i])
 		}
 		for _, adapter := range adapters {
-			if !pluginTargetsAdapter(*target, adapter.ID()) {
+			if !pluginTargetsAdapter(*target, adapter.ID()) || !adapterSupportsPlugin(adapter, *target) {
 				continue
 			}
 			if !adapter.Available() {
@@ -358,12 +383,12 @@ func (a *App) AddPlugin(ctx context.Context, p config.Plugin) (AddPluginResult, 
 		return AddPluginResult{}, err
 	}
 	m := findMarketplace(cfg.Agents.Marketplaces, p.Marketplace)
-	if m == nil {
+	if p.Marketplace != "" && m == nil {
 		return AddPluginResult{}, fmt.Errorf("plugin %q references unknown marketplace %q; declare it first", p.Name, p.Marketplace)
 	}
 	var res AddPluginResult
 	for _, adapter := range a.pluginAdapters() {
-		if !pluginTargetsAdapter(p, adapter.ID()) {
+		if !pluginTargetsAdapter(p, adapter.ID()) || !adapterSupportsPlugin(adapter, p) {
 			continue
 		}
 		installed, listErr := adapter.ListPlugins(ctx)
@@ -376,9 +401,11 @@ func (a *App) AddPlugin(ctx context.Context, p config.Plugin) (AddPluginResult, 
 			}
 			continue
 		}
-		if mErr := ensureMarketplace(ctx, adapter, *m); mErr != nil {
-			res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: p.Name, Err: fmt.Errorf("marketplace %s: %w", m.Name, mErr)})
-			continue
+		if m != nil {
+			if mErr := ensureMarketplace(ctx, adapter, *m); mErr != nil {
+				res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: p.Name, Err: fmt.Errorf("marketplace %s: %w", m.Name, mErr)})
+				continue
+			}
 		}
 		if alreadyInstalled {
 			res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
@@ -408,6 +435,9 @@ func (a *App) AddMarketplace(ctx context.Context, m config.Marketplace) (AddPlug
 	}
 	var res AddPluginResult
 	for _, adapter := range a.pluginAdapters() {
+		if !adapterSupportsMarketplaces(adapter) {
+			continue
+		}
 		targeted := len(m.Agents) == 0
 		for _, id := range m.Agents {
 			if id == adapter.ID() {
@@ -452,7 +482,7 @@ func (a *App) RemovePlugin(ctx context.Context, name string) (RemovePluginResult
 	}
 	var res RemovePluginResult
 	for _, adapter := range a.pluginAdapters() {
-		if !pluginTargetsAdapter(*target, adapter.ID()) {
+		if !pluginTargetsAdapter(*target, adapter.ID()) || !adapterSupportsPlugin(adapter, *target) {
 			continue
 		}
 		installed, listErr := adapter.ListPlugins(ctx)
@@ -530,6 +560,9 @@ func (a *App) SetPluginAgents(ctx context.Context, name string, agents []string)
 	for _, adapter := range a.pluginAdapters() {
 		wasTargeted := pluginTargetsAdapter(*target, adapter.ID())
 		nowTargeted := pluginTargetsAdapter(updated, adapter.ID())
+		if !adapterSupportsPlugin(adapter, updated) {
+			continue
+		}
 		switch {
 		case nowTargeted:
 			if installed, listErr := adapter.ListPlugins(ctx); listErr == nil && pluginListed(installed, updated.Name, updated.Marketplace) {
@@ -717,6 +750,9 @@ type PluginAdoptResult struct {
 
 // Shared by adoption and use-local resolution so both name the same missing declaration.
 func undeclaredMarketplaceSkip(name, marketplace string) string {
+	if marketplace == "" {
+		return fmt.Sprintf("plugin %q has no discoverable install source; add it explicitly with \"omni agents plugins add --name %s --source <src>\"", name, name)
+	}
 	return fmt.Sprintf(
 		"plugin %q comes from marketplace %q, which is not declared; add it with \"omni agents plugins marketplace add\" first",
 		name, marketplace)

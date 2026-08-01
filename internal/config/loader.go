@@ -251,6 +251,7 @@ var configMigrations = []configMigration{
 	{from: 17, to: 18, apply: migrateConfigV17ToV18, applyRaw: migrateRawConfigV17ToV18},
 	{from: 18, to: 19, apply: migrateConfigV18ToV19, applyRaw: migrateRawConfigV18ToV19},
 	{from: 19, to: 20, apply: migrateConfigV19ToV20, applyRaw: migrateRawConfigV19ToV20},
+	{from: 20, to: 21, apply: migrateConfigV20ToV21, applyRaw: migrateRawConfigV20ToV21},
 }
 
 func configMigrationFrom(version int) (configMigration, bool) {
@@ -1043,6 +1044,17 @@ func migrateConfigV19ToV20(cfg *RootConfig) error {
 
 func migrateRawConfigV19ToV20(raw map[string]json.RawMessage) error {
 	raw["version"] = json.RawMessage(`20`)
+	return nil
+}
+
+// No-op: v21 lets plugins use a direct source instead of a marketplace.
+func migrateConfigV20ToV21(cfg *RootConfig) error {
+	cfg.Version = 21
+	return nil
+}
+
+func migrateRawConfigV20ToV21(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`21`)
 	return nil
 }
 

@@ -66,7 +66,7 @@ func (a *App) ResolvePluginDrift(ctx context.Context, opts ResolvePluginDriftOpt
 func (a *App) driftedPluginInstalls(ctx context.Context, target config.Plugin) (map[string]InstalledPlugin, error) {
 	out := make(map[string]InstalledPlugin)
 	for _, adapter := range a.pluginAdapters() {
-		if !pluginTargetsAdapter(target, adapter.ID()) || !adapter.Available() {
+		if !pluginTargetsAdapter(target, adapter.ID()) || !adapterSupportsPlugin(adapter, target) || !adapter.Available() {
 			continue
 		}
 		listed, listErr := adapter.ListPlugins(ctx)

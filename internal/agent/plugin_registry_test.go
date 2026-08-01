@@ -36,7 +36,7 @@ func TestNewRegistryRejectsUnknownPluginAdapterID(t *testing.T) {
 func TestWithDefaultPluginAdaptersUsesCanonicalProductionSet(t *testing.T) {
 	r := mustRegistry(t, WithDefaultPluginAdapters(nil, nil))
 	got := r.PluginAdapters()
-	want := []string{"claude-code", "codex", "grok"}
+	want := []string{"claude-code", "codex", "grok", "hermes-agent"}
 	if len(got) != len(want) {
 		t.Fatalf("Registry.PluginAdapters() count = %d, want %d", len(got), len(want))
 	}

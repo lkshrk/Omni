@@ -11,7 +11,7 @@ import (
 )
 
 // CurrentVersion — Version 0 is the legacy unversioned format.
-const CurrentVersion = 20
+const CurrentVersion = 21
 
 const (
 	FallbackSourceGitHub = "github"
@@ -401,10 +401,11 @@ type Marketplace struct {
 	Agents []string `json:"agents,omitempty"`
 }
 
-// Plugin — Marketplace must reference a declared Marketplace.Name; a dangling reference makes restore impossible.
+// Plugin — Exactly one of Marketplace or Source identifies where the agent installs the plugin from.
 type Plugin struct {
 	Name        string   `json:"name"`
-	Marketplace string   `json:"marketplace"`
+	Marketplace string   `json:"marketplace,omitempty"`
+	Source      string   `json:"source,omitempty"`
 	Agents      []string `json:"agents,omitempty"`
 }
 
@@ -965,7 +966,7 @@ func validateMarketplaces(marketplaces []Marketplace, names map[string]struct{},
 	return errs
 }
 
-// validatePlugins rejects dangling marketplace references because they make restore impossible.
+// validatePlugins rejects ambiguous sources and dangling marketplace references because they make restore impossible.
 func validatePlugins(plugins []Plugin, marketplaceNames map[string]struct{}, path string) []ValidationError {
 	var errs []ValidationError
 	seen := make(map[string]struct{}, len(plugins))
@@ -977,12 +978,16 @@ func validatePlugins(plugins []Plugin, marketplaceNames map[string]struct{}, pat
 			errs = append(errs, ValidationError{Path: pp + ".name", Message: fmt.Sprintf("duplicate plugin name %q", p.Name)})
 		}
 		seen[p.Name] = struct{}{}
-		if strings.TrimSpace(p.Marketplace) == "" {
-			errs = append(errs, ValidationError{Path: pp + ".marketplace", Message: "plugin marketplace is required"})
+		marketplace := strings.TrimSpace(p.Marketplace)
+		source := strings.TrimSpace(p.Source)
+		if (marketplace == "") == (source == "") {
+			errs = append(errs, ValidationError{Path: pp, Message: "plugin requires exactly one of marketplace or source"})
 			continue
 		}
-		if _, ok := marketplaceNames[p.Marketplace]; !ok {
-			errs = append(errs, ValidationError{Path: pp + ".marketplace", Message: fmt.Sprintf("plugin marketplace %q has no matching agents.marketplaces entry", p.Marketplace)})
+		if marketplace != "" {
+			if _, ok := marketplaceNames[marketplace]; !ok {
+				errs = append(errs, ValidationError{Path: pp + ".marketplace", Message: fmt.Sprintf("plugin marketplace %q has no matching agents.marketplaces entry", p.Marketplace)})
+			}
 		}
 	}
 	return errs

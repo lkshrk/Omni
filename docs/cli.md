@@ -189,10 +189,10 @@ to the tool leg alone.
 | `omni agents mcp import [<name>]` | List unmanaged MCP servers, or adopt one into the manifest by name. |
 | `omni agents mcp resolve <name>` | Settle a drifted MCP server with an explicit side: `--use-managed` reinstalls the manifest definition, `--use-local` adopts the live one. |
 | `omni agents plugins list` | List managed and unmanaged plugins, with installed version and, for outdated plugins, an arrow to the latest available version (e.g. `1.0.0 → 1.2.0`). |
-| `omni agents plugins add` | Add a plugin to the manifest and install it. |
+| `omni agents plugins add --name <name> (--marketplace <name> \| --source <source>)` | Add and install a marketplace plugin, or a direct-source plugin for agents such as Hermes. |
 | `omni agents plugins remove <name>` | Remove a plugin from the manifest. |
 | `omni agents plugins sync` | Install the manifest plugin set onto this host. |
-| `omni agents plugins import [<name>]` | List unmanaged plugins, or adopt one into the manifest by name. |
+| `omni agents plugins import [<name>]` | List unmanaged plugins, or adopt one by name. Direct-source agents require `--source <source>` because their CLI does not report the original URL. |
 | `omni agents plugins resolve <name>` | Settle a plugin installed from the wrong marketplace: `--use-managed` reinstalls from the declared one, `--use-local` repoints the manifest. |
 | `omni agents plugins marketplace list` | List declared marketplaces. |
 | `omni agents plugins marketplace add <name>` | Declare a marketplace and add it to targeted agent CLIs. |

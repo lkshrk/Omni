@@ -1,0 +1,58 @@
+# Hermes plugins use direct sources and never synthesize an Omni marketplace.
+chmod 0755 $WORK/bin/hermes
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json agents plugins add --name weather --source owner/weather --agents hermes-agent
+stdout 'added weather'
+exec grep -q 'plugins install owner/weather --enable' .omni-cache/hermes-plugin-calls.log
+exec grep -q '"source": "owner/weather"' settings.json
+! exec grep -q '"marketplace"' settings.json
+
+exec omni --config settings.json agents plugins list
+stdout 'weather\s+owner/weather\s+1.2.3\s+hermes-agent\(✓\)'
+
+exec omni --config settings.json agents plugins sync
+stdout 'already installed: hermes-agent/weather'
+! exec grep -q 'plugins marketplace' .omni-cache/hermes-plugin-calls.log
+
+exec omni --config settings.json agents plugins remove weather
+stdout 'removed weather'
+exec grep -q 'plugins remove weather' .omni-cache/hermes-plugin-calls.log
+! exec grep -q '"name": "weather"' settings.json
+
+# Hermes cannot report the original Git URL, so import accepts it explicitly.
+exec touch .omni-cache/hermes-weather-installed
+exec omni --config settings.json agents plugins import weather --source owner/weather
+stdout 'imported weather'
+exec grep -q '"source": "owner/weather"' settings.json
+exec omni --config settings.json agents plugins remove weather
+
+-- settings.json --
+{}
+
+-- bin/hermes --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/hermes-plugin-calls.log"
+state="${OMNI_CACHE_DIR}/hermes-weather-installed"
+if [ "$1" = "plugins" ] && [ "$2" = "list" ]; then
+  if [ -f "$state" ]; then
+    printf '[{"name":"weather","status":"enabled","version":"1.2.3","description":"Weather","source":"git"}]\n'
+  else
+    printf '[]\n'
+  fi
+  exit 0
+fi
+if [ "$1" = "plugins" ] && [ "$2" = "install" ] && [ "$3" = "owner/weather" ] && [ "$4" = "--enable" ]; then
+  touch "$state"
+  exit 0
+fi
+if [ "$1" = "plugins" ] && [ "$2" = "remove" ] && [ "$3" = "weather" ]; then
+  rm -f "$state"
+  exit 0
+fi
+if [ "$1" = "plugins" ] && [ "$2" = "update" ] && [ "$3" = "weather" ]; then
+  exit 0
+fi
+exit 1

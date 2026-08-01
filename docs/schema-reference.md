@@ -274,5 +274,6 @@ supported value. Notable steps since older tagged releases:
 | 16 | Adds `agents.ignore.marketplaces`. |
 | 17 | Adds optional tool source, recipe, and `bin_dir` fields plus `$include` support. |
 | 20 | Adds structured `agents.packages[].skills`, makes packages the sole durable skill manifest, and preserves legacy per-skill names during migration. |
+| 21 | Allows `agents.plugins[]` to use exactly one of `marketplace` or a direct `source`. |
 
 See [GitHub Releases](https://github.com/lkshrk/omni/releases) for release notes.

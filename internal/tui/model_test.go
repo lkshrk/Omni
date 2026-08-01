@@ -53,6 +53,9 @@ func baseModel(tools []*app.ToolView) Model {
 	pfm := textinput.New()
 	pfm.Placeholder = "caveman"
 	pfm.CharLimit = 256
+	pfs := textinput.New()
+	pfs.Placeholder = "owner/repo or Git URL"
+	pfs.CharLimit = 512
 	pfa := textinput.New()
 	pfa.Placeholder = "claude-code,codex"
 	pfa.CharLimit = 256
@@ -69,6 +72,7 @@ func baseModel(tools []*app.ToolView) Model {
 		mcpFormEnvLit:         mfl,
 		pluginFormName:        pfn,
 		pluginFormMarketplace: pfm,
+		pluginFormSource:      pfs,
 		pluginFormAgents:      pfa,
 		agentsEnabled:         true,
 		skillsEnabled:         true,
