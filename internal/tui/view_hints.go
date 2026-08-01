@@ -650,7 +650,7 @@ func tabShortHelpBindings(m *Model) []key.Binding {
 	case viewStatus:
 		return footerBindings(k, dashboardFooterActionBindings(m), nil)
 	case viewGroups:
-		actions := []key.Binding{k.NewGroup}
+		actions := []key.Binding{k.NewGroup, k.NewHost}
 		return footerBindings(k, actions, nil)
 	case viewSkills:
 		listActions := []key.Binding{agentsUpgradeAllBinding(), agentsSyncAllBinding(), agentsRefreshBinding()}
@@ -816,7 +816,7 @@ func tabFullHelpBindings(m *Model) [][]key.Binding {
 	case viewGroups:
 		return [][]key.Binding{
 			common,
-			{k.NewGroup, k.HostGroups, k.GroupTools, k.GroupDots, k.Toggle, k.Back},
+			{k.NewGroup, k.NewHost, k.HostGroups, k.GroupTools, k.GroupDots, k.Toggle, k.Back},
 		}
 	case viewSkills:
 		return [][]key.Binding{
@@ -1036,7 +1036,8 @@ func helpActionGroups(m Model) []helpGroup {
 		return groups
 	case viewGroups:
 		items := []hintItem{
-			hintFromBindingDesc(k.NewGroup, actions.MustTUILabel(actions.GroupCreate)),
+			hintFromBinding(k.NewGroup),
+			hintFromBinding(k.NewHost),
 			hintFromBindingDesc(k.Rename, actions.LabelRename),
 			hintFromBindingDesc(k.HostGroups, actions.MustTUILabel(actions.HostEditGroups)),
 			hintFromBindingDesc(k.GroupTools, actions.MustTUILabel(actions.GroupEditTools)),
@@ -1044,7 +1045,7 @@ func helpActionGroups(m Model) []helpGroup {
 			hintFromBindingDesc(k.Delete, actions.LabelDelete),
 		}
 		if m.canCopySelectedHostGroups() {
-			items = append([]hintItem{items[0], hintFromBindingDesc(k.Toggle, "copy groups")}, items[1:]...)
+			items = append([]hintItem{items[0], items[1], hintFromBindingDesc(k.Toggle, "copy groups")}, items[2:]...)
 		}
 		return []helpGroup{{items: items}}
 	case viewSkills:

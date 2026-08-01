@@ -1360,29 +1360,153 @@ func TestFlow2_UC104_NewGroupCreating(t *testing.T) {
 	}
 }
 
-func TestFlow2_HostCreationRemovedFromGroupSection(t *testing.T) {
+func TestFlow2_HostCreationFromGroupSection(t *testing.T) {
 	t.Parallel()
 	m := hostsModel()
 	m.assignmentSection = 1
 	got := drive(m, pressRune('p'))
-	if got.groupCreating {
-		t.Error("groupCreating should stay false after p in section 1")
+	if !got.groupCreating {
+		t.Error("host popup should open after p")
 	}
-	if got.hostEditMode != 0 || got.hostRenameMode {
-		t.Fatalf("p should not start a Hosts tab edit mode: hostEditMode=%d hostRename=%v", got.hostEditMode, got.hostRenameMode)
+	if got.assignmentSection != 0 || got.settingsInput.Placeholder != "hostname…" {
+		t.Fatalf("host creation state = section %d placeholder %q", got.assignmentSection, got.settingsInput.Placeholder)
 	}
 }
 
-func TestFlow2_GroupCreationAvailableFromHostSection(t *testing.T) {
-	t.Parallel()
+func TestFlow2_HostCreationFromHostSection(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "beta")
+	a := newHostsFlowApp(t)
 	m := hostsModel()
+	m.app = a
+	m.ctx = context.Background()
 	m.assignmentSection = 0
-	got := drive(m, pressRune('n'))
+	tm, _ := m.Update(pressRune('p'))
+	got := tm.(Model)
 	if !got.groupCreating {
-		t.Error("groupCreating should be true after n in section 0")
+		t.Error("host popup should be open after p")
 	}
-	if got.assignmentSection != 1 {
-		t.Errorf("assignmentSection = %d, want 1 after starting group creation", got.assignmentSection)
+	if got.assignmentSection != 0 {
+		t.Errorf("assignmentSection = %d, want host section unchanged", got.assignmentSection)
+	}
+	got.settingsInput.SetValue("Aardvark.EXAMPLE")
+	tm, cmd := got.Update(pressEnter())
+	got = tm.(Model)
+	if cmd != nil {
+		t.Fatal("host creation should wait for copy-or-fresh choice")
+	}
+	if got.hostCreateStep != 1 || got.hostCreateName != "aardvark" {
+		t.Fatalf("host copy choice state = step %d name %q", got.hostCreateStep, got.hostCreateName)
+	}
+	tm, cmd = got.Update(pressEsc())
+	got = tm.(Model)
+	if cmd == nil {
+		t.Fatal("start-fresh command missing")
+	}
+	msg := runLastBatchCommand(t, cmd)
+	changed, ok := msg.(hostGroupChangedMsg)
+	if !ok {
+		t.Fatalf("host creation command returned %T", msg)
+	}
+	if changed.err != nil || changed.info == nil {
+		t.Fatalf("host creation result = %+v", changed)
+	}
+	if changed.host != "aardvark" {
+		t.Fatalf("created host identity = %q, want canonical aardvark", changed.host)
+	}
+	got = drive(got, changed)
+	if _, ok := got.hostInfo.Hosts["aardvark"]; !ok {
+		t.Fatalf("created host missing from refreshed result: %+v", got.hostInfo.Hosts)
+	}
+	if got.selectedHostName() != "aardvark" {
+		t.Fatalf("selected host = %q, want aardvark", got.selectedHostName())
+	}
+}
+
+func TestFlow2_HostCreationCanCopyExistingHost(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "beta")
+	a := newHostsFlowApp(t)
+	m := hostsModel()
+	m.app = a
+	m.ctx = context.Background()
+
+	got := drive(m, pressRune('p'))
+	got.settingsInput.SetValue("gamma")
+	tm, _ := got.Update(pressEnter())
+	got = tm.(Model)
+	if got.hostCreateStep != 1 {
+		t.Fatalf("hostCreateStep = %d, want copy prompt", got.hostCreateStep)
+	}
+	tm, _ = got.Update(pressEnter())
+	got = tm.(Model)
+	if got.hostCreateStep != 2 {
+		t.Fatalf("hostCreateStep = %d, want source picker", got.hostCreateStep)
+	}
+	tm, cmd := got.Update(pressEnter())
+	got = tm.(Model)
+	if cmd == nil {
+		t.Fatal("copy-host command missing")
+	}
+	msg := runLastBatchCommand(t, cmd)
+	changed, ok := msg.(hostGroupChangedMsg)
+	if !ok || changed.err != nil || changed.info == nil {
+		t.Fatalf("copy-host result = %#v", msg)
+	}
+	got = drive(got, changed)
+	created, ok := got.hostInfo.Hosts["gamma"]
+	if !ok || !slices.Equal(created.Groups, []string{"apps"}) {
+		t.Fatalf("copied host = %+v, want alpha groups [apps]", created)
+	}
+}
+
+func TestFlow2_HostCreationRejectsEmptyCanonicalName(t *testing.T) {
+	m := hostsModel()
+	got := drive(m, pressRune('p'))
+	got.settingsInput.SetValue(".")
+	tm, _ := got.Update(pressEnter())
+	got = tm.(Model)
+	if got.hostCreateStep != 0 || got.loading {
+		t.Fatalf("invalid hostname started creation: step=%d loading=%v", got.hostCreateStep, got.loading)
+	}
+	if !got.statusIsErr || !strings.Contains(got.statusMsg, "hostname is required") {
+		t.Fatalf("invalid hostname status = %q error=%v", got.statusMsg, got.statusIsErr)
+	}
+}
+
+func TestFlow2_HostCreateChoiceOwnsInput(t *testing.T) {
+	m := hostsModel()
+	m.hostCreateStep = 1
+	m.hostCreateName = "gamma"
+	got := drive(m, pressTab(), pressRune(':'), pressRune('?'), pressRune('q'))
+	if got.mode != viewGroups || got.hostCreateStep != 1 {
+		t.Fatalf("host modal escaped: mode=%v step=%d", got.mode, got.hostCreateStep)
+	}
+	if got.help.ShowAll || got.confirmQuit {
+		t.Fatalf("global overlay escaped host modal: help=%v quit=%v", got.help.ShowAll, got.confirmQuit)
+	}
+	if got.mainTabsClickable() {
+		t.Fatal("main tabs should not be clickable through host modal")
+	}
+
+	got.hostCreateStep = 2
+	got.setupCopyHostIdx = 0
+	got = drive(got, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	if got.setupCopyHostIdx != 1 {
+		t.Fatalf("mouse wheel moved source index to %d, want 1", got.setupCopyHostIdx)
+	}
+}
+
+func TestDoCreateHost_ExistingCanonicalHostIsNotReportedCreated(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "beta")
+	m := hostsModel()
+	m.app = newHostsFlowApp(t)
+
+	msg := m.doCreateHost("ALPHA.EXAMPLE")()
+	changed, ok := msg.(hostGroupChangedMsg)
+	if !ok {
+		t.Fatalf("host creation command returned %T", msg)
+	}
+	if changed.err != nil || changed.host != "alpha" || changed.detail != "host alpha already exists" {
+		t.Fatalf("existing host result = %+v", changed)
 	}
 }
 

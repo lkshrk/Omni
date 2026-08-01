@@ -790,16 +790,8 @@ func (m *Model) handleHostGroupChangedMsg(msg hostGroupChangedMsg) []tea.Cmd {
 }
 
 func (m *Model) placeHostCursor(host string) {
-	if m.hostInfo == nil {
-		return
-	}
-	names := make([]string, 0, len(m.hostInfo.Hosts))
-	for name := range m.hostInfo.Hosts {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for i, name := range names {
-		if name == host {
+	for i, summary := range app.PrioritizedHostSummaries(m.hostInfo) {
+		if summary.Name == host {
 			m.hostCursor = i
 			return
 		}

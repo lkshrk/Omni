@@ -1709,6 +1709,7 @@ func TestRenderHosts_GroupCreating(t *testing.T) {
 		Hosts: map[string]config.HostAssignment{},
 	}
 	m.groupCreating = true
+	m.assignmentSection = 1
 	out := m.viewString()
 	for _, want := range []string{"New Group", "group name", "enter create", "esc cancel"} {
 		if !strings.Contains(out, want) {
@@ -1725,6 +1726,48 @@ func TestRenderHosts_GroupCreating(t *testing.T) {
 	}
 	if strings.Contains(renderGroups(m), "New group —") {
 		t.Errorf("new group input should not render inline:\n%s", renderGroups(m))
+	}
+}
+
+func TestRenderHosts_HostCreating(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewGroups
+	m.width = 80
+	m.height = 30
+	m.hostInfo = &app.HostInfo{Hosts: map[string]config.HostAssignment{}}
+	m.groupCreating = true
+	m.assignmentSection = 0
+	out := m.viewString()
+	for _, want := range []string{"New Host", "hostname", "enter create", "esc cancel"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in new host popup, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderHosts_HostCreateCopyChoice(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewGroups
+	m.width = 80
+	m.height = 30
+	m.hostInfo = &app.HostInfo{Hosts: map[string]config.HostAssignment{"laptop": {Groups: []string{"base"}}}}
+	m.hostCreateName = "desktop"
+	m.hostCreateStep = 1
+	out := m.viewString()
+	for _, want := range []string{"New Host", "Copy another host's config?", "start fresh", "copy host"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in host copy prompt, got:\n%s", want, out)
+		}
+	}
+
+	m.hostCreateStep = 2
+	out = m.viewString()
+	for _, want := range []string{"Choose the host to copy", "laptop", "base", "copy selected"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in host source picker, got:\n%s", want, out)
+		}
 	}
 }
 
@@ -3343,11 +3386,11 @@ func TestTabKeyMap_ShortHelp_HostsMode(t *testing.T) {
 	if len(bindings) == 0 {
 		t.Error("expected non-empty ShortHelp for hosts mode")
 	}
-	if got := strings.Join(bindingHelpDescs(bindings), ","); !strings.Contains(got, "new group") {
-		t.Errorf("hosts footer should include new group, got %v", got)
+	if got := strings.Join(bindingHelpDescs(bindings), ","); !strings.Contains(got, "new host") {
+		t.Errorf("hosts footer should include new host, got %v", got)
 	}
-	if got := strings.Join(bindingHelpDescs(bindings), ","); strings.Contains(got, "new host") {
-		t.Errorf("hosts footer should not include new host, got %v", got)
+	if got := strings.Join(bindingHelpDescs(bindings), ","); !strings.Contains(got, "new group") {
+		t.Errorf("hosts footer should preserve new group, got %v", got)
 	}
 }
 
@@ -3360,8 +3403,12 @@ func TestTabKeyMap_ShortHelp_HostsGroupSection(t *testing.T) {
 	if !strings.Contains(got, "new group") {
 		t.Errorf("hosts footer should include new group in group section, got %v", got)
 	}
-	if strings.Contains(got, "new host") {
-		t.Errorf("hosts footer should not include new host in group section, got %v", got)
+	if !strings.Contains(got, "new host") {
+		t.Errorf("hosts footer should include new host in group section, got %v", got)
+	}
+	help := renderHelpPopupWithWidth(m, helpPopupContentWidth(m))
+	if !strings.Contains(help, "new group") || !strings.Contains(help, "new host") {
+		t.Errorf("group-section help should show both create actions:\n%s", help)
 	}
 }
 
@@ -3534,7 +3581,7 @@ func TestRenderHelpPopup_TabSpecificActionsAndLegend(t *testing.T) {
 		{"dots", viewDots, []string{"refresh", "conflict", "no source", "host variant", "child"}},
 		{"status", viewStatus, []string{"upgrade all tools", "reconcile all", "refresh dashboard", iconInstalled, "healthy", iconPending, "working", iconFailed, "warning", iconMissing, "failure", iconIgnored, "quiet"}},
 		{"settings", viewSettings, []string{"change toggle or option", "[ON]", "[OFF]"}},
-		{"hosts", viewGroups, []string{"new group", "(local)", "[x]", "[ ]", "may need sudo"}},
+		{"hosts", viewGroups, []string{"new host", "(local)", "[x]", "[ ]", "may need sudo"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3726,7 +3773,7 @@ func TestRenderHelpPopup_ActionOrderKeepsDeleteLast(t *testing.T) {
 		{
 			name:   "groups",
 			mode:   viewGroups,
-			before: []string{"new group", "rename", "edit groups", "edit tools"},
+			before: []string{"new host", "rename", "edit groups", "edit tools"},
 		},
 	}
 	for _, tc := range cases {

@@ -52,7 +52,24 @@ func renderGroupDeletePopup(m Model) string {
 const groupDeletePopupContentWidth = 44
 
 func renderGroupCreatePopup(m Model) string {
+	if m.assignmentSection == 0 {
+		return renderNameCreatePopup(m, "hostname")
+	}
 	return renderNameCreatePopup(m, "group name")
+}
+
+func groupCreatePopupTitle(m Model) string {
+	if m.assignmentSection == 0 {
+		return "New Host"
+	}
+	return "New Group"
+}
+
+func renderHostCreateChoicePopup(m Model, width int) string {
+	popupModel := m
+	popupModel.width = max(width, 1)
+	popupModel.setupStep = m.hostCreateStep + 6
+	return renderSetup(popupModel)
 }
 
 func renderNameCreatePopup(m Model, label string) string {

@@ -862,7 +862,7 @@ var Hosts = []Action{
 		Description:     "Create a host.",
 		LongDescription: "Create a host assignment and its protected host group.",
 		Mutates:         true,
-		CLIOnlyReason:   "TUI creates the current host during onboarding; manual remote host creation is intentionally CLI-only.",
+		TUI:             &TUIBinding{KeyMapField: "NewHost", DefaultKey: "p", Label: LabelNewHost, Description: "Create a new host."},
 		CLI:             []CLIBinding{{Command: []string{"hosts", "ensure"}}},
 	},
 	{

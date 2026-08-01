@@ -299,12 +299,23 @@ func (m Model) viewString() string {
 		return placePopup(bg, m, renderGroupDeletePopup(m), popupFrame{Title: "Delete Group", PaddingX: paddingX, Width: popupFrameWidthForContent(groupDeletePopupContentWidth, paddingX)})
 	}
 
+	if m.mode == viewGroups && m.hostCreateStep != 0 {
+		bgModel := m
+		bgModel.hostCreateStep = 0
+		bgModel.suppressFooterHints = true
+		bg := bgModel.viewString()
+		frame := setupPopupFrame(m)
+		frame.Title = "New Host"
+		contentWidth := popupInnerContentWidth(fitPopupFrameToWindow(m, frame))
+		return placePopup(bg, m, renderHostCreateChoicePopup(m, contentWidth), frame)
+	}
+
 	if m.mode == viewGroups && m.groupCreating {
 		bgModel := m
 		bgModel.groupCreating = false
 		bg := bgModel.viewString()
 		paddingX := 2
-		return placePopup(bg, m, renderGroupCreatePopup(m), popupFrame{Title: "New Group", PaddingY: 1, PaddingX: paddingX, Width: popupFrameWidthForContent(groupCreatePopupWidth(m), paddingX), NoTitleDivider: true})
+		return placePopup(bg, m, renderGroupCreatePopup(m), popupFrame{Title: groupCreatePopupTitle(m), PaddingY: 1, PaddingX: paddingX, Width: popupFrameWidthForContent(groupCreatePopupWidth(m), paddingX), NoTitleDivider: true})
 	}
 
 	if m.mode == viewGroups && m.hostEditMode == 1 {

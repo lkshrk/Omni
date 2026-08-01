@@ -33,6 +33,7 @@ type KeyMap struct {
 	EditIgnore      key.Binding // e — edit ignore scopes for ignored tools
 	Reconcile       key.Binding // A — reconcile all safe host lifecycle fixes
 	NewGroup        key.Binding // n — new group
+	NewHost         key.Binding // p — new host
 	HostGroups      key.Binding // g — edit host group assignments
 	Rename          key.Binding // r — rename selected host/group
 	GroupTools      key.Binding // t — edit selected group tools
@@ -173,6 +174,10 @@ func DefaultKeyMap() KeyMap {
 		NewGroup: key.NewBinding(
 			key.WithKeys("n"),
 			key.WithHelp("n", actions.MustTUILabel(actions.GroupCreate)),
+		),
+		NewHost: key.NewBinding(
+			key.WithKeys("p"),
+			key.WithHelp("p", actions.MustTUILabel(actions.HostCreate)),
 		),
 		HostGroups: key.NewBinding(
 			key.WithKeys("g"),
