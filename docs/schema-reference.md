@@ -9,7 +9,7 @@ This page explains the shape of `settings.json`. For narrative examples, use
 | Key | Type | Required | Description |
 | --- | --- | --- | --- |
 | `$schema` | string | no | Editor schema URI written by Omni. |
-| `version` | integer | yes | Settings format version. Current version is `17`. |
+| `version` | integer | yes | Settings format version. Current version is `22`. |
 | `settings` | object | no | Global defaults. |
 | `host_settings` | object | no | Per-host setting overrides. |
 | `tools` | object | no | Logical tool specs keyed by logical name. |
@@ -126,6 +126,7 @@ unavailable for the configured package.
 | `bin_dir` | string | Optional per-tool fallback binary directory override. |
 | `release_channel` | string | Optional release channel metadata. |
 | `recipe` | object | Structured recipe metadata, such as release asset pattern and checksum. |
+| `recipe.checksum_asset_pattern` | string | Optional SHA-256 manifest asset pattern for verified, atomic binary installation. |
 | `recipe.release_id` | string | Generated GitHub release id used for provenance and update detection. |
 | `recipe.tag_name` | string | Generated GitHub release tag used for display and update detection. |
 | `recipe.published_at` | string | Generated GitHub release publish timestamp. Fallback update detection requires this field and compares newer releases strictly by timestamp. |

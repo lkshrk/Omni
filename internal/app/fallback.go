@@ -287,6 +287,7 @@ func (a *App) githubFallbackUpgradeCandidate(ctx context.Context, name string, s
 	}
 	resolved.Source = fallback.Source
 	resolved.BinDir = fallback.BinDir
+	resolved.Recipe.ChecksumAssetPattern = fallback.Recipe.ChecksumAssetPattern
 	if err := preserveCustomGitHubFallbackCommands(fallback, &resolved); err != nil {
 		return nil, false, err
 	}

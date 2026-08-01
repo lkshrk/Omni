@@ -326,7 +326,7 @@ func fullyPopulatedRootConfig() config.RootConfig {
 		InstallWith: "brew",
 		Options:     map[string]string{"head": "true"},
 		Source:      &config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep", URL: "https://github.com/BurntSushi/ripgrep"},
-		Recipe:      &config.FallbackRecipe{Type: config.FallbackRecipeGitHubReleaseAsset, AssetPattern: "rg-{version}.tar.gz", BinaryPath: "rg", Checksum: "sha256:abc", ChecksumAssetID: "1", ReleaseID: "2", TagName: "v1.0.0", PublishedAt: "2024-01-01T00:00:00Z", AssetID: "3", AssetName: "rg.tar.gz", AssetDownloadURL: "https://example.com/rg.tar.gz", InstalledVersion: "1.0.0"},
+		Recipe:      &config.FallbackRecipe{Type: config.FallbackRecipeGitHubReleaseAsset, AssetPattern: "rg-{version}.tar.gz", ChecksumAssetPattern: "checksums.txt", BinaryPath: "rg", Checksum: "sha256:abc", ChecksumAssetID: "1", ReleaseID: "2", TagName: "v1.0.0", PublishedAt: "2024-01-01T00:00:00Z", AssetID: "3", AssetName: "rg.tar.gz", AssetDownloadURL: "https://example.com/rg.tar.gz", InstalledVersion: "1.0.0"},
 		BinDir:      "~/.local/bin",
 	}
 	settings := config.Settings{

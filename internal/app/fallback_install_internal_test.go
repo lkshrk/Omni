@@ -72,16 +72,12 @@ func TestExtractChecksumForFile_MatchesFilename(t *testing.T) {
 	}
 }
 
-func TestExtractChecksumForFile_StripsLeadingPath(t *testing.T) {
+func TestExtractChecksumForFile_RequiresExactBasename(t *testing.T) {
 	t.Parallel()
 	want := strings.Repeat("a", sha256.Size*2)
 	content := want + "  ./dist/fd_1.0_darwin_arm64.tar.gz\n"
-	got, err := extractChecksumForFile(strings.NewReader(content), "fd_1.0_darwin_arm64.tar.gz")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
+	if _, err := extractChecksumForFile(strings.NewReader(content), "fd_1.0_darwin_arm64.tar.gz"); err == nil || !strings.Contains(err.Error(), "no checksum entry") {
+		t.Fatalf("error = %v, want exact-basename mismatch", err)
 	}
 }
 
@@ -116,6 +112,15 @@ func TestExtractChecksumForFile_GNUBinaryMarker(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("checksum = %q, want %q", got, want)
+	}
+}
+
+func TestExtractChecksumForFile_RejectsDuplicateEntries(t *testing.T) {
+	t.Parallel()
+	digest := strings.Repeat("a", sha256.Size*2)
+	content := digest + "  target.tar.gz\n" + digest + " *target.tar.gz\n"
+	if _, err := extractChecksumForFile(strings.NewReader(content), "target.tar.gz"); err == nil || !strings.Contains(err.Error(), "duplicate checksum entries") {
+		t.Fatalf("error = %v, want duplicate checksum entries", err)
 	}
 }
 
@@ -204,6 +209,38 @@ func TestFetchReleaseChecksum_AllRecognizedAssetsFail(t *testing.T) {
 	_, err := a.fetchReleaseChecksum(t.Context(), "owner", "repo", "v1", "tool.tar.gz")
 	if err == nil || !strings.Contains(err.Error(), "first.sha256sum") || !strings.Contains(err.Error(), "checksums.txt") {
 		t.Fatalf("error = %v, want failures for both recognized assets", err)
+	}
+}
+
+func TestVerifyFallbackChecksum_ConfiguredManifestIsRequired(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/releases/tags/v1":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": 1,
+				"assets": []map[string]any{
+					{"id": 2, "name": "checksums.txt", "browser_download_url": "https://" + r.Host + "/checksums"},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	assetPath := filepath.Join(t.TempDir(), "tool")
+	if err := os.WriteFile(assetPath, []byte("payload"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fallback := &config.FallbackSpec{
+		Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "owner", Repo: "repo"},
+		Binary: "tool",
+		Recipe: config.FallbackRecipe{TagName: "v1", ChecksumAssetPattern: "required.txt"},
+	}
+	a := &App{}
+	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
+	if err := a.verifyFallbackChecksum(t.Context(), "tool", fallback, assetPath, "tool"); err == nil || !strings.Contains(err.Error(), `checksum asset "required.txt" not found`) {
+		t.Fatalf("error = %v, want configured manifest failure", err)
 	}
 }
 

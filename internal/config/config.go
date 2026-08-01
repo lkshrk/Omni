@@ -11,7 +11,7 @@ import (
 )
 
 // CurrentVersion — Version 0 is the legacy unversioned format.
-const CurrentVersion = 21
+const CurrentVersion = 22
 
 const (
 	FallbackSourceGitHub = "github"
@@ -117,10 +117,11 @@ type FallbackSource struct {
 }
 
 type FallbackRecipe struct {
-	Type         string `json:"type,omitempty"`
-	AssetPattern string `json:"asset_pattern,omitempty"`
-	BinaryPath   string `json:"binary_path,omitempty"`
-	Checksum     string `json:"checksum,omitempty"`
+	Type                 string `json:"type,omitempty"`
+	AssetPattern         string `json:"asset_pattern,omitempty"`
+	ChecksumAssetPattern string `json:"checksum_asset_pattern,omitempty"`
+	BinaryPath           string `json:"binary_path,omitempty"`
+	Checksum             string `json:"checksum,omitempty"`
 	// Checksum is trusted only while this matches the asset being installed; a rotated asset re-verifies from the release checksums file.
 	ChecksumAssetID  string `json:"checksum_asset_id,omitempty"`
 	ReleaseID        string `json:"release_id,omitempty"`
@@ -1108,6 +1109,9 @@ func validateRecipeInstallSpec(path string, spec ToolInstallSpec) []ValidationEr
 		}
 		if strings.TrimSpace(spec.Recipe.AssetPattern) == "" {
 			errs = append(errs, ValidationError{Path: path + ".recipe.asset_pattern", Message: "github_release_asset requires recipe.asset_pattern"})
+		}
+		if strings.TrimSpace(spec.Recipe.ChecksumAssetPattern) != "" && optionValue(spec.Options, "extract_dir") != "" {
+			errs = append(errs, ValidationError{Path: path + ".options.extract_dir", Message: "github_release_asset cannot combine checksum_asset_pattern with extract_dir"})
 		}
 	case FallbackRecipeAptRepo:
 		keyURL := optionValue(spec.Options, "key_url")

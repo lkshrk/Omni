@@ -104,6 +104,26 @@ For an unpinned `github_release_asset` recipe, Omni instead reuses its shared
 GitHub latest-release lookup. A recipe `tag_name` or `options.release_tag` pins
 the tool and disables automatic release tracking.
 
+Use `checksum_asset_pattern` to verify a release binary against a standard
+SHA-256 manifest before atomically replacing the installed executable:
+
+```json
+{
+  "provider": "script",
+  "bin": "actionlint",
+  "options": { "arch_map": "x86_64:amd64,aarch64:arm64" },
+  "source": { "type": "github", "owner": "rhysd", "repo": "actionlint" },
+  "recipe": {
+    "type": "github_release_asset",
+    "asset_pattern": "actionlint_{version}_linux_{arch}.tar.gz",
+    "checksum_asset_pattern": "actionlint_{version}_checksums.txt"
+  }
+}
+```
+
+This verified form installs one executable and cannot be combined with
+`options.extract_dir`.
+
 Routing behavior:
 
 - Omni tries provider candidates in order and skips providers that are not

@@ -252,6 +252,7 @@ var configMigrations = []configMigration{
 	{from: 18, to: 19, apply: migrateConfigV18ToV19, applyRaw: migrateRawConfigV18ToV19},
 	{from: 19, to: 20, apply: migrateConfigV19ToV20, applyRaw: migrateRawConfigV19ToV20},
 	{from: 20, to: 21, apply: migrateConfigV20ToV21, applyRaw: migrateRawConfigV20ToV21},
+	{from: 21, to: 22, apply: migrateConfigV21ToV22, applyRaw: migrateRawConfigV21ToV22},
 }
 
 func configMigrationFrom(version int) (configMigration, bool) {
@@ -1055,6 +1056,17 @@ func migrateConfigV20ToV21(cfg *RootConfig) error {
 
 func migrateRawConfigV20ToV21(raw map[string]json.RawMessage) error {
 	raw["version"] = json.RawMessage(`21`)
+	return nil
+}
+
+// No-op: v22 adds optional checksum manifests to GitHub release asset recipes.
+func migrateConfigV21ToV22(cfg *RootConfig) error {
+	cfg.Version = 22
+	return nil
+}
+
+func migrateRawConfigV21ToV22(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`22`)
 	return nil
 }
 
