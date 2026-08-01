@@ -57,7 +57,7 @@ func TestPluginFlow_TabCyclesFieldsForwardAndWraps(t *testing.T) {
 	m := pluginChipFixture(nil)
 	m = drive(m, pressRune('n'))
 
-	wantOrder := []int{1, 2, 0}
+	wantOrder := []int{1, 2, 3, 0}
 	for i, want := range wantOrder {
 		m = drive(m, pressTab())
 		if m.pluginFormField != want {
@@ -85,7 +85,7 @@ func TestPluginFlow_EmptyNameShowsValidationError(t *testing.T) {
 	}
 }
 
-func TestPluginFlow_EmptyMarketplaceShowsValidationError(t *testing.T) {
+func TestPluginFlow_EmptyOriginShowsValidationError(t *testing.T) {
 	t.Parallel()
 	m := pluginChipFixture(nil)
 	m = drive(m, pressRune('n'))
@@ -95,16 +95,33 @@ func TestPluginFlow_EmptyMarketplaceShowsValidationError(t *testing.T) {
 	m = newModel.(Model)
 
 	if m.pluginFormErr == nil {
-		t.Fatal("expected pluginFormErr when marketplace is empty")
+		t.Fatal("expected pluginFormErr when origin is empty")
 	}
-	if !strings.Contains(m.pluginFormErr.Error(), "marketplace is required") {
-		t.Errorf("pluginFormErr = %v, want 'marketplace is required'", m.pluginFormErr)
+	if !strings.Contains(m.pluginFormErr.Error(), "exactly one of marketplace or source") {
+		t.Errorf("pluginFormErr = %v, want origin validation", m.pluginFormErr)
 	}
 	if m.pluginRunning {
 		t.Error("pluginRunning should remain false when validation fails")
 	}
 	if cmd != nil {
 		t.Error("expected no command when validation fails")
+	}
+}
+
+func TestPluginFlow_DirectSourceBuildsExpectedPlugin(t *testing.T) {
+	t.Parallel()
+	m := pluginChipFixture(nil)
+	m.pluginFormName.SetValue("hermes-plugin")
+	m.pluginFormSource.SetValue("owner/repo")
+	m.pluginFormAgents.SetValue("hermes-agent")
+
+	got, err := m.buildPluginFromForm()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := config.Plugin{Name: "hermes-plugin", Source: "owner/repo", Agents: []string{"hermes-agent"}}
+	if got.Name != want.Name || got.Source != want.Source || len(got.Agents) != 1 || got.Agents[0] != "hermes-agent" {
+		t.Fatalf("buildPluginFromForm = %+v, want %+v", got, want)
 	}
 }
 

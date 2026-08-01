@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/app"
@@ -46,6 +47,11 @@ type pluginStubAdapter struct {
 	addedMarkets  []config.Marketplace
 	removedNames  []string
 }
+
+type directPluginCLIStub struct{ *pluginStubAdapter }
+
+func (*directPluginCLIStub) SupportsMarketplaces() bool  { return false }
+func (*directPluginCLIStub) SupportsDirectSources() bool { return true }
 
 func (s *pluginStubAdapter) ID() string      { return s.id }
 func (s *pluginStubAdapter) Available() bool { return true }
@@ -129,6 +135,35 @@ func TestAgentsPluginsAdd_InstallsAndPersists(t *testing.T) {
 	}
 	if len(cfg.Agents.Plugins) != 1 || cfg.Agents.Plugins[0].Name != "caveman" {
 		t.Fatalf("expected manifest entry, got %+v", cfg.Agents.Plugins)
+	}
+}
+
+func TestAgentsPluginsAdd_DirectSourceInstallsAndPersists(t *testing.T) {
+	stub := &pluginStubAdapter{id: "hermes-agent"}
+	a := newPluginCLITestApp(t, []app.PluginAdapter{&directPluginCLIStub{stub}}, config.AgentsConfig{})
+	cmd := newAgentsPluginsAddCmd(&rootState{app: a})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--name", "hermes-plugin", "--source", "owner/repo", "--agents", "hermes-agent"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.installed) != 1 || stub.installed[0].Source != "owner/repo" {
+		t.Fatalf("installed=%+v", stub.installed)
+	}
+	cfg, err := config.Load(a.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Agents.Plugins) != 1 || cfg.Agents.Plugins[0].Source != "owner/repo" || cfg.Agents.Plugins[0].Marketplace != "" {
+		t.Fatalf("plugins=%+v", cfg.Agents.Plugins)
+	}
+}
+
+func TestAgentsPluginsAdd_RejectsAmbiguousOrigin(t *testing.T) {
+	cmd := newAgentsPluginsAddCmd(&rootState{})
+	cmd.SetArgs([]string{"--name", "plugin", "--marketplace", "market", "--source", "owner/repo"})
+	if err := cmd.ExecuteContext(context.Background()); err == nil {
+		t.Fatal("expected exactly-one origin error")
 	}
 }
 
@@ -232,6 +267,35 @@ func TestAgentsPluginsImport_NoArgListsUnmanaged(t *testing.T) {
 	}
 	if !bytes.Contains(out.Bytes(), []byte("hand-added")) {
 		t.Fatalf("expected unmanaged plugin listed, got: %s", out.String())
+	}
+}
+
+func TestAgentsPluginsImport_DirectSourcePersistsProvidedOrigin(t *testing.T) {
+	stub := &pluginStubAdapter{id: "hermes-agent", listedPlugins: []app.InstalledPlugin{{Name: "weather", Version: "1.2.3"}}}
+	a := newPluginCLITestApp(t, []app.PluginAdapter{&directPluginCLIStub{stub}}, config.AgentsConfig{})
+	cmd := newAgentsPluginsImportCmd(&rootState{app: a})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"weather", "--source", "owner/weather"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(a.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Agents.Plugins) != 1 || cfg.Agents.Plugins[0].Source != "owner/weather" || cfg.Agents.Plugins[0].Marketplace != "" {
+		t.Fatalf("plugins=%+v", cfg.Agents.Plugins)
+	}
+}
+
+func TestAgentsPluginsImport_DirectSourceRequiresOrigin(t *testing.T) {
+	stub := &pluginStubAdapter{id: "hermes-agent", listedPlugins: []app.InstalledPlugin{{Name: "weather"}}}
+	a := newPluginCLITestApp(t, []app.PluginAdapter{&directPluginCLIStub{stub}}, config.AgentsConfig{})
+	cmd := newAgentsPluginsImportCmd(&rootState{app: a})
+	cmd.SetArgs([]string{"weather"})
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "pass --source") {
+		t.Fatalf("error=%v, want --source guidance", err)
 	}
 }
 

@@ -231,7 +231,7 @@ func (m *Model) focusedTextInputActive() bool {
 			return true
 		}
 		if m.pluginFormOpen {
-			return m.pluginFormName.Focused() || m.pluginFormMarketplace.Focused() || m.pluginFormAgents.Focused()
+			return m.pluginFormName.Focused() || m.pluginFormMarketplace.Focused() || m.pluginFormSource.Focused() || m.pluginFormAgents.Focused()
 		}
 		return m.mcpFormOpen && (m.mcpFormName.Focused() || m.mcpFormCommand.Focused() || m.mcpFormURL.Focused() || m.mcpFormEnv.Focused() || m.mcpFormEnvLit.Focused())
 	case viewCommand:
@@ -889,9 +889,9 @@ func (m *Model) handlePluginFormKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		m.resetPluginForm()
 	case key.Matches(msg, m.keys.Tab):
 		if msg.Mod.Contains(tea.ModShift) {
-			m.pluginFormField = (m.pluginFormField + 2) % 3
+			m.pluginFormField = (m.pluginFormField + 3) % 4
 		} else {
-			m.pluginFormField = (m.pluginFormField + 1) % 3
+			m.pluginFormField = (m.pluginFormField + 1) % 4
 		}
 		m.focusPluginFormField()
 	case key.Matches(msg, m.keys.Confirm):
@@ -911,6 +911,8 @@ func (m *Model) handlePluginFormKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		case 1:
 			m.pluginFormMarketplace, cmd = m.pluginFormMarketplace.Update(msg)
 		case 2:
+			m.pluginFormSource, cmd = m.pluginFormSource.Update(msg)
+		case 3:
 			m.pluginFormAgents, cmd = m.pluginFormAgents.Update(msg)
 		}
 		cmds = append(cmds, cmd)

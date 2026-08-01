@@ -40,7 +40,8 @@ type schema struct {
 	Required             []string           `json:"required,omitempty"`
 	AdditionalProperties any                `json:"additionalProperties,omitempty"` // bool or *schema
 
-	Items *schema `json:"items,omitempty"`
+	Items *schema   `json:"items,omitempty"`
+	OneOf []*schema `json:"oneOf,omitempty"`
 
 	Defs map[string]*schema `json:"$defs,omitempty"`
 }
@@ -701,7 +702,7 @@ func buildWithID(id string) *schema {
 						Items:       ref("#/$defs/Marketplace"),
 					},
 					"plugins": {
-						Description: "Plugins installed from a declared marketplace.",
+						Description: "Plugins installed from a declared marketplace or direct source.",
 						Type:        "array",
 						Items:       ref("#/$defs/Plugin"),
 					},
@@ -855,9 +856,13 @@ func buildWithID(id string) *schema {
 				AdditionalProperties: false,
 			},
 			"Plugin": {
-				Description: "A plugin installed from a declared marketplace.",
+				Description: "A plugin installed from either a declared marketplace or a direct source accepted by the agent CLI.",
 				Type:        "object",
-				Required:    []string{"name", "marketplace"},
+				Required:    []string{"name"},
+				OneOf: []*schema{
+					{Required: []string{"marketplace"}},
+					{Required: []string{"source"}},
+				},
 				Properties: map[string]*schema{
 					"name": {
 						Description: "Plugin identifier.",
@@ -866,6 +871,11 @@ func buildWithID(id string) *schema {
 					},
 					"marketplace": {
 						Description: "Name of the declared agents.marketplaces entry this plugin comes from.",
+						Type:        "string",
+						MinLength:   1,
+					},
+					"source": {
+						Description: "Direct plugin source accepted by the target agent CLI, such as owner/repo or a Git URL.",
 						Type:        "string",
 						MinLength:   1,
 					},

@@ -202,8 +202,8 @@ omni dots groups nvim --remove old-host
 | `omni agents mcp group <name> <group>...` | no | Config | `omni groups` |
 | `omni agents mcp resolve <name>` | no | Agent config or manifest | `--dry-run` |
 | `omni agents plugins list` | no | Read-only | already read-only |
-| `omni agents plugins add --name <name> --marketplace <marketplace>` | no | Config, agent files, network | `omni agents plugins list` |
-| `omni agents plugins import [<name>]` | no | Config | `omni agents plugins list` |
+| `omni agents plugins add --name <name> (--marketplace <marketplace> \| --source <source>)` | no | Config, agent files, network | `omni agents plugins list` |
+| `omni agents plugins import [<name>] [--source <source>]` | no | Config | `omni agents plugins list` |
 | `omni agents plugins sync` | no | Agent files, network | `--dry-run` |
 | `omni agents plugins remove <name>` | no | Config, agent files | `omni agents plugins list` |
 | `omni agents plugins group <name> <group>...` | no | Config | `omni groups` |

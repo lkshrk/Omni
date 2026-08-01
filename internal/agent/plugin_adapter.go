@@ -22,6 +22,13 @@ type PluginAdapter interface {
 	UpdateMarketplaces(ctx context.Context) error
 }
 
+// PluginAdapterCapabilities distinguishes marketplace plugins from direct-source plugins.
+// Adapters that do not implement it retain the original marketplace-only behavior.
+type PluginAdapterCapabilities interface {
+	SupportsMarketplaces() bool
+	SupportsDirectSources() bool
+}
+
 // Best-effort: a marketplace clone need not exist or be readable at scan time, so an unreadable dir yields the zero time.
 func dirModTime(dir string) time.Time {
 	if dir == "" {

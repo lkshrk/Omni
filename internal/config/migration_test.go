@@ -99,8 +99,8 @@ func TestMigrateV19ToV20_AllowsMissingSkillSelectors(t *testing.T) {
 	if _, err := Migrate(&cfg); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Version != 20 {
-		t.Fatalf("version = %d, want 20", cfg.Version)
+	if cfg.Version != CurrentVersion {
+		t.Fatalf("version = %d, want %d", cfg.Version, CurrentVersion)
 	}
 	if cfg.Agents.Packages[0].Skills != nil {
 		t.Fatalf("skills = %v, want nil (all discovered skills)", cfg.Agents.Packages[0].Skills)

@@ -51,6 +51,7 @@ func WithDefaultMcpAdapters(
 		NewClaudeCodeMcpAdapter(execFn, lookupEnv),
 		NewCodexMcpAdapter(execFn, lookupEnv),
 		NewGrokMcpAdapter(execFn, lookupEnv),
+		NewHermesMcpAdapter(execFn, lookupEnv),
 	})
 }
 
@@ -82,6 +83,7 @@ func WithDefaultPluginAdapters(
 		NewClaudeCodePluginAdapter(execFn, lookupEnv),
 		NewCodexPluginAdapter(execFn, lookupEnv),
 		NewGrokPluginAdapter(execFn, lookupEnv),
+		NewHermesPluginAdapter(execFn, lookupEnv),
 	})
 }
 
@@ -286,7 +288,7 @@ var supportedTargets = []Target{
 	{ID: "github-copilot", Display: "GitHub Copilot", configDir: ".copilot"},
 	{ID: "goose", Display: "Goose", configDir: ".config/goose"},
 	{ID: "grok", Display: "Grok", configDir: ".grok", configEnv: "GROK_HOME", binary: "grok"},
-	{ID: "hermes-agent", Display: "Hermes Agent", configDir: ".hermes"},
+	{ID: "hermes-agent", Display: "Hermes Agent", configDir: ".hermes", configEnv: "HERMES_HOME", binary: "hermes"},
 	{ID: "inference-sh", Display: "inference.sh", configDir: ".inferencesh"},
 	{ID: "jazz", Display: "Jazz", configDir: ".jazz"},
 	{ID: "junie", Display: "Junie", configDir: ".junie"},

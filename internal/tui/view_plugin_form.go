@@ -10,7 +10,7 @@ import (
 func pluginFormPopupFrame(m Model) popupFrame {
 	paddingX := 2
 	contentW := popupContentWidth(m, 52, 40, 60)
-	contentH := 3 + 2 + popupFooterHeight // 3 fields + blank + optional error line
+	contentH := 4 + 2 + popupFooterHeight // 4 fields + blank + optional error line
 	if m.pluginFormErr != nil {
 		contentH++
 	}
@@ -33,7 +33,9 @@ func renderPluginFormPopup(m Model) string {
 	sb.WriteString("\n")
 	sb.WriteString(renderPluginFormRow(m, contentW, "Marketplace:", 1))
 	sb.WriteString("\n")
-	sb.WriteString(renderPluginFormRow(m, contentW, "Agents:", 2))
+	sb.WriteString(renderPluginFormRow(m, contentW, "Source:", 2))
+	sb.WriteString("\n")
+	sb.WriteString(renderPluginFormRow(m, contentW, "Agents:", 3))
 	sb.WriteString("\n\n")
 
 	if m.pluginFormErr != nil {
@@ -76,6 +78,8 @@ func renderPluginFormRow(m Model, width int, label string, field int) string {
 	case 1:
 		input = m.pluginFormMarketplace
 	case 2:
+		input = m.pluginFormSource
+	case 3:
 		input = m.pluginFormAgents
 	}
 	inputView := renderEmptyAwareTextInputView(p, input, input.Placeholder, inputWidth)

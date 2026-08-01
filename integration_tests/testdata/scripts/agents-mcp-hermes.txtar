@@ -1,0 +1,88 @@
+# Hermes MCP integration: Omni manages config.yaml directly. It may query the
+# noninteractive plugin list for shadowing, but never uses the CLI for MCP mutation.
+chmod 0755 $WORK/bin/hermes
+env PATH=$WORK/bin:$PATH
+env HOME=$WORK/home
+env HERMES_HOME=$WORK/home/.hermes
+env OMNI_TEST_API_KEY=integration-secret
+mkdir $WORK/home
+mkdir $HERMES_HOME
+
+exec omni --config settings.json agents mcp sync
+stdout 'updated: hermes-agent/remote'
+stdout 'installed: hermes-agent/local'
+
+exec grep 'X-Key: new-value' $HERMES_HOME/config.yaml
+exec grep 'enabled: false' $HERMES_HOME/config.yaml
+exec grep '# enabled comment' $HERMES_HOME/config.yaml
+exec grep 'timeout: 42' $HERMES_HOME/config.yaml
+exec grep 'include: \[query\]' $HERMES_HOME/config.yaml
+exec grep 'custom: keep' $HERMES_HOME/config.yaml
+exec grep 'command: npx' $HERMES_HOME/config.yaml
+exec grep 'API_KEY: \${env:OMNI_TEST_API_KEY}' $HERMES_HOME/config.yaml
+! exec grep 'integration-secret' $HERMES_HOME/config.yaml
+exec grep -q '^plugins list --user --no-bundled --json$' .omni-cache/hermes-calls.log
+! exec grep -q '^mcp' .omni-cache/hermes-calls.log
+
+exec omni --config settings.json agents mcp list
+stdout 'local\s+stdio\s+hermes-agent\(✓\)'
+stdout 'remote\s+http\s+hermes-agent\(✓\)'
+
+exec omni --config settings.json agents mcp sync
+stdout 'already installed: hermes-agent/remote'
+stdout 'already installed: hermes-agent/local'
+! exec grep -q '^mcp' .omni-cache/hermes-calls.log
+
+exec omni --config settings.json agents mcp remove local
+stdout 'removed local'
+! exec grep 'local:' $HERMES_HOME/config.yaml
+exec grep 'custom: keep' $HERMES_HOME/config.yaml
+! exec grep -q '^mcp' .omni-cache/hermes-calls.log
+
+-- settings.json --
+{
+  "version": 18,
+  "agents": {
+    "mcp_servers": [
+      {
+        "name": "remote",
+        "transport": "http",
+        "url": "https://mcp.example.com",
+        "headers": {"X-Key": "new-value"},
+        "agents": ["hermes-agent"]
+      },
+      {
+        "name": "local",
+        "transport": "stdio",
+        "command": "npx -y example@1.2.3",
+        "env": ["OMNI_TEST_API_KEY"],
+        "agents": ["hermes-agent"]
+      }
+    ]
+  }
+}
+
+-- home/.hermes/config.yaml --
+# root comment
+mcp_servers:
+  remote:
+    url: https://mcp.example.com
+    headers:
+      X-Key: old-value
+    enabled: false # enabled comment
+    timeout: 42
+    tools:
+      include: [query]
+    custom: keep
+
+-- bin/hermes --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/hermes-calls.log"
+if [ "$1" = "plugins" ] && [ "$2" = "list" ]; then
+  printf '[]\n'
+  exit 0
+fi
+echo 'Hermes CLI must not be invoked for MCP config sync' >&2
+exit 99

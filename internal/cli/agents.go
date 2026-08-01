@@ -1128,7 +1128,11 @@ func newAgentsPluginsListCmd(state *rootState) *cobra.Command {
 					}
 					agentParts = append(agentParts, fmt.Sprintf("%s(%s)", id, marker))
 				}
-				line := row.Name + "  " + row.Marketplace
+				origin := row.Marketplace
+				if origin == "" {
+					origin = row.Source
+				}
+				line := row.Name + "  " + origin
 				if row.Version != "" {
 					line += "  " + row.Version
 					if row.Outdated() {
@@ -1164,22 +1168,26 @@ func newAgentsPluginsAddCmd(state *rootState) *cobra.Command {
 	var (
 		name        string
 		marketplace string
+		source      string
 		agents      []string
 	)
 	cmd := &cobra.Command{
 		Use:   "add",
 		Short: "Declare a plugin in the manifest and install it here",
-		Long: "Record a plugin and its marketplace as manifest intent and install it through the " +
+		Long: "Record a plugin and its marketplace or direct source as manifest intent and install it through the " +
 			"targeted agents' own CLIs — declaration and one host's convergence in a single step. " +
 			"Other hosts pick it up on their next sync.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			name = strings.TrimSpace(name)
+			marketplace = strings.TrimSpace(marketplace)
+			source = strings.TrimSpace(source)
 			if name == "" {
 				return fmt.Errorf("--name is required")
 			}
-			if marketplace == "" {
-				return fmt.Errorf("--marketplace is required")
+			if (marketplace == "") == (source == "") {
+				return fmt.Errorf("exactly one of --marketplace or --source is required")
 			}
-			p := config.Plugin{Name: name, Marketplace: marketplace, Agents: agents}
+			p := config.Plugin{Name: name, Marketplace: marketplace, Source: source, Agents: agents}
 			res, err := state.app.AddPlugin(cmd.Context(), p)
 			if err != nil {
 				return err
@@ -1193,7 +1201,8 @@ func newAgentsPluginsAddCmd(state *rootState) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "plugin name (required)")
-	cmd.Flags().StringVar(&marketplace, "marketplace", "", "declared marketplace name (required)")
+	cmd.Flags().StringVar(&marketplace, "marketplace", "", "declared marketplace name")
+	cmd.Flags().StringVar(&source, "source", "", "direct plugin source, owner/repo or Git URL")
 	cmd.Flags().StringArrayVar(&agents, "agents", nil, "target agent IDs (repeatable)")
 	return cmd
 }
@@ -1231,7 +1240,7 @@ func newAgentsPluginsSyncCmd(state *rootState) *cobra.Command {
 		Use:   "sync",
 		Short: "Install the manifest plugin set onto this host",
 		Long: "Move the manifest's plugins onto this host through each agent's own CLI, installing " +
-			"the missing ones from their declared marketplace and leaving matching ones alone. " +
+			"the missing ones from their declared marketplace or direct source and leaving matching ones alone. " +
 			"Adopting plugins the manifest does not declare runs the other way — see import.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			res, err := state.app.RestorePlugins(cmd.Context(), opts)
@@ -1268,7 +1277,8 @@ func newAgentsPluginsSyncCmd(state *rootState) *cobra.Command {
 }
 
 func newAgentsPluginsImportCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	var source string
+	cmd := &cobra.Command{
 		Use:   "import [<name>]",
 		Short: "Adopt a plugin this host already installed into the manifest",
 		Long: "Move an installed plugin into the manifest. Without a name it lists what each agent " +
@@ -1282,7 +1292,10 @@ func newAgentsPluginsImportCmd(state *rootState) *cobra.Command {
 				return err
 			}
 			if len(args) == 1 {
-				return importPluginByName(cmd, state, diff, args[0])
+				return importPluginByName(cmd, state, diff, args[0], strings.TrimSpace(source))
+			}
+			if source != "" {
+				return fmt.Errorf("--source requires a plugin name")
 			}
 			w := cmdOut(cmd)
 			agentIDs := make([]string, 0, len(diff.Unmanaged))
@@ -1299,10 +1312,12 @@ func newAgentsPluginsImportCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&source, "source", "", "direct install source when the agent cannot report one")
+	return cmd
 }
 
 // An undeclared marketplace is adopted only with a real reported source: a fabricated placeholder would be replayed as a real `marketplace add` on restore.
-func importPluginByName(cmd *cobra.Command, state *rootState, diff app.PluginImportDiff, name string) error {
+func importPluginByName(cmd *cobra.Command, state *rootState, diff app.PluginImportDiff, name, directSource string) error {
 	agentIDs := make([]string, 0, len(diff.Unmanaged))
 	for id := range diff.Unmanaged {
 		agentIDs = append(agentIDs, id)
@@ -1328,6 +1343,22 @@ func importPluginByName(cmd *cobra.Command, state *rootState, diff app.PluginImp
 	}
 	if !found {
 		return fmt.Errorf("plugin %q is not unmanaged in any agent CLI", name)
+	}
+	if match.Marketplace == "" {
+		if directSource == "" {
+			return fmt.Errorf("plugin %q has no discoverable install source; pass --source <owner/repo-or-url>", name)
+		}
+		p := config.Plugin{Name: match.Name, Source: directSource, Agents: matchedAgents}
+		res, err := state.app.AddPlugin(cmd.Context(), p)
+		if err != nil {
+			return err
+		}
+		for _, e := range res.Errors {
+			fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.Name, e.Err)
+		}
+		printSkippedUnavailable(cmd, res.SkippedUnavailable)
+		fmt.Fprintf(cmdOut(cmd), "imported %s\n", p.Name)
+		return agentErrsFailure(len(res.Errors))
 	}
 
 	failed := 0

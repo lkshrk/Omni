@@ -25,6 +25,9 @@ func NewClaudeCodePluginAdapter(
 
 func (a *claudeCodePluginAdapter) ID() string { return "claude-code" }
 
+func (a *claudeCodePluginAdapter) SupportsMarketplaces() bool  { return true }
+func (a *claudeCodePluginAdapter) SupportsDirectSources() bool { return false }
+
 func (a *claudeCodePluginAdapter) Available() bool {
 	_, err := lookPath("claude")
 	return err == nil

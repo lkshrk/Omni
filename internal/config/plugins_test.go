@@ -27,6 +27,38 @@ func TestValidateRoot_PluginMissingMarketplace_IsHardError(t *testing.T) {
 	}
 }
 
+func TestValidateRoot_PluginWithDirectSource_NoError(t *testing.T) {
+	cfg := &config.RootConfig{Agents: config.AgentsConfig{Plugins: []config.Plugin{{
+		Name: "caveman", Source: "lkshrk/caveman", Agents: []string{"hermes"},
+	}}}}
+	for _, e := range config.ValidateRoot(cfg, config.ProviderValidation{}) {
+		if !e.Warn {
+			t.Fatalf("unexpected hard error: %+v", e)
+		}
+	}
+}
+
+func TestValidateRoot_PluginRequiresExactlyOneSourceKind(t *testing.T) {
+	for _, plugin := range []config.Plugin{
+		{Name: "missing"},
+		{Name: "ambiguous", Marketplace: "caveman", Source: "lkshrk/caveman"},
+	} {
+		cfg := &config.RootConfig{Agents: config.AgentsConfig{
+			Marketplaces: []config.Marketplace{{Name: "caveman", Source: "lkshrk/marketplace"}},
+			Plugins:      []config.Plugin{plugin},
+		}}
+		found := false
+		for _, e := range config.ValidateRoot(cfg, config.ProviderValidation{}) {
+			if !e.Warn && e.Path == `$.agents.plugins[0]` {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected source-kind error for %+v", plugin)
+		}
+	}
+}
+
 func TestValidateRoot_PluginWithDeclaredMarketplace_NoError(t *testing.T) {
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{

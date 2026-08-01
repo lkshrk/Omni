@@ -19,6 +19,11 @@ type McpAdapter interface {
 	Remove(ctx context.Context, name string) error
 }
 
+// McpInPlaceUpdater preserves adapter-specific configuration that is not represented in McpServer.
+type McpInPlaceUpdater interface {
+	UpdateMcpServer(ctx context.Context, s config.McpServer) error
+}
+
 func headerFlags(headers map[string]string) []string {
 	names := make([]string, 0, len(headers))
 	for name := range headers {

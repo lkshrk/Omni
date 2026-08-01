@@ -317,3 +317,24 @@ func TestResolvePluginDrift_DryRunAndNotDrifted(t *testing.T) {
 		t.Fatalf("error = %v, want a not-drifted refusal", err)
 	}
 }
+
+func TestResolvePluginDrift_DirectSourceIgnoresSameNameMarketplacePlugin(t *testing.T) {
+	t.Parallel()
+	marketplace := &stubPluginAdapter{id: "claude-code", available: true, listedPlugins: []app.InstalledPlugin{{
+		Name: "helper", Marketplace: "other",
+	}}}
+	direct := &stubPluginAdapter{id: "hermes-agent", available: true}
+	a := newPluginTestApp(t, config.AgentsConfig{Plugins: []config.Plugin{{
+		Name: "helper", Source: "owner/helper",
+	}}}, app.WithPluginAdapters([]app.PluginAdapter{marketplace, &directPluginStubAdapter{direct}}))
+
+	_, err := a.ResolvePluginDrift(context.Background(), app.ResolvePluginDriftOptions{
+		Name: "helper", Strategy: app.PluginDriftUseManaged,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not drifted") {
+		t.Fatalf("error=%v, want not-drifted refusal", err)
+	}
+	if len(marketplace.removedNames)+len(marketplace.installedPlugin) != 0 {
+		t.Fatalf("unrelated marketplace plugin was mutated: removed=%v installed=%v", marketplace.removedNames, marketplace.installedPlugin)
+	}
+}

@@ -114,6 +114,23 @@ func TestRegistryByID(t *testing.T) {
 	}
 }
 
+func TestHermesTargetMetadata(t *testing.T) {
+	r := mustRegistry(t)
+	hermes, ok := r.ByID("hermes-agent")
+	if !ok {
+		t.Fatal("hermes-agent target missing")
+	}
+	if hermes.binary != "hermes" || hermes.configEnv != "HERMES_HOME" || hermes.configDir != ".hermes" {
+		t.Fatalf("hermes-agent metadata = %+v", hermes)
+	}
+	home := t.TempDir()
+	hermesHome := t.TempDir()
+	t.Setenv("HERMES_HOME", hermesHome)
+	if got := hermes.configPath(home); got != hermesHome {
+		t.Fatalf("configPath() = %q, want %q", got, hermesHome)
+	}
+}
+
 func TestTargetHasAnySkill(t *testing.T) {
 	r := testRegistry(t)
 	codex, ok := r.ByID("codex")

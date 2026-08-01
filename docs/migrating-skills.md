@@ -200,7 +200,7 @@ evidence:
 | --- | --- | --- | --- | --- |
 | skills | Managed link or byte-identical copy | Nothing at the path | Different content, or a foreign symlink | Package behind its source |
 | mcp servers | Live registration matches the manifest's transport, command and URL | No registration under that name | Registration differs on one of those identity fields | n/a — Omni does not track server versions |
-| plugins | Installed from the declared marketplace | Not installed | Installed from a different marketplace | Behind the marketplace's version |
+| plugins | Installed from the declared marketplace or direct source | Not installed | Installed from a different marketplace | Behind the marketplace's version |
 
 Headers are deliberately absent from the MCP identity list: they derive from
 environment variables and secrets whose rotation is routine, so sync keeps
