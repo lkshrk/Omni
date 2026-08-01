@@ -25,7 +25,7 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.0
+      - uses: actions/checkout@v7.0.1
         with:
           # Annotated tag pushes set github.sha to the tag object, not its commit.
           ref: ${{ github.event.workflow_run.head_sha || github.ref }}
@@ -99,7 +99,7 @@ jobs:
 
       - name: GoReleaser
         if: steps.tag.outputs.tag != '' && steps.civerify.outputs.skip != 'true'
-        uses: goreleaser/goreleaser-action@v7.2.2
+        uses: goreleaser/goreleaser-action@v7.2.3
         with:
           version: '~> v2'
           args: release --clean
