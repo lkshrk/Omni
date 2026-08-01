@@ -54,11 +54,6 @@ type toolsLoadedMsg struct {
 	agentsIgnore           app.AgentsIgnore
 }
 
-type agentsSummaryLoadedMsg struct {
-	summary app.DashboardAgentsSummary
-	err     error
-}
-
 type nvmManagedLoadedMsg struct {
 	nvmManaged map[string]bool
 	err        error

@@ -17,21 +17,6 @@ func (m *Model) doSaveAgentsUse(ids []string) tea.Cmd {
 	}
 }
 
-func (m *Model) doLoadAgentsSummary() tea.Cmd {
-	if m.app == nil {
-		return nil
-	}
-	a, ctx := m.app, m.ctx
-	return func() tea.Msg {
-		cfg, err := a.LoadConfig()
-		if err != nil {
-			return agentsSummaryLoadedMsg{err: err}
-		}
-		summary, err := a.DashboardAgentsSummary(ctx, cfg)
-		return agentsSummaryLoadedMsg{summary: summary, err: err}
-	}
-}
-
 func (m *Model) doRestoreSkills() tea.Cmd {
 	if m.app == nil {
 		return nil

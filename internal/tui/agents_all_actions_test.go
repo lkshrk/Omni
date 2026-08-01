@@ -1861,7 +1861,7 @@ func TestConfirmTimeoutMsg_StaleGen_LeavesOfferArmed(t *testing.T) {
 	}
 }
 
-// skills contributes 1 cmd, mcp/plugins/marketplaces 2 each (spinner tick + row load), and the dashboard summary is always appended; marketplaces share pluginsEnabled.
+// Skills contributes 1 cmd; MCP/plugins/marketplaces contribute 2 each (spinner tick + the same row load consumed by tabs and dashboard).
 func TestDoAgentsRefreshAll_SectionGates(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -1874,12 +1874,12 @@ func TestDoAgentsRefreshAll_SectionGates(t *testing.T) {
 		wantPluginRunning      bool
 		wantMarketplaceRunning bool
 	}{
-		{"all sections enabled", true, true, true, true, 8, true, true, true, true},
-		{"agents disabled gates every section", false, true, true, true, 1, false, false, false, false},
-		{"skills only", true, true, false, false, 2, true, false, false, false},
-		{"mcp only", true, false, true, false, 3, false, true, false, false},
-		{"plugins only also enables marketplaces", true, false, false, true, 5, false, false, true, true},
-		{"skills and mcp without plugins", true, true, true, false, 4, true, true, false, false},
+		{"all sections enabled", true, true, true, true, 7, true, true, true, true},
+		{"agents disabled gates every section", false, true, true, true, 0, false, false, false, false},
+		{"skills only", true, true, false, false, 1, true, false, false, false},
+		{"mcp only", true, false, true, false, 2, false, true, false, false},
+		{"plugins only also enables marketplaces", true, false, false, true, 4, false, false, true, true},
+		{"skills and mcp without plugins", true, true, true, false, 3, true, true, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
