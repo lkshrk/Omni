@@ -79,15 +79,9 @@ func TestSkillOutdatedSurfacesInRowsDashboardAndDoctor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	summary, err := a.DashboardAgentsSummary(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if summary.SkillsOutdated != 1 || len(summary.SkillsOutdatedNames) != 1 {
-		t.Fatalf("summary outdated = %d %v, want 1", summary.SkillsOutdated, summary.SkillsOutdatedNames)
-	}
-	if summary.OutOfSync() != 0 {
-		t.Errorf("outdated is installed and consistent, not out of sync, got %d", summary.OutOfSync())
+	counts := classifySkillRows(rows)
+	if len(counts.Outdated) != 1 || len(counts.Missing) != 0 || len(counts.Drifted) != 0 {
+		t.Fatalf("classified rows = %+v, want one outdated package and no sync issue", counts)
 	}
 
 	group, _ := a.doctorAgentsSkills(ctx, cfg)
@@ -108,16 +102,13 @@ func TestSkillOutdatedIsNotCountedTwiceWhenAlsoMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := a.loadConfig()
+	rows, err := a.SkillPackageRows(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	summary, err := a.DashboardAgentsSummary(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if summary.SkillsMissing != 1 || summary.SkillsOutdated != 0 {
-		t.Fatalf("missing=%d outdated=%d, want 1 and 0", summary.SkillsMissing, summary.SkillsOutdated)
+	counts := classifySkillRows(rows)
+	if len(counts.Missing) != 1 || len(counts.Outdated) != 0 {
+		t.Fatalf("classified rows = %+v, want one missing and no outdated package", counts)
 	}
 }
 
@@ -149,20 +140,9 @@ func TestSkillOutdatedStaysVisibleWhileDrifted(t *testing.T) {
 		t.Fatalf("PerAgentStatus = %v, want drifted", rows[0].PerAgentStatus)
 	}
 
-	cfg, err := a.loadConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	summary, err := a.DashboardAgentsSummary(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if summary.SkillsDrifted != 1 {
-		t.Errorf("SkillsDrifted = %d, want 1", summary.SkillsDrifted)
-	}
-	if summary.SkillsOutdated != 1 || len(summary.SkillsOutdatedNames) != 1 {
-		t.Fatalf("SkillsOutdated = %d %v, want the upgrade visible alongside the drift",
-			summary.SkillsOutdated, summary.SkillsOutdatedNames)
+	counts := classifySkillRows(rows)
+	if len(counts.Drifted) != 1 || len(counts.Outdated) != 1 {
+		t.Fatalf("classified rows = %+v, want the upgrade visible alongside the drift", counts)
 	}
 
 	if _, err := a.ResolveSkillDrift(ctx, ResolveSkillDriftOptions{
@@ -174,15 +154,13 @@ func TestSkillOutdatedStaysVisibleWhileDrifted(t *testing.T) {
 	if _, err := a.RefreshSkillOutdated(ctx, true); err != nil {
 		t.Fatal(err)
 	}
-	summary, err = a.DashboardAgentsSummary(ctx, cfg)
+	rows, err = a.SkillPackageRows(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.SkillsDrifted != 0 {
-		t.Errorf("SkillsDrifted = %d after resolving, want 0", summary.SkillsDrifted)
-	}
-	if summary.SkillsOutdated != 1 {
-		t.Errorf("SkillsOutdated = %d after resolving, want the same 1", summary.SkillsOutdated)
+	counts = classifySkillRows(rows)
+	if len(counts.Drifted) != 0 || len(counts.Outdated) != 1 {
+		t.Errorf("classified rows = %+v after resolving, want no drift and the same upgrade", counts)
 	}
 }
 

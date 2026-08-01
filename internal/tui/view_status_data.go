@@ -181,10 +181,6 @@ func (c agentsDashCounts) Outdated() int {
 	return c.SkillsOutdated + c.PluginsOutdated
 }
 
-func agentsDashboardDataLoaded(m Model) bool {
-	return m.skillsLoaded || m.mcpLoaded || m.pluginLoaded || m.marketplaceLoaded
-}
-
 type agentsFeatureName struct {
 	feature agentsSection
 	name    string
@@ -197,7 +193,7 @@ type agentsOutOfSyncKey struct {
 	unmanaged bool
 }
 
-// One item out of sync is one issue: counting per-agent rows would report it once per agent. The first out-of-sync row's mark picks the bucket, matching DashboardAgentsSummary.
+// One item out of sync is one issue: counting per-agent rows would report it once per agent.
 func agentsDashCountsFromRows(rows []agentsAllRow) agentsDashCounts {
 	var counts agentsDashCounts
 	countedOutdated := make(map[agentsFeatureName]bool)
@@ -258,48 +254,6 @@ func agentsDashCountsFromRows(rows []agentsAllRow) agentsDashCounts {
 	return counts
 }
 
-func agentsDashCountsFromSummary(summary app.DashboardAgentsSummary, ignore app.AgentsIgnore) agentsDashCounts {
-	skillsIgnore, mcpIgnore, pluginIgnore, marketplaceIgnore := agentsIgnoreSets(ignore)
-	counts := agentsDashCounts{}
-	for _, name := range summary.SkillsMissingNames {
-		if !skillsIgnore[name] {
-			counts.SkillsMissing++
-		}
-	}
-	for _, name := range summary.SkillsDriftedNames {
-		if !skillsIgnore[name] {
-			counts.SkillsDrifted++
-		}
-	}
-	for _, name := range summary.SkillsUnmanagedNames {
-		if !skillsIgnore[name] {
-			counts.SkillsUnmanaged++
-		}
-	}
-	for _, name := range summary.McpDriftedNames {
-		if !mcpIgnore[name] {
-			counts.McpDrifted++
-		}
-	}
-	for _, name := range summary.PluginsDriftedNames {
-		if !pluginIgnore[name] {
-			counts.PluginsDrifted++
-		}
-	}
-	for _, name := range summary.SkillsOutdatedNames {
-		if !skillsIgnore[name] {
-			counts.SkillsOutdated++
-		}
-	}
-	for _, name := range summary.PluginsOutdatedNames {
-		if !pluginIgnore[name] {
-			counts.PluginsOutdated++
-		}
-	}
-	_ = marketplaceIgnore
-	return counts
-}
-
 // Model.New seeds agentsEnabled true until toolsLoadedMsg corrects it.
 func agentsDashboardEnabled(m Model) bool {
 	return m.agentsEnabled
@@ -328,63 +282,36 @@ func agentsDashboardViewFor(m Model) agentsDashboardView {
 	skillsIgnore, _, _, _ := agentsIgnoreSets(m.agentsIgnore)
 	view := agentsDashboardView{enabled: true}
 
-	if m.skillsLoaded && (len(m.skillsRows) > 0 || len(m.skillsUnmanagedRows) > 0) {
-		view.skillsMissingNames = make([]string, 0, len(m.skillsRows))
-		for _, row := range m.skillsRows {
-			if skillsIgnore[row.Name] {
-				continue
-			}
-			view.skillPackages++
-			status, mark := skillPackageRowStatus(
-				row.Installed,
-				row.ShadowedByPlugin,
-				len(skillShadowedAgents(row, m.enabledAgents)) > 0 &&
-					len(skillMissingAgents(row, m.enabledAgents)) == 0,
-				len(skillDriftedAgents(row, m.enabledAgents)) > 0,
-				skillRowOutdated(row),
-			)
-			if status == agentsStatusOutOfSync && agentsMarkNeedsInstall(mark) {
-				view.skillsMissing++
-				view.skillsMissingNames = append(view.skillsMissingNames, row.Name)
-				continue
-			}
-			view.skillsInstalled++
+	view.skillsMissingNames = make([]string, 0, len(m.skillsRows))
+	for _, row := range m.skillsRows {
+		if skillsIgnore[row.Name] {
+			continue
 		}
-		for _, row := range m.skillsUnmanagedRows {
-			if !skillsIgnore[row.Name] {
-				view.skillsUnmanaged++
-			}
+		view.skillPackages++
+		status, mark := skillPackageRowStatus(
+			row.Installed,
+			row.ShadowedByPlugin,
+			len(skillShadowedAgents(row, m.enabledAgents)) > 0 &&
+				len(skillMissingAgents(row, m.enabledAgents)) == 0,
+			len(skillDriftedAgents(row, m.enabledAgents)) > 0,
+			skillRowOutdated(row),
+		)
+		if status == agentsStatusOutOfSync && agentsMarkNeedsInstall(mark) {
+			view.skillsMissing++
+			view.skillsMissingNames = append(view.skillsMissingNames, row.Name)
+			continue
 		}
-		sort.Strings(view.skillsMissingNames)
-	} else {
-		summary := m.agentsSummary
-		view.skillPackages = summary.SkillPackages
-		view.skillsInstalled = summary.SkillsInstalled
-		view.skillsMissing = summary.SkillsMissing + summary.SkillsDrifted
-		view.skillsUnmanaged = summary.SkillsUnmanaged
-		for _, name := range append(append([]string(nil), summary.SkillsMissingNames...), summary.SkillsDriftedNames...) {
-			if !skillsIgnore[name] {
-				view.skillsMissingNames = append(view.skillsMissingNames, name)
-			}
+		view.skillsInstalled++
+	}
+	for _, row := range m.skillsUnmanagedRows {
+		if !skillsIgnore[row.Name] {
+			view.skillsUnmanaged++
 		}
-		sort.Strings(view.skillsMissingNames)
 	}
-
-	if m.mcpLoaded && len(m.mcpRows) > 0 {
-		view.mcpServers = len(m.mcpRows)
-	} else {
-		view.mcpServers = m.agentsSummary.McpServers
-	}
-	if m.pluginLoaded && len(m.pluginRows) > 0 {
-		view.plugins = len(m.pluginRows)
-	} else {
-		view.plugins = m.agentsSummary.Plugins
-	}
-	if m.marketplaceLoaded && len(m.marketplaceRows) > 0 {
-		view.marketplaces = len(m.marketplaceRows)
-	} else {
-		view.marketplaces = m.agentsSummary.Marketplaces
-	}
+	sort.Strings(view.skillsMissingNames)
+	view.mcpServers = len(m.mcpRows)
+	view.plugins = len(m.pluginRows)
+	view.marketplaces = len(m.marketplaceRows)
 	return view
 }
 
@@ -392,38 +319,11 @@ func statusAgentsCounts(m Model) agentsDashCounts {
 	if !agentsDashboardEnabled(m) {
 		return agentsDashCounts{}
 	}
-	if agentsDashboardDataLoaded(m) {
-		return agentsDashCountsFromRows(agentsAllRowsList(m))
-	}
-	return agentsDashCountsFromSummary(m.agentsSummary, m.agentsIgnore)
+	return agentsDashCountsFromRows(agentsAllRowsList(m))
 }
 
 func statusAgentsOutOfSyncNames(m Model) []string {
 	rows := agentsAllRowsList(m)
-	if !agentsDashboardDataLoaded(m) {
-		skillsIgnore, _, _, _ := agentsIgnoreSets(m.agentsIgnore)
-		seen := make(map[string]bool)
-		var names []string
-		add := func(name string) {
-			if name == "" || seen[name] {
-				return
-			}
-			seen[name] = true
-			names = append(names, name)
-		}
-		for _, name := range m.agentsSummary.SkillsMissingNames {
-			if !skillsIgnore[name] {
-				add(name)
-			}
-		}
-		for _, name := range m.agentsSummary.SkillsUnmanagedNames {
-			if !skillsIgnore[name] {
-				add(name)
-			}
-		}
-		sort.Strings(names)
-		return names
-	}
 	seen := make(map[string]bool)
 	var names []string
 	for _, e := range rows {
@@ -438,7 +338,6 @@ func statusAgentsOutOfSyncNames(m Model) []string {
 }
 
 func statusAgentsOutdatedNames(m Model) []string {
-	skillsIgnore, _, pluginIgnore, _ := agentsIgnoreSets(m.agentsIgnore)
 	seen := make(map[string]bool)
 	var names []string
 	add := func(name string) {
@@ -447,20 +346,6 @@ func statusAgentsOutdatedNames(m Model) []string {
 		}
 		seen[name] = true
 		names = append(names, name)
-	}
-	if !agentsDashboardDataLoaded(m) {
-		for _, name := range m.agentsSummary.SkillsOutdatedNames {
-			if !skillsIgnore[name] {
-				add(name)
-			}
-		}
-		for _, name := range m.agentsSummary.PluginsOutdatedNames {
-			if !pluginIgnore[name] {
-				add(name)
-			}
-		}
-		sort.Strings(names)
-		return names
 	}
 	for _, e := range agentsAllRowsList(m) {
 		if e.outdated {

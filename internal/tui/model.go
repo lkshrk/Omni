@@ -491,7 +491,6 @@ type Model struct {
 	skillsEnabled  bool
 	mcpEnabled     bool
 	pluginsEnabled bool
-	agentsSummary  app.DashboardAgentsSummary
 	// Unset with empty rows means "not loaded yet" — render as loading, not as the onboarding empty state.
 	skillsRowsKnown      bool
 	mcpRowsKnown         bool

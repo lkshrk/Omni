@@ -332,11 +332,6 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	case fallbackSavedMsg:
 		cmds = append(cmds, m.handleFallbackSavedMsg(msg)...)
 
-	case agentsSummaryLoadedMsg:
-		if msg.err == nil {
-			m.agentsSummary = msg.summary
-		}
-
 	case nvmManagedLoadedMsg:
 		if msg.err == nil {
 			m.nvmManaged = msg.nvmManaged
@@ -358,7 +353,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			if !msg.nowIgnored {
 				desc = "unignored"
 			}
-			cmds = append(cmds, setStatus(&m, "✓ "+msg.name+" "+desc, false), m.doReloadAgentsIgnore(), m.doLoadAgentsSummary())
+			cmds = append(cmds, setStatus(&m, "✓ "+msg.name+" "+desc, false), m.doReloadAgentsIgnore())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -379,8 +374,6 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		}
 		clampSkillsCursor(&m)
 		clampAgentsAllCursor(&m)
-		cmds = append(cmds, m.doLoadAgentsSummary())
-
 	case skillsGroupsUpdatedMsg:
 		if msg.err != nil && !app.IsCatalogWarning(msg.err) {
 			m.skillsErr = msg.err
@@ -401,7 +394,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			r := msg.res
 			m.skillsResult = &r
 			m.skillsLoaded = false
-			cmds = append(cmds, setStatus(&m, app.RestoreSkillsSummaryText(r), false), m.loadSkillsManifestCmd(), m.doLoadAgentsSummary())
+			cmds = append(cmds, setStatus(&m, app.RestoreSkillsSummaryText(r), false), m.loadSkillsManifestCmd())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -473,7 +466,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			m.skillsErr = msg.err
 		} else {
 			m.skillsLoaded = false
-			cmds = append(cmds, m.loadSkillsManifestCmd(), m.doLoadAgentsSummary())
+			cmds = append(cmds, m.loadSkillsManifestCmd())
 		}
 		if msg.warning != "" {
 			cmds = append(cmds, setStatus(&m, "⚠ "+msg.warning, true))
@@ -496,7 +489,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			cmds = append(cmds, setStatus(&m, fmt.Sprintf("✓ resolved %d", msg.result.Resolved()), false))
 		}
 		m.skillsLoaded = false
-		cmds = append(cmds, m.loadSkillsManifestCmd(), m.doLoadMcpRows(), m.doLoadPluginRows(), m.doLoadAgentsSummary())
+		cmds = append(cmds, m.loadSkillsManifestCmd(), m.doLoadMcpRows(), m.doLoadPluginRows())
 		return m, tea.Batch(cmds...)
 
 	case skillDriftResolvedMsg:
@@ -509,7 +502,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
 		} else {
 			m.skillsLoaded = false
-			cmds = append(cmds, m.loadSkillsManifestCmd(), m.doLoadAgentsSummary())
+			cmds = append(cmds, m.loadSkillsManifestCmd())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -520,7 +513,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
 		} else {
 			m.skillsLoaded = false
-			cmds = append(cmds, m.loadSkillsManifestCmd(), m.doLoadAgentsSummary())
+			cmds = append(cmds, m.loadSkillsManifestCmd())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -534,7 +527,6 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 				m.skillsLoaded = false
 				cmds = append(cmds, m.loadSkillsManifestCmd())
 			}
-			cmds = append(cmds, m.doLoadAgentsSummary())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -548,7 +540,6 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 				m.skillsLoaded = false
 				cmds = append(cmds, m.loadSkillsManifestCmd())
 			}
-			cmds = append(cmds, m.doLoadAgentsSummary())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -563,7 +554,6 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 				m.mcpRunning = true
 				cmds = append(cmds, m.spinner.Tick, m.doLoadMcpRows())
 			}
-			cmds = append(cmds, m.doLoadAgentsSummary())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -581,7 +571,6 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 				m.marketplaceRunning = true
 				cmds = append(cmds, m.spinner.Tick, m.doLoadMarketplaceRows())
 			}
-			cmds = append(cmds, m.doLoadAgentsSummary())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -664,7 +653,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
 		} else {
 			m.mcpErr = nil
-			cmds = append(cmds, m.doLoadMcpRows(), m.doLoadAgentsSummary())
+			cmds = append(cmds, m.doLoadMcpRows())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -752,7 +741,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
 		} else {
 			m.pluginErr = nil
-			cmds = append(cmds, m.doLoadPluginRows(), m.doLoadAgentsSummary())
+			cmds = append(cmds, m.doLoadPluginRows())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -888,7 +877,6 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		} else if msg.report != nil {
 			cmds = append(cmds, setStatus(&m, "✓ "+app.AgentsSyncAllSummaryText(*msg.report), false))
 		}
-		cmds = append(cmds, m.doLoadAgentsSummary())
 		if m.dashboardReconcileCurrent == dashboardReconcilePlanSyncAgents {
 			m.continueDashboardReconcile(dashboardReconcilePlanSyncAgents, firstAgentsProgressError(msg), &cmds)
 		}

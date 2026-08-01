@@ -78,7 +78,7 @@ func agentsAllRowsList(m Model) []agentsAllRow {
 				drifted := len(skillDriftedAgents(r, m.enabledAgents)) > 0
 				packageShadowed := len(skillShadowedAgents(r, m.enabledAgents)) > 0 &&
 					len(skillMissingAgents(r, m.enabledAgents)) == 0
-				// Mirrors DashboardAgentsSummary: a drifted package is still installed and its upgrade real; a missing one has nothing to upgrade.
+				// A drifted package is still installed and its upgrade real; a missing one has nothing to upgrade.
 				outdated := skillRowOutdated(r) && !r.ShadowedByPlugin && !packageShadowed && (r.Installed || drifted)
 				status, mark := skillPackageRowStatus(
 					r.Installed, r.ShadowedByPlugin, packageShadowed, drifted, outdated)
@@ -690,7 +690,6 @@ func (m *Model) doAgentsRefreshAll() []tea.Cmd {
 		m.marketplaceRunning = true
 		cmds = append(cmds, m.spinner.Tick, m.doLoadMarketplaceRows())
 	}
-	cmds = append(cmds, m.doLoadAgentsSummary())
 	return cmds
 }
 

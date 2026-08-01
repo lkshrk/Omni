@@ -45,7 +45,8 @@ GEMINI.md
 .wolf/
 .agent-progress.md
 .worktrees/
-docs/superpowers
+/docs/superpowers/
+/specs/
 docs/research
 vendor/
 coverage.out

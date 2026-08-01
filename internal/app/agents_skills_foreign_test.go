@@ -79,8 +79,11 @@ func TestForeignSkillEntries_ReportsOnlyUnaccountedEntries(t *testing.T) {
 	}
 
 	items := f.doctorSkillsItems(t)
-	requireItemContaining(t, items, "2 foreign skill entr(ies) not managed by omni (other tools or manual installs)")
-	requireItemContaining(t, items, handmade)
+	for _, item := range items {
+		if strings.Contains(item, "foreign skill") {
+			t.Fatalf("doctor skills items = %v, want foreign content omitted", items)
+		}
+	}
 	if _, err := os.Lstat(handmade); err != nil {
 		t.Fatalf("doctor must not touch foreign content: %v", err)
 	}

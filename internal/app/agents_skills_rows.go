@@ -348,7 +348,7 @@ func (a *App) UnmanagedSkillPackages(ctx context.Context) ([]SkillPackageRow, er
 	}
 	lock, err := config.LoadSkillLock(config.SkillLockPath(home))
 	if err != nil {
-		return nil, err
+		return nil, nil
 	}
 	sources := a.unmanagedLockSources(cfg, lock)
 	installedAgents := a.installedAgents(home)

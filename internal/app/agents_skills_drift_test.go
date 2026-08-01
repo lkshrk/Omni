@@ -66,22 +66,9 @@ func TestSkillPackageDriftIsDistinctFromMissing(t *testing.T) {
 		t.Error("a drifted package must not report as installed")
 	}
 
-	cfg, err := a.loadConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	summary, err := a.DashboardAgentsSummary(context.Background(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if summary.SkillsDrifted != 1 || len(summary.SkillsDriftedNames) != 1 {
-		t.Fatalf("summary drift = %d %v, want 1 name", summary.SkillsDrifted, summary.SkillsDriftedNames)
-	}
-	if summary.SkillsMissing != 0 {
-		t.Errorf("drifted package counted as missing: %+v", summary)
-	}
-	if summary.OutOfSync() < 1 {
-		t.Errorf("drift must count toward attention, got %d", summary.OutOfSync())
+	counts := classifySkillRows(rows)
+	if len(counts.Drifted) != 1 || len(counts.Missing) != 0 {
+		t.Fatalf("classified rows = %+v, want one drift and no missing package", counts)
 	}
 
 	result, err := a.Doctor(context.Background())

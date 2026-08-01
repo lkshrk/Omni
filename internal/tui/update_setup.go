@@ -216,9 +216,6 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		cmds = append(cmds, m.spinner.Tick, m.doLaunchDotsSyncOnly())
 	}
 
-	if m.agentsEnabled {
-		cmds = append(cmds, m.doLoadAgentsSummary())
-	}
 	cmds = append(cmds, m.doLoadNvmManaged())
 	cmds = append(cmds, m.startPostLoadBackgroundTasks()...)
 	// Only suppress the dashboard body during the post-bootstrap reload; a normal launch renders immediately with per-row loading indicators.

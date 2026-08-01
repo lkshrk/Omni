@@ -99,47 +99,6 @@ func TestAgentsSyncAll_ClaimLegOptIn(t *testing.T) {
 	}
 }
 
-func TestDashboardAgentsSummary_CountsMcpAndPluginAttention(t *testing.T) {
-	outdated := true
-	mcp := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{
-		{Name: "srv", Transport: "http", URL: "https://elsewhere.example.com"},
-	}}
-	plugins := &stubPluginAdapter{id: "claude-code", available: true, listedPlugins: []app.InstalledPlugin{
-		{Name: "wrong-market", Marketplace: "other"},
-		{Name: "stale", Marketplace: "declared", PathOutdated: &outdated},
-	}}
-	agents := config.AgentsConfig{
-		McpServers: []config.McpServer{{Name: "srv", Transport: "http", URL: "https://mcp.example.com"}},
-		Plugins: []config.Plugin{
-			{Name: "wrong-market", Marketplace: "declared"},
-			{Name: "stale", Marketplace: "declared"},
-		},
-		Marketplaces: []config.Marketplace{{Name: "declared", Source: "o/declared"}, {Name: "other", Source: "o/other"}},
-	}
-	a := parityTestApp(t, agents, []app.McpAdapter{mcp}, []app.PluginAdapter{plugins})
-
-	cfg, err := a.LoadConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	summary, err := a.DashboardAgentsSummary(context.Background(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if summary.McpDrifted != 1 || len(summary.McpDriftedNames) != 1 || summary.McpDriftedNames[0] != "srv" {
-		t.Errorf("McpDrifted = %d %v, want 1 [srv]", summary.McpDrifted, summary.McpDriftedNames)
-	}
-	if summary.PluginsDrifted != 1 || summary.PluginsDriftedNames[0] != "wrong-market" {
-		t.Errorf("PluginsDrifted = %d %v, want 1 [wrong-market]", summary.PluginsDrifted, summary.PluginsDriftedNames)
-	}
-	if summary.PluginsOutdated != 1 || summary.PluginsOutdatedNames[0] != "stale" {
-		t.Errorf("PluginsOutdated = %d %v, want 1 [stale]", summary.PluginsOutdated, summary.PluginsOutdatedNames)
-	}
-	if summary.OutOfSync() != 2 {
-		t.Errorf("OutOfSync = %d, want only the two drift states counted (outdated is installed, not out of sync)", summary.OutOfSync())
-	}
-}
-
 func TestDoctorAgents_ReportsMcpAndPluginDrift(t *testing.T) {
 	outdated := true
 	mcp := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{
@@ -199,5 +158,41 @@ func TestDoctorAgents_ReportsMcpAndPluginDrift(t *testing.T) {
 	}
 	if !hasItem(pluginGroup.Items, "1 plugin(s) not in manifest") {
 		t.Errorf("plugin items = %v, want the unmanaged info line", pluginGroup.Items)
+	}
+}
+
+func TestDoctorAgents_UnmanagedCountsMatchVisibleIssues(t *testing.T) {
+	claudeMcp := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{
+		{Name: "shared", Transport: "stdio", Command: "shared"},
+		{Name: "ignored", Transport: "stdio", Command: "ignored"},
+	}}
+	codexMcp := &stubMcpAdapter{id: "codex", available: true, listed: []app.InstalledMcpServer{
+		{Name: "shared", Transport: "stdio", Command: "shared"},
+		{Name: "ignored", Transport: "stdio", Command: "ignored"},
+	}}
+	claudePlugins := &stubPluginAdapter{id: "claude-code", available: true, listedPlugins: []app.InstalledPlugin{
+		{Name: "shared-plugin", Marketplace: "other"},
+		{Name: "ignored-plugin", Marketplace: "other"},
+	}}
+	codexPlugins := &stubPluginAdapter{id: "codex", available: true, listedPlugins: []app.InstalledPlugin{
+		{Name: "shared-plugin", Marketplace: "other"},
+		{Name: "ignored-plugin", Marketplace: "other"},
+	}}
+	a := newDoctorAgentsApp(t, config.AgentsConfig{Ignore: config.AgentsIgnore{
+		McpServers: []string{"ignored"},
+		Plugins:    []string{"ignored-plugin"},
+	}}, app.WithMcpAdapters([]app.McpAdapter{claudeMcp, codexMcp}),
+		app.WithPluginAdapters([]app.PluginAdapter{claudePlugins, codexPlugins}))
+
+	result, err := a.Doctor(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := doctorCheck(result, "agents")
+	if group := doctorAgentsGroup(check, "mcp servers"); group == nil || !hasItem(group.Items, "1 mcp server(s) not in manifest") {
+		t.Fatalf("mcp group = %+v, want one unique non-ignored server", group)
+	}
+	if group := doctorAgentsGroup(check, "plugins"); group == nil || !hasItem(group.Items, "1 plugin(s) not in manifest") {
+		t.Fatalf("plugin group = %+v, want one unique non-ignored plugin", group)
 	}
 }

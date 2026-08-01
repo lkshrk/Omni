@@ -180,13 +180,6 @@ func TestSkillPackageRows_UnknownAgentTargetDegradesToRowWarning(t *testing.T) {
 		t.Errorf("warning = %q, want the unknown ID and a fix hint", w)
 	}
 
-	cfg, err := a.loadConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := a.DashboardAgentsSummary(context.Background(), cfg); err != nil {
-		t.Fatalf("dashboard should degrade, not fail: %v", err)
-	}
 }
 
 func TestSkillPackageRows_AgentsUseMatchesRestoreTargets(t *testing.T) {
@@ -259,13 +252,9 @@ func TestSkillPackageRows_AgentsUseMatchesRestoreTargets(t *testing.T) {
 		t.Fatalf("PerAgentStatus targets = %v, want the restore targets %v", got, want)
 	}
 
-	summary, err := a.DashboardAgentsSummary(context.Background(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if summary.SkillsDrifted != 0 {
-		t.Fatalf("SkillsDrifted = %d (%v), want 0: cursor is not managed on this host",
-			summary.SkillsDrifted, summary.SkillsDriftedNames)
+	counts := classifySkillRows(rows)
+	if len(counts.Drifted) != 0 {
+		t.Fatalf("Drifted = %v, want none: cursor is not managed on this host", counts.Drifted)
 	}
 
 	result, err := a.ResolveAllDrift(context.Background(), ResolveAllDriftOptions{UseManaged: true})

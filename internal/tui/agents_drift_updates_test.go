@@ -59,7 +59,7 @@ func TestAgentsDashCounts_ResolvingDriftLeavesTheUpdateCount(t *testing.T) {
 	}
 }
 
-// A package installed nowhere has nothing to upgrade, so it stays out of the update count (mirrors DashboardAgentsSummary).
+// A package installed nowhere has nothing to upgrade, so it stays out of the update count.
 func TestAgentsDashCounts_MissingPackageIsNotAnUpdate(t *testing.T) {
 	t.Parallel()
 	m := agentsAllModel([]app.SkillPackageRow{{

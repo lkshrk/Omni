@@ -63,7 +63,7 @@ func (a *App) doctorAgentsSkills(ctx context.Context, cfg *config.RootConfig) (D
 	} else {
 		g.Items = append(g.Items, "git: ok")
 	}
-	rows, err := a.SkillPackageRows(ctx)
+	rows, unmanaged, err := a.SkillPackageRowState(ctx)
 	if err != nil {
 		g.Items = append(g.Items, fmt.Sprintf("packages: %v", err))
 		return g, false
@@ -94,13 +94,9 @@ func (a *App) doctorAgentsSkills(ctx context.Context, cfg *config.RootConfig) (D
 		g.Items = append(g.Items, item)
 	}
 	// An unadopted legacy install is intent not yet expressed, not breakage.
-	if unmanaged, err := a.UnmanagedSkillPackages(ctx); err == nil && len(unmanaged) > 0 {
+	if len(unmanaged) > 0 {
 		g.Items = append(g.Items, fmt.Sprintf(
 			"%d legacy skill package(s) not in manifest (\"omni agents skills import\" claims them)", len(unmanaged)))
-	}
-	// A hand-managed skill is somebody else's, not breakage.
-	if foreign, err := a.ForeignSkillEntries(); err == nil && len(foreign) > 0 {
-		g.Items = append(g.Items, foreignSkillEntriesItem(foreign))
 	}
 	report, err := a.skillStoreFix(ctx, cfg, true)
 	for _, item := range skillStoreItems(report) {
@@ -112,19 +108,6 @@ func (a *App) doctorAgentsSkills(ctx context.Context, cfg *config.RootConfig) (D
 		healthy = false
 	}
 	return g, healthy
-}
-
-const foreignSkillExamples = 3
-
-func foreignSkillEntriesItem(paths []string) string {
-	examples := paths
-	suffix := ""
-	if len(examples) > foreignSkillExamples {
-		examples = examples[:foreignSkillExamples]
-		suffix = ", …"
-	}
-	return fmt.Sprintf("%d foreign skill entr(ies) not managed by omni (other tools or manual installs): %s%s",
-		len(paths), strings.Join(examples, ", "), suffix)
 }
 
 // Each item carries its fix, so the remedy travels with the finding.
@@ -202,7 +185,8 @@ func (a *App) doctorAgentsMcp(ctx context.Context, cfg *config.RootConfig) (Doct
 	}
 	// A server another tool registered is intent not yet expressed, not breakage.
 	if item := unmanagedCountItem(
-		countUnmanaged(unmanaged), "mcp server(s) not in manifest", "omni agents mcp import"); item != "" {
+		countUnmanaged(unmanaged, cfg.Agents.Ignore.McpServers, func(s InstalledMcpServer) string { return s.Name }),
+		"mcp server(s) not in manifest", "omni agents mcp import"); item != "" {
 		g.Items = append(g.Items, item)
 	}
 	return g, healthy
@@ -230,7 +214,8 @@ func (a *App) doctorAgentsPlugins(ctx context.Context, cfg *config.RootConfig) (
 		g.Items = append(g.Items, item)
 	}
 	if item := unmanagedCountItem(
-		countUnmanaged(unmanaged), "plugin(s) not in manifest", "omni agents plugins import"); item != "" {
+		countUnmanaged(unmanaged, cfg.Agents.Ignore.Plugins, func(p InstalledPlugin) string { return p.Name }),
+		"plugin(s) not in manifest", "omni agents plugins import"); item != "" {
 		g.Items = append(g.Items, item)
 	}
 	if _, err := lookPath("claude"); err == nil {
@@ -239,12 +224,21 @@ func (a *App) doctorAgentsPlugins(ctx context.Context, cfg *config.RootConfig) (
 	return g, healthy
 }
 
-func countUnmanaged[T any](byAgent map[string][]T) int {
-	total := 0
-	for _, entries := range byAgent {
-		total += len(entries)
+func countUnmanaged[T any](byAgent map[string][]T, ignored []string, name func(T) string) int {
+	ignoredNames := make(map[string]bool, len(ignored))
+	for _, entry := range ignored {
+		ignoredNames[entry] = true
 	}
-	return total
+	seen := make(map[string]bool)
+	for _, entries := range byAgent {
+		for _, entry := range entries {
+			entryName := name(entry)
+			if !ignoredNames[entryName] {
+				seen[entryName] = true
+			}
+		}
+	}
+	return len(seen)
 }
 
 func unmanagedCountItem(n int, label, verb string) string {

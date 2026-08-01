@@ -6,7 +6,6 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -8468,7 +8467,7 @@ func TestDashboardOverviewBreakdownFormats(t *testing.T) {
 	})
 }
 
-func TestAgentsDashboardEnabled_ShowsLoadingNotDisabledBeforeSnapshot(t *testing.T) {
+func TestAgentsDashboardEnabled_ShowsLoadingNotDisabledBeforeRows(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
 	m.agentsEnabled = true
@@ -8477,7 +8476,7 @@ func TestAgentsDashboardEnabled_ShowsLoadingNotDisabledBeforeSnapshot(t *testing
 	}
 	view := agentsDashboardViewFor(m)
 	if !view.enabled {
-		t.Fatal("dashboard view should be enabled before agentsSummary snapshot arrives")
+		t.Fatal("dashboard view should be enabled before agent rows arrive")
 	}
 	row := statusAgentsOverviewRow(m)
 	if row.muted {
@@ -8492,13 +8491,6 @@ func TestAgentsDashboardViewFor_UsesLiveSkillRows(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
 	m.agentsEnabled = true
-	m.agentsSummary = app.DashboardAgentsSummary{
-		AgentsEnabled: true,
-		SkillPackages: 99,
-		SkillsMissing: 99,
-		McpServers:    99,
-		Plugins:       99,
-	}
 	m.skillsLoaded = true
 	m.mcpLoaded = true
 	m.pluginLoaded = true
@@ -8523,12 +8515,17 @@ func TestDashboardAgentsOverviewRow(t *testing.T) {
 	t.Parallel()
 	t.Run("enabled", func(t *testing.T) {
 		m := baseModel(nil)
-		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillPackages: 7, McpServers: 3, Plugins: 5}
+		m.skillsRows = make([]app.SkillPackageRow, 7)
+		for i := range m.skillsRows {
+			m.skillsRows[i].Installed = true
+		}
+		m.mcpRows = make([]app.McpServerRow, 3)
+		m.pluginRows = make([]app.PluginRow, 5)
 		if !statusAgentsLoading(m) {
 			t.Fatalf("bare baseModel should be in a loading state (skillsLoaded=false)")
 		}
 		row := statusAgentsOverviewRow(m)
-		want := fmt.Sprintf("%d managed", m.agentsSummary.Managed())
+		want := fmt.Sprintf("%d managed", agentsDashboardViewFor(m).managed())
 		if !strings.Contains(row.value, want) {
 			t.Fatalf("agents overview value = %q, want it to contain %q even while loading", row.value, want)
 		}
@@ -8543,7 +8540,12 @@ func TestDashboardAgentsOverviewRow(t *testing.T) {
 
 	t.Run("enabled and loaded", func(t *testing.T) {
 		m := baseModel(nil)
-		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillPackages: 7, McpServers: 3, Plugins: 5}
+		m.skillsRows = make([]app.SkillPackageRow, 7)
+		for i := range m.skillsRows {
+			m.skillsRows[i].Installed = true
+		}
+		m.mcpRows = make([]app.McpServerRow, 3)
+		m.pluginRows = make([]app.PluginRow, 5)
 		m.skillsLoaded = true
 		m.mcpLoaded = true
 		m.pluginLoaded = true
@@ -8570,7 +8572,6 @@ func TestDashboardAgentsOverviewRow(t *testing.T) {
 	t.Run("disabled", func(t *testing.T) {
 		m := baseModel(nil)
 		m.agentsEnabled = false
-		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: false}
 		row := statusAgentsOverviewRow(m)
 		if !row.muted {
 			t.Fatalf("disabled agents row should be muted")
@@ -8582,31 +8583,29 @@ func TestDashboardAgentsOverviewRow(t *testing.T) {
 
 	t.Run("details", func(t *testing.T) {
 		m := baseModel(nil)
-		summary := app.DashboardAgentsSummary{
-			AgentsEnabled:   true,
-			SkillsInstalled: 11,
-			SkillsMissing:   13,
-			SkillsUnmanaged: 17,
-			McpServers:      19,
-			Plugins:         23,
-			Marketplaces:    29,
+		m.skillsRows = []app.SkillPackageRow{
+			{Name: "installed", Installed: true},
+			{Name: "missing"},
 		}
-		m.agentsSummary = summary
+		m.skillsUnmanagedRows = []app.SkillPackageRow{{Name: "unmanaged"}}
+		m.mcpRows = []app.McpServerRow{{Name: "mcp"}}
+		m.pluginRows = []app.PluginRow{{Name: "plugin"}}
+		m.marketplaceRows = []app.MarketplaceRow{{Name: "marketplace"}}
 		row := statusAgentsOverviewRow(m)
 		if len(row.details) != 4 {
 			t.Fatalf("agents overview details = %#v, want 4 lines", row.details)
 		}
-		if !strings.Contains(row.details[0], "11") || !strings.Contains(row.details[0], "13") || !strings.Contains(row.details[0], "17") {
-			t.Fatalf("skills detail line = %q, want installed=11, missing=13, unmanaged=17", row.details[0])
+		if !strings.Contains(row.details[0], "1 installed") || !strings.Contains(row.details[0], "1 missing") || !strings.Contains(row.details[0], "1 unmanaged") {
+			t.Fatalf("skills detail line = %q, want installed, missing, and unmanaged counts from rows", row.details[0])
 		}
-		if !strings.Contains(row.details[1], "19") {
-			t.Fatalf("mcp detail line = %q, want mcp servers=19", row.details[1])
+		if !strings.Contains(row.details[1], "1") {
+			t.Fatalf("mcp detail line = %q, want one mcp server", row.details[1])
 		}
-		if !strings.Contains(row.details[2], "23") {
-			t.Fatalf("plugins detail line = %q, want plugins=23", row.details[2])
+		if !strings.Contains(row.details[2], "1") {
+			t.Fatalf("plugins detail line = %q, want one plugin", row.details[2])
 		}
-		if !strings.Contains(row.details[3], "29") {
-			t.Fatalf("marketplaces detail line = %q, want marketplaces=29", row.details[3])
+		if !strings.Contains(row.details[3], "1") {
+			t.Fatalf("marketplaces detail line = %q, want one marketplace", row.details[3])
 		}
 	})
 }
@@ -8615,7 +8614,6 @@ func TestDashboardAgentsAttentionRow(t *testing.T) {
 	t.Parallel()
 	t.Run("ok when all managed", func(t *testing.T) {
 		m := baseModel(nil)
-		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true}
 		row := statusAgentsAttentionRow(m)
 		if row.needsAttention {
 			t.Fatalf("attention row should be healthy when out of sync is zero: %#v", row)
@@ -8628,7 +8626,6 @@ func TestDashboardAgentsAttentionRow(t *testing.T) {
 	t.Run("present but muted when disabled", func(t *testing.T) {
 		m := baseModel(nil)
 		m.agentsEnabled = false
-		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: false, SkillsMissing: 2}
 		row := statusAgentsAttentionRow(m)
 		if row.label != "Agents" || !row.muted {
 			t.Fatalf("disabled agents row = %#v, want muted Agents row", row)
@@ -8640,10 +8637,9 @@ func TestDashboardAgentsAttentionRow(t *testing.T) {
 
 	t.Run("present with issues and sample", func(t *testing.T) {
 		m := baseModel(nil)
-		m.agentsSummary = app.DashboardAgentsSummary{
-			AgentsEnabled:      true,
-			SkillsMissing:      2,
-			SkillsMissingNames: []string{"skillpkg-alpha", "skillpkg-beta"},
+		m.skillsRows = []app.SkillPackageRow{
+			{Name: "skillpkg-alpha"},
+			{Name: "skillpkg-beta"},
 		}
 		row := statusAgentsAttentionRow(m)
 		if !row.needsAttention {
@@ -8659,11 +8655,6 @@ func TestDashboardAgentsAttentionRow(t *testing.T) {
 
 	t.Run("mcp plugin issues without misleading skills summary", func(t *testing.T) {
 		m := baseModel(nil)
-		m.agentsSummary = app.DashboardAgentsSummary{
-			AgentsEnabled:   true,
-			SkillPackages:   8,
-			SkillsInstalled: 8,
-		}
 		m.skillsLoaded = true
 		m.mcpLoaded = true
 		m.pluginLoaded = true
@@ -8699,14 +8690,14 @@ func TestDashboardAgentsAttentionRow(t *testing.T) {
 
 	t.Run("action selection", func(t *testing.T) {
 		m := baseModel(nil)
-		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillsUnmanaged: 3, SkillsUnmanagedNames: []string{"skillpkg-a", "skillpkg-b", "skillpkg-c"}}
+		m.skillsUnmanagedRows = []app.SkillPackageRow{{Name: "skillpkg-a"}, {Name: "skillpkg-b"}, {Name: "skillpkg-c"}}
 		row := statusAgentsAttentionRow(m)
 		if !row.needsAttention || row.action.kind != statusActionOpenAgents {
 			t.Fatalf("unmanaged-only issues should open agents, row=%#v", row)
 		}
 
 		m2 := baseModel(nil)
-		m2.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillsMissing: 2, SkillsMissingNames: []string{"skillpkg-a", "skillpkg-b"}}
+		m2.skillsRows = []app.SkillPackageRow{{Name: "skillpkg-a"}, {Name: "skillpkg-b"}}
 		m2.loading = true
 		row2 := statusAgentsAttentionRow(m2)
 		if !row2.needsAttention || row2.action.kind != statusActionOpenAgents {
@@ -8714,7 +8705,7 @@ func TestDashboardAgentsAttentionRow(t *testing.T) {
 		}
 
 		m3 := baseModel(nil)
-		m3.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillsMissing: 2, SkillsMissingNames: []string{"skillpkg-a", "skillpkg-b"}}
+		m3.skillsRows = []app.SkillPackageRow{{Name: "skillpkg-a"}, {Name: "skillpkg-b"}}
 		m3.skillsRunning = true
 		row3 := statusAgentsAttentionRow(m3)
 		if !row3.needsAttention || row3.action.kind != statusActionOpenAgents {
@@ -8722,7 +8713,7 @@ func TestDashboardAgentsAttentionRow(t *testing.T) {
 		}
 
 		m4 := baseModel(nil)
-		m4.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillsMissing: 2, SkillsMissingNames: []string{"skillpkg-a", "skillpkg-b"}}
+		m4.skillsRows = []app.SkillPackageRow{{Name: "skillpkg-a"}, {Name: "skillpkg-b"}}
 		row4 := statusAgentsAttentionRow(m4)
 		if !row4.needsAttention || row4.action.kind != statusActionRestoreSkills {
 			t.Fatalf("missing skills with no gates should offer restore skills, row=%#v", row4)
@@ -8731,7 +8722,7 @@ func TestDashboardAgentsAttentionRow(t *testing.T) {
 
 	t.Run("working icon", func(t *testing.T) {
 		running := baseModel(nil)
-		running.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillsMissing: 2, SkillsMissingNames: []string{"skillpkg-a", "skillpkg-b"}}
+		running.skillsRows = []app.SkillPackageRow{{Name: "skillpkg-a"}, {Name: "skillpkg-b"}}
 		running.skillsRunning = true
 		row := statusAgentsAttentionRow(running)
 		if !row.needsAttention {
@@ -8743,7 +8734,7 @@ func TestDashboardAgentsAttentionRow(t *testing.T) {
 		}
 
 		idle := baseModel(nil)
-		idle.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillsMissing: 2, SkillsMissingNames: []string{"skillpkg-a", "skillpkg-b"}}
+		idle.skillsRows = []app.SkillPackageRow{{Name: "skillpkg-a"}, {Name: "skillpkg-b"}}
 		idleRow := statusAgentsAttentionRow(idle)
 		if !idleRow.needsAttention {
 			t.Fatalf("attention row should need attention: %#v", idleRow)
@@ -8754,11 +8745,10 @@ func TestDashboardAgentsAttentionRow(t *testing.T) {
 	})
 }
 
-// Both the overview icon and the attention row must derive out-of-sync state from statusAgentsCounts (live rows), not agentsSummary ints, so a live mcp-missing row still trips the warning.
+// Both the overview icon and the attention row derive out-of-sync state from the same live rows.
 func TestDashboardAgentsOverviewIconAndAttentionAgree(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
-	m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true}
 	m.skillsLoaded = true
 	m.mcpLoaded = true
 	m.pluginLoaded = true
@@ -8838,11 +8828,6 @@ func TestStatusAgentsCounts_IgnoredItemsExcludedAcrossAllThreeFeatures(t *testin
 		McpServers: []string{"lambda-mcp-ignored"},
 		Plugins:    []string{"lambda-plugin-ignored"},
 	}
-	m.agentsSummary = app.DashboardAgentsSummary{
-		AgentsEnabled:        true,
-		SkillsMissingNames:   []string{"lambda-skill-ignored", "lambda-skill-kept"},
-		SkillsUnmanagedNames: []string{"lambda-skill-ignored", "lambda-skill-kept"},
-	}
 	m.skillsLoaded = true
 	m.mcpLoaded = true
 	m.pluginLoaded = true
@@ -8889,30 +8874,7 @@ func TestStatusAgentsCounts_IgnoredItemsExcludedAcrossAllThreeFeatures(t *testin
 	}
 }
 
-func TestDashboardAgentsSummaryLoadedMsgHandler(t *testing.T) {
-	t.Parallel()
-	t.Run("error path keeps previous summary", func(t *testing.T) {
-		m := baseModel(nil)
-		seeded := app.DashboardAgentsSummary{SkillPackages: 41, AgentsEnabled: true}
-		m.agentsSummary = seeded
-		got := drive(m, agentsSummaryLoadedMsg{err: errors.New("boom")})
-		// msg.summary is a zero value on error and must not overwrite the previously loaded summary.
-		if !reflect.DeepEqual(got.agentsSummary, seeded) {
-			t.Fatalf("agentsSummary = %#v, want unchanged %#v", got.agentsSummary, seeded)
-		}
-	})
-
-	t.Run("success path replaces summary", func(t *testing.T) {
-		m := baseModel(nil)
-		want := app.DashboardAgentsSummary{SkillPackages: 41, AgentsEnabled: true}
-		got := drive(m, agentsSummaryLoadedMsg{summary: want})
-		if !reflect.DeepEqual(got.agentsSummary, want) {
-			t.Fatalf("agentsSummary = %#v, want %#v", got.agentsSummary, want)
-		}
-	})
-}
-
-func TestDashboardAgentsSummaryRefreshWiring(t *testing.T) {
+func TestAgentsRowRefreshWiring(t *testing.T) {
 	m, _ := dashboardDotsAppModel(t, nil)
 	m.mode = viewStatus
 	m.agentsEnabled = true
@@ -8934,11 +8896,6 @@ func TestDashboardAgentsRestoreSkillsDispatch(t *testing.T) {
 	t.Parallel()
 	t.Run("restore skills", func(t *testing.T) {
 		m := baseModel(nil)
-		m.agentsSummary = app.DashboardAgentsSummary{
-			AgentsEnabled:      true,
-			SkillsMissing:      2,
-			SkillsMissingNames: []string{"skillpkg-alpha"},
-		}
 		var cmds []tea.Cmd
 		m.handleStatusAction(statusAction{kind: statusActionRestoreSkills}, &cmds)
 		if !m.skillsRunning {
@@ -8967,7 +8924,6 @@ func TestStatusDashboardDataRows_ActivityConsistency(t *testing.T) {
 		m.progressText = "working…"
 		m.dotsPreparing = true
 		m.dotsServicesRefreshing = true
-		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true}
 		m.skillsLoaded = false
 		return m
 	}
@@ -8976,12 +8932,9 @@ func TestStatusDashboardDataRows_ActivityConsistency(t *testing.T) {
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: dots.StateSynced}}
 		m.dotsReminderService = &app.DotsReminderService{Installed: true, Interval: time.Hour}
 		m.dotsWatchService = &app.DotsWatchService{Installed: true}
-		m.agentsSummary = app.DashboardAgentsSummary{
-			AgentsEnabled: true,
-			SkillPackages: 2,
-			McpServers:    1,
-			Plugins:       1,
-		}
+		m.skillsRows = []app.SkillPackageRow{{Name: "skill-a", Installed: true}, {Name: "skill-b", Installed: true}}
+		m.mcpRows = []app.McpServerRow{{Name: "mcp"}}
+		m.pluginRows = []app.PluginRow{{Name: "plugin"}}
 		m.skillsLoaded = true
 		m.mcpLoaded = true
 		m.pluginLoaded = true
@@ -9018,7 +8971,7 @@ func TestStatusDashboardDataRows_ActivityConsistency(t *testing.T) {
 			return ""
 		}},
 		{"Agents", statusAgentsOverviewRow, func(m Model) string {
-			if m.agentsSummary.AgentsEnabled && statusAgentsLoading(m) {
+			if m.agentsEnabled && statusAgentsLoading(m) {
 				return "Loading agents…"
 			}
 			return ""
