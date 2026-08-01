@@ -1202,18 +1202,8 @@ func (a *App) UpgradeWithOptions(ctx context.Context, name, providerName string,
 			return err
 		}
 	}
-	if !opts.Force && cached != nil {
-		cfg, cfgErr := a.loadConfig()
-		if cfgErr != nil {
-			return cfgErr
-		}
-		decision, decisionErr := a.updateQuarantineDecision(ctx, cfg, cached, time.Now())
-		if decisionErr != nil {
-			return decisionErr
-		}
-		if decision.Blocked {
-			return quarantineBlockedError(name, decision)
-		}
+	if err := a.validateUpgradeQuarantine(ctx, name, cached, opts); err != nil {
+		return err
 	}
 
 	prov, opProvider, manager, ok := a.lifecycleProvider(providerName, installedWith)
@@ -1257,6 +1247,24 @@ func (a *App) UpgradeWithOptions(ctx context.Context, name, providerName string,
 	}
 	if err := a.refreshOutdatedAfterUpgrade(ctx, name, providerName, pkg, installedOwner); err != nil {
 		return fmt.Errorf("refresh outdated after upgrade: %w", err)
+	}
+	return nil
+}
+
+func (a *App) validateUpgradeQuarantine(ctx context.Context, name string, cached *database.ToolCache, opts UpgradeOptions) error {
+	if opts.Force || cached == nil {
+		return nil
+	}
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return err
+	}
+	decision, err := a.updateQuarantineDecision(ctx, cfg, cached, time.Now())
+	if err != nil {
+		return err
+	}
+	if decision.Blocked {
+		return quarantineBlockedError(name, decision)
 	}
 	return nil
 }

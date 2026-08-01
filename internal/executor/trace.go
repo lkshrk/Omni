@@ -64,11 +64,23 @@ func TraceReason(ctx context.Context) string {
 }
 
 func (t *TracingExecutor) Run(ctx context.Context, name string, args ...string) (string, string, error) {
+	return t.run(ctx, name, args, func() (string, string, error) {
+		return t.Next.Run(ctx, name, args...)
+	})
+}
+
+func (t *TracingExecutor) RunEnv(ctx context.Context, env []string, name string, args ...string) (string, string, error) {
+	return t.run(ctx, name, args, func() (string, string, error) {
+		return RunWithEnv(ctx, t.Next, env, name, args...)
+	})
+}
+
+func (t *TracingExecutor) run(ctx context.Context, name string, args []string, run func() (string, string, error)) (string, string, error) {
 	if t == nil || t.Next == nil {
 		return "", "", errors.New("tracing executor missing wrapped executor")
 	}
 	started := t.now()
-	stdout, stderr, err := t.Next.Run(ctx, name, args...)
+	stdout, stderr, err := run()
 	finished := t.now()
 	t.record(ctx, SanitizeTraceRecord(TraceRecord{
 		StartedAt:  started,

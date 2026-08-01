@@ -989,8 +989,8 @@ func statusActivityDetailLine(m Model, text string, cancellable bool) string {
 	if !cancellable {
 		return prefix + status
 	}
-	cancel := renderActionHintText(m.palette, []hintItem{rawHint("ctrl+c", "cancel")})
-	return prefix + hintJoin(m.palette, status, cancel)
+	quit := renderActionHintText(m.palette, []hintItem{rawHint("ctrl+c", "quit")})
+	return prefix + hintJoin(m.palette, status, quit)
 }
 
 func statusDetailLines(m Model, lines ...string) []string {

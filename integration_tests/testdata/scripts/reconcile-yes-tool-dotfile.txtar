@@ -1,4 +1,4 @@
-# omni reconcile --yes installs missing tools, repairs dotfile links, and commits dirty dotfiles
+# omni reconcile --yes installs missing tools, repairs dotfile links, and backs up dirty dotfiles
 # @requires: stow
 env HOME=$WORK/home
 mkdir $WORK/home
@@ -15,18 +15,22 @@ exec git -C $WORK/home/dotfiles add dotfiles
 exec git -C $WORK/home/dotfiles commit -m seed
 exec cp changed/init.lua $WORK/home/dotfiles/dotfiles/nvim/.config/nvim/init.lua
 
-exec omni --yes --config settings.json reconcile --skip-privileged -m 'dots: reconcile commit'
+exec omni --yes --config settings.json reconcile --skip-privileged -m 'dots: reconcile backup'
 stdout 'syncing tools'
 stdout 'Scanning brew… \(1/1\)'
 stdout 'done: fd \(brew\)'
 stdout 'syncing dotfiles'
-stdout 'committing dotfiles'
-stdout 'Reconcile complete .* 1 installed, 0 added to config, 0 upgraded, .* dotfile op, dotfiles committed\.'
+stdout 'backing up dotfile changes'
+stdout 'Reconcile complete .* 1 installed, 0 added to config, 0 upgraded, .* dotfile op, dotfile changes backed up\.'
 exec test -f .omni-cache/fake-brew/fd
 exec grep 'reconciled config' $WORK/home/.config/nvim/init.lua
 stdout 'reconciled config'
-exec git -C $WORK/home/dotfiles log -1 --pretty=%s
-stdout 'dots: reconcile commit'
+exec git -C $WORK/home/dotfiles log -1 --pretty=%s omni/backup
+stdout 'dots: reconcile backup'
+exec git -C $WORK/home/dotfiles log -1 --pretty=%s HEAD
+stdout 'seed'
+exec git -C $WORK/home/dotfiles status --short
+stdout 'dotfiles/nvim/.config/nvim/init.lua'
 
 -- bin/brew --
 #!/bin/sh

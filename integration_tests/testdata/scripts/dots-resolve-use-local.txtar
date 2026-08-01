@@ -15,8 +15,9 @@ exec cat home/.config/nvim/init.lua
 stdout '-- local'
 exec cat home/dotfiles.bkp/.config/nvim/init.lua
 stdout '-- local'
-exec git -C $WORK/home/dotfiles log --oneline -1
+exec git -C $WORK/home/dotfiles log --oneline -1 omni/backup
 stdout 'dots: pre-resolve nvim'
+! exec git -C $WORK/home/dotfiles rev-parse --verify HEAD
 
 -- settings.json --
 {"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"nvim","path":"~/.config/nvim"}]}]}

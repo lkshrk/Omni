@@ -15,15 +15,21 @@ func (m *Model) handleDescRefreshDoneMsg(msg descRefreshDoneMsg) tea.Cmd {
 		return nil
 	}
 	m.descRefreshing = false
-	m.settleToolRefresh()
+	m.releaseDescriptionProgressStream()
 	if msg.err != nil && (m.ctx == nil || !errors.Is(msg.err, m.ctx.Err())) {
 		m.finishSetupReloadIfIdle()
 		status := "description refresh failed: " + msg.err.Error()
 		if m.collectLaunchBatchError(status) {
-			return m.finishLaunchBatchIfIdle()
+			m.settleToolRefresh()
+			cmd := m.finishLaunchBatchIfIdle()
+			if cmd != nil {
+				m.clearRefreshIssue()
+			}
+			return cmd
 		}
-		return setStatus(m, status, true)
+		m.rememberRefreshIssue(status, refreshIssueSnapshotError)
 	}
+	m.settleToolRefresh()
 	changed := false
 	if msg.tools != nil {
 		m.allTools = msg.tools
@@ -39,10 +45,25 @@ func (m *Model) handleDescRefreshDoneMsg(msg descRefreshDoneMsg) tea.Cmd {
 	}
 	m.finishSetupReloadIfIdle()
 	if cmd := m.finishLaunchBatchIfIdle(); cmd != nil {
+		m.clearRefreshIssue()
+		return cmd
+	}
+	if cmd := m.finishRefreshIssueIfIdle(); cmd != nil {
 		return cmd
 	}
 	m.clearActivityStatusIfIdle()
 	return nil
+}
+
+func (m *Model) releaseDescriptionProgressStream() {
+	if m.descriptionProgressCh == nil {
+		return
+	}
+	if m.progressCh == m.descriptionProgressCh {
+		m.progressCh = nil
+		m.progressGen++
+	}
+	m.descriptionProgressCh = nil
 }
 
 func (m *Model) handleProgressMsg(msg progressMsg) []tea.Cmd {

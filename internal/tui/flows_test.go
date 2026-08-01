@@ -2600,15 +2600,26 @@ func TestFlow_UC48_ProviderScanMsgs(t *testing.T) {
 		}
 	})
 
-	t.Run("providerScannedMsg shows scan error", func(t *testing.T) {
+	t.Run("providerScannedMsg shows scan error after update check settles", func(t *testing.T) {
 		m := baseModel(nil)
 		m.scanningProviders = map[string]bool{"brew": true}
-		got := drive(m, providerScannedMsg{provider: "brew", err: errors.New("db write failed")})
+		scanErr := errors.New("db write failed")
+		got := drive(m, providerScannedMsg{provider: "brew", err: scanErr})
+		if got.statusMsg != "" {
+			t.Fatalf("statusMsg = %q before update check settles, want deferred error", got.statusMsg)
+		}
+		got = drive(got,
+			providerOutdatedCheckedMsg{provider: "brew"},
+			outdatedProvidersDoneMsg{},
+			allProvidersDoneMsg{},
+			discoveredRefreshedMsg{gen: got.discoveryGen},
+		)
 		if !got.statusIsErr {
 			t.Fatal("statusIsErr = false, want true")
 		}
-		if got.statusMsg == "" {
-			t.Fatal("statusMsg empty, want scan failure")
+		want := app.ProviderScanFailureStatus("brew", scanErr)
+		if got.statusMsg != want {
+			t.Fatalf("statusMsg = %q, want %q", got.statusMsg, want)
 		}
 	})
 

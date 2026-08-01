@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
-
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	textutil "github.com/lkshrk/omni/internal/text"
@@ -104,42 +102,31 @@ func TestEscapeDismissesSetupReloadOverlay(t *testing.T) {
 
 func TestQuitWhileSetupReloadOverlayIsUp(t *testing.T) {
 	t.Parallel()
-	for _, quitKey := range []tea.Msg{pressRune('q'), tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}} {
-		model, _ := stuckPostSetupModel().Update(quitKey)
-		armed := model.(Model)
-		if !armed.confirmQuit {
-			t.Fatalf("%v: first press should arm the quit confirmation behind the overlay", quitKey)
-		}
-		footer := stripANSIEscapeSequences(renderStatusBar(armed))
-		if !strings.Contains(footer, "again to quit") {
-			t.Fatalf("%v: armed footer = %q, want the press-again hint", quitKey, footer)
-		}
-
-		_, cmd := armed.Update(quitKey)
-		if !cmdQuits(cmd) {
-			t.Fatalf("%v: second press should quit while the overlay is up", quitKey)
-		}
+	quitKey := pressRune('q')
+	model, _ := stuckPostSetupModel().Update(quitKey)
+	armed := model.(Model)
+	if !armed.confirmQuit {
+		t.Fatal("first q should arm the quit confirmation behind the overlay")
+	}
+	footer := stripANSIEscapeSequences(renderStatusBar(armed))
+	if !strings.Contains(footer, "again to quit") {
+		t.Fatalf("armed footer = %q, want the press-again hint", footer)
+	}
+	if _, cmd := armed.Update(quitKey); !cmdQuits(cmd) {
+		t.Fatal("second q should quit while the overlay is up")
 	}
 }
 
 // A silently disarmed quit confirmation is what made the stuck overlay look unquittable: the second press re-armed instead of exiting.
 func TestExpiredQuitConfirmationSaysSo(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		press tea.Msg
-		want  string
-	}{
-		{pressRune('q'), "quit confirmation expired — press q again"},
-		{tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}, "quit confirmation expired — press ctrl+c again"},
-	} {
-		armed := drive(stuckPostSetupModel(), tc.press)
-		got := drive(armed, confirmTimeoutMsg{gen: armed.confirmGen})
-		if got.confirmQuit {
-			t.Fatal("the quit confirmation should expire")
-		}
-		if got.statusMsg != tc.want {
-			t.Fatalf("statusMsg = %q, want %q", got.statusMsg, tc.want)
-		}
+	armed := drive(stuckPostSetupModel(), pressRune('q'))
+	got := drive(armed, confirmTimeoutMsg{gen: armed.confirmGen})
+	if got.confirmQuit {
+		t.Fatal("the quit confirmation should expire")
+	}
+	if want := "quit confirmation expired — press q again"; got.statusMsg != want {
+		t.Fatalf("statusMsg = %q, want %q", got.statusMsg, want)
 	}
 }
 

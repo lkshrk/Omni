@@ -119,10 +119,10 @@ func (a *App) DotsExtract(ctx context.Context, parentName, subpath string, opts 
 		return nil, err
 	}
 
-	// Safety snapshot before moving files around the repo.
+	// Preserve the repo state without touching the user's branch before moving files around.
 	if g := newGitForRepo(repoPath, a.newExecutor()); g.IsRepo() {
-		if err := g.SnapshotAll(ctx, "dots: pre-extract "+childName); err != nil {
-			return nil, fmt.Errorf("dots extract: snapshot repo: %w", err)
+		if err := g.BackupAll(ctx, "dots: pre-extract "+childName); err != nil {
+			return nil, fmt.Errorf("dots extract: backup repo: %w", err)
 		}
 	}
 

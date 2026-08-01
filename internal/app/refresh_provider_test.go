@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -215,6 +218,78 @@ func TestRefreshProviderOutdated_ReturnsOutdatedMapError(t *testing.T) {
 	if !strings.Contains(err.Error(), "outdated command failed") {
 		t.Fatalf("RefreshProviderOutdated error = %q, want provider failure", err)
 	}
+}
+
+func TestRefreshOutdated_ReportsProviderWarningThroughOutputObserver(t *testing.T) {
+	prov := &provOutdatedStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		outdatedErr:  errors.New("outdated command failed\nRun pnpm setup"),
+	}
+	a, _ := newImportApp(t, prov)
+	ctx := context.Background()
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name: "ripgrep", Provider: "brew", Package: "ripgrep",
+		Installed: true, InstalledWith: "brew", LastChecked: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	var lines []string
+	ctx = executor.WithOutputObserver(ctx, func(line string) {
+		lines = append(lines, line)
+	})
+	var refreshErr error
+	stderr := captureStderr(t, func() {
+		refreshErr = a.RefreshOutdated(ctx, false, nil)
+	})
+	if refreshErr != nil {
+		t.Fatalf("RefreshOutdated: %v", refreshErr)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want no direct terminal output", stderr)
+	}
+
+	const want = "warning: omni: refresh outdated for brew: checking outdated tools for brew: outdated command failed Run pnpm setup"
+	if len(lines) != 1 || lines[0] != want {
+		t.Fatalf("observed output = %#v, want [%q]", lines, want)
+	}
+
+	stderr = captureStderr(t, func() {
+		refreshErr = a.RefreshOutdated(context.Background(), false, nil)
+	})
+	if refreshErr != nil {
+		t.Fatalf("RefreshOutdated: %v", refreshErr)
+	}
+	const wantStderr = "warning: omni: refresh outdated for brew: checking outdated tools for brew: outdated command failed\nRun pnpm setup\n"
+	if stderr != wantStderr {
+		t.Fatalf("stderr fallback = %q, want %q", stderr, wantStderr)
+	}
+}
+
+func captureStderr(t *testing.T, run func()) string {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	original := os.Stderr
+	os.Stderr = writer
+	defer func() {
+		os.Stderr = original
+		_ = writer.Close()
+		_ = reader.Close()
+	}()
+
+	run()
+	os.Stderr = original
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close stderr writer: %v", err)
+	}
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read stderr: %v", err)
+	}
+	return string(output)
 }
 
 func TestRefreshProviderOutdated_NoOutdatedTools(t *testing.T) {

@@ -6378,7 +6378,7 @@ func TestDotsResolveConflict_UseRepoAllowsIgnoredSource(t *testing.T) {
 	}
 }
 
-func TestDotsResolveConflict_UseLocalCommitsRepoCopiesLocalAndRelinks(t *testing.T) {
+func TestDotsResolveConflict_UseLocalBacksUpRepoCopiesLocalAndRelinks(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
@@ -6413,6 +6413,12 @@ func TestDotsResolveConflict_UseLocalCommitsRepoCopiesLocalAndRelinks(t *testing
 	}
 	gitCmd("add", "-A")
 	gitCmd("commit", "-m", "initial")
+	headBeforeCmd := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD")
+	headBeforeOut, err := headBeforeCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v\n%s", err, headBeforeOut)
+	}
+	headBefore := strings.TrimSpace(string(headBeforeOut))
 	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- dirty repo"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -6446,13 +6452,26 @@ func TestDotsResolveConflict_UseLocalCommitsRepoCopiesLocalAndRelinks(t *testing
 	assertRealDirectory(t, nvimPath)
 	assertSymlinkResolvesTo(t, filepath.Join(nvimPath, "init.lua"), filepath.Join(srcDir, "init.lua"))
 	assertNoOldDotTempInHome(t, home)
-	c := exec.Command("git", "-C", repoDir, "log", "--oneline", "-1")
+	c := exec.Command("git", "-C", repoDir, "log", "--oneline", "-1", "refs/heads/omni/backup")
 	out, err := c.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git log: %v\n%s", err, out)
 	}
 	if !strings.Contains(string(out), "dots: pre-resolve nvim") {
-		t.Fatalf("latest commit = %q, want pre-resolve commit", out)
+		t.Fatalf("latest backup = %q, want pre-resolve backup", out)
+	}
+	headAfterCmd := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD")
+	headAfterOut, err := headAfterCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD after resolve: %v\n%s", err, headAfterOut)
+	}
+	if got := strings.TrimSpace(string(headAfterOut)); got != headBefore {
+		t.Fatalf("HEAD = %q after resolve, want unchanged %q", got, headBefore)
+	}
+	backupFileCmd := exec.Command("git", "-C", repoDir, "show", "omni/backup:dotfiles/nvim/.config/nvim/init.lua")
+	backupFile, err := backupFileCmd.CombinedOutput()
+	if err != nil || string(backupFile) != "-- dirty repo" {
+		t.Fatalf("backup file = %q, %v; want dirty repo state", backupFile, err)
 	}
 }
 
@@ -7210,7 +7229,7 @@ func TestDotsResolveConflict_ModifiedEntryUseLocalAdopts(t *testing.T) {
 	assertSymlinkResolvesTo(t, filepath.Join(zshPath, "local-extra.zsh"), filepath.Join(srcDir, "local-extra.zsh"))
 }
 
-func TestDotsSync_PurgeMovesIgnoredRepoSourceToTrashWithSnapshot(t *testing.T) {
+func TestDotsSync_PurgeMovesIgnoredRepoSourceToTrashWithBackup(t *testing.T) {
 	if _, err := exec.LookPath("stow"); err != nil {
 		t.Skip("stow not available")
 	}
@@ -7270,13 +7289,55 @@ func TestDotsSync_PurgeMovesIgnoredRepoSourceToTrashWithSnapshot(t *testing.T) {
 	if got, err := os.ReadFile(trashed); err != nil || string(got) != "precious" {
 		t.Fatalf("trash copy = %q, %v; want purged content preserved in trash", got, err)
 	}
-	logCmd := exec.Command("git", "-C", repoDir, "log", "--format=%s", "--", "dotfiles/nvim/.config/nvim/secret.txt")
+	logCmd := exec.Command("git", "-C", repoDir, "log", "refs/heads/omni/backup", "--format=%s", "--", "dotfiles/nvim/.config/nvim/secret.txt")
 	out, err := logCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git log: %v\n%s", err, out)
 	}
 	if !strings.Contains(string(out), "dots: pre-purge nvim") {
-		t.Fatalf("git log = %q, want pre-purge snapshot containing purged file", out)
+		t.Fatalf("git log = %q, want pre-purge backup containing purged file", out)
+	}
+	if headCmd := exec.Command("git", "-C", repoDir, "rev-parse", "--verify", "HEAD"); headCmd.Run() == nil {
+		t.Fatal("pre-purge backup created a commit on the user's unborn branch")
+	}
+}
+
+func TestDotsSync_PurgeStopsWhenBackupBranchIsUnavailable(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	initDotsTestGitRepo(t, repoDir)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	purgedPath := filepath.Join(srcDir, "secret.txt")
+	if err := os.WriteFile(purgedPath, []byte("must survive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dotsTestGit(t, repoDir, "add", "-A")
+	dotsTestGit(t, repoDir, "commit", "-m", "initial")
+	dotsTestGit(t, repoDir, "branch", "omni/backup")
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "nvim", Path: filepath.Join(home, ".config", "nvim"), Ignore: []string{"secret.txt"}},
+	}, home)
+
+	_, err := a.DotsSync(dots.SyncOptions{})
+	if err == nil || !strings.Contains(err.Error(), "not managed by omni") {
+		t.Fatalf("DotsSync error = %v, want unavailable backup branch", err)
+	}
+	if got, readErr := os.ReadFile(purgedPath); readErr != nil || string(got) != "must survive" {
+		t.Fatalf("purge continued without backup: %q, %v", got, readErr)
 	}
 }
 

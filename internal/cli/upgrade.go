@@ -1,13 +1,16 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/lkshrk/omni/internal/actions"
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/executor"
 	syncprogress "github.com/lkshrk/omni/internal/sync"
 )
 
@@ -55,8 +58,22 @@ Examples:
 						return
 					}
 					fmt.Fprintf(out, "  ✓ upgraded: %s (%s)\n", name, event.Tool.Provider)
-				}, app.UpgradeAllOptions{Force: force})
+				}, app.UpgradeAllOptions{Force: force, SkipPrivileged: true})
 				if err != nil {
+					var commands []string
+					if result != nil {
+						for _, failure := range result.Failures {
+							if !strings.HasPrefix(failure.Message, "requires sudo:") {
+								continue
+							}
+							if command, ok, planErr := a.PrivilegedInstalledUpgradeCommand(ctx, failure.Name, app.UpgradeOptions{Force: force}); planErr == nil && ok {
+								commands = append(commands, "admin approval required; run interactively: "+command.Display)
+							}
+						}
+					}
+					if len(commands) > 0 {
+						return errors.Join(err, errors.New(strings.Join(commands, "\n")))
+					}
 					return err
 				}
 				if result == nil || len(result.Upgraded)+len(result.Failures)+len(result.Quarantined)+len(result.Skipped) == 0 {
@@ -72,6 +89,34 @@ Examples:
 				return fmt.Errorf("specify a tool name or use --all")
 			}
 			name := args[0]
+			if command, ok, err := a.PrivilegedInstalledUpgradeCommand(ctx, name, app.UpgradeOptions{Force: force}); err != nil {
+				return err
+			} else if ok {
+				if !stdinIsTerminal() {
+					return fmt.Errorf("admin approval required; run interactively: %s", command.Display)
+				}
+				resolved, env := executor.ResolveCommand(command.Command)
+				child := exec.CommandContext(ctx, resolved, command.Args...)
+				child.Env = env
+				child.Stdin = cmd.InOrStdin()
+				child.Stdout = cmd.OutOrStdout()
+				child.Stderr = cmd.ErrOrStderr()
+				if err := child.Run(); err != nil {
+					return fmt.Errorf("%s: %w", command.Display, err)
+				}
+				if _, err := a.CompleteExternalToolActionWithState(ctx, app.CompleteExternalToolActionOptions{
+					Action:        command.Action,
+					Name:          command.Name,
+					ProviderName:  command.ProviderName,
+					Package:       command.Package,
+					InstalledWith: command.InstalledWith,
+					Options:       command.Options,
+				}); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmdOut(cmd), "✓ upgraded %s\n", name)
+				return nil
+			}
 			if err := a.UpgradeInstalledWithOptions(ctx, name, app.UpgradeOptions{Force: force}); err != nil {
 				return err
 			}

@@ -31,12 +31,13 @@ type stubMcpAdapter struct {
 type recordingMcpExecutor struct {
 	names []string
 	args  [][]string
+	err   error
 }
 
 func (e *recordingMcpExecutor) Run(_ context.Context, name string, args ...string) (string, string, error) {
 	e.names = append(e.names, name)
 	e.args = append(e.args, append([]string(nil), args...))
-	return "", "", nil
+	return "", "", e.err
 }
 
 func (s *stubMcpAdapter) ID() string      { return s.id }
@@ -100,7 +101,6 @@ func TestProductionMcpAdaptersUseFallbackExecutorSetAfterNew(t *testing.T) {
 	binDir := t.TempDir()
 	writeTestExecutable(t, binDir, "claude")
 	t.Setenv("PATH", binDir)
-	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 
 	a := newMcpTestApp(t, config.AgentsConfig{})
 	exec := &recordingMcpExecutor{}
@@ -121,6 +121,33 @@ func TestProductionMcpAdaptersUseFallbackExecutorSetAfterNew(t *testing.T) {
 	}
 	if len(exec.names) != 1 || exec.names[0] != "claude" {
 		t.Fatalf("fallback executor calls = %v %v, want one claude call", exec.names, exec.args)
+	}
+}
+
+func TestProductionAdaptersSkipUnavailableAgents(t *testing.T) {
+	home := t.TempDir()
+	binDir := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", binDir)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("GROK_HOME", "")
+
+	a := newMcpTestApp(t, config.AgentsConfig{})
+	exec := &recordingMcpExecutor{err: errors.New("unavailable agent invoked")}
+	a.SetFallbackExecutor(exec)
+
+	if _, _, err := a.McpServerRows(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.PluginRows(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.MarketplaceRows(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(exec.names) != 0 {
+		t.Fatalf("fallback executor calls = %v %v, want none", exec.names, exec.args)
 	}
 }
 

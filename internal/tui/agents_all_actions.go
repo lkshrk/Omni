@@ -389,7 +389,6 @@ func (m *Model) handleAgentsBulkResolveConfirmKeyMsg(msg tea.KeyPressMsg) []tea.
 	return []tea.Cmd{m.spinner.Tick, m.doAgentsBulkResolve(useManaged)}
 }
 
-// ctrl+c is left to the top-level quit path even though Quit also binds it: a modal must not be the only thing ctrl+c can reach.
 func (m *Model) dismissAgentsDriftPromptOn(msg tea.KeyPressMsg) {
 	if key.Matches(msg, m.keys.Back) || msg.String() == "q" {
 		m.closeAgentsDriftPrompt()

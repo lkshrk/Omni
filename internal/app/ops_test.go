@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1207,9 +1209,81 @@ func TestReconcile_SkipsDotfilesWhenDisabled(t *testing.T) {
 		t.Fatalf("DotsSkipped = %q, want disabled reason", result.DotsSkipped)
 	}
 	for _, message := range progress {
-		if message == "syncing dotfiles..." || message == "committing dotfiles..." {
-			t.Fatalf("progress = %v, want no dotfile sync/commit when dots are disabled", progress)
+		if message == "syncing dotfiles..." || message == "backing up dotfile changes..." {
+			t.Fatalf("progress = %v, want no dotfile sync/backup when dots are disabled", progress)
 		}
+	}
+}
+
+func TestReconcile_BacksUpDirtyDotsWithoutCommittingHead(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	a, cfgPath := newReconcileApp(t)
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-b", "main")
+	git("config", "user.email", "user@example.com")
+	git("config", "user.name", "User")
+	if err := os.MkdirAll(dotsContentDir(repo), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tracked := filepath.Join(repo, "tracked.txt")
+	if err := os.WriteFile(tracked, []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "-m", "initial")
+	headBefore := git("rev-parse", "HEAD")
+	if err := os.WriteFile(tracked, []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	disableAgents := true
+	if err := config.Save(cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repo, AgentsDisabled: &disableAgents},
+		Hosts:    map[string][]string{"testhost": {}},
+		Groups:   []*config.GroupConfig{{Name: "testhost", Special: "host"}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	var progress []string
+	result, err := a.Reconcile(context.Background(), app.ReconcileOptions{
+		BackupMessage: "test reconcile backup",
+		Progress:      func(message string) { progress = append(progress, message) },
+	})
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if result == nil || !result.DotsBackedUp {
+		t.Fatalf("result = %#v, want dotfile backup", result)
+	}
+	if got := git("rev-parse", "HEAD"); got != headBefore {
+		t.Fatalf("HEAD = %q, want unchanged %q", got, headBefore)
+	}
+	if got := git("status", "--porcelain=v1"); !strings.Contains(got, "tracked.txt") {
+		t.Fatalf("working tree was cleaned by reconcile: %q", got)
+	}
+	if got := git("show", "omni/backup:tracked.txt"); got != "dirty" {
+		t.Fatalf("backup tracked.txt = %q, want dirty", got)
+	}
+	if got := git("show", "-s", "--format=%s", "omni/backup"); got != "test reconcile backup" {
+		t.Fatalf("backup subject = %q", got)
+	}
+	if !slices.Contains(progress, "backing up dotfile changes...") {
+		t.Fatalf("progress = %v, want backup progress", progress)
 	}
 }
 

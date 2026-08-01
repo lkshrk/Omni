@@ -25,7 +25,19 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	m.scrubLoadingOwner()
 
 	if press, ok := msg.(tea.KeyPressMsg); ok {
-		msg = normalizeKeyPress(press)
+		press = normalizeKeyPress(press)
+		if isCtrlC(press) {
+			if m.ctrlCConfirm {
+				m.shutdown()
+				return m, tea.Quit
+			}
+			m.ctrlCConfirm = true
+			return m, m.armCtrlCConfirmationTimeout()
+		}
+		if m.ctrlCConfirm {
+			m.clearCtrlCConfirmation()
+		}
+		msg = press
 	}
 
 	cmds = append(cmds, m.updateActiveFilePicker(msg)...)
@@ -223,6 +235,9 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 
 	case confirmTimeoutMsg:
 		cmds = append(cmds, m.handleConfirmTimeoutMsg(msg)...)
+
+	case ctrlCConfirmTimeoutMsg:
+		cmds = append(cmds, m.handleCtrlCConfirmTimeoutMsg(msg)...)
 
 	case setupReloadTimeoutMsg:
 		cmds = append(cmds, m.handleSetupReloadTimeoutMsg(msg)...)

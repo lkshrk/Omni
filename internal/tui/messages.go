@@ -167,6 +167,7 @@ type allProvidersDoneMsg struct {
 type providerOutdatedCheckedMsg struct {
 	gen      int
 	provider string
+	warning  string
 	err      error
 }
 

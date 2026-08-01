@@ -548,10 +548,26 @@ func (m *Model) doCheckProviderOutdated(provName string, gen int) tea.Cmd {
 	return func() tea.Msg {
 		defer profile.Start("tui.refresh.outdated.provider." + provName)()
 
+		// ponytail: one warning fits the status bar; aggregate if provider diagnostics gain a detail view.
+		warningCh := make(chan string, 1)
 		outdatedErr := runBoundedProviderScan(ctx, nil, func(scanCtx context.Context) error {
+			scanCtx = executor.WithOutputObserver(scanCtx, func(line string) {
+				if !strings.HasPrefix(line, "warning: omni:") {
+					return
+				}
+				select {
+				case warningCh <- line:
+				default:
+				}
+			})
 			return a.RefreshProviderOutdated(scanCtx, provName, true)
 		})
-		return providerOutdatedCheckedMsg{gen: gen, provider: provName, err: outdatedErr}
+		var warning string
+		select {
+		case warning = <-warningCh:
+		default:
+		}
+		return providerOutdatedCheckedMsg{gen: gen, provider: provName, warning: warning, err: outdatedErr}
 	}
 }
 
@@ -601,12 +617,14 @@ func (m *Model) doRefreshDiscovered(gen int, progressCh chan progressUpdate, pro
 func (m *Model) startDescriptionRefresh() tea.Cmd {
 	m.descRefreshGen++
 	m.descRefreshing = true
+	m.descriptionProgressCh = nil
 	// Take over the shared status stream only when no other operation owns it: beginning a stream here would bump progressGen and drop the active operation's remaining updates.
 	if m.progressCh != nil {
 		return m.doRefreshDescriptions(m.descRefreshGen, nil, 0)
 	}
 	setActivityStatus(m, descriptionRefreshStatus)
 	ch, progressGen := m.beginProgressStream()
+	m.descriptionProgressCh = ch
 	return tea.Batch(m.doRefreshDescriptions(m.descRefreshGen, ch, progressGen), waitForProgress(ch, progressGen))
 }
 

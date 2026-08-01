@@ -9,6 +9,12 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
+const (
+	refreshIssueWarning = iota + 1
+	refreshIssueProviderError
+	refreshIssueSnapshotError
+)
+
 func (m *Model) handleProviderScannedMsg(msg providerScannedMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -63,7 +69,7 @@ func (m *Model) handleProviderScannedMsg(msg providerScannedMsg) []tea.Cmd {
 		cmds = append(cmds, m.doFetchFinalTools(msg.gen), m.doRefreshDiscovered(m.discoveryGen, ch, progressGen))
 		cmds = append(cmds, m.startProviderOutdatedChecks(outdatedProviders, msg.gen)...)
 		if len(m.refreshScanErrors) > 0 {
-			cmds = append(cmds, setStatus(m, aggregateRefreshErrors(m.refreshScanErrors), true))
+			m.rememberRefreshIssue(aggregateRefreshErrors(m.refreshScanErrors), refreshIssueProviderError)
 			m.refreshScanErrors = nil
 		}
 	}
@@ -83,7 +89,11 @@ func aggregateRefreshErrors(errs []string) string {
 }
 
 func (m *Model) startProviderOutdatedChecks(providers []string, gen int) []tea.Cmd {
+	m.refreshIssue = ""
+	m.refreshIssuePriority = 0
 	if len(providers) == 0 {
+		m.outdatedProviders = nil
+		m.outdatedTotal = 0
 		return nil
 	}
 	m.outdatedProviders = make(map[string]bool, len(providers))
@@ -130,15 +140,23 @@ func (m *Model) handleAllProvidersDoneMsg(msg allProvidersDoneMsg) tea.Cmd {
 		return nil
 	}
 	m.providerSnapshotRefreshing = false
-	m.settleToolRefresh()
 	if msg.err != nil {
-		m.finishSetupReloadIfIdle()
 		status := "refresh failed: " + msg.err.Error()
 		if m.collectLaunchBatchError(status) {
-			return m.finishLaunchBatchIfIdle()
+			m.settleToolRefresh()
+			m.finishSetupReloadIfIdle()
+			cmd := m.finishLaunchBatchIfIdle()
+			if cmd != nil {
+				m.clearRefreshIssue()
+			}
+			return cmd
 		}
-		return setStatus(m, status, true)
+		m.rememberRefreshIssue(status, refreshIssueSnapshotError)
+		m.settleToolRefresh()
+		m.finishSetupReloadIfIdle()
+		return m.finishRefreshIssueIfIdle()
 	}
+	m.settleToolRefresh()
 	if msg.tools != nil {
 		m.allTools = msg.tools
 		m.applyFilter()
@@ -149,6 +167,10 @@ func (m *Model) handleAllProvidersDoneMsg(msg allProvidersDoneMsg) tea.Cmd {
 
 	m.finishSetupReloadIfIdle()
 	if cmd := m.finishLaunchBatchIfIdle(); cmd != nil {
+		m.clearRefreshIssue()
+		return cmd
+	}
+	if cmd := m.finishRefreshIssueIfIdle(); cmd != nil {
 		return cmd
 	}
 	m.clearActivityStatusIfIdle()
@@ -165,7 +187,9 @@ func (m *Model) handleProviderOutdatedCheckedMsg(msg providerOutdatedCheckedMsg)
 	}
 	delete(m.outdatedProviders, msg.provider)
 	if msg.err != nil {
-		cmds = append(cmds, setStatus(m, app.ProviderScanFailureStatus(msg.provider, msg.err), true))
+		m.rememberRefreshIssue(app.ProviderScanFailureStatus(msg.provider, msg.err), refreshIssueProviderError)
+	} else if msg.warning != "" {
+		m.rememberRefreshIssue(msg.warning, refreshIssueWarning)
 	}
 	if len(m.outdatedProviders) > 0 {
 		if !m.providerSnapshotRefreshing && !m.discoveryRefreshing {
@@ -184,20 +208,23 @@ func (m *Model) handleOutdatedProvidersDoneMsg(msg outdatedProvidersDoneMsg) tea
 		return nil
 	}
 	m.outdatedSnapshotRefreshing = false
-	m.settleToolRefresh()
 	// The scan labels and counts outlive the installed phase so the update check can name its providers too; this is where they stop being needed.
 	m.providerScanLabels = nil
 	m.providerScanToolCounts = nil
 	m.outdatedTotal = 0
 	if msg.err != nil {
-		return setStatus(m, "update check failed: "+msg.err.Error(), true)
-	}
-	if msg.tools != nil {
+		m.rememberRefreshIssue("update check failed: "+msg.err.Error(), refreshIssueSnapshotError)
+	} else if msg.tools != nil {
 		m.allTools = msg.tools
 		m.applyFilter()
 	}
 	if msg.effectiveSystemManager != "" {
 		m.effectiveSystemManager = msg.effectiveSystemManager
+	}
+	m.settleToolRefresh()
+	m.finishSetupReloadIfIdle()
+	if cmd := m.finishRefreshIssueIfIdle(); cmd != nil {
+		return cmd
 	}
 	m.clearActivityStatusIfIdle()
 	return nil
@@ -214,9 +241,14 @@ func (m *Model) handleDiscoveredRefreshedMsg(msg discoveredRefreshedMsg) tea.Cmd
 		m.finishSetupReloadIfIdle()
 		status := "orphan scan failed: " + msg.err.Error()
 		if m.collectLaunchBatchError(status) {
-			return m.finishLaunchBatchIfIdle()
+			cmd := m.finishLaunchBatchIfIdle()
+			if cmd != nil {
+				m.clearRefreshIssue()
+			}
+			return cmd
 		}
-		return setStatus(m, status, true)
+		m.rememberRefreshIssue(status, refreshIssueSnapshotError)
+		return m.finishRefreshIssueIfIdle()
 	}
 	// A successful scan can legitimately prune the last discovered row, so still overwrite or pruned rows linger in the UI.
 	m.discoveredTools = msg.discovered
@@ -228,6 +260,10 @@ func (m *Model) handleDiscoveredRefreshedMsg(msg discoveredRefreshedMsg) tea.Cmd
 
 	m.finishSetupReloadIfIdle()
 	if cmd := m.finishLaunchBatchIfIdle(); cmd != nil {
+		m.clearRefreshIssue()
+		return cmd
+	}
+	if cmd := m.finishRefreshIssueIfIdle(); cmd != nil {
 		return cmd
 	}
 	m.clearActivityStatusIfIdle()
@@ -247,10 +283,32 @@ func (m *Model) releaseDiscoveryProgressStream() {
 }
 
 func (m *Model) clearActivityStatusIfIdle() {
-	if m.launchBatchActive || m.setupReloading || m.launchBatchPending() {
+	if m.launchBatchActive || m.setupReloading || m.launchBatchPending() || m.toolRefreshPending() {
 		return
 	}
 	m.progressText = ""
+}
+
+func (m *Model) rememberRefreshIssue(text string, priority int) {
+	if text == "" || priority <= m.refreshIssuePriority {
+		return
+	}
+	m.refreshIssue = text
+	m.refreshIssuePriority = priority
+}
+
+func (m *Model) clearRefreshIssue() {
+	m.refreshIssue = ""
+	m.refreshIssuePriority = 0
+}
+
+func (m *Model) finishRefreshIssueIfIdle() tea.Cmd {
+	if m.toolRefreshPending() || m.launchBatchActive || m.setupReloading || m.refreshIssue == "" {
+		return nil
+	}
+	status := m.refreshIssue
+	m.clearRefreshIssue()
+	return setStatus(m, status, true)
 }
 
 func (m Model) toolRefreshPending() bool {

@@ -3161,10 +3161,10 @@ func TestRenderStatusBar_QuitConfirmReplacesFooterHints(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
 	m.confirmQuit = true
-	m.quitConfirmKey = "ctrl+c"
+	m.quitConfirmKey = "q"
 	m.statusMsg = "previous status should not cover quit confirm"
 	out := renderStatusBar(m)
-	if !strings.Contains(out, "press ") || !strings.Contains(out, "ctrl+c") || !strings.Contains(out, "again to quit") {
+	if !strings.Contains(out, "press ") || !strings.Contains(out, "q") || !strings.Contains(out, "again to quit") {
 		t.Fatalf("quit confirmation should show triggering key and confirm text, got: %q", out)
 	}
 	if strings.Contains(out, "previous status") {
@@ -5283,8 +5283,8 @@ func TestInlineDetailLines_RowOperationReplacesHints(t *testing.T) {
 	if !strings.Contains(combined, "Installing curl…") {
 		t.Fatalf("row operation should show current status in hint slot, got:\n%s", combined)
 	}
-	if !strings.Contains(combined, "ctrl+c") || !strings.Contains(combined, "cancel") {
-		t.Fatalf("row operation should show ctrl+c cancel hint, got:\n%s", combined)
+	if !strings.Contains(combined, "ctrl+c") || !strings.Contains(combined, "quit") {
+		t.Fatalf("row operation should show ctrl+c quit hint, got:\n%s", combined)
 	}
 	if strings.Contains(combined, "edit groups") || strings.Contains(combined, "delete") {
 		t.Fatalf("row operation should replace normal action hints, got:\n%s", combined)

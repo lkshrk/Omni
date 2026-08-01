@@ -12,6 +12,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/profile"
 	"github.com/lkshrk/omni/internal/provider"
 )
@@ -227,7 +228,7 @@ func (a *App) toolOutdatedUpdate(ctx context.Context, cached *database.ToolCache
 		return unknownOutdatedUpdate(cached), false
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: omni: refresh outdated for %s/%s: %v\n", providerName, cached.Name, err)
+		reportRefreshWarning(ctx, "refresh outdated for %s/%s: %v", providerName, cached.Name, err)
 		if errors.Is(err, provider.ErrInstalledVersionUnknown) {
 			// Permanent: no verdict will ever be reached, and writing nothing would leave the tool less
 			// upgradable than one that never configured a check at all. Unknown still offers the upgrade.
@@ -282,7 +283,7 @@ func (a *App) outdatedMapsForProvidersBestEffort(ctx context.Context, providerNa
 			defer wg.Done()
 			m, byManager, metadata, ok, err := a.outdatedMapsForProvider(ctx, provName)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "warning: omni: refresh outdated for %s: %v\n", provName, err)
+				reportRefreshWarning(ctx, "refresh outdated for %s: %v", provName, err)
 				return
 			}
 			if !ok {
@@ -316,8 +317,15 @@ func (a *App) refreshProviderMetadataBestEffort(ctx context.Context, providerNam
 			continue
 		}
 		if err := mr.RefreshMetadata(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: omni: refresh %s metadata: %v\n", name, err)
+			reportRefreshWarning(ctx, "refresh %s metadata: %v", name, err)
 		}
+	}
+}
+
+func reportRefreshWarning(ctx context.Context, format string, args ...any) {
+	message := fmt.Sprintf("warning: omni: "+format, args...)
+	if !executor.EmitOutput(ctx, message) {
+		fmt.Fprintln(os.Stderr, message)
 	}
 }
 

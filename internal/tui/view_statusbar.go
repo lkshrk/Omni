@@ -21,7 +21,9 @@ func (t tabKeyMap) FullHelp() [][]key.Binding { return tabFullHelpBindings(t.m) 
 func renderStatusBar(m Model) string {
 	p := m.palette
 	legend := m.help.View(tabKeyMap{&m})
-	if m.confirmQuit {
+	if m.ctrlCConfirm {
+		legend = renderPressAgainActionHint(p, "", "ctrl+c", "quit")
+	} else if m.confirmQuit {
 		legend = renderPressAgainActionHint(p, "", quitConfirmKeyLabel(m.quitConfirmKey), "quit")
 	} else if m.listConfirm.action == listConfirmSyncAll {
 		desc := "sync all"
@@ -51,7 +53,7 @@ func renderStatusBar(m Model) string {
 }
 
 func footerConfirmationPromptActive(m Model) bool {
-	return m.confirmQuit || m.listConfirm.action == listConfirmSyncAll ||
+	return m.ctrlCConfirm || m.confirmQuit || m.listConfirm.action == listConfirmSyncAll ||
 		m.agentsSyncAllConfirm
 }
 

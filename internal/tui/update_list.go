@@ -409,24 +409,6 @@ func (m *Model) finishCancellableAction() {
 	m.activeActionCancel = nil
 }
 
-func (m *Model) cancelActiveAction() tea.Cmd {
-	if m.activeActionCancel == nil {
-		return nil
-	}
-	m.activeActionCancel()
-	m.activeActionCancel = nil
-	m.progressGen++
-	m.progressCh = nil
-	m.progressText = ""
-	m.loading = false
-	m.migrating = false
-	m.clearRowOperation()
-	m.clearBulkPending()
-	clear(m.upgradingKeys)
-	m.adminTerminalQueue = nil
-	return setStatus(m, "cancelled", false)
-}
-
 func (m *Model) setToolActionError(key, message string, errValues ...error) {
 	if key == "" || message == "" {
 		return

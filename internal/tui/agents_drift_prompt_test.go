@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
-
 	"github.com/lkshrk/omni/internal/app"
 )
 
@@ -115,22 +113,6 @@ func TestAgentsDriftPrompt_SuppressesTheFooterHintsBehindIt(t *testing.T) {
 	out := stripANSIEscapeSequences(driftPromptModel(t).viewString())
 	if strings.Contains(out, "U upgrade") {
 		t.Errorf("the tab's U hint must not show under the drift prompt, got:\n%s", out)
-	}
-}
-
-func TestAgentsDriftPrompt_CtrlCReachesTheQuitConfirmation(t *testing.T) {
-	t.Parallel()
-	m := driftPromptModel(t)
-	model, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
-	armed := model.(Model)
-	if !armed.confirmQuit {
-		t.Fatal("ctrl+c at the drift prompt should arm the quit confirmation")
-	}
-	if cmdQuits(cmd) {
-		t.Fatal("the first ctrl+c should not quit outright")
-	}
-	if _, cmd = armed.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}); !cmdQuits(cmd) {
-		t.Fatal("the second ctrl+c should quit")
 	}
 }
 

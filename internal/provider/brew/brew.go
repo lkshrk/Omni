@@ -551,6 +551,8 @@ func (c brewCaskInfo) privilegePlan(action provider.PrivilegeAction) provider.Pr
 			reason = "brew cask " + c.Token + " uses pkgutil uninstall"
 		case c.hasUninstallKey("launchctl"):
 			reason = "brew cask " + c.Token + " unloads a launchctl service"
+		case c.hasUninstallKey("delete"):
+			reason = "brew cask " + c.Token + " deletes files during uninstall"
 		case c.hasArtifact("pkg"):
 			reason = "brew cask " + c.Token + " uses a pkg installer"
 		}
@@ -564,6 +566,8 @@ func (c brewCaskInfo) privilegePlan(action provider.PrivilegeAction) provider.Pr
 			reason = "brew cask " + c.Token + " uses pkgutil uninstall"
 		case c.hasUninstallKey("launchctl"):
 			reason = "brew cask " + c.Token + " unloads a launchctl service"
+		case c.hasUninstallKey("delete"):
+			reason = "brew cask " + c.Token + " deletes files during uninstall"
 		}
 	}
 	if reason == "" {

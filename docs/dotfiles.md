@@ -175,6 +175,11 @@ omni dots history
 `pull` fetches remote dotfile changes and then syncs links. `push` stages,
 commits, and pushes all dotfiles repo changes.
 
+Omni's automatic safety checkpoints never commit the current branch. They
+snapshot the worktree on the local `omni/backup` branch without changing HEAD,
+the index, or the worktree, and never push that branch. Explicit `commit`,
+`push`, `auto_commit`, and `auto_push` retain their documented Git behavior.
+
 ## Native Services
 
 Reminders check whether dotfiles need attention:
@@ -210,3 +215,10 @@ Before replacing local dotfiles, Omni creates safety copies under:
 ```
 
 Review backups before deleting them.
+
+Repository checkpoints are available through native Git:
+
+```sh
+git diff omni/backup
+git restore --source=omni/backup -- path
+```

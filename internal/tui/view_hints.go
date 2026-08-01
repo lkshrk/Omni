@@ -859,6 +859,8 @@ func helpPopupContentWidth(m Model) int {
 
 func activeConfirmationHelpItems(m Model) []hintItem {
 	switch {
+	case m.ctrlCConfirm:
+		return []hintItem{pressAgainHint("ctrl+c", "quit")}
 	case m.confirmQuit:
 		keyLabel := m.quitConfirmKey
 		if keyLabel == "" {

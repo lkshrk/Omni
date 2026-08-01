@@ -26,7 +26,7 @@ mutability, dry-run support, and safer first steps.
 | `omni` | Launch the TUI. |
 | `omni ui` | Launch the TUI explicitly. |
 | `omni bootstrap` | Bootstrap Omni on this machine. |
-| `omni reconcile` | Claim discovered tools, sync, upgrade, sync agent resources, repair dotfiles, and commit dotfile changes. |
+| `omni reconcile` | Claim discovered tools, sync, upgrade, sync agent resources, repair dotfiles, and back up dotfile changes. |
 | `omni doctor` | Run read-only health checks. |
 | `omni tools` | Manage logical tool specs and package operations. |
 | `omni dots` | Manage dotfile symlinks from a Git repo. |
