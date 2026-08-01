@@ -94,6 +94,7 @@ func materializeGitHubReleaseAsset(logicalName string, spec ToolInstallSpec, fal
 	if pattern == "" {
 		return spec, fmt.Errorf("github_release_asset for %q requires recipe.asset_pattern", logicalName)
 	}
+	checksumPattern := strings.TrimSpace(recipe.ChecksumAssetPattern)
 	binary := strings.TrimSpace(spec.Bin)
 	if binary == "" {
 		binary = logicalName
@@ -115,23 +116,44 @@ func materializeGitHubReleaseAsset(logicalName string, spec ToolInstallSpec, fal
 	binaryPath := strings.TrimSpace(recipe.BinaryPath)
 	extractDir := optionValue(spec.Options, "extract_dir")
 	stripComponents := optionValue(spec.Options, "strip_components")
+	if checksumPattern != "" && extractDir != "" {
+		return spec, fmt.Errorf("github_release_asset for %q cannot combine recipe.checksum_asset_pattern with options.extract_dir", logicalName)
+	}
 
 	var install string
-	if downloadURL := strings.TrimSpace(recipe.AssetDownloadURL); downloadURL != "" {
-		// Re-checked at the sink: materialization is reachable without ValidateRoot having run.
-		if !IsHTTPSURL(downloadURL) {
-			return spec, fmt.Errorf("github_release_asset for %q: %s", logicalName, errAssetDownloadURLScheme)
+	downloadURL := strings.TrimSpace(recipe.AssetDownloadURL)
+	if downloadURL != "" && !IsHTTPSURL(downloadURL) {
+		return spec, fmt.Errorf("github_release_asset for %q: %s", logicalName, errAssetDownloadURLScheme)
+	}
+	dynamicPattern := strings.Contains(pattern+checksumPattern, "{arch}") || strings.Contains(pattern+checksumPattern, "{os}")
+	if downloadURL != "" {
+		if checksumPattern != "" && dynamicPattern {
+			install = githubReleaseAssetResolvedVerifiedInstall(
+				owner, repo, tag, version, downloadURL, checksumPattern, binary, binDir, binaryPath,
+				optionValue(spec.Options, "arch_map"),
+			)
+		} else {
+			checksumURL := ""
+			if checksumPattern != "" {
+				checksumAsset := expandRecipePlaceholders(checksumPattern, binary, version)
+				checksumURL = githubReleaseAssetURL(owner, repo, tag, checksumAsset)
+			}
+			install = githubReleaseAssetInstallCommand(downloadURL, checksumURL, binary, binDir, cacheDir, binaryPath, extractDir, stripComponents)
 		}
-		install = githubReleaseAssetInstallCommand(downloadURL, binary, binDir, cacheDir, binaryPath, extractDir, stripComponents)
-	} else if strings.Contains(pattern, "{arch}") || strings.Contains(pattern, "{os}") {
+	} else if dynamicPattern {
 		install = githubReleaseAssetArchAwareInstall(
-			owner, repo, tag, version, pattern, binary, binDir, cacheDir, binaryPath,
+			owner, repo, tag, version, pattern, checksumPattern, binary, binDir, cacheDir, binaryPath,
 			extractDir, stripComponents, optionValue(spec.Options, "arch_map"),
 		)
 	} else {
 		filename := expandRecipePlaceholders(pattern, binary, version)
 		downloadURL := githubReleaseAssetURL(owner, repo, tag, filename)
-		install = githubReleaseAssetInstallCommand(downloadURL, binary, binDir, cacheDir, binaryPath, extractDir, stripComponents)
+		checksumURL := ""
+		if checksumPattern != "" {
+			checksumAsset := expandRecipePlaceholders(checksumPattern, binary, version)
+			checksumURL = githubReleaseAssetURL(owner, repo, tag, checksumAsset)
+		}
+		install = githubReleaseAssetInstallCommand(downloadURL, checksumURL, binary, binDir, cacheDir, binaryPath, extractDir, stripComponents)
 	}
 
 	check := optionValue(spec.Options, "check")
@@ -257,15 +279,20 @@ func githubReleaseDownloadBase(owner, repo, tag string) string {
 	return fmt.Sprintf("https://github.com/%s/%s/releases/download/%s", owner, repo, tag)
 }
 
-func githubReleaseAssetArchAwareInstall(owner, repo, tag, version, pattern, binary, binDir, cacheDir, binaryPath, extractDir, stripComponents, archMapRaw string) string {
+func githubReleaseAssetArchAwareInstall(owner, repo, tag, version, pattern, checksumPattern, binary, binDir, cacheDir, binaryPath, extractDir, stripComponents, archMapRaw string) string {
 	assetExpr := githubAssetPatternExprShell(pattern, version, binary)
 	archCase := buildArchCaseStatement(parseArchMap(archMapRaw))
 	releaseBase := githubReleaseDownloadBase(owner, repo, tag)
 	prefix := fmt.Sprintf(`mkdir -p %s %s`, shellSingleQuote(binDir), shellSingleQuote(cacheDir))
-	if strings.Contains(pattern, "{os}") {
+	if strings.Contains(pattern+checksumPattern, "{os}") {
 		prefix += ` && os=$(uname -s | tr '[:upper:]' '[:lower:]')`
 	}
 	prefix += ` && ` + archCase + ` && asset=` + assetExpr
+	if checksumPattern != "" {
+		checksumExpr := githubAssetPatternExprShell(checksumPattern, version, binary)
+		prefix += ` && checksum_asset=` + checksumExpr + ` && asset_url=` + shellSingleQuote(releaseBase) + `/"$asset" && checksum_url=` + shellSingleQuote(releaseBase) + `/"$checksum_asset"`
+		return githubReleaseAssetVerifiedInstallCommand(prefix, binary, binDir, binaryPath, isArchiveAssetPattern(pattern))
+	}
 
 	if isArchiveAssetPattern(pattern) {
 		tarTarget := extractDir
@@ -300,6 +327,21 @@ func githubReleaseAssetArchAwareInstall(owner, repo, tag, version, pattern, bina
 		shellSingleQuote(releaseBase), shellSingleQuote(binDir), shellSingleQuote(binary),
 		shellSingleQuote(binDir), shellSingleQuote(binary),
 	)
+}
+
+func githubReleaseAssetResolvedVerifiedInstall(owner, repo, tag, version, downloadURL, checksumPattern, binary, binDir, binaryPath, archMapRaw string) string {
+	assetName := filepath.Base(downloadURL)
+	prefix := `mkdir -p ` + shellSingleQuote(binDir)
+	if strings.Contains(checksumPattern, "{os}") {
+		prefix += ` && os=$(uname -s | tr '[:upper:]' '[:lower:]')`
+	}
+	if strings.Contains(checksumPattern, "{arch}") {
+		prefix += ` && ` + buildArchCaseStatement(parseArchMap(archMapRaw))
+	}
+	checksumExpr := githubAssetPatternExprShell(checksumPattern, version, binary)
+	releaseBase := githubReleaseDownloadBase(owner, repo, tag)
+	prefix += ` && asset=` + shellSingleQuote(assetName) + ` && asset_url=` + shellSingleQuote(downloadURL) + ` && checksum_asset=` + checksumExpr + ` && checksum_url=` + shellSingleQuote(releaseBase) + `/"$checksum_asset"`
+	return githubReleaseAssetVerifiedInstallCommand(prefix, binary, binDir, binaryPath, isArchiveAssetPattern(assetName))
 }
 
 func materializeAptRepo(logicalName string, spec ToolInstallSpec) (ToolInstallSpec, error) {
@@ -446,10 +488,37 @@ func expandRecipePlaceholders(pattern, binary, version string) string {
 	return out
 }
 
-func githubReleaseAssetInstallCommand(downloadURL, binary, binDir, cacheDir, binaryPath, extractDir, stripComponents string) string {
+func githubReleaseAssetVerifiedInstallCommand(prefix, binary, binDir, binaryPath string, archive bool) string {
+	selectBinary := `found="$tmp/$asset_name"`
+	if archive {
+		match := binary
+		if binaryPath != "" {
+			match = binaryPath
+		}
+		selectBinary = `extract="$tmp/extract" && mkdir "$extract" && case "$asset_name" in *.zip) unzip -q "$tmp/$asset_name" -d "$extract" ;; *.tar.gz|*.tgz) tar -xzf "$tmp/$asset_name" -C "$extract" ;; *.tar.xz) tar -xJf "$tmp/$asset_name" -C "$extract" ;; esac && found="$(find "$extract" -type f -perm -111 -path ` + shellSingleQuote("*/"+match) + ` | head -n 1)" && test -n "$found"`
+	}
+	destination := filepath.Join(binDir, binary)
+	stagePattern := filepath.Join(binDir, "."+binary+".XXXXXX")
+	return prefix + ` && tmp="$(mktemp -d)" && staged= && trap 'rm -rf "$tmp"; if [ -n "$staged" ]; then rm -f "$staged"; fi' 0 && asset_name="${asset##*/}" && ` +
+		CurlFetch + ` "$asset_url" -o "$tmp/$asset_name" && ` +
+		CurlFetch + ` "$checksum_url" -o "$tmp/checksums" && ` +
+		`digests="$(awk -v target="$asset_name" '{ line=$0; sub(/\r$/, "", line); separator=index(line, " "); if (!separator) next; marker=substr(line, separator, 2); if (marker != "  " && marker != " *") next; if (substr(line, separator + 2) == target) print substr(line, 1, separator - 1) }' "$tmp/checksums")" && count="$(printf '%s\n' "$digests" | awk 'NF { count++ } END { print count + 0 }')" && ` +
+		`if [ "$count" -eq 0 ]; then echo "checksum manifest has no entry for $asset_name" >&2; exit 1; fi && if [ "$count" -ne 1 ]; then echo "checksum manifest has duplicate entries for $asset_name" >&2; exit 1; fi && expected="$digests" && if [ "${#expected}" -ne 64 ]; then echo "checksum manifest has malformed digest for $asset_name" >&2; exit 1; fi && case "$expected" in *[!0123456789abcdefABCDEF]*) echo "checksum manifest has malformed digest for $asset_name" >&2; exit 1 ;; esac && ` +
+		`if command -v sha256sum >/dev/null 2>&1; then actual="$(sha256sum "$tmp/$asset_name" | awk '{print $1}')"; elif command -v shasum >/dev/null 2>&1; then actual="$(shasum -a 256 "$tmp/$asset_name" | awk '{print $1}')"; else echo "SHA-256 verification requires sha256sum or shasum" >&2; exit 1; fi && expected="$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')" && if [ "$actual" != "$expected" ]; then echo "checksum mismatch for $asset_name" >&2; exit 1; fi && ` +
+		selectBinary + ` && staged="$(mktemp ` + shellSingleQuote(stagePattern) + `)" && install -m 0755 "$found" "$staged" && mv -f "$staged" ` + shellSingleQuote(destination) + ` && staged=`
+}
+
+func githubReleaseAssetInstallCommand(downloadURL, checksumURL, binary, binDir, cacheDir, binaryPath, extractDir, stripComponents string) string {
 	assetName := filepath.Base(downloadURL)
 	if strings.TrimSpace(assetName) == "" || assetName == "." || assetName == "/" {
 		return ""
+	}
+	if checksumURL != "" {
+		prefix := fmt.Sprintf(
+			`mkdir -p %s && asset=%s && asset_url=%s && checksum_url=%s`,
+			shellSingleQuote(binDir), shellSingleQuote(assetName), shellSingleQuote(downloadURL), shellSingleQuote(checksumURL),
+		)
+		return githubReleaseAssetVerifiedInstallCommand(prefix, binary, binDir, binaryPath, isArchiveAssetPattern(assetName))
 	}
 	if !isArchiveAssetPattern(assetName) {
 		return fmt.Sprintf(

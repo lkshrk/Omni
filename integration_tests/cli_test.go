@@ -877,7 +877,13 @@ func scriptRequires(path, requirement string) (bool, error) {
 // Stub server for the GitHub releases API, asset download, and checksums; rewrites STUB_SERVER_URL in the --config file at runtime.
 // Usage in txtar: exec omni-native-fallback-install --config settings.json <cmd> [args...]
 func nativeFallbackInstallMain() int {
-	binaryContent := []byte("#!/bin/sh\nexit 0\n")
+	configuredManifest := os.Getenv("OMNI_TEST_NATIVE_FALLBACK_CONFIGURED_MANIFEST") == "1"
+	failManifest := os.Getenv("OMNI_TEST_NATIVE_FALLBACK_MANIFEST_FAILURE") == "1"
+	binaryVersion := "native-v1"
+	if failManifest {
+		binaryVersion = "native-v2"
+	}
+	binaryContent := []byte("#!/bin/sh\nprintf '%s\\n' " + binaryVersion + "\n")
 	assetName := fmt.Sprintf("mytool_v1.0.0_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
 
 	var assetBuf bytes.Buffer
@@ -898,6 +904,7 @@ func nativeFallbackInstallMain() int {
 			return []map[string]any{
 				{"id": 1, "name": assetName, "browser_download_url": "https://" + host + "/asset/" + assetName},
 				{"id": 2, "name": "checksums.txt", "browser_download_url": "https://" + host + "/checksums"},
+				{"id": 3, "name": "configured.manifest", "browser_download_url": "https://" + host + "/configured-manifest"},
 			}
 		}
 		switch {
@@ -912,6 +919,17 @@ func nativeFallbackInstallMain() int {
 			w.Header().Set("Content-Type", "application/octet-stream")
 			w.Write(assetBytes) //nolint:errcheck
 		case r.URL.Path == "/checksums":
+			w.Header().Set("Content-Type", "text/plain")
+			if configuredManifest {
+				w.Write([]byte(strings.Repeat("0", 64) + "  " + assetName + "\n")) //nolint:errcheck
+			} else {
+				w.Write([]byte(checksumContent)) //nolint:errcheck
+			}
+		case r.URL.Path == "/configured-manifest":
+			if failManifest {
+				http.Error(w, "manifest unavailable", http.StatusServiceUnavailable)
+				return
+			}
 			w.Header().Set("Content-Type", "text/plain")
 			w.Write([]byte(checksumContent)) //nolint:errcheck
 		default:

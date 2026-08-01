@@ -533,6 +533,11 @@ func buildWithID(id string) *schema {
 						Type:        "string",
 						Examples:    []any{"ripgrep-{version}-{os}-{arch}.tar.gz"},
 					},
+					"checksum_asset_pattern": {
+						Description: "Optional SHA-256 manifest asset pattern for verified, atomic binary installation.",
+						Type:        "string",
+						Examples:    []any{"checksums.txt"},
+					},
 					"binary_path": {
 						Description: "Path to the executable inside the downloaded asset, when extraction is needed.",
 						Type:        "string",

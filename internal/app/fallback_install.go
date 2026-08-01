@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -303,6 +304,8 @@ func downloadToFile(ctx context.Context, client *http.Client, rawURL, destPath s
 
 // A missing checksums asset is best-effort nil; a mismatch is always a hard failure.
 func (a *App) verifyFallbackChecksum(ctx context.Context, name string, fallback *config.FallbackSpec, assetPath, assetName string) error {
+	checksumAsset := fallbackChecksumAssetName(name, fallback)
+	required := checksumAsset != ""
 	// A stored digest is reused only when its recorded asset scope still matches the asset being installed.
 	assetID := strings.TrimSpace(fallback.Recipe.AssetID)
 	if stored := strings.TrimSpace(fallback.Recipe.Checksum); stored != "" {
@@ -316,12 +319,18 @@ func (a *App) verifyFallbackChecksum(ctx context.Context, name string, fallback 
 	repo := strings.TrimSpace(fallback.Source.Repo)
 	tagName := strings.TrimSpace(fallback.Recipe.TagName)
 	if owner == "" || repo == "" || tagName == "" {
+		if required {
+			return fmt.Errorf("fallback %s: checksum manifest requires GitHub owner, repo, and tag", name)
+		}
 		return nil
 	}
 
-	digest, err := a.fetchReleaseChecksum(ctx, owner, repo, tagName, assetName)
+	digest, err := a.fetchReleaseChecksum(ctx, owner, repo, tagName, assetName, checksumAsset)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("fallback %s: checksum fetch: %w", name, err)
+		}
+		if required {
 			return fmt.Errorf("fallback %s: checksum fetch: %w", name, err)
 		}
 		// Best-effort: absent or unreachable checksums do not block install.
@@ -338,7 +347,23 @@ func (a *App) verifyFallbackChecksum(ctx context.Context, name string, fallback 
 	return nil
 }
 
-func (a *App) fetchReleaseChecksum(ctx context.Context, owner, repo, tagName, assetName string) (string, error) {
+func fallbackChecksumAssetName(name string, fallback *config.FallbackSpec) string {
+	pattern := strings.TrimSpace(fallback.Recipe.ChecksumAssetPattern)
+	if pattern == "" {
+		return ""
+	}
+	binary := strings.TrimSpace(fallback.Binary)
+	if binary == "" {
+		binary = name
+	}
+	version := strings.TrimPrefix(strings.TrimSpace(fallback.Recipe.TagName), "v")
+	pattern = strings.ReplaceAll(pattern, "{binary}", binary)
+	pattern = strings.ReplaceAll(pattern, "{version}", version)
+	pattern = strings.ReplaceAll(pattern, "{os}", runtime.GOOS)
+	return strings.ReplaceAll(pattern, "{arch}", runtime.GOARCH)
+}
+
+func (a *App) fetchReleaseChecksum(ctx context.Context, owner, repo, tagName, assetName string, checksumAssetPattern ...string) (string, error) {
 	release, err := a.fetchGitHubReleaseByTag(ctx, owner, repo, tagName)
 	if err != nil {
 		return "", err
@@ -347,8 +372,15 @@ func (a *App) fetchReleaseChecksum(ctx context.Context, owner, repo, tagName, as
 	client := a.githubHTTPClient()
 	var assetErrs []error
 	recognized := 0
+	configuredAsset := ""
+	if len(checksumAssetPattern) > 0 {
+		configuredAsset = strings.TrimSpace(checksumAssetPattern[0])
+	}
 	for _, asset := range release.Assets {
-		if !isChecksumAsset(strings.ToLower(asset.Name)) {
+		if configuredAsset != "" && asset.Name != configuredAsset {
+			continue
+		}
+		if configuredAsset == "" && !isChecksumAsset(strings.ToLower(asset.Name)) {
 			continue
 		}
 		recognized++
@@ -392,6 +424,9 @@ func (a *App) fetchReleaseChecksum(ctx context.Context, owner, repo, tagName, as
 			return "", parseErr
 		}
 		assetErrs = append(assetErrs, fmt.Errorf("checksum asset %q: %w", asset.Name, parseErr))
+	}
+	if recognized == 0 && configuredAsset != "" {
+		return "", fmt.Errorf("checksum asset %q not found in release %s/%s %s", configuredAsset, owner, repo, tagName)
 	}
 	if recognized == 0 {
 		return "", fmt.Errorf("no checksums asset in release %s/%s %s", owner, repo, tagName)
@@ -444,34 +479,44 @@ func isChecksumAsset(name string) bool {
 
 func extractChecksumForFile(r io.Reader, targetName string) (string, error) {
 	scanner := bufio.NewScanner(r)
+	var matches []string
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		line := strings.TrimSuffix(scanner.Text(), "\r")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		// Format: "<hex>  <filename>" or "<hex> <filename>"
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
+		separator := strings.IndexByte(line, ' ')
+		if separator < 0 || len(line) < separator+2 {
 			continue
 		}
-		// GNU sha256sum uses a leading '*' to mark binary-mode input.
-		filename := filepath.Base(strings.TrimPrefix(parts[len(parts)-1], "*"))
+		marker := line[separator : separator+2]
+		if marker != "  " && marker != " *" {
+			continue
+		}
+		filename := line[separator+2:]
 		if filename != targetName {
 			continue
 		}
-		digest := strings.ToLower(parts[0])
-		if len(digest) != sha256.Size*2 {
-			return "", fmt.Errorf("invalid SHA-256 digest for %q: got %d hex characters", targetName, len(digest))
-		}
-		if _, err := hex.DecodeString(digest); err != nil {
-			return "", fmt.Errorf("invalid SHA-256 digest for %q: %w", targetName, err)
-		}
-		return digest, nil
+		matches = append(matches, strings.ToLower(line[:separator]))
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("reading checksums: %w", err)
 	}
-	return "", fmt.Errorf("no checksum entry for %q in checksums file", targetName)
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no checksum entry for %q in checksums file", targetName)
+	}
+	if len(matches) != 1 {
+		return "", fmt.Errorf("duplicate checksum entries for %q in checksums file", targetName)
+	}
+	digest := matches[0]
+	if len(digest) != sha256.Size*2 {
+		return "", fmt.Errorf("invalid SHA-256 digest for %q: got %d hex characters", targetName, len(digest))
+	}
+	if _, err := hex.DecodeString(digest); err != nil {
+		return "", fmt.Errorf("invalid SHA-256 digest for %q: %w", targetName, err)
+	}
+	return digest, nil
 }
 
 func verifyFileChecksum(path, expectedHex, name string) error {

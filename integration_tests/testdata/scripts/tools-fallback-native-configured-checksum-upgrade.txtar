@@ -1,0 +1,81 @@
+# Configured checksum manifest selection and failed-upgrade preservation.
+# The helper makes the auto-discovered checksums.txt invalid in this mode, so
+# installation succeeds only if configured.manifest is selected exactly.
+
+exec chmod 755 bin/apt-get
+
+env PATH=$WORK/bin:$PATH
+env HOME=$WORK
+env OMNI_TEST_NATIVE_FALLBACK_CONFIGURED_MANIFEST=1
+
+exec omni-native-fallback-install --config settings.json hosts ensure testhost
+exec omni-seed-package-availability mytool apt mytool false 'no candidate'
+exec omni-native-fallback-install --config settings.json tools sync
+stdout 'installed: mytool \(apt\)'
+
+exec .omni-cache/fallback/bin/mytool
+stdout '^native-v1$'
+exec cp .omni-cache/fallback/bin/mytool old-mytool
+exec grep '"checksum_asset_pattern": "configured.manifest"' settings.json
+stdout 'configured.manifest'
+exec grep '"checksum": "' settings.json
+stdout '"checksum": "[0-9a-f]+'
+
+# Refresh resolves a v2 payload, then the configured manifest download fails.
+# The installed v1 bytes must remain untouched.
+exec omni-seed-cache mytool apt mytool 1.0.0 1.1.0 gh
+env OMNI_TEST_NATIVE_FALLBACK_MANIFEST_FAILURE=1
+! exec omni-native-fallback-install --config settings.json tools upgrade mytool --force
+stderr 'checksum fetch'
+exec cmp old-mytool .omni-cache/fallback/bin/mytool
+exec .omni-cache/fallback/bin/mytool
+stdout '^native-v1$'
+
+-- bin/apt-get --
+#!/bin/sh
+set -eu
+case "${1:-}" in
+  --version) echo "apt 2.0.0" ;;
+  *) exit 1 ;;
+esac
+
+-- settings.json --
+{
+  "version": 22,
+  "settings": {
+    "disabled_providers": ["brew", "npm", "pip", "node", "python", "pip3"]
+  },
+  "tools": {
+    "mytool": {
+      "providers": [{ "provider": "apt" }],
+      "fallback": {
+        "source": {
+          "type": "github",
+          "owner": "testowner",
+          "repo": "testrepo",
+          "url": "https://github.com/testowner/testrepo"
+        },
+        "status": "unverified",
+        "binary": "mytool",
+        "recipe": {
+          "type": "github_release_asset",
+          "asset_pattern": "mytool_v1.0.0_GOOS_GOARCH.tar.gz",
+          "checksum_asset_pattern": "configured.manifest",
+          "release_id": "1",
+          "tag_name": "v1.0.0",
+          "published_at": "2026-06-01T00:00:00Z",
+          "asset_id": "1",
+          "asset_name": "ASSET_NAME_PLACEHOLDER",
+          "asset_download_url": "STUB_SERVER_URL/asset/ASSET_NAME_PLACEHOLDER"
+        },
+        "commands": {
+          "check": "test -x {{bin_dir}}/{{binary}}"
+        }
+      }
+    }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["mytool"] }
+  ]
+}

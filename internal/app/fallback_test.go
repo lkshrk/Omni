@@ -1286,6 +1286,7 @@ func TestUpgradeToolFallback_GitHubRefreshPreservesCustomCommands(t *testing.T) 
 		return body
 	}))
 	fallback := oldGitHubCLIFallbackSpec()
+	fallback.Recipe.ChecksumAssetPattern = "checksums.txt"
 	want := config.FallbackCommands{
 		Install:   "custom install",
 		Check:     "custom check",
@@ -1322,6 +1323,9 @@ func TestUpgradeToolFallback_GitHubRefreshPreservesCustomCommands(t *testing.T) 
 	}
 	if commands := got.Tools["gh"].Fallback.Commands; commands != want {
 		t.Fatalf("commands after refresh = %+v, want custom commands %+v", commands, want)
+	}
+	if pattern := got.Tools["gh"].Fallback.Recipe.ChecksumAssetPattern; pattern != "checksums.txt" {
+		t.Fatalf("checksum asset pattern after refresh = %q, want checksums.txt", pattern)
 	}
 }
 

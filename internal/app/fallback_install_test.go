@@ -319,6 +319,7 @@ func TestNativeInstallPipeline_ChecksumMatch_Persisted(t *testing.T) {
 	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
 
 	fallbackSpec := githubReleaseAssetFallback(srv.URL, "tool_darwin_arm64.tar.gz", "mytool")
+	fallbackSpec.Recipe.ChecksumAssetPattern = "checksums.txt"
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"mytool": {
@@ -342,6 +343,9 @@ func TestNativeInstallPipeline_ChecksumMatch_Persisted(t *testing.T) {
 	expected := sha256Hex(assetContent)
 	if persisted != expected {
 		t.Errorf("persisted checksum = %q, want %q", persisted, expected)
+	}
+	if pattern := got.Tools["mytool"].Fallback.Recipe.ChecksumAssetPattern; pattern != "checksums.txt" {
+		t.Errorf("checksum asset pattern = %q, want checksums.txt", pattern)
 	}
 }
 
