@@ -137,6 +137,7 @@ func TestDurableTUIActionsAreCataloged(t *testing.T) {
 		actions.GroupDelete,
 		actions.GroupEditTools,
 		actions.GroupEditDots,
+		actions.HostCreate,
 		actions.HostDelete,
 		actions.HostEditGroups,
 		actions.SettingsSet,

@@ -1003,7 +1003,7 @@ func (m Model) mainTabsClickable() bool {
 	if !isMainTabMode(m.mode) {
 		return false
 	}
-	if m.hostRenameMode || m.groupCreating || m.groupRenameMode || m.groupDeleteConfirm {
+	if m.hostRenameMode || m.groupCreating || m.hostCreateStep != 0 || m.groupRenameMode || m.groupDeleteConfirm {
 		return false
 	}
 	if m.hostEditMode != 0 || m.editingPriority || m.editingServiceDuration || m.dangerConfirmRow >= 0 {
@@ -1031,6 +1031,12 @@ func (m *Model) handleMouseWheelMsg(msg tea.MouseWheelMsg) bool {
 	}
 	if (m.mode == viewSettings || m.mode == viewList || m.mode == viewSearch) && m.traceLog != nil {
 		m.scrollTraceLogBy(delta)
+		return true
+	}
+	if m.hostCreateStep != 0 {
+		if m.hostCreateStep == 2 {
+			m.setupCopyHostIdx = clampIndex(m.setupCopyHostIdx+delta, len(m.setupCopyHostNames()))
+		}
 		return true
 	}
 	m.scrollBy(delta)

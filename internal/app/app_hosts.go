@@ -278,26 +278,44 @@ func (a *App) CopyHostConfig(sourceName, targetName string) error {
 		return a.EnsureHost(targetName)
 	}
 	return a.withConfig(func(cfg *config.RootConfig) error {
-		sourceGroups, ok := cfg.Hosts[sourceName]
-		if !ok {
-			return fmt.Errorf("host %q not found", sourceName)
-		}
-		if _, err := ensureHostGroupInConfig(cfg, targetName); err != nil {
-			return err
-		}
-		if cfg.Hosts == nil {
-			cfg.Hosts = make(map[string][]string)
-		}
-		groups, err := reusableHostGroupsInConfig(cfg, targetName, sourceGroups)
-		if err != nil {
-			return err
-		}
-		cfg.Hosts[targetName] = groups
-		copyHostSettings(cfg, sourceName, targetName)
-		copyToolHostOverrides(cfg, sourceName, targetName)
-		copyDotHostVariants(cfg, sourceName, targetName)
-		return nil
+		return copyHostConfigInConfig(cfg, sourceName, targetName)
 	})
+}
+
+func (a *App) CopyHostConfigToNewHost(sourceName, targetName string) error {
+	sourceName = strings.TrimSpace(machineGroupName(sourceName))
+	targetName = strings.TrimSpace(machineGroupName(targetName))
+	if sourceName == "" || targetName == "" {
+		return fmt.Errorf("hostname is required")
+	}
+	return a.withConfig(func(cfg *config.RootConfig) error {
+		if _, exists := cfg.Hosts[targetName]; exists {
+			return fmt.Errorf("host %q already exists", targetName)
+		}
+		return copyHostConfigInConfig(cfg, sourceName, targetName)
+	})
+}
+
+func copyHostConfigInConfig(cfg *config.RootConfig, sourceName, targetName string) error {
+	sourceGroups, ok := cfg.Hosts[sourceName]
+	if !ok {
+		return fmt.Errorf("host %q not found", sourceName)
+	}
+	if _, err := ensureHostGroupInConfig(cfg, targetName); err != nil {
+		return err
+	}
+	if cfg.Hosts == nil {
+		cfg.Hosts = make(map[string][]string)
+	}
+	groups, err := reusableHostGroupsInConfig(cfg, targetName, sourceGroups)
+	if err != nil {
+		return err
+	}
+	cfg.Hosts[targetName] = groups
+	copyHostSettings(cfg, sourceName, targetName)
+	copyToolHostOverrides(cfg, sourceName, targetName)
+	copyDotHostVariants(cfg, sourceName, targetName)
+	return nil
 }
 
 func copyHostSettings(cfg *config.RootConfig, sourceName, targetName string) {

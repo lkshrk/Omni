@@ -61,6 +61,16 @@ func TestMustTUICopy_UsesTUIOverrides(t *testing.T) {
 	}
 }
 
+func TestHostCreateHasDurableTUIBinding(t *testing.T) {
+	action, ok := Get(HostCreate)
+	if !ok || action.TUI == nil {
+		t.Fatalf("HostCreate TUI binding = %+v, found = %v", action.TUI, ok)
+	}
+	if action.CLIOnlyReason != "" {
+		t.Fatalf("HostCreate CLIOnlyReason = %q, want empty", action.CLIOnlyReason)
+	}
+}
+
 func TestToolSetSpecCopyUsesProviderListTerminology(t *testing.T) {
 	action, ok := Get(ToolSetSpec)
 	if !ok {

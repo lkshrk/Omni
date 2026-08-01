@@ -324,7 +324,9 @@ type Model struct {
 	groupDeleteChoice  int  // 0=move last-membership tools to this host, 1=delete last-membership specs
 	groupRenameMode    bool // true when inline rename text input is open
 	groupRenameName    string
-	groupCreating      bool // true when the shared new-group popup is open
+	groupCreating      bool // true when the shared new-group/new-host name popup is open
+	hostCreateStep     int  // 0=none, 1=copy-or-fresh prompt, 2=source-host picker
+	hostCreateName     string
 
 	groupToolsEditor         groupAssignmentEditor
 	groupToolsProviderIdx    int

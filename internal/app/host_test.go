@@ -687,6 +687,43 @@ func TestCopyHostConfigCopiesHostScopedSettingsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestCopyHostConfigToNewHostRejectsExistingTarget(t *testing.T) {
+	t.Parallel()
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Groups: []*config.GroupConfig{
+			{Name: "source", Special: "host"},
+			{Name: "target", Special: "host"},
+			{Name: "source-group"},
+			{Name: "target-group"},
+		},
+		Hosts: map[string][]string{
+			"source": {"source-group"},
+			"target": {"target-group"},
+		},
+		HostSettings: map[string]config.Settings{
+			"source": {DotsRepo: "~/source"},
+			"target": {DotsRepo: "~/target"},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.CopyHostConfigToNewHost("source", "target"); err == nil {
+		t.Fatal("CopyHostConfigToNewHost overwrote an existing target")
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if !slices.Equal(cfg.Hosts["target"], []string{"target-group"}) {
+		t.Fatalf("target groups changed: %v", cfg.Hosts["target"])
+	}
+	if got := cfg.HostSettings["target"].DotsRepo; got != "~/target" {
+		t.Fatalf("target settings changed: %q", got)
+	}
+}
+
 func TestRemoveHostDeletesSpecialHostGroup(t *testing.T) {
 	t.Parallel()
 	a, cfgPath := newImportApp(t)

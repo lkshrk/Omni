@@ -329,12 +329,30 @@ func (m *Model) handleHostSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 		switch {
 		case key.Matches(msg, m.keys.Confirm):
 			newName := strings.TrimSpace(m.settingsInput.Value())
+			creatingHost := m.assignmentSection == 0
 			m.groupCreating = false
 			m.settingsInput.Blur()
 			if newName != "" {
-				m.beginLoading(loadingOwnerLocalOp)
-				startOp(m, "Creating group "+newName+"…")
-				cmds = append(cmds, m.spinner.Tick, m.doCreateGroup(newName))
+				if creatingHost {
+					newName = canonicalHostName(newName)
+					if newName == "" {
+						cmds = append(cmds, setStatus(m, "hostname is required", true))
+						return true, cmds
+					}
+					if m.hostInfo != nil {
+						if _, exists := m.hostInfo.Hosts[newName]; exists {
+							cmds = append(cmds, setStatus(m, "host "+newName+" already exists", false))
+							return true, cmds
+						}
+					}
+					m.hostCreateName = newName
+					m.hostCreateStep = 1
+					m.setupCopyHostIdx = 0
+				} else {
+					m.beginLoading(loadingOwnerLocalOp)
+					startOp(m, "Creating group "+newName+"…")
+					cmds = append(cmds, m.spinner.Tick, m.doCreateGroup(newName))
+				}
 			}
 		case key.Matches(msg, m.keys.Back):
 			m.groupCreating = false
@@ -345,6 +363,10 @@ func (m *Model) handleHostSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 			cmds = append(cmds, inputCmd)
 		}
 		return true, cmds
+	}
+
+	if m.hostCreateStep != 0 {
+		return true, m.handleHostCreateChoiceKeyMsg(msg)
 	}
 
 	if m.groupDeleteConfirm {
@@ -469,6 +491,49 @@ func (m *Model) handleHostSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 	return false, nil
 }
 
+func (m *Model) handleHostCreateChoiceKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+	names := m.setupCopyHostNames()
+	switch m.hostCreateStep {
+	case 1:
+		switch {
+		case key.Matches(msg, m.keys.Confirm) || strings.EqualFold(msg.String(), "y"):
+			switch len(names) {
+			case 0:
+				m.beginPendingHostCreation(&cmds, "")
+			case 1:
+				m.beginPendingHostCreation(&cmds, names[0])
+			default:
+				m.setupCopyHostIdx = clampRange(m.setupCopyHostIdx, 0, len(names)-1)
+				m.hostCreateStep = 2
+			}
+		case strings.EqualFold(msg.String(), "n") || key.Matches(msg, m.keys.Back):
+			m.beginPendingHostCreation(&cmds, "")
+		}
+	case 2:
+		switch {
+		case key.Matches(msg, m.keys.Up):
+			if m.setupCopyHostIdx > 0 {
+				m.setupCopyHostIdx--
+			}
+		case key.Matches(msg, m.keys.Down):
+			if m.setupCopyHostIdx < len(names)-1 {
+				m.setupCopyHostIdx++
+			}
+		case key.Matches(msg, m.keys.Confirm):
+			if len(names) == 0 {
+				m.beginPendingHostCreation(&cmds, "")
+				break
+			}
+			source := names[clampRange(m.setupCopyHostIdx, 0, len(names)-1)]
+			m.beginPendingHostCreation(&cmds, source)
+		case key.Matches(msg, m.keys.Back):
+			m.beginPendingHostCreation(&cmds, "")
+		}
+	}
+	return cmds
+}
+
 func (m *Model) handleGroupsNavigationKeyMsg(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Up):
@@ -542,6 +607,8 @@ func (m *Model) handleGroupsActionKey(msg tea.KeyPressMsg, cmds *[]tea.Cmd) {
 		switch {
 		case key.Matches(msg, m.keys.NewGroup):
 			m.startGroupCreation(cmds)
+		case key.Matches(msg, m.keys.NewHost):
+			m.startHostCreation(cmds)
 		case key.Matches(msg, m.keys.Rename):
 			m.startHostOrGroupRename()
 		case key.Matches(msg, m.keys.HostGroups):
@@ -563,6 +630,29 @@ func (m *Model) startGroupCreation(cmds *[]tea.Cmd) {
 	m.settingsInput.Placeholder = "group name…"
 	m.settingsInput.Focus()
 	*cmds = append(*cmds, textinput.Blink)
+}
+
+func (m *Model) startHostCreation(cmds *[]tea.Cmd) {
+	m.assignmentSection = 0
+	m.groupCreating = true
+	m.settingsInput.SetValue("")
+	m.settingsInput.Placeholder = "hostname…"
+	m.settingsInput.Focus()
+	*cmds = append(*cmds, textinput.Blink)
+}
+
+func (m *Model) beginPendingHostCreation(cmds *[]tea.Cmd, source string) {
+	target := m.hostCreateName
+	m.hostCreateStep = 0
+	m.hostCreateName = ""
+	m.beginLoading(loadingOwnerLocalOp)
+	if source == "" {
+		startOp(m, "Creating host "+target+"…")
+		*cmds = append(*cmds, m.spinner.Tick, m.doCreateHost(target))
+		return
+	}
+	startOp(m, "Copying host config…")
+	*cmds = append(*cmds, m.spinner.Tick, m.doCopyHostConfig(source, target))
 }
 
 func (m *Model) startHostOrGroupRename() {

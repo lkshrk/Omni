@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -170,6 +171,51 @@ func (m *Model) doCreateGroup(name string) tea.Cmd {
 			toolMemberships: state.ToolMemberships,
 			hostInfo:        state.HostInfo,
 		}
+	}
+}
+
+func (m *Model) doCreateHost(name string) tea.Cmd {
+	name = canonicalHostName(name)
+	a := m.app
+	return func() tea.Msg {
+		info, err := a.HostStatus()
+		if err != nil {
+			return hostGroupChangedMsg{err: err, host: name}
+		}
+		if _, exists := info.Hosts[name]; exists {
+			return hostGroupChangedMsg{host: name, detail: "host " + name + " already exists", info: info}
+		}
+		if err := a.EnsureHost(name); err != nil {
+			return hostGroupChangedMsg{err: err, host: name}
+		}
+		info, err = a.HostStatus()
+		return hostGroupChangedMsg{err: err, host: name, detail: "✓ host " + name + " created", info: info}
+	}
+}
+
+func canonicalHostName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	name, _, _ = strings.Cut(name, ".")
+	return name
+}
+
+func (m *Model) doCopyHostConfig(source, target string) tea.Cmd {
+	source = canonicalHostName(source)
+	target = canonicalHostName(target)
+	a := m.app
+	return func() tea.Msg {
+		info, err := a.HostStatus()
+		if err != nil {
+			return hostGroupChangedMsg{err: err, host: target}
+		}
+		if _, exists := info.Hosts[target]; exists {
+			return hostGroupChangedMsg{host: target, detail: "host " + target + " already exists", info: info}
+		}
+		if err := a.CopyHostConfigToNewHost(source, target); err != nil {
+			return hostGroupChangedMsg{err: err, host: target}
+		}
+		info, err = a.HostStatus()
+		return hostGroupChangedMsg{err: err, host: target, detail: "✓ host " + target + " copied from " + source, info: info}
 	}
 }
 

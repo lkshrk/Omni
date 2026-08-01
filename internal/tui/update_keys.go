@@ -32,6 +32,11 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		return *m, tea.Batch(cmds...)
 	}
 
+	if m.hostCreateStep != 0 {
+		cmds = append(cmds, m.handleHostCreateChoiceKeyMsg(msg)...)
+		return *m, tea.Batch(cmds...)
+	}
+
 	if !m.focusedTextInputActive() && key.Matches(msg, m.keys.Help) {
 		m.help.ShowAll = !m.help.ShowAll
 		return *m, nil

@@ -1635,21 +1635,27 @@ func TestFlow_UC37_GroupsNavigation(t *testing.T) {
 	})
 }
 
-func TestFlow_UC38_NewHostRemovedFromHostsTab(t *testing.T) {
+func TestFlow_UC38_NewHostFromHostsTab(t *testing.T) {
 	t.Parallel()
 	toHosts := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab(), pressTab()} }
 
-	t.Run("p does not open host creation", func(t *testing.T) {
-		got := drive(baseModel(nil), append(toHosts(), pressRune('p'))...)
-		if got.groupCreating || got.hostRenameMode || got.hostEditMode != 0 {
-			t.Fatalf("p should not start a Hosts tab edit mode: groupCreating=%v hostRename=%v hostEditMode=%d", got.groupCreating, got.hostRenameMode, got.hostEditMode)
+	t.Run("n still opens group creation", func(t *testing.T) {
+		got := drive(baseModel(nil), append(toHosts(), pressRune('n'))...)
+		if !got.groupCreating {
+			t.Error("groupCreating should be true after n")
+		}
+		if got.assignmentSection != 1 || got.settingsInput.Placeholder != "group name…" {
+			t.Fatalf("group creation state = section %d placeholder %q", got.assignmentSection, got.settingsInput.Placeholder)
 		}
 	})
 
-	t.Run("n still opens reusable group creation", func(t *testing.T) {
-		got := drive(baseModel(nil), append(toHosts(), pressRune('n'))...)
+	t.Run("p opens host creation", func(t *testing.T) {
+		got := drive(baseModel(nil), append(toHosts(), pressRune('p'))...)
 		if !got.groupCreating {
-			t.Error("groupCreating should be true after n in hosts tab")
+			t.Error("groupCreating should be true after p")
+		}
+		if got.assignmentSection != 0 || got.settingsInput.Placeholder != "hostname…" {
+			t.Fatalf("host creation state = section %d placeholder %q", got.assignmentSection, got.settingsInput.Placeholder)
 		}
 	})
 }
