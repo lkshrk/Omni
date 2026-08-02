@@ -1,5 +1,5 @@
 site_name: Omni
-site_description: Portable package and dotfile management for developer machines.
+site_description: Portable tool, dotfile, and AI-agent resource management for developer machines.
 site_url: https://lkshrk.github.io/omni/
 repo_url: https://github.com/lkshrk/omni
 repo_name: lkshrk/omni
@@ -70,6 +70,7 @@ nav:
       - Providers: providers.md
       - Tools: tools.md
       - Dotfiles: dotfiles.md
+      - Agents: agents.md
       - Upgrading From CLI-Managed Skills: migrating-skills.md
       - TUI: tui.md
   - Reference:

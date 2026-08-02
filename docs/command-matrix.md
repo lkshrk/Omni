@@ -103,7 +103,7 @@ Important flags:
 | --- | --- | --- |
 | `--dry-run` | `sync`, `import`, `consolidate`, `normalize`, `heal-taps`, `baseline` | Show planned changes without writing config or mutating packages where supported. |
 | `--prune` | `sync` | Remove local installations no longer in config. Cannot be combined with `sync --all`. |
-| `--all` | `sync`, `migrate-nvm` | For sync, claim discovered installed tools into config, install missing configured tools, then import unmanaged agent skills, MCP servers and plugins, and sync agent skills, MCP servers, and plugins. For migrate-nvm, migrate every nvm-managed system-provider tool. |
+| `--all` | `sync`, `migrate-nvm` | For sync, claim and install tools, then run plugin → skill → MCP import/restore in dependency order (see [CLI](cli.md#sync-all)). For migrate-nvm, migrate every nvm-managed system-provider tool. |
 | `--group` | `install`, `sync`, `import`, `list`, `add` | Target, filter, or assign a reusable group explicitly. |
 | `--force` | `install`, `upgrade`, `reconcile` | For install, skip bootstrap and host assignment checks for an explicit install path. For upgrade and reconcile, bypass update quarantine. |
 | `--allow-weak` | `install`, `sync` | Permit the best weak provider discovery match when no high-confidence match exists. |
@@ -253,10 +253,9 @@ from under plugins an agent still installs from would break them.
 capabilities in one pass, so it is the broadest of the resolve verbs; prefer the
 per-capability `resolve` when only one row is in question.
 
-`agents sync` runs all three feature syncs in one pass and stays
-converge-only for the same reason. `omni tools sync --all` is the command that
-also claims: it imports unmanaged skill packages, MCP servers and plugins
-before syncing, which is why its confirmation prompt names that scope.
+`agents sync` restores plugins, skills, then MCP servers and stays converge-only.
+`omni tools sync --all` also imports each capability immediately before its
+restore; see the [exact order and dry-run shadow rules](cli.md#sync-all).
 
 ## Group Commands
 

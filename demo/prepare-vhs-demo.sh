@@ -346,7 +346,17 @@ elif [[ "${1:-}" == "show" ]]; then
 fi
 EOF
 ln -sf pip3 "$root/bin/pip"
-chmod +x "$root/bin/brew" "$root/bin/pnpm" "$root/bin/uv" "$root/bin/pip3"
+
+cat > "$root/bin/python3" <<'EOF'
+#!/usr/bin/env bash
+case "${2:-}" in
+  *INSTALLER*|*console_scripts*) echo '{"pre-commit":1,"httpie":1,"awscli":1}' ;;
+  *EXTERNALLY-MANAGED*) echo 1 ;;
+  *) exit 1 ;;
+esac
+EOF
+
+chmod +x "$root/bin/brew" "$root/bin/pnpm" "$root/bin/uv" "$root/bin/pip3" "$root/bin/python3"
 
 for agent_bin in claude grok; do
   ln -sf agent-stub "$root/bin/$agent_bin"
@@ -531,8 +541,8 @@ EOF
 
 cat > "$root/settings.json" <<EOF
 {
-  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v20.schema.json",
-  "version": 20,
+  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v22.schema.json",
+  "version": 22,
   "settings": {
     "auto_import": true,
     "provider_priority": ["brew", "pnpm", "bun", "npm", "uv", "pip"],
@@ -665,8 +675,8 @@ EOF
 
 cat > "$root/onboarding-settings.json" <<EOF
 {
-  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v20.schema.json",
-  "version": 20,
+  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v22.schema.json",
+  "version": 22,
   "settings": {
     "provider_priority": ["brew", "pnpm", "bun", "npm", "uv", "pip"]
   },

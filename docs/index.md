@@ -1,7 +1,7 @@
 # Omni
 
-Omni keeps development tools and dotfiles in sync across machines from one
-portable JSON config.
+Omni keeps development tools, dotfiles, and AI-agent resources in sync across
+machines from one portable JSON config.
 
 It manages logical tools such as `ripgrep`, `typescript`, and `black`, then
 installs them with the right package manager for the current machine. It also
@@ -21,6 +21,8 @@ syncs dotfiles through a Git-backed GNU Stow repo.
   host-specific variants, Git commit/push flows, and optional native services.
 - **Hosts and groups**: per-machine activation of reusable tool and dotfile
   groups.
+- **Agent resources**: skills, MCP servers, plugins, and marketplaces across
+  supported agent CLIs.
 - **Health**: dashboard checks, `doctor`, `reconcile`, cache refreshes, and
   repair actions.
 - **Two surfaces**: the interactive TUI and a scriptable CLI share the same app
@@ -60,6 +62,7 @@ omni reconcile
 | Understand provider resolution | [Providers](providers.md) |
 | Manage tools | [Tools](tools.md) |
 | Manage dotfiles | [Dotfiles](dotfiles.md) |
+| Manage agent skills, MCP servers, and plugins | [Agents](agents.md) |
 | Move off the old skills CLI | [Upgrading From CLI-Managed Skills](migrating-skills.md) |
 | Use the terminal UI | [TUI](tui.md) |
 | Script Omni | [CLI Reference](cli.md) and [Command Matrix](command-matrix.md) |

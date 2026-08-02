@@ -16,6 +16,7 @@ This page explains the shape of `settings.json`. For narrative examples, use
 | `hosts` | object | no | Host to reusable-group assignments. |
 | `groups` | array | no | Reusable groups and special host groups. |
 | `ignore` | object | no | Global ignored tool and dot names. |
+| `agents` | object | no | Skill packages, MCP servers, marketplaces, plugins, and agent-specific ignores. |
 
 ## `settings`
 
@@ -35,6 +36,7 @@ This page explains the shape of `settings.json`. For narrative examples, use
 | `dots_git` | object | Dotfiles repo commit/push behavior. |
 | `disabled_providers` | array | Providers disabled for this settings scope. |
 | `fallback_bin_dir` | string | Default directory for fallback-installed binaries. |
+| `agents_use` | array | Agent IDs managed in this scope. Omit to manage every detected agent; an explicit empty list manages none. |
 
 ### `settings.ecosystems` (legacy)
 
@@ -65,14 +67,17 @@ family `disabled_providers` (`system`/`node`/`python`) into concrete providers.
 ```
 
 Host settings can override `provider_priority`, `dots_repo`, `dots_disabled`,
-`agents_disabled`, `skills_disabled`, `mcp_disabled`, `plugins_disabled`, and
-`disabled_providers`. They do not override `auto_import`,
+`agents_disabled`, `skills_disabled`, `mcp_disabled`, `plugins_disabled`,
+`agents_use`, and `disabled_providers`. They do not override `auto_import`,
 `update_quarantine`, `provider_update_quarantine`, or `dots_git`.
 
 A nil (absent) value for `agents_disabled`, `skills_disabled`, `mcp_disabled`,
 or `plugins_disabled` on a host means "enabled by default" and inherits the
 global setting. `agents_disabled` is the master switch: when true, it
 disables skills, mcp, and plugins regardless of their individual flags.
+
+An absent host `agents_use` inherits the global list. A present list replaces
+it; an explicit empty list manages no agents on that host.
 
 ## `tools`
 
@@ -172,6 +177,10 @@ Special host groups are protected machine-local groups:
 | `tools` | array | Logical tool names. |
 | `dots` | array | Dot entries. |
 | `taps` | array | Legacy group-level Homebrew taps. Prefer tool-level taps. |
+| `skills` | array | Skill package sources active for this group. `@agents.packages` expands to all declared packages. |
+| `mcp_servers` | array | MCP server names active for this group. `@agents.mcp_servers` expands to all declared servers. |
+| `marketplaces` | array | Marketplace names active for this group. `@agents.marketplaces` expands to all declared marketplaces. |
+| `plugins` | array | Plugin names active for this group. `@agents.plugins` expands to all declared plugins. |
 
 ## Dot Entries
 
@@ -217,7 +226,18 @@ the reusable group list.
 
 ## `agents`
 
-`agents.packages` is the sole durable skill manifest.
+`agents` is the desired-state manifest for agent resources:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `packages` | array | Skill package sources. The sole durable skill manifest. |
+| `mcp_servers` | array | MCP server registrations. |
+| `marketplaces` | array | Plugin marketplace sources. |
+| `plugins` | array | Plugins installed from a marketplace or direct source. |
+| `ignore` | object | Resource identities skipped during restore and sync. |
+| `skills` | array | Legacy per-skill entries accepted only for migration into `packages`; never written back. |
+
+### `agents.packages[]`
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -229,6 +249,38 @@ the reusable group list.
 Source shorthand such as `owner/repo#main@review` is normalized into
 `source`, `ref`, and `skills`. Source paths and locators remain portable;
 resolved hashes, timestamps, and cache paths are never stored here.
+
+### `agents.mcp_servers[]`
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `name` | string | Server identifier. Required. |
+| `transport` | string | `stdio`, `http`, or `sse`. Required. |
+| `command` | string | Launch command. Required for `stdio`. |
+| `url` | string | Remote endpoint. Required for `http` and `sse`. |
+| `env` | array | Environment variable names resolved during restore; values are not stored. |
+| `env_literal` | object | Literal non-secret environment values. |
+| `headers` | object | HTTP headers for remote transports. |
+| `agents` | array | Target agent IDs. Omitted or empty means the host's enabled targets. |
+
+### `agents.marketplaces[]`
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `name` | string | Marketplace identifier. Required. |
+| `source` | string | Source accepted by the target agent CLI. Required. |
+| `agents` | array | Target agent IDs. Omitted or empty means the host's enabled targets. |
+
+### `agents.plugins[]`
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `name` | string | Plugin identifier. Required. |
+| `marketplace` | string | Name of a declared marketplace. Mutually exclusive with `source`. |
+| `source` | string | Direct plugin source accepted by the target agent CLI. Mutually exclusive with `marketplace`. |
+| `agents` | array | Target agent IDs. Omitted or empty means the host's enabled targets. |
+
+Each plugin must set exactly one of `marketplace` or `source`.
 
 ## `ignore`
 

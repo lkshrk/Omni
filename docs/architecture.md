@@ -109,26 +109,12 @@ a group with `--group`, or when a command exposes a deliberate `--force` path.
 
 ## Provider Registry
 
-At app startup, Omni registers concrete providers first:
-
-- `brew`
-- `apt`
-- `apk`
-- `dnf`
-- `pacman`
-- `zypper`
-- `pip`
-- `cargo`
-
-Provider metadata records each provider's package family, display order, manager
-options, and default install order. The legacy provider-family names
-`system`, `node`, and `python` remain internal compatibility metadata for old
-configs and consolidation flows, but current tool config stores concrete
-providers in `tools[].providers[]`.
-
-The Python provider is `pip`. Legacy `pip3` manager settings remain accepted
-and migrate through the provider catalog, but current config should use `pip`
-as the concrete provider name.
+At startup, Omni registers the concrete package managers listed in
+[Providers](providers.md#provider-types). Registry metadata records each
+provider's package family, display order, manager options, and default install
+order. The legacy provider-family names `system`, `node`, and `python` remain
+internal compatibility metadata for old configs and consolidation flows, but
+current tool config stores concrete providers in `tools[].providers[]`.
 
 ## Tool Lifecycle
 
@@ -188,7 +174,7 @@ conflict resolution requires an explicit `--use-repo` or `--use-local` choice.
 - sync missing configured tools
 - claim discovered installed tools into the current machine group
 - upgrade configured tools
-- claim unmanaged agent skills and sync skills, MCP servers, and plugins
+- import and restore agent plugins, skills, and MCP servers in dependency order
 - repair dotfile links
 - commit dotfile repo changes
 

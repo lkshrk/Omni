@@ -11,11 +11,11 @@ keep working; the sections below explain what happens on their next sync.
 
 ## What Changes On An Existing Machine
 
-Config migrates automatically. Loading a settings file written by an older
-Omni upgrades it to schema version 20 in place, and `agents.packages` entries
-keep their `source`, `ref`, and `agents` fields unchanged. An entry with no
-`skills` selector means "every skill discovered in the source" — the selector
-list is optional rather than required.
+Config migrates automatically. Omni loads older settings as the current schema,
+and the next config-changing command writes the migrated form. Existing
+`agents.packages` entries keep their `source`, `ref`, and `agents` fields. An
+entry with no `skills` selector means "every skill discovered in the source" —
+the selector list is optional rather than required.
 
 The next sync reinstalls manifest packages natively:
 
@@ -184,12 +184,12 @@ the package with no skills or no agents is refused in favour of
 `omni agents skills remove`. In the TUI, a drifted skills row offers `u` (use
 managed) and `l` (use local), mirroring the dots tab's conflict keys.
 
-`omni tools sync --all` performs the import and the sync for you: it claims
-unmanaged skill packages, MCP servers, and plugins into the manifest and then
-reconciles all three, reporting drift in its summary instead of resolving it.
-A claim it cannot make — an MCP server two agents describe differently, a
-plugin from an undeclared marketplace — becomes a report line rather than a
-failed run.
+`omni tools sync --all` performs import and restore in plugin → skill → MCP
+dependency order. This prevents plugin-provided skills and MCP servers from
+being claimed separately, including in dry-run; see the [exact sync
+order](cli.md#sync-all). A claim it cannot make — an MCP server two agents
+describe differently, a plugin from an undeclared marketplace — becomes a
+report line rather than a failed run.
 
 ### MCP Servers And Plugins
 
