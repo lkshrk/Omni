@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -17,10 +19,13 @@ func TestRefreshInstalled_PinnedGitHubRecipeReportsTagAsVersion(t *testing.T) {
 	ctx := context.Background()
 	mock := executor.NewMatchMock().WithFallback(executor.MockCall{})
 	a, cfgPath := newImportApp(t, script.New(mock))
+	a.SetFallbackExecutor(mock)
+	binDir := installedRecipeBin(t, "actionlint")
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{"actionlint": {Providers: []config.ToolInstallSpec{{
 			Provider: "script",
 			Bin:      "actionlint",
+			BinDir:   binDir,
 			Options:  map[string]string{"arch_map": "amd64=amd64,arm64=arm64"},
 			Source:   &config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "rhysd", Repo: "actionlint"},
 			Recipe: &config.FallbackRecipe{
@@ -55,6 +60,8 @@ func TestRefreshOutdated_PinnedGitHubRecipeIsKnownNotUnknown(t *testing.T) {
 	ctx := context.Background()
 	mock := executor.NewMatchMock().WithFallback(executor.MockCall{})
 	a, cfgPath := newImportApp(t, script.New(mock))
+	a.SetFallbackExecutor(mock)
+	binDir := installedRecipeBin(t, "actionlint")
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, nil, func() io.ReadCloser {
 		t.Fatal("latest release endpoint should not be called for a pinned recipe")
 		return http.NoBody
@@ -63,6 +70,7 @@ func TestRefreshOutdated_PinnedGitHubRecipeIsKnownNotUnknown(t *testing.T) {
 		Tools: map[string]config.ToolSpec{"actionlint": {Providers: []config.ToolInstallSpec{{
 			Provider: "script",
 			Bin:      "actionlint",
+			BinDir:   binDir,
 			Source:   &config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "rhysd", Repo: "actionlint"},
 			Recipe: &config.FallbackRecipe{
 				Type:         config.FallbackRecipeGitHubReleaseAsset,
@@ -99,10 +107,13 @@ func TestRefreshInstalled_RecipeInstalledVersionOutranksTag(t *testing.T) {
 	ctx := context.Background()
 	mock := executor.NewMatchMock().WithFallback(executor.MockCall{})
 	a, cfgPath := newImportApp(t, script.New(mock))
+	a.SetFallbackExecutor(mock)
+	binDir := installedRecipeBin(t, "actionlint")
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{"actionlint": {Providers: []config.ToolInstallSpec{{
 			Provider: "script",
 			Bin:      "actionlint",
+			BinDir:   binDir,
 			Source:   &config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "rhysd", Repo: "actionlint"},
 			Recipe: &config.FallbackRecipe{
 				Type:             config.FallbackRecipeGitHubReleaseAsset,
@@ -127,6 +138,15 @@ func TestRefreshInstalled_RecipeInstalledVersionOutranksTag(t *testing.T) {
 	if got.Version.String != "1.7.11" {
 		t.Fatalf("version = %q; want %q", got.Version.String, "1.7.11")
 	}
+}
+
+func installedRecipeBin(t *testing.T, name string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("installed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 func TestRefreshInstalled_AptRepoRecipeReportsPackageVersion(t *testing.T) {

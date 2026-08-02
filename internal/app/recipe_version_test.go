@@ -1,8 +1,12 @@
 package app_test
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -32,14 +36,18 @@ func unpinnedActionlintConfig() *config.RootConfig {
 
 func actionlintLatestReleaseClient(t *testing.T, calls *int32, tag string) *http.Client {
 	t.Helper()
+	archive := executableArchive(t, "actionlint", "1.7.12")
 	return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Path != "/repos/rhysd/actionlint/releases/latest" {
+		asset := "actionlint_1.7.12_linux_amd64.tar.gz"
+		if req.URL.Path == "/rhysd/actionlint/releases/download/"+tag+"/"+asset {
+			return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(bytes.NewReader(archive)), Header: make(http.Header), Request: req}, nil
+		}
+		if req.URL.Path != "/repos/rhysd/actionlint/releases/latest" && req.URL.Path != "/repos/rhysd/actionlint/releases/tags/"+tag {
 			t.Fatalf("unexpected GitHub API path %q", req.URL.Path)
 		}
-		if calls != nil {
+		if calls != nil && req.URL.Path == "/repos/rhysd/actionlint/releases/latest" {
 			atomic.AddInt32(calls, 1)
 		}
-		asset := "actionlint_1.7.12_linux_amd64.tar.gz"
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Status:     "200 OK",
@@ -48,6 +56,51 @@ func actionlintLatestReleaseClient(t *testing.T, calls *int32, tag string) *http
 			Header:  make(http.Header),
 			Request: req,
 		}, nil
+	})}
+}
+
+func executableArchive(t *testing.T, name, version string) []byte {
+	t.Helper()
+	content := "#!/bin/sh\necho " + version + "\n"
+	var out bytes.Buffer
+	gz := gzip.NewWriter(&out)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(content))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return out.Bytes()
+}
+
+func actionlintPinnedReleaseClient(t *testing.T, tag string) *http.Client {
+	t.Helper()
+	archive := executableArchive(t, "actionlint", strings.TrimPrefix(tag, "v"))
+	version := strings.TrimPrefix(tag, "v")
+	asset := "actionlint_" + version + "_linux_amd64.tar.gz"
+	return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/repos/rhysd/actionlint/releases/tags/" + tag:
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body: githubFallbackReleaseBody(tag, "2026-05-27T17:47:41Z", asset,
+					"https://github.com/rhysd/actionlint/releases/download/"+tag+"/"+asset),
+				Header: make(http.Header), Request: req,
+			}, nil
+		case "/rhysd/actionlint/releases/download/" + tag + "/" + asset:
+			return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(bytes.NewReader(archive)), Header: make(http.Header), Request: req}, nil
+		default:
+			t.Fatalf("unexpected GitHub path %q", req.URL.Path)
+			return nil, nil
+		}
 	})}
 }
 
@@ -151,12 +204,7 @@ func TestInstall_PinnedGitHubRecipeDoesNotResolveARelease(t *testing.T) {
 	ctx := context.Background()
 	mock := executor.NewMatchMock().WithFallback(executor.MockCall{})
 	a, cfgPath := newImportApp(t, script.New(mock))
-	a.SetGitHubFallbackAPIForTest("https://api.github.test", &http.Client{
-		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-			t.Fatal("a pinned recipe must not call the GitHub API")
-			return nil, nil
-		}),
-	})
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", actionlintPinnedReleaseClient(t, "v1.7.11"))
 	cfg := unpinnedActionlintConfig()
 	spec := cfg.Tools["actionlint"]
 	spec.Providers[0].Recipe.TagName = "v1.7.11"
@@ -199,16 +247,8 @@ func TestInstall_UnpinnedGitHubRecipeIgnoresAReleaseMissingTheAsset(t *testing.T
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	if err := a.Install(ctx, "actionlint", "script"); err != nil {
-		t.Fatalf("Install: %v", err)
-	}
-
-	got, err := a.DB().Get(ctx, "actionlint", "script", "actionlint")
-	if err != nil {
-		t.Fatalf("Get actionlint: %v", err)
-	}
-	if got.Version.Valid {
-		t.Fatalf("version = %q; want none when the release lacks the configured asset", got.Version.String)
+	if err := a.Install(ctx, "actionlint", "script"); err == nil || !strings.Contains(err.Error(), "does not contain configured asset") {
+		t.Fatalf("Install error = %v, want missing configured asset", err)
 	}
 }
 
@@ -217,6 +257,7 @@ func TestUpgrade_UnpinnedGitHubRecipeReplacesTheRecordedRelease(t *testing.T) {
 	ctx := context.Background()
 	mock := executor.NewMatchMock().WithFallback(executor.MockCall{})
 	a, cfgPath := newImportApp(t, script.New(mock))
+	a.SetFallbackExecutor(mock)
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", actionlintLatestReleaseClient(t, nil, "v1.7.12"))
 	cfg := unpinnedActionlintConfig()
 	spec := cfg.Tools["actionlint"]
@@ -248,6 +289,7 @@ func TestReinstall_UnpinnedGitHubRecipeRecordsResolvedRelease(t *testing.T) {
 	ctx := context.Background()
 	mock := executor.NewMatchMock().WithFallback(executor.MockCall{})
 	a, cfgPath := newImportApp(t, script.New(mock))
+	a.SetFallbackExecutor(mock)
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", actionlintLatestReleaseClient(t, nil, "v1.7.12"))
 	if err := saveAppConfig(t, cfgPath, unpinnedActionlintConfig()); err != nil {
 		t.Fatalf("config.Save: %v", err)
@@ -276,6 +318,7 @@ func TestReinstall_KeepsTheRecipeItWasAuthoredWith(t *testing.T) {
 	ctx := context.Background()
 	mock := executor.NewMatchMock().WithFallback(executor.MockCall{})
 	a, cfgPath := newImportApp(t, script.New(mock))
+	a.SetFallbackExecutor(mock)
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", actionlintLatestReleaseClient(t, nil, "v1.7.12"))
 	if err := saveAppConfig(t, cfgPath, unpinnedActionlintConfig()); err != nil {
 		t.Fatalf("config.Save: %v", err)

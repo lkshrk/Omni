@@ -957,6 +957,7 @@ func (a *App) Uninstall(ctx context.Context, name, providerName string) error {
 	}
 	var pkg string
 	installedWith := ""
+	var configuredOptions map[string]string
 	if configured, _, found, err := a.configuredOperationTool(ctx, name, providerName); err != nil {
 		return err
 	} else if found {
@@ -965,6 +966,7 @@ func (a *App) Uninstall(ctx context.Context, name, providerName string) error {
 		}
 		providerName = configured.Provider
 		pkg = configured.EffectivePackage()
+		configuredOptions = configured.Options
 		if configured.InstallWith != "" {
 			installedWith = configured.InstallWith
 		}
@@ -977,7 +979,7 @@ func (a *App) Uninstall(ctx context.Context, name, providerName string) error {
 	}
 	if cached, err := a.readDB().Get(ctx, name, providerName, pkg); err == nil {
 		pkg = cached.Package
-		if cached.InstalledWith != "" {
+		if cached.InstalledWith != "" && installedWith != config.ProviderGitHubReleaseAsset {
 			installedWith = cached.InstalledWith
 		}
 	} else if !errors.Is(err, sql.ErrNoRows) {
@@ -994,7 +996,7 @@ func (a *App) Uninstall(ctx context.Context, name, providerName string) error {
 		return fmt.Errorf("unknown provider %q", providerName)
 	}
 	ctx = traceReasonDetail(ctx, "removing", name, opProvider, manager)
-	t := provider.Tool{Name: name, Provider: opProvider, Package: pkg}
+	t := provider.Tool{Name: name, Provider: opProvider, Package: pkg, Options: configuredOptions}
 	if err := uninstallWithProvider(ctx, prov, t, manager); err != nil {
 		a.recordPrivilegeError(ctx, name, providerName, pkg, err)
 		return err
@@ -1187,7 +1189,7 @@ func (a *App) UpgradeWithOptions(ctx context.Context, name, providerName string,
 	cached, err := a.readDB().Get(ctx, name, providerName, pkg)
 	if err == nil {
 		pkg = cached.Package
-		if cached.InstalledWith != "" {
+		if cached.InstalledWith != "" && installedWith != config.ProviderGitHubReleaseAsset {
 			installedWith = cached.InstalledWith
 		}
 	} else if !errors.Is(err, sql.ErrNoRows) {

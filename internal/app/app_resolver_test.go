@@ -34,6 +34,22 @@ func (p *availabilityCountingProvider) ListInstalled(context.Context) ([]provide
 	return nil, nil
 }
 
+func TestInstallCandidateUsesConfiguredOperationProviderAvailability(t *testing.T) {
+	a := &App{registry: provider.NewRegistry()}
+	script := &availabilityCountingProvider{name: "script", available: false}
+	a.registry.Register(script)
+	a.registry.Register(&githubReleaseAssetProvider{app: a, next: script})
+	candidate := config.ToolInstallSpec{Provider: "script", InstallWith: config.ProviderGitHubReleaseAsset}
+
+	usable, skip := a.installCandidateUsableCached(t.Context(), "opentofu", candidate, nil, nil)
+	if !usable {
+		t.Fatalf("native recipe route rejected: %+v", skip)
+	}
+	if script.calls != 0 {
+		t.Fatalf("script availability checked %d times", script.calls)
+	}
+}
+
 type managerRoutingProvider struct {
 	availabilityCountingProvider
 	installCalls        []provider.Tool

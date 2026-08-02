@@ -583,7 +583,7 @@ func (a *App) configuredGitHubOutdatedUpdatesBestEffort(ctx context.Context, too
 			continue
 		}
 		configured := tool.route.ConfiguredInstall
-		if strings.TrimSpace(tool.entry.Options["latest"]) != "" {
+		if strings.TrimSpace(configured.Options["latest"]) != "" {
 			continue
 		}
 		if configured.Source == nil || configured.Source.Type != config.FallbackSourceGitHub || configured.Recipe == nil || configured.Recipe.Type != config.FallbackRecipeGitHubReleaseAsset {
@@ -1197,9 +1197,14 @@ func (a *App) InitTestMode(ctx context.Context, providers ...provider.Provider) 
 	}
 	a.db = db
 	a.registry = provider.NewRegistry()
+	var scriptProvider provider.Provider
 	for _, p := range providers {
+		if p.Name() == "script" {
+			scriptProvider = p
+		}
 		a.registry.RegisterWithMetadata(p, provider.BuiltinMetadata(p.Name()))
 	}
+	a.registry.Register(&githubReleaseAssetProvider{app: a, next: scriptProvider})
 	return nil
 }
 

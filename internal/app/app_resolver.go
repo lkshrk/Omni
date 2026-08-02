@@ -333,7 +333,13 @@ func (a *App) installCandidateUsableCached(ctx context.Context, logicalName stri
 	if disabled[candidate.Provider] {
 		return false, installRouteSkip{Install: candidate, Reason: installRouteSkipProviderDisabled}
 	}
-	if !a.providerUsableCached(ctx, candidate.Provider, availability) {
+	operationProvider := candidate.Provider
+	if candidate.InstallWith != "" {
+		if _, ok := a.registry.Get(candidate.InstallWith); ok {
+			operationProvider = candidate.InstallWith
+		}
+	}
+	if !a.providerUsableCached(ctx, operationProvider, availability) {
 		return false, installRouteSkip{Install: candidate, Reason: installRouteSkipProviderUnavailable}
 	}
 	pkg := candidate.EffectivePackage(logicalName)

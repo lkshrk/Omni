@@ -1111,7 +1111,7 @@ func validateRecipeInstallSpec(path string, spec ToolInstallSpec) []ValidationEr
 			errs = append(errs, ValidationError{Path: path + ".recipe.asset_pattern", Message: "github_release_asset requires recipe.asset_pattern"})
 		}
 		if strings.TrimSpace(spec.Recipe.ChecksumAssetPattern) != "" && optionValue(spec.Options, "extract_dir") != "" {
-			errs = append(errs, ValidationError{Path: path + ".options.extract_dir", Message: "github_release_asset cannot combine checksum_asset_pattern with extract_dir"})
+			errs = append(errs, ValidationError{Path: path + ".options.extract_dir", Message: "cannot combine with recipe.checksum_asset_pattern"})
 		}
 	case FallbackRecipeAptRepo:
 		keyURL := optionValue(spec.Options, "key_url")

@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -575,7 +578,8 @@ func TestUpgrade_GitHubRecipeUsesCachedLatestRelease(t *testing.T) {
 		Response: executor.MockCall{Stdout: "2.93.0\n"},
 	}).WithFallback(executor.MockCall{})
 	a, cfgPath := newImportApp(t, scriptprovider.New(exec))
-	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, nil, func() io.ReadCloser {
+	var latestCalls int32
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, &latestCalls, func() io.ReadCloser {
 		return githubFallbackReleaseBody("v2.93.0", "2026-05-27T17:47:41Z", "gh_2.93.0_linux_amd64.tar.gz", assetURL)
 	}))
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -608,14 +612,56 @@ func TestUpgrade_GitHubRecipeUsesCachedLatestRelease(t *testing.T) {
 		t.Fatalf("UpgradeWithOptions: %v", err)
 	}
 
-	var hydratedCalls int
+	var shellDownloadCalls int
 	for _, call := range exec.CallsMatching("sh -c") {
 		if strings.Contains(strings.Join(call.Args, " "), assetURL) {
-			hydratedCalls++
+			shellDownloadCalls++
 		}
 	}
-	if hydratedCalls != 1 {
-		t.Fatalf("hydrated GitHub upgrade calls = %d, want 1", hydratedCalls)
+	if shellDownloadCalls != 0 {
+		t.Fatalf("GitHub upgrade used %d shell download calls", shellDownloadCalls)
+	}
+	if atomic.LoadInt32(&latestCalls) == 0 {
+		t.Fatal("native GitHub upgrade did not resolve the release")
+	}
+}
+
+func TestUninstall_GitHubRecipeMigratesLegacyScriptOwner(t *testing.T) {
+	ctx := context.Background()
+	exec := executor.NewMatchMock().WithFallback(executor.MockCall{Err: errors.New("unexpected shell command")})
+	a, cfgPath := newImportApp(t, scriptprovider.New(exec))
+	binDir := t.TempDir()
+	binPath := filepath.Join(binDir, "tofu")
+	if err := os.WriteFile(binPath, []byte("installed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{"opentofu": {Providers: []config.ToolInstallSpec{{
+			Provider: "script", Bin: "tofu", BinDir: binDir,
+			Source: &config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "opentofu", Repo: "opentofu"},
+			Recipe: &config.FallbackRecipe{Type: config.FallbackRecipeGitHubReleaseAsset, AssetPattern: "tofu.tar.gz"},
+		}}}},
+		Groups: []*config.GroupConfig{{Tools: groupTools("opentofu")}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name: "opentofu", Provider: "script", Package: "opentofu", Installed: true, InstalledWith: "script", LastChecked: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.Uninstall(ctx, "opentofu", "script"); err != nil {
+		t.Fatalf("Uninstall: %v", err)
+	}
+	if _, err := os.Stat(binPath); !os.IsNotExist(err) {
+		t.Fatalf("binary still exists: %v", err)
+	}
+	if calls := exec.CallsMatching("sh -c"); len(calls) != 0 {
+		t.Fatalf("shell calls = %d", len(calls))
+	}
+	if _, err := a.DB().Get(ctx, "opentofu", "script", "opentofu"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("cache row remains: %v", err)
 	}
 }
 
