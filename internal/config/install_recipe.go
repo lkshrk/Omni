@@ -110,7 +110,8 @@ func materializeGitHubReleaseAsset(logicalName string, spec ToolInstallSpec, fal
 	cacheDir := filepath.Join(filepath.Dir(binDir), "cache")
 	tag := githubReleaseTag(&recipe, spec.Options)
 	version := strings.TrimPrefix(tag, "v")
-	if version == "" {
+	resolveLatest := tag == "" && strings.Contains(pattern+checksumPattern, "{version}")
+	if version == "" && !resolveLatest {
 		version = "latest"
 	}
 	binaryPath := strings.TrimSpace(recipe.BinaryPath)
@@ -125,7 +126,7 @@ func materializeGitHubReleaseAsset(logicalName string, spec ToolInstallSpec, fal
 	if downloadURL != "" && !IsHTTPSURL(downloadURL) {
 		return spec, fmt.Errorf("github_release_asset for %q: %s", logicalName, errAssetDownloadURLScheme)
 	}
-	dynamicPattern := strings.Contains(pattern+checksumPattern, "{arch}") || strings.Contains(pattern+checksumPattern, "{os}")
+	dynamicPattern := strings.Contains(pattern+checksumPattern, "{arch}") || strings.Contains(pattern+checksumPattern, "{os}") || resolveLatest
 	if downloadURL != "" {
 		if checksumPattern != "" && dynamicPattern {
 			install = githubReleaseAssetResolvedVerifiedInstall(
@@ -281,16 +282,23 @@ func githubReleaseDownloadBase(owner, repo, tag string) string {
 
 func githubReleaseAssetArchAwareInstall(owner, repo, tag, version, pattern, checksumPattern, binary, binDir, cacheDir, binaryPath, extractDir, stripComponents, archMapRaw string) string {
 	assetExpr := githubAssetPatternExprShell(pattern, version, binary)
-	archCase := buildArchCaseStatement(parseArchMap(archMapRaw))
 	releaseBase := githubReleaseDownloadBase(owner, repo, tag)
 	prefix := fmt.Sprintf(`mkdir -p %s %s`, shellSingleQuote(binDir), shellSingleQuote(cacheDir))
+	releaseBaseExpr := shellSingleQuote(releaseBase)
+	if version == "" {
+		prefix += ` && ` + githubLatestReleaseResolve(owner, repo)
+		releaseBaseExpr = `"$release_base"`
+	}
 	if strings.Contains(pattern+checksumPattern, "{os}") {
 		prefix += ` && os=$(uname -s | tr '[:upper:]' '[:lower:]')`
 	}
-	prefix += ` && ` + archCase + ` && asset=` + assetExpr
+	if strings.Contains(pattern+checksumPattern, "{arch}") || version != "" {
+		prefix += ` && ` + buildArchCaseStatement(parseArchMap(archMapRaw))
+	}
+	prefix += ` && asset=` + assetExpr
 	if checksumPattern != "" {
 		checksumExpr := githubAssetPatternExprShell(checksumPattern, version, binary)
-		prefix += ` && checksum_asset=` + checksumExpr + ` && asset_url=` + shellSingleQuote(releaseBase) + `/"$asset" && checksum_url=` + shellSingleQuote(releaseBase) + `/"$checksum_asset"`
+		prefix += ` && checksum_asset=` + checksumExpr + ` && asset_url=` + releaseBaseExpr + `/"$asset" && checksum_url=` + releaseBaseExpr + `/"$checksum_asset"`
 		return githubReleaseAssetVerifiedInstallCommand(prefix, binary, binDir, binaryPath, isArchiveAssetPattern(pattern))
 	}
 
@@ -305,7 +313,7 @@ func githubReleaseAssetArchAwareInstall(owner, repo, tag, version, pattern, chec
 		}
 		extract := fmt.Sprintf(
 			`tmp="$(mktemp -d)" && `+CurlFetch+` %s/"$asset" -o %s/"$asset" && case "$asset" in *.zip) unzip -q %s/"$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf %s/"$asset" -C %s%s ;; *.tar.xz) tar -xJf %s/"$asset" -C %s%s ;; *) cp %s/"$asset" "$tmp/" ;; esac`,
-			shellSingleQuote(releaseBase), shellSingleQuote(cacheDir), shellSingleQuote(cacheDir),
+			releaseBaseExpr, shellSingleQuote(cacheDir), shellSingleQuote(cacheDir),
 			shellSingleQuote(cacheDir), tarTarget, stripFlag,
 			shellSingleQuote(cacheDir), tarTarget, stripFlag,
 			shellSingleQuote(cacheDir),
@@ -324,7 +332,7 @@ func githubReleaseAssetArchAwareInstall(owner, repo, tag, version, pattern, chec
 	}
 	return prefix + fmt.Sprintf(
 		` && `+CurlFetch+` %s/"$asset" -o %s/%s && chmod +x %s/%s`,
-		shellSingleQuote(releaseBase), shellSingleQuote(binDir), shellSingleQuote(binary),
+		releaseBaseExpr, shellSingleQuote(binDir), shellSingleQuote(binary),
 		shellSingleQuote(binDir), shellSingleQuote(binary),
 	)
 }
@@ -332,6 +340,11 @@ func githubReleaseAssetArchAwareInstall(owner, repo, tag, version, pattern, chec
 func githubReleaseAssetResolvedVerifiedInstall(owner, repo, tag, version, downloadURL, checksumPattern, binary, binDir, binaryPath, archMapRaw string) string {
 	assetName := filepath.Base(downloadURL)
 	prefix := `mkdir -p ` + shellSingleQuote(binDir)
+	releaseBaseExpr := shellSingleQuote(githubReleaseDownloadBase(owner, repo, tag))
+	if version == "" {
+		prefix += ` && ` + githubLatestReleaseResolve(owner, repo)
+		releaseBaseExpr = `"$release_base"`
+	}
 	if strings.Contains(checksumPattern, "{os}") {
 		prefix += ` && os=$(uname -s | tr '[:upper:]' '[:lower:]')`
 	}
@@ -339,9 +352,18 @@ func githubReleaseAssetResolvedVerifiedInstall(owner, repo, tag, version, downlo
 		prefix += ` && ` + buildArchCaseStatement(parseArchMap(archMapRaw))
 	}
 	checksumExpr := githubAssetPatternExprShell(checksumPattern, version, binary)
-	releaseBase := githubReleaseDownloadBase(owner, repo, tag)
-	prefix += ` && asset=` + shellSingleQuote(assetName) + ` && asset_url=` + shellSingleQuote(downloadURL) + ` && checksum_asset=` + checksumExpr + ` && checksum_url=` + shellSingleQuote(releaseBase) + `/"$checksum_asset"`
+	prefix += ` && asset=` + shellSingleQuote(assetName) + ` && asset_url=` + shellSingleQuote(downloadURL) + ` && checksum_asset=` + checksumExpr + ` && checksum_url=` + releaseBaseExpr + `/"$checksum_asset"`
 	return githubReleaseAssetVerifiedInstallCommand(prefix, binary, binDir, binaryPath, isArchiveAssetPattern(assetName))
+}
+
+func githubLatestReleaseResolve(owner, repo string) string {
+	latestURL := fmt.Sprintf("https://github.com/%s/%s/releases/latest", owner, repo)
+	tagBase := fmt.Sprintf("https://github.com/%s/%s/releases/tag/", owner, repo)
+	downloadBase := fmt.Sprintf("https://github.com/%s/%s/releases/download", owner, repo)
+	return `release_url="$(` + CurlFetch + ` -o /dev/null -w '%{url_effective}' ` + shellSingleQuote(latestURL) + `)" && ` +
+		`tag="${release_url##*/}" && case "$release_url" in ` + shellSingleQuote(tagBase) + `"$tag") ;; *) echo "invalid latest release redirect" >&2; exit 1 ;; esac && ` +
+		`case "$tag" in ""|*[!A-Za-z0-9._+@%~-]*) echo "invalid latest release tag" >&2; exit 1 ;; esac && ` +
+		`version="${tag#v}" && release_base=` + shellSingleQuote(downloadBase) + `/"$tag"`
 }
 
 func materializeAptRepo(logicalName string, spec ToolInstallSpec) (ToolInstallSpec, error) {
@@ -397,10 +419,14 @@ func materializeAptRepo(logicalName string, spec ToolInstallSpec) (ToolInstallSp
 }
 
 func githubAssetPatternExprShell(pattern, version, binary string) string {
+	versionExpr := shellSingleQuote(version)
+	if version == "" {
+		versionExpr = `"$version"`
+	}
 	values := map[string]string{
 		"{arch}":    `"$a"`,
 		"{os}":      `"$os"`,
-		"{version}": shellSingleQuote(version),
+		"{version}": versionExpr,
 		"{binary}":  shellSingleQuote(binary),
 	}
 	var expression strings.Builder

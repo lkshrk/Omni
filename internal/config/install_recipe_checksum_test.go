@@ -23,6 +23,7 @@ type releaseRecipeHarness struct {
 	fixtureDir string
 	fakeBin    string
 	requests   string
+	releaseURL string
 	tempDir    string
 	arch       string
 	path       string
@@ -36,6 +37,7 @@ func newReleaseRecipeHarness(t *testing.T, arch string) *releaseRecipeHarness {
 		fixtureDir: filepath.Join(root, "fixtures"),
 		fakeBin:    filepath.Join(root, "bin"),
 		requests:   filepath.Join(root, "requests"),
+		releaseURL: "https://github.com/owner/repo/releases/tag/v1.0.0",
 		tempDir:    filepath.Join(root, "tmp"),
 		arch:       arch,
 	}
@@ -49,14 +51,20 @@ func newReleaseRecipeHarness(t *testing.T, arch string) *releaseRecipeHarness {
 set -eu
 url=
 out=
+write=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o) shift; out=$1 ;;
+    -w) shift; write=$1 ;;
     -*) ;;
     *) url=$1 ;;
   esac
   shift
 done
+if [ -n "$write" ]; then
+  printf '%s' "$OMNI_RECIPE_RELEASE_URL"
+  exit 0
+fi
 name=${url##*/}
 printf '%s\n' "$name" >>"$OMNI_RECIPE_REQUESTS"
 test -f "$OMNI_RECIPE_FIXTURES/$name"
@@ -98,6 +106,7 @@ func (h *releaseRecipeHarness) run(t *testing.T, spec config.ToolInstallSpec, op
 		"TMPDIR="+h.tempDir,
 		"OMNI_RECIPE_ARCH="+h.arch,
 		"OMNI_RECIPE_FIXTURES="+h.fixtureDir,
+		"OMNI_RECIPE_RELEASE_URL="+h.releaseURL,
 		"OMNI_RECIPE_REQUESTS="+h.requests,
 	)
 	return cmd.CombinedOutput()
@@ -174,6 +183,30 @@ func TestGitHubReleaseAssetVerifiedArchiveInstallsExtractedBinary(t *testing.T) 
 		t.Fatalf("install: %v\n%s", err, output)
 	}
 	assertInstalledBinary(t, filepath.Join(h.binDir, "tool"), []byte("archive binary"))
+}
+
+func TestGitHubReleaseAssetUnpinnedVersionPreservesChecksumAndExtraction(t *testing.T) {
+	h := newReleaseRecipeHarness(t, "x86_64")
+	h.releaseURL = "https://github.com/owner/repo/releases/tag/v1.2.3+meta"
+	assetName := "tool_1.2.3+meta_linux_amd64.tar.gz"
+	checksumName := "tool_1.2.3+meta_checksums.txt"
+	asset := tarGzExecutable(t, "tool", []byte("latest archive binary"))
+	h.fixture(t, assetName, asset)
+	h.fixture(t, checksumName, []byte(sha256Digest(asset)+"  "+assetName+"\n"))
+
+	spec := verifiedReleaseRecipe(h.binDir, "tool_{version}_linux_{arch}.tar.gz", "tool_{version}_checksums.txt")
+	spec.Recipe.TagName = ""
+	if output, err := h.run(t, spec, "install"); err != nil {
+		t.Fatalf("install: %v\n%s", err, output)
+	}
+	assertInstalledBinary(t, filepath.Join(h.binDir, "tool"), []byte("latest archive binary"))
+	requests, err := os.ReadFile(h.requests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(requests) != assetName+"\n"+checksumName+"\n" {
+		t.Fatalf("requests = %q, want resolved asset and checksum names", requests)
+	}
 }
 
 func TestGitHubReleaseAssetVerifiedAdditionalArchiveFormats(t *testing.T) {
