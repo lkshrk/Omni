@@ -13,7 +13,7 @@ exec git -C $WORK/home/dotfiles config user.email t@t.com
 exec git -C $WORK/home/dotfiles config user.name T
 exec git -C $WORK/home/dotfiles commit --allow-empty -m init
 
-! exec sh -c 'omni --config settings.json --cache-dir cache dots watch run --debounce 500ms & watch=$!; sleep 1; kill -INT "$watch"; wait "$watch"'
+! exec sh -c 'log="$WORK/watch.log"; omni --config settings.json --cache-dir cache dots watch run --debounce 500ms >"$log" 2>&1 & watch=$!; for i in $(seq 1 100); do grep -q "Watching 0 dotfile path" "$log" && break; kill -0 "$watch" 2>/dev/null || break; sleep 0.1; done; kill -INT "$watch" 2>/dev/null || true; wait "$watch"; status=$?; cat "$log"; exit "$status"'
 stdout 'Watching 0 dotfile path'
 
 exec omni --config settings.json --cache-dir cache dots watch install --debounce 2s
