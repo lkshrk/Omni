@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path"
@@ -115,17 +116,15 @@ func (a *App) fetchLatestGitHubRelease(ctx context.Context, owner, repoName stri
 	if err != nil {
 		return githubRelease{}, err
 	}
-	resp, err := client.Do(req)
+	resp, err := doGitHubRequest(ctx, client, req)
 	if err != nil {
-		return githubRelease{}, err
+		var statusErr *githubHTTPError
+		if errors.As(err, &statusErr) && statusErr.statusCode == http.StatusNotFound {
+			return githubRelease{}, fmt.Errorf("github latest release not found for %s/%s", owner, repoName)
+		}
+		return githubRelease{}, fmt.Errorf("github release lookup failed: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck
-	if resp.StatusCode == http.StatusNotFound {
-		return githubRelease{}, fmt.Errorf("github latest release not found for %s/%s", owner, repoName)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return githubRelease{}, fmt.Errorf("github release lookup failed: %s", resp.Status)
-	}
 	var release githubRelease
 	decoder := json.NewDecoder(resp.Body)
 	decoder.UseNumber()

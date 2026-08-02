@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,10 @@ const (
 	maxDownloadBytes = 512 << 20
 	// maxEntryBytes caps each extracted tar/zip entry individually.
 	maxEntryBytes = 512 << 20
+	// Keeps remote error pages useful without flooding tool-sync output.
+	maxGitHubErrorTextBytes = 4 << 10
+	// A remote rate-limit response must not stall a sync indefinitely.
+	maxGitHubRetryDelay = 30 * time.Second
 )
 
 // Shared by the native download and the generated curl command so one policy governs both fetch paths.
@@ -243,20 +248,11 @@ func downloadToFile(ctx context.Context, client *http.Client, rawURL, destPath s
 	req.Header.Set("User-Agent", "omni")
 	attachGitHubToken(req, rawURL)
 
-	resp, err := client.Do(req)
+	resp, err := doGitHubRequest(dlCtx, client, req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		err := fmt.Errorf("HTTP %s", resp.Status)
-		// Wrapping in errNoRetry prevents retrying a request that will never succeed.
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			return errNoRetry{err}
-		}
-		return err
-	}
 	if resp.StatusCode == http.StatusNoContent {
 		return errNoRetry{fmt.Errorf("HTTP %s: response has no content", resp.Status)}
 	}
@@ -401,7 +397,7 @@ func (a *App) fetchReleaseChecksum(ctx context.Context, owner, repo, tagName, as
 		req.Header.Set("User-Agent", "omni")
 		attachGitHubToken(req, checksumURL)
 
-		resp, err := client.Do(req)
+		resp, err := doGitHubRequest(ctx, client, req)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return "", err
@@ -409,12 +405,6 @@ func (a *App) fetchReleaseChecksum(ctx context.Context, owner, repo, tagName, as
 			assetErrs = append(assetErrs, fmt.Errorf("checksum asset %q: %w", asset.Name, err))
 			continue
 		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			_ = resp.Body.Close()
-			assetErrs = append(assetErrs, fmt.Errorf("checksum asset %q: HTTP %s", asset.Name, resp.Status))
-			continue
-		}
-
 		digest, parseErr := extractChecksumForFile(resp.Body, assetName)
 		_ = resp.Body.Close()
 		if parseErr == nil {
@@ -444,18 +434,15 @@ func (a *App) fetchGitHubReleaseByTag(ctx context.Context, owner, repo, tagName 
 		return githubRelease{}, err
 	}
 
-	resp, err := client.Do(req)
+	resp, err := doGitHubRequest(ctx, client, req)
 	if err != nil {
-		return githubRelease{}, err
+		var statusErr *githubHTTPError
+		if errors.As(err, &statusErr) && statusErr.statusCode == http.StatusNotFound {
+			return githubRelease{}, fmt.Errorf("release %s/%s %s not found", owner, repo, tagName)
+		}
+		return githubRelease{}, fmt.Errorf("release lookup: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode == http.StatusNotFound {
-		return githubRelease{}, fmt.Errorf("release %s/%s %s not found", owner, repo, tagName)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return githubRelease{}, fmt.Errorf("release lookup HTTP %s", resp.Status)
-	}
 
 	var release githubRelease
 	decoder := json.NewDecoder(resp.Body)
@@ -816,7 +803,11 @@ func (a *App) newGitHubAPIRequest(ctx context.Context, pathSuffix string) (*http
 
 // Prevents credential leakage to non-GitHub hosts.
 func attachGitHubToken(req *http.Request, rawURL string) {
-	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+	req.Header.Del("Authorization")
+	token := strings.TrimSpace(os.Getenv("GH_TOKEN"))
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+	}
 	if token == "" {
 		return
 	}
@@ -825,4 +816,149 @@ func attachGitHubToken(req *http.Request, rawURL string) {
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+}
+
+type githubHTTPError struct {
+	statusCode int
+	status     string
+	body       string
+	headers    http.Header
+}
+
+func (e *githubHTTPError) Error() string {
+	parts := make([]string, 0, 3)
+	for _, name := range []string{"X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"} {
+		if value := strings.TrimSpace(e.headers.Get(name)); value != "" {
+			parts = append(parts, name+"="+value)
+		}
+	}
+	message := "HTTP " + e.status
+	if e.body != "" {
+		message += ": " + e.body
+	}
+	if len(parts) > 0 {
+		message += " (" + strings.Join(parts, ", ") + ")"
+	}
+	return message
+}
+
+func doGitHubRequest(ctx context.Context, client *http.Client, req *http.Request) (*http.Response, error) {
+	var lastErr error
+	for attempt := range downloadRetries {
+		resp, err := client.Do(req.Clone(ctx))
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			lastErr = err
+		} else if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return resp, nil
+		} else {
+			body := githubResponseText(resp.Body)
+			_ = resp.Body.Close()
+			status := resp.Status
+			if status == "" {
+				status = fmt.Sprintf("%d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+			}
+			statusErr := &githubHTTPError{
+				statusCode: resp.StatusCode,
+				status:     strings.TrimSpace(status),
+				body:       body,
+				headers:    resp.Header.Clone(),
+			}
+			lastErr = statusErr
+			if !githubResponseRetryable(resp.StatusCode, resp.Header, body) {
+				if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+					return nil, errNoRetry{statusErr}
+				}
+				return nil, statusErr
+			}
+		}
+
+		if attempt == downloadRetries-1 {
+			break
+		}
+		delay := time.Duration(attempt+1) * 500 * time.Millisecond
+		if resp != nil {
+			delay = githubRetryDelay(resp.Header, time.Now(), attempt)
+		}
+		if err := waitForGitHubRetry(ctx, delay); err != nil {
+			return nil, err
+		}
+	}
+	return nil, errNoRetry{lastErr}
+}
+
+func githubResponseRetryable(status int, header http.Header, body string) bool {
+	if status == http.StatusTooManyRequests {
+		return true
+	}
+	if status != http.StatusForbidden {
+		return false
+	}
+	body = strings.ToLower(body)
+	return strings.TrimSpace(header.Get("Retry-After")) != "" ||
+		strings.TrimSpace(header.Get("X-RateLimit-Remaining")) == "0" ||
+		strings.Contains(body, "rate limit") || strings.Contains(body, "rate-limit")
+}
+
+func githubRetryDelay(header http.Header, now time.Time, attempt int) time.Duration {
+	if raw := strings.TrimSpace(header.Get("Retry-After")); raw != "" {
+		if seconds, err := strconv.ParseInt(raw, 10, 64); err == nil && seconds >= 0 {
+			if seconds >= int64(maxGitHubRetryDelay/time.Second) {
+				return maxGitHubRetryDelay
+			}
+			return time.Duration(seconds) * time.Second
+		}
+		if retryAt, err := http.ParseTime(raw); err == nil {
+			return min(max(retryAt.Sub(now), 0), maxGitHubRetryDelay)
+		}
+	}
+	if reset, err := strconv.ParseInt(strings.TrimSpace(header.Get("X-RateLimit-Reset")), 10, 64); err == nil {
+		return min(max(time.Unix(reset, 0).Sub(now), 0), maxGitHubRetryDelay)
+	}
+	return time.Duration(attempt+1) * 500 * time.Millisecond
+}
+
+func waitForGitHubRetry(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func githubResponseText(r io.Reader) string {
+	body, _ := io.ReadAll(io.LimitReader(r, maxGitHubErrorTextBytes+1))
+	truncated := len(body) > maxGitHubErrorTextBytes
+	if truncated {
+		body = body[:maxGitHubErrorTextBytes]
+	}
+	text := strings.ToValidUTF8(string(body), "")
+	text = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, text)
+	text = strings.Join(strings.Fields(text), " ")
+	tokens := []string{strings.TrimSpace(os.Getenv("GH_TOKEN")), strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))}
+	if len(tokens[1]) > len(tokens[0]) {
+		tokens[0], tokens[1] = tokens[1], tokens[0]
+	}
+	for _, token := range tokens {
+		if token != "" {
+			text = strings.ReplaceAll(text, token, "[redacted]")
+		}
+	}
+	if truncated {
+		text += "…"
+	}
+	return text
 }
