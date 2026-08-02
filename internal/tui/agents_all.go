@@ -640,31 +640,33 @@ func (m *Model) doAgentsComposedRun(claim bool) []tea.Cmd {
 	work := func() tea.Msg {
 		defer close(ch)
 		done := agentsProgressDoneMsg{gen: gen, skills: runSkills, mcp: runMcp, plugin: runPlugins}
-		var report app.AgentsSyncAllResult
-		if runSkills {
-			var importErr error
-			if claim {
-				sendProgress(ch, gen, "importing unmanaged skills…")
-				diff, err := a.ImportSkills(ctx, app.ImportSkillsOptions{})
-				importErr = err
-				report.AddSkillsImport(diff, err)
+		report, err := a.AgentsSyncAll(ctx, app.AgentsSyncAllOptions{
+			ImportUnmanaged: claim,
+			Progress: func(text string) {
+				sendProgress(ch, gen, text)
+			},
+		})
+		if err != nil {
+			if runSkills {
+				done.skillsErr = err
 			}
-			sendProgress(ch, gen, "restoring skills…")
-			res, _, err := a.RestoreSkills(ctx, app.RestoreSkillsOptions{})
-			report.AddSkills(res, nil, err)
-			done.skillsErr = errors.Join(importErr, combineSkillErrors(err, res))
-		}
-		if runMcp {
-			sendProgress(ch, gen, "restoring mcp servers…")
-			res, err := a.RestoreMcpServers(ctx, app.RestoreMcpOptions{})
-			report.AddMcp(res, err)
-			done.mcpErr = combineMcpErrors(err, res.Errors)
-		}
-		if runPlugins {
-			sendProgress(ch, gen, "restoring plugins…")
-			res, err := a.RestorePlugins(ctx, app.RestorePluginOptions{})
-			report.AddPlugins(res, err)
-			done.pluginErr = combinePluginErrors(err, res.Errors)
+			if runMcp {
+				done.mcpErr = err
+			}
+			if runPlugins {
+				done.pluginErr = err
+			}
+		} else {
+			for _, featureErr := range report.Errors {
+				switch featureErr.Feature {
+				case app.AgentsFeatureImport, app.AgentsFeatureSkills:
+					done.skillsErr = errors.Join(done.skillsErr, featureErr)
+				case app.AgentsFeatureMcp:
+					done.mcpErr = errors.Join(done.mcpErr, featureErr)
+				case app.AgentsFeaturePlugins:
+					done.pluginErr = errors.Join(done.pluginErr, featureErr)
+				}
+			}
 		}
 		done.report = &report
 		return done

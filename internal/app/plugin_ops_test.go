@@ -32,6 +32,7 @@ type stubPluginAdapter struct {
 	updatedNames            []string
 	updatedIdentities       []string
 	addedMarkets            []config.Marketplace
+	calls                   []string
 	listCalls               int
 	updateMarketplacesCalls int
 }
@@ -65,6 +66,7 @@ func (s *stubPluginAdapter) ListPlugins(_ context.Context) ([]app.InstalledPlugi
 	return append([]app.InstalledPlugin(nil), s.listedPlugins...), nil
 }
 func (s *stubPluginAdapter) InstallPlugin(_ context.Context, p config.Plugin) error {
+	s.calls = append(s.calls, "install-plugin:"+p.Name)
 	s.installedPlugin = append(s.installedPlugin, p)
 	if s.installFunc != nil {
 		return s.installFunc(p)
@@ -87,12 +89,14 @@ func (s *stubPluginAdapter) UpdatePlugin(_ context.Context, name, marketplace st
 	return s.updateErr
 }
 func (s *stubPluginAdapter) ListMarketplaces(_ context.Context) ([]app.InstalledMarketplace, error) {
+	s.calls = append(s.calls, "list-marketplaces")
 	if s.listMarketErr != nil {
 		return nil, s.listMarketErr
 	}
 	return append([]app.InstalledMarketplace(nil), s.listedMarkets...), nil
 }
 func (s *stubPluginAdapter) AddMarketplace(_ context.Context, m config.Marketplace) error {
+	s.calls = append(s.calls, "add-marketplace:"+m.Name)
 	s.addedMarkets = append(s.addedMarkets, m)
 	return s.addMarketErr
 }
@@ -303,8 +307,118 @@ func TestRestorePlugins_AddsMarketplaceBeforePlugin(t *testing.T) {
 	if len(stub.installedPlugin) != 1 || stub.installedPlugin[0].Name != "caveman" {
 		t.Fatalf("expected plugin install, got %v", stub.installedPlugin)
 	}
+	if !slices.Equal(stub.calls, []string{"list-marketplaces", "add-marketplace:caveman", "install-plugin:caveman"}) {
+		t.Fatalf("calls = %v, want marketplace installed before plugin", stub.calls)
+	}
 	if len(res.Errors) != 0 {
 		t.Fatalf("unexpected errors: %v", res.Errors)
+	}
+}
+
+func TestRestorePlugins_DoesNotReinstallExistingMarketplace(t *testing.T) {
+	t.Parallel()
+	stub := &stubPluginAdapter{
+		id: "claude-code", available: true,
+		listedMarkets: []app.InstalledMarketplace{{Name: "caveman", Source: "lkshrk/agent-marketplace"}},
+	}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "lkshrk/agent-marketplace", Agents: []string{"claude-code"}}},
+		Plugins:      []config.Plugin{{Name: "caveman", Marketplace: "caveman", Agents: []string{"claude-code"}}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+
+	res, err := a.RestorePlugins(context.Background(), app.RestorePluginOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", res.Errors)
+	}
+	if len(stub.addedMarkets) != 0 {
+		t.Fatalf("addedMarkets = %v, want existing marketplace reused", stub.addedMarkets)
+	}
+	if !slices.Equal(stub.calls, []string{"list-marketplaces", "install-plugin:caveman"}) {
+		t.Fatalf("calls = %v, want marketplace check before plugin without re-add", stub.calls)
+	}
+}
+
+func TestRestorePlugins_AddsSharedMarketplaceOnceBeforeItems(t *testing.T) {
+	t.Parallel()
+	stub := &stubPluginAdapter{id: "claude-code", available: true}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "market", Source: "owner/market", Agents: []string{"claude-code"}}},
+		Plugins: []config.Plugin{
+			{Name: "first", Marketplace: "market", Agents: []string{"claude-code"}},
+			{Name: "second", Marketplace: "market", Agents: []string{"claude-code"}},
+		},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+
+	res, err := a.RestorePlugins(context.Background(), app.RestorePluginOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", res.Errors)
+	}
+	want := []string{"list-marketplaces", "add-marketplace:market", "install-plugin:first", "install-plugin:second"}
+	if !slices.Equal(stub.calls, want) {
+		t.Fatalf("calls = %v, want %v", stub.calls, want)
+	}
+}
+
+func TestRestorePlugins_MarketplaceFailureBlocksPluginInstall(t *testing.T) {
+	t.Parallel()
+	stub := &stubPluginAdapter{id: "claude-code", available: true, addMarketErr: errors.New("marketplace exploded")}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "market", Source: "owner/market", Agents: []string{"claude-code"}}},
+		Plugins:      []config.Plugin{{Name: "item", Marketplace: "market", Agents: []string{"claude-code"}}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+
+	res, err := a.RestorePlugins(context.Background(), app.RestorePluginOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 1 || !strings.Contains(res.Errors[0].Error(), "marketplace exploded") {
+		t.Fatalf("Errors = %v, want marketplace failure", res.Errors)
+	}
+	if len(stub.installedPlugin) != 0 {
+		t.Fatalf("installedPlugin = %v, want item blocked after marketplace failure", stub.installedPlugin)
+	}
+	want := []string{"list-marketplaces", "add-marketplace:market"}
+	if !slices.Equal(stub.calls, want) {
+		t.Fatalf("calls = %v, want %v", stub.calls, want)
+	}
+}
+
+func TestRestorePlugins_ClaudeAdapterAddsMarketplaceBeforeItem(t *testing.T) {
+	binDir := t.TempDir()
+	writeTestExecutable(t, binDir, "claude")
+	t.Setenv("PATH", binDir)
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "market", Source: "owner/market", Agents: []string{"claude-code"}}},
+		Plugins:      []config.Plugin{{Name: "item", Marketplace: "market", Agents: []string{"claude-code"}}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters(nil))
+	exec := &recordingPluginExecutor{}
+	a.SetFallbackExecutor(exec)
+
+	res, err := a.RestorePlugins(context.Background(), app.RestorePluginOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", res.Errors)
+	}
+	marketIdx := slices.IndexFunc(exec.args, func(args []string) bool {
+		return slices.Equal(args, []string{"plugins", "marketplace", "add", "owner/market"})
+	})
+	itemIdx := slices.IndexFunc(exec.args, func(args []string) bool {
+		return slices.Equal(args, []string{"plugins", "install", "item@market"})
+	})
+	if marketIdx < 0 || itemIdx <= marketIdx {
+		t.Fatalf("claude args = %v, want marketplace add before item install", exec.args)
 	}
 }
 

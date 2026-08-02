@@ -118,44 +118,46 @@ func (a *App) AgentsSyncAll(ctx context.Context, opts AgentsSyncAllOptions) (Age
 		opts.Progress(doing)
 	}
 
-	if opts.ImportUnmanaged {
-		if a.SkillsEnabled(cfg) {
-			progress("importing unmanaged skills…", "would import unmanaged skills…")
-			diff, err := a.ImportSkills(ctx, ImportSkillsOptions{DryRun: opts.DryRun})
-			res.AddSkillsImport(diff, err)
+	if opts.ImportUnmanaged && a.PluginsEnabled(cfg) {
+		progress("importing unmanaged plugins…", "would import unmanaged plugins…")
+		adopted, err := a.adoptUnmanagedPlugins(ctx, opts.DryRun)
+		res.PluginsAdopted = adopted
+		res.addWarnings(AgentsFeaturePlugins, adopted.Skipped)
+		if err != nil {
+			res.addError(AgentsFeaturePlugins, err.Error())
 		}
-		if a.McpEnabled(cfg) {
-			progress("importing unmanaged mcp servers…", "would import unmanaged mcp servers…")
-			adopted, err := a.adoptUnmanagedMcpServers(ctx, mcpAdoptOptions{DryRun: opts.DryRun})
-			// Conflicts, Skipped and Warnings travel on McpAdopted alone; mirroring two of the three into
-			// res.Warnings printed them twice and left the third looking like a different kind of line.
-			res.McpAdopted = adopted
-			if err != nil {
-				res.addError(AgentsFeatureMcp, err.Error())
-			}
-		}
-		if a.PluginsEnabled(cfg) {
-			progress("importing unmanaged plugins…", "would import unmanaged plugins…")
-			adopted, err := a.adoptUnmanagedPlugins(ctx, opts.DryRun)
-			res.PluginsAdopted = adopted
-			res.addWarnings(AgentsFeaturePlugins, adopted.Skipped)
-			if err != nil {
-				res.addError(AgentsFeaturePlugins, err.Error())
-			}
-		}
+	}
+
+	pluginNames, pluginWarnings := installedPluginNames(ctx, a)
+	progress("restoring plugins…", "would restore plugins…")
+	plugins, err := a.RestorePlugins(ctx, RestorePluginOptions{DryRun: opts.DryRun})
+	res.AddPlugins(plugins, err)
+	ctx = projectPluginInstalls(ctx, pluginNames, pluginWarnings, plugins)
+
+	if opts.ImportUnmanaged && a.SkillsEnabled(cfg) {
+		progress("importing unmanaged skills…", "would import unmanaged skills…")
+		diff, err := a.ImportSkills(ctx, ImportSkillsOptions{DryRun: opts.DryRun})
+		res.AddSkillsImport(diff, err)
 	}
 
 	progress("restoring skills…", "would restore skills…")
 	skills, lines, err := a.RestoreSkills(ctx, RestoreSkillsOptions{DryRun: opts.DryRun})
 	res.AddSkills(skills, lines, err)
 
+	if opts.ImportUnmanaged && a.McpEnabled(cfg) {
+		progress("importing unmanaged mcp servers…", "would import unmanaged mcp servers…")
+		adopted, err := a.adoptUnmanagedMcpServers(ctx, mcpAdoptOptions{DryRun: opts.DryRun})
+		// Conflicts, Skipped and Warnings travel on McpAdopted alone; mirroring two of the three into
+		// res.Warnings printed them twice and left the third looking like a different kind of line.
+		res.McpAdopted = adopted
+		if err != nil {
+			res.addError(AgentsFeatureMcp, err.Error())
+		}
+	}
+
 	progress("restoring mcp servers…", "would restore mcp servers…")
 	mcp, err := a.RestoreMcpServers(ctx, RestoreMcpOptions{DryRun: opts.DryRun})
 	res.AddMcp(mcp, err)
-
-	progress("restoring plugins…", "would restore plugins…")
-	plugins, err := a.RestorePlugins(ctx, RestorePluginOptions{DryRun: opts.DryRun})
-	res.AddPlugins(plugins, err)
 
 	return res, nil
 }
