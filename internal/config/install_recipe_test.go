@@ -64,6 +64,9 @@ func TestMaterializeInstallSpec_GitHubReleaseAssetArchAware(t *testing.T) {
 	if !strings.Contains(got.Options["install"], "eza-community/eza/releases/latest/download") {
 		t.Fatalf("install = %q, want latest release URL", got.Options["install"])
 	}
+	if strings.Contains(got.Options["install"], "url_effective") {
+		t.Fatalf("install = %q, want patterns without {version} unchanged", got.Options["install"])
+	}
 	if !strings.Contains(got.Options["install"], filepath.Join(home, ".local", "bin")) {
 		t.Fatalf("install = %q, want expanded home directory", got.Options["install"])
 	}
@@ -146,6 +149,9 @@ func TestMaterializeInstallSpec_GitHubReleaseAssetPinnedTag(t *testing.T) {
 	if !strings.Contains(got.Options["install"], "releases/download/v0.62.2") {
 		t.Fatalf("install = %q, want pinned tag URL", got.Options["install"])
 	}
+	if strings.Contains(got.Options["install"], "url_effective") {
+		t.Fatalf("install = %q, want pinned recipe unchanged", got.Options["install"])
+	}
 	if got.Options[config.OptionRecordedVersion] != "0.62.2" {
 		t.Fatalf("recorded version = %q, want %q", got.Options[config.OptionRecordedVersion], "0.62.2")
 	}
@@ -208,6 +214,113 @@ func TestMaterializeInstallSpec_GitHubReleaseAssetExpandsPinnedVersion(t *testin
 	}
 	if !strings.Contains(got.Options["install"], "gh_2.93.0_linux_amd64.tar.gz") {
 		t.Fatalf("install = %q, want asset version expanded from tag", got.Options["install"])
+	}
+}
+
+func TestMaterializeInstallSpec_GitHubReleaseAssetResolvesLatestVersion(t *testing.T) {
+	tmp := t.TempDir()
+	fakeBin := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(fakeBin, "uname"), "#!/bin/sh\necho x86_64\n")
+	writeExecutable(t, filepath.Join(fakeBin, "curl"), `#!/bin/sh
+out=
+url=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -w) printf '%s' "$FAKE_RELEASE_URL"; exit 0 ;;
+    -o) out="$2"; shift 2 ;;
+    https://*) url="$1"; shift ;;
+    *) shift ;;
+  esac
+done
+printf '%s\n' "$url" > "$FAKE_CURL_LOG"
+contents="$out.contents"
+mkdir -p "$contents"
+printf '#!/bin/sh\nexit 0\n' > "$contents/tool"
+chmod +x "$contents/tool"
+tar -czf "$out" -C "$contents" tool
+`)
+	logPath := filepath.Join(tmp, "curl.log")
+	spec := config.ToolInstallSpec{
+		Provider: "script",
+		Source:   &config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "owner", Repo: "repo"},
+		Recipe: &config.FallbackRecipe{
+			Type:         config.FallbackRecipeGitHubReleaseAsset,
+			AssetPattern: "tool_{version}_linux_{arch}.tar.gz",
+		},
+		Bin:    "tool",
+		BinDir: filepath.Join(tmp, "install"),
+		Options: map[string]string{
+			"arch_map": "x86_64:amd64",
+		},
+	}
+	got, err := config.MaterializeInstallSpec("tool", spec, "")
+	if err != nil {
+		t.Fatalf("MaterializeInstallSpec: %v", err)
+	}
+	if strings.Contains(got.Options["install"], "tool_latest_") {
+		t.Fatalf("install = %q, want no latest substitution in asset filename", got.Options["install"])
+	}
+	cmd := exec.Command("sh", "-c", got.Options["install"])
+	cmd.Env = append(os.Environ(),
+		"PATH="+fakeBin+":/usr/bin:/bin",
+		"FAKE_RELEASE_URL=https://github.com/owner/repo/releases/tag/v1.2.3",
+		"FAKE_CURL_LOG="+logPath,
+	)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generated install command failed: %v\n%s\ncommand: %s", err, output, got.Options["install"])
+	}
+	requested, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://github.com/owner/repo/releases/download/v1.2.3/tool_1.2.3_linux_amd64.tar.gz\n"
+	if string(requested) != want {
+		t.Fatalf("asset URL = %q, want %q", requested, want)
+	}
+}
+
+func TestMaterializeInstallSpec_GitHubReleaseAssetRejectsUnsafeRedirectTag(t *testing.T) {
+	tmp := t.TempDir()
+	marker := filepath.Join(tmp, "injected")
+	fakeBin := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(fakeBin, "curl"), "#!/bin/sh\nprintf '%s' \"$FAKE_RELEASE_URL\"\n")
+	spec := config.ToolInstallSpec{
+		Provider: "script",
+		Source:   &config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "owner", Repo: "repo"},
+		Recipe: &config.FallbackRecipe{
+			Type:         config.FallbackRecipeGitHubReleaseAsset,
+			AssetPattern: "tool_{version}_linux_amd64",
+		},
+		Bin:    "tool",
+		BinDir: filepath.Join(tmp, "install"),
+	}
+	got, err := config.MaterializeInstallSpec("tool", spec, "")
+	if err != nil {
+		t.Fatalf("MaterializeInstallSpec: %v", err)
+	}
+	cmd := exec.Command("sh", "-c", got.Options["install"])
+	cmd.Env = append(os.Environ(),
+		"PATH="+fakeBin+":/usr/bin:/bin",
+		"FAKE_RELEASE_URL=https://github.com/owner/repo/releases/tag/v1$(touch "+marker+")",
+	)
+	if output, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("generated install command succeeded with unsafe redirect tag\n%s", output)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("redirected release tag executed shell substitution; marker stat error = %v", err)
+	}
+}
+
+func writeExecutable(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
+		t.Fatal(err)
 	}
 }
 
