@@ -130,12 +130,11 @@ test-package-managers: prune-tmp
 test-all: test test-integration
 
 ## test-integration-build: run the isolated integration test Docker build stage
-test-integration-build:
+test-integration-build: clean-docker
 	docker buildx build -f Dockerfile.test --target integration-test $(DOCKER_TEST_CACHE) --output=type=cacheonly .
 
 ## test-integration: run integration-tagged tests inside the isolated Docker environment
 test-integration: test-integration-build
-	@docker builder prune --keep-storage=2g -f >/dev/null 2>&1 || true
 
 ## docs-build: build the documentation site in a minimal Docker image
 docs-build:

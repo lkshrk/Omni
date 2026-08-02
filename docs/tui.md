@@ -179,11 +179,14 @@ Sync, reading `drifted · upgrade` in the version column with `upgrade
 available` in its detail; the Agent Updates dashboard row still counts it, so
 the pending upgrade is never hidden behind the drift.
 
-The tab-wide actions run every feature in one pass: `S` claims what other CLIs
-installed and then converges all three, `R` reloads the rows. The run's outcome
-goes to the status bar as a one-line total; the rows themselves are the report,
-so nothing is stacked above the table. A per-feature failure still gets its own
-`error:` line there, since it names something no row can show.
+The tab-wide actions run every feature in one pass: `S` imports plugins,
+restores plugins, imports skills, restores skills, adopts MCP servers, then
+restores MCP servers; `R` reloads the rows. The same projected per-agent plugin
+state used by the CLI prevents dry-run from previewing duplicate plugin-provided
+skill or MCP installs. The run's outcome goes to the status bar as a one-line
+total; the rows themselves are the report, so nothing is stacked above the
+table. A per-feature failure still gets its own `error:` line there, since it
+names something no row can show.
 
 A run that leaves drift behind ends on a Drift Detected popup naming the first
 ten drifted items. That popup holds every keypress while it is up, which is

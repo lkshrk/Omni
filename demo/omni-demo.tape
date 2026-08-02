@@ -19,19 +19,9 @@ Set Framerate 24
 Set PlaybackSpeed 1.0
 
 Hide
-Type "mkdir -p /private/tmp/omni-vhs-bin && GOCACHE=/private/tmp/omni-gocache go build -o /private/tmp/omni-vhs-bin/omni ./cmd/omni" Enter
-Sleep 500ms
-Type "chmod +x demo/prepare-vhs-demo.sh && demo/prepare-vhs-demo.sh /private/tmp/omni-vhs-demo /private/tmp/omni-vhs-bin/omni" Enter
-Sleep 500ms
-Type "export OMNI_CONFIG=/private/tmp/omni-vhs-demo/settings.json OMNI_CACHE_DIR=/private/tmp/omni-vhs-demo/cache OMNI_HOSTNAME=demo-macbook HOME=/private/tmp/omni-vhs-demo/home PATH=/private/tmp/omni-vhs-demo/bin:/private/tmp/omni-vhs-bin TERM_PROGRAM=WezTerm COLORTERM=truecolor" Enter
-Type "omni ui" Enter
-Sleep 500ms
-
-Show
-Sleep 1.5s
-
-Hide
+Type "mkdir -p /tmp/omni-vhs-bin && GOCACHE=/tmp/omni-gocache go build -o /tmp/omni-vhs-bin/omni ./cmd/omni && chmod +x demo/prepare-vhs-demo.sh && demo/prepare-vhs-demo.sh /tmp/omni-vhs-demo /tmp/omni-vhs-bin/omni && export OMNI_CONFIG=/tmp/omni-vhs-demo/settings.json OMNI_CACHE_DIR=/tmp/omni-vhs-demo/cache OMNI_HOSTNAME=demo-macbook HOME=/tmp/omni-vhs-demo/home PATH=/tmp/omni-vhs-demo/bin:/tmp/omni-vhs-bin NVM_BIN= NVM_DIR= TERM_PROGRAM=WezTerm COLORTERM=truecolor && omni ui" Enter
 Sleep 30s
+Wait+Screen /Dashboard/
 
 Show
 Sleep 3s
@@ -73,6 +63,13 @@ Sleep 3.5s
 Tab
 Sleep 1s
 Sleep 3.5s
+
+Type "S"
+Sleep 800ms
+Type "S"
+Sleep 3.5s
+Escape
+Sleep 500ms
 
 Right
 Sleep 500ms

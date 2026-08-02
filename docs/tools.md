@@ -79,10 +79,9 @@ omni tools sync --all
 omni tools sync --prune --dry-run
 ```
 
-`sync` installs missing configured tools. `--all` also claims discovered
-installed tools into config before syncing missing tools, and then — when agent
-features are enabled for this host — imports unmanaged agent skill packages
-into the manifest and syncs agent skills, MCP servers, and plugins.
+`sync` installs missing configured tools. `--all` also claims discovered tools,
+then runs agent plugin → skill → MCP import/restore in dependency order; see
+the [exact sequence and dry-run behavior](cli.md#sync-all).
 `--prune` removes local installations that are no longer in config; preview
 with `--dry-run` first.
 

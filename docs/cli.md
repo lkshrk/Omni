@@ -103,7 +103,7 @@ instead of taking the prompt's default. Pass `--import-skills` (or the global
 | `omni tools add <package>` | Add a tool to config. |
 | `omni tools install [tool]` | Install one missing tool. |
 | `omni tools sync [group]` | Install missing tools from config. |
-| `omni tools sync --all` | Claim discovered tools, install missing tools, then import unmanaged agent skills, MCP servers and plugins, and sync agent skills, MCP servers, and plugins. |
+| `omni tools sync --all` | Claim and sync tools, then import and restore agent plugins, skills, and MCP servers in dependency order. |
 | `omni tools sync --prune` | Remove local installations no longer in config. |
 | `omni tools upgrade [tool]` | Upgrade one tool or use `--all`. |
 | `omni tools import` | Import installed tools into config. |
@@ -145,17 +145,23 @@ order:
 1. Claim discovered installed tools into config (into the machine group, or
    into `--group` when given).
 2. Install configured tools that are missing locally.
-3. Import unmanaged agent skill packages into the manifest, adopting their
-   installed directories.
-4. Sync agent skills, MCP servers, and plugins.
+3. Import unmanaged plugins.
+4. Restore plugins. Missing marketplaces are installed before their plugins;
+   marketplaces already present on an agent are not reinstalled.
+5. Import unmanaged skill packages.
+6. Restore skills.
+7. Adopt unmanaged MCP servers.
+8. Restore MCP servers.
 
-Steps 3 and 4 run only when agent features are enabled for this host, and each
-agent feature keeps its own gate: a disabled one warns and installs nothing.
-Skill packages an installed plugin already provides are skipped rather than
-claimed, and drift — an agent's skill entry another tool took over with
-different content — is reported in the summary and never resolved
-automatically. Use `--dry-run` to preview both phases, and `omni agents sync`
-when you want the convergence without the claim.
+Steps 3–8 keep the master and per-feature enablement gates: a disabled feature
+warns and installs nothing, while a failure in one feature does not stop later
+features. Plugin state is tracked per agent. Skills and MCP servers supplied by
+an installed plugin are skipped only for that agent; an MCP server shadowed for
+Claude can still be adopted for Codex. Dry-run includes plugins it would
+install in that projected state, so it does not preview duplicate skill or MCP
+installs from those plugins. Drift is reported and never resolved
+automatically. Use `omni agents sync` for converge-only restore without the
+import phases.
 
 Exit code: `omni tools sync --all` exits nonzero when either leg reports a
 failure — a tool that could not be installed or whose provider is
@@ -172,7 +178,7 @@ to the tool leg alone.
 | --- | --- |
 | `omni agents add <source>` | Add and install a skill package from Git, a well-known HTTP catalog, or a local directory. `#ref` and `@skill` selectors are supported. |
 | `omni agents find <query>` | Search skills.sh. Results are cached for one hour; stale results are returned with a warning when refresh fails. |
-| `omni agents sync` | Install the manifest's skills, MCP servers, and plugins in one pass. Converge only: it never claims unmanaged packages into the manifest. |
+| `omni agents sync` | Restore manifest plugins, then skills, then MCP servers. Converge only: it never claims unmanaged resources into the manifest. |
 | `omni agents resolve` | Settle every drifted skill, MCP server, and plugin at once with one side: `--use-managed` or `--use-local`. A per-item refusal is reported and never blocks the rest. |
 | `omni agents skills sync` | Install the manifest skill set onto this host through Omni's native skills engine. |
 | `omni agents skills import [<source>]` | Explicitly import legacy `.skill-lock.json` entries into the manifest, adopting their installed directories. With a source, claim only that package. |

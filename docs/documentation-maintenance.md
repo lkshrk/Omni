@@ -23,6 +23,7 @@ Docs dependencies are installed with `uv`.
 | New config key | [Configuration](configuration.md), [Schema Reference](schema-reference.md), [State And Files](state-and-files.md) when stateful. |
 | Provider behavior change | [Providers](providers.md), [Tools](tools.md), [Troubleshooting](troubleshooting.md). |
 | Dotfile behavior change | [Dotfiles](dotfiles.md), [Safety Model](safety.md), [Runbooks](runbooks.md). |
+| Agent skill, MCP, plugin, or marketplace change | [Agents](agents.md), [CLI Reference](cli.md), [Configuration](configuration.md), [TUI](tui.md) when interactive behavior changes. |
 | TUI interaction change | [TUI](tui.md), [Safety Model](safety.md) when risk changes. |
 | Test or contributor workflow change | [Development](development.md), [Test Matrix](test-matrix.md), this page. |
 | User-facing terminology change | [Glossary](glossary.md), affected guide pages. |

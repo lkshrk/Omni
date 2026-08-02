@@ -25,7 +25,7 @@ The smallest legal file is:
 
 ```json
 {
-  "version": 17
+  "version": 22
 }
 ```
 
@@ -39,7 +39,7 @@ automatically by Omni config writes.
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.schema.json",
-  "version": 17,
+  "version": 22,
   "settings": {
     "fallback_bin_dir": "~/.local/share/omni/fallback/bin",
     "provider_priority": ["brew", "apt", "dnf", "zypper", "pacman", "apk", "npm", "pip"]
@@ -116,6 +116,7 @@ Common keys:
 | `dots_git.auto_push` | Push dotfile repo changes after add/remove flows. |
 | `fallback_bin_dir` | Default directory for fallback-installed binaries. Omni warns if it is not on `PATH`; it does not edit shell files automatically. |
 | `providers` | Bootstrap provider tools installed before dependent tools. |
+| `agents_use` | Agent IDs managed on this machine. Omit to manage every detected agent; an explicit empty list manages none. |
 
 Use CLI settings commands when possible:
 
@@ -146,16 +147,18 @@ Host settings override selected global settings for one machine:
       "agents_disabled": false,
       "skills_disabled": false,
       "mcp_disabled": false,
-      "plugins_disabled": false
+      "plugins_disabled": false,
+      "agents_use": ["claude-code", "codex"]
     }
   }
 }
 ```
 
 Host-specific fields include `provider_priority`, `dots_repo`, `dots_disabled`,
-`disabled_providers`, `agents_disabled`, `skills_disabled`, `mcp_disabled`, and
-`plugins_disabled`. Global fields such as `auto_import`, `update_quarantine`,
-`provider_update_quarantine`, and `dots_git` are not host overrides.
+`disabled_providers`, `agents_disabled`, `skills_disabled`, `mcp_disabled`,
+`plugins_disabled`, and `agents_use`. Global fields such as `auto_import`,
+`update_quarantine`, `provider_update_quarantine`, and `dots_git` are not host
+overrides.
 
 `agents_disabled`, `skills_disabled`, `mcp_disabled`, and `plugins_disabled`
 are per-host pointer-to-bool fields: absent (`nil`) means enabled by default,
@@ -163,6 +166,10 @@ and only an explicit `true` turns the feature off. `agents_disabled` is the
 master switch for the agent skills/mcp/plugins features — when it disables
 agents for a host, skills, mcp, and plugins are all disabled too regardless of
 their own individual flags.
+
+`agents_use` is also host-scoped: an absent host value inherits the global
+list, while a present list replaces it. An explicit empty list disables every
+agent target on that host.
 
 ## Tool Specs
 
@@ -283,6 +290,20 @@ Dot entries use two similarly named fields:
 | `ignored` | Skip the whole dot entry while keeping it visible. |
 | `ignore` | Child path patterns to skip inside that entry. |
 
+Groups can also scope agent resources. Values reference entries declared under
+the top-level `agents` object:
+
+| Field | Reference value |
+| --- | --- |
+| `skills` | `agents.packages[].source` |
+| `mcp_servers` | `agents.mcp_servers[].name` |
+| `marketplaces` | `agents.marketplaces[].name` |
+| `plugins` | `agents.plugins[].name` |
+
+Each field also accepts its corresponding expansion token:
+`@agents.packages`, `@agents.mcp_servers`, `@agents.marketplaces`, or
+`@agents.plugins`.
+
 ## Global Ignore
 
 ```json
@@ -297,7 +318,25 @@ Dot entries use two similarly named fields:
 Ignore state keeps noisy or intentionally unmanaged items out of normal sync
 and refresh flows.
 
-## Agent Skill Packages
+## Agent Resources
+
+See [Agents](agents.md) for normal management, sync order, dry-run projection,
+feature gates, and plugin shadowing.
+
+`agents` contains four desired-state lists:
+
+| Field | Identity | Purpose |
+| --- | --- | --- |
+| `packages` | `source` | Skill packages installed through Omni's native skill store. |
+| `mcp_servers` | `name` | MCP registrations restored through agent adapters. |
+| `marketplaces` | `name` | Plugin catalogs added before their items. |
+| `plugins` | `name` | Marketplace or direct-source plugins. |
+
+Every entry accepts an optional `agents` list that narrows the enabled target
+agents for that resource. An omitted or empty resource-level list uses all
+enabled targets for the host.
+
+### Skill Packages
 
 `agents.packages` is the durable desired-state manifest for skills:
 
@@ -351,6 +390,18 @@ Legacy `.skill-lock.json` state is never written automatically. Sync and
 update leave legacy CLI-managed skill directories in place and warn about
 them; only `omni agents skills import` adopts those installations into the
 canonical package store.
+
+### MCP Servers, Marketplaces, And Plugins
+
+MCP servers require `name` and `transport`. `stdio` requires `command`; `http`
+and `sse` require `url`. `env` stores environment variable names,
+`env_literal` stores literal non-secret values, and `headers` stores remote
+headers.
+
+Marketplaces require `name` and `source`. Plugins require `name` and exactly
+one of `marketplace` or `source`; a `marketplace` value must name a declared
+marketplace. Sync adds a missing marketplace before installing its plugins and
+does not re-add one already present.
 
 ## Agents Ignore
 
