@@ -266,6 +266,7 @@ func TestRefreshDiscovered_BaselinesEverySystemPackageProviderOnFirstObservation
 	t.Parallel()
 	for _, providerName := range []string{"apt", "dnf", "pacman", "apk", "zypper"} {
 		t.Run(providerName, func(t *testing.T) {
+			t.Parallel()
 			p := &stubProvider{
 				name:      providerName,
 				available: true,

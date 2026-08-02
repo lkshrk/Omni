@@ -12,6 +12,8 @@ DEV_CACHE   ?= $(DEV_DIR)/cache
 DEV_GOCACHE ?= $(DEV_DIR)/go-build
 TEST_SAFE   := bash scripts/run-test-safe.sh
 TEST_UNIT_ROOT := $(TMP_DIR)/test-unit-root
+TEST_PACKAGES ?= ./...
+INTEGRATION_PACKAGES ?= ./integration_tests/... ./internal/provider/...
 ARGS        ?= --help
 DOCKER      ?= docker
 
@@ -94,7 +96,7 @@ test-unit:
 	@mkdir -p "$(TEST_UNIT_ROOT)"
 	@chmod -R u+w "$(TEST_UNIT_ROOT)" 2>/dev/null || true
 	@find "$(TEST_UNIT_ROOT)" -mindepth 1 -delete
-	OMNI_TEST_ROOT="$(TEST_UNIT_ROOT)" $(TEST_SAFE) go test -race -trimpath ./...
+	OMNI_TEST_ROOT="$(TEST_UNIT_ROOT)" $(TEST_SAFE) go test -race -trimpath $(TEST_PACKAGES)
 
 ## test-unit-fast: run unit tests without the race detector, for quick local iteration
 test-unit-fast:
@@ -131,7 +133,7 @@ test-all: test test-integration
 
 ## test-integration-build: run the isolated integration test Docker build stage
 test-integration-build: clean-docker
-	docker buildx build -f Dockerfile.test --target integration-test $(DOCKER_TEST_CACHE) --output=type=cacheonly .
+	docker buildx build -f Dockerfile.test --target integration-test --build-arg "TEST_PACKAGES=$(INTEGRATION_PACKAGES)" $(DOCKER_TEST_CACHE) --output=type=cacheonly .
 
 ## test-integration: run integration-tagged tests inside the isolated Docker environment
 test-integration: test-integration-build
