@@ -234,6 +234,7 @@ func TestConsolidateToProvider_CollectsInstallAndVerificationFailures(t *testing
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			a, cfgPath := newImportApp(t, tt.target, &stubProvider{name: "npm", available: true})
 			if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 				Tools: map[string]config.ToolSpec{

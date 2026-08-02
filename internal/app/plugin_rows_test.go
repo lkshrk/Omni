@@ -73,6 +73,7 @@ func TestPluginRows_VersionAndOutdated(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			claude := &stubPluginAdapter{
 				id:        "claude-code",
 				available: true,

@@ -56,9 +56,10 @@ func TestMakeTestTargetsUseSafeRunner(t *testing.T) {
 	for _, want := range []string{
 		"TEST_SAFE   := bash scripts/run-test-safe.sh",
 		"TEST_UNIT_ROOT := $(TMP_DIR)/test-unit-root",
+		"TEST_PACKAGES ?= ./...",
 		"test: test-scripts test-unit",
 		"$(TEST_SAFE) bash scripts/test-release.sh",
-		"OMNI_TEST_ROOT=\"$(TEST_UNIT_ROOT)\" $(TEST_SAFE) go test -race -trimpath ./...",
+		"OMNI_TEST_ROOT=\"$(TEST_UNIT_ROOT)\" $(TEST_SAFE) go test -race -trimpath $(TEST_PACKAGES)",
 	} {
 		if !strings.Contains(makefile, want) {
 			t.Fatalf("Makefile test target is missing safe runner command %q", want)

@@ -6,6 +6,16 @@ pre-push:
     integration:
       only:
         - ref: main
+      glob:
+        - "cmd/**"
+        - "internal/**"
+        - "integration_tests/**"
+        - "scripts/**"
+        - go.mod
+        - go.sum
+        - .dockerignore
+        - Dockerfile.test
+        - Makefile
       run: make test-integration
 
 pre-commit:

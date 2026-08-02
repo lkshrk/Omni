@@ -82,6 +82,7 @@ func TestSync_InstallsProvidersBeforeDependents(t *testing.T) {
 		{name: "batch group", groupName: "dev", opts: isync.SyncOptions{Group: "dev"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			var mu sync.Mutex
 			var log []string
 			var pipAvailable atomic.Bool

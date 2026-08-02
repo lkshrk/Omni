@@ -386,6 +386,7 @@ func TestInstallAndAddWithStateRejectsInvalidInstallWith(t *testing.T) {
 		{name: "wrong ecosystem", installWith: "uv", want: `install_with "uv" belongs to ecosystem "python", not "node"`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			npm := &installTracker{stubProvider: stubProvider{name: "npm", available: true}}
 			a, cfgPath := newImportApp(t, npm)

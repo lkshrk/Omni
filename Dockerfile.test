@@ -58,6 +58,7 @@ RUN --mount=type=cache,target=/app/.tmp,uid=10001,gid=10001 \
 
 COPY --chown=omni:omni . .
 
+ARG TEST_PACKAGES="./integration_tests/... ./internal/provider/..."
 RUN --mount=type=cache,target=/home/omni/.cache/go-build,uid=10001,gid=10001 \
     --mount=type=cache,target=/app/.tmp,uid=10001,gid=10001 \
-    go test -count=1 -tags=integration -race -trimpath -v ./integration_tests/... ./internal/provider/...
+    go test -count=1 -tags=integration -race -trimpath $TEST_PACKAGES
