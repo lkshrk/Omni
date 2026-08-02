@@ -139,6 +139,34 @@ func TestAdoptUnmanaged_DryRunPreviewsWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestAdoptUnmanagedMcpServers_FiltersPluginShadowPerAgent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	server := InstalledMcpServer{
+		Name: "shared", Transport: "http", URL: "https://example.com/mcp", HeadersKnown: true,
+	}
+	a := newSkillsTestApp(t, config.AgentsConfig{},
+		WithMcpAdapters([]McpAdapter{
+			&listingMcpAdapter{id: "claude-code", listed: []InstalledMcpServer{server}},
+			&listingMcpAdapter{id: "codex", listed: []InstalledMcpServer{server}},
+		}),
+		WithPluginAdapters([]PluginAdapter{
+			&shadowTestPluginAdapter{id: "claude-code", listedPlugins: []InstalledPlugin{{Name: "shared"}}},
+			&shadowTestPluginAdapter{id: "codex"},
+		}),
+	)
+
+	res, err := a.adoptUnmanagedMcpServers(context.Background(), mcpAdoptOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.WouldAdopt) != 1 || !strings.Contains(res.WouldAdopt[0], "on codex") {
+		t.Fatalf("WouldAdopt = %v, want shared adopted only for unshadowed codex", res.WouldAdopt)
+	}
+	if strings.Contains(res.WouldAdopt[0], "claude-code") {
+		t.Fatalf("WouldAdopt = %v, want plugin-shadowed claude-code filtered only", res.WouldAdopt)
+	}
+}
+
 func resolveNames(cfg *config.RootConfig, group string) []string {
 	servers := resolveMcpServers(cfg, group)
 	names := make([]string, len(servers))

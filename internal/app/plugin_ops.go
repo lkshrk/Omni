@@ -21,9 +21,10 @@ type RestorePluginResult struct {
 	Skipped          []string
 	WouldInstall     []string
 	// One user-facing line per pair the agent has installed from another marketplace.
-	Drift    []string
-	Warnings []string
-	Errors   []PluginError
+	Drift         []string
+	Warnings      []string
+	Errors        []PluginError
+	observedNames map[string]map[string]bool
 }
 
 type PluginError struct {
@@ -183,7 +184,7 @@ func (a *App) restorePlugins(ctx context.Context, opts RestorePluginOptions, ref
 		return RestorePluginResult{Warnings: []string{"plugins are disabled for this host, skipping sync"}}, nil
 	}
 	plugins := resolvePlugins(cfg, currentMachineGroupName())
-	var res RestorePluginResult
+	res := RestorePluginResult{observedNames: make(map[string]map[string]bool)}
 	for _, adapter := range a.pluginAdapters() {
 		if _, explicitCapabilities := adapter.(agent.PluginAdapterCapabilities); explicitCapabilities {
 			if !slices.ContainsFunc(plugins, func(p config.Plugin) bool {
@@ -205,6 +206,12 @@ func (a *App) restorePlugins(ctx context.Context, opts RestorePluginOptions, ref
 		if listErr != nil {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("agent %s: list plugins failed, attempting installs: %v", adapter.ID(), listErr))
 			installed = nil
+		} else {
+			names := make(map[string]bool, len(installed))
+			for _, plugin := range installed {
+				names[plugin.Name] = true
+			}
+			res.observedNames[adapter.ID()] = names
 		}
 		alreadyInstalled := make(map[string]struct{}, len(installed))
 		for _, ip := range installed {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +38,19 @@ func (s *unavailablePluginAdapter) AddMarketplace(context.Context, config.Market
 	return nil
 }
 func (s *unavailablePluginAdapter) UpdateMarketplaces(context.Context) error { return nil }
+
+type secondListFailingPluginAdapter struct {
+	shadowTestPluginAdapter
+	calls int
+}
+
+func (s *secondListFailingPluginAdapter) ListPlugins(context.Context) ([]InstalledPlugin, error) {
+	s.calls++
+	if s.calls == 2 {
+		return nil, errors.New("transient plugin list failure")
+	}
+	return s.listedPlugins, nil
+}
 
 func legacySkillFixture(t *testing.T, home, name string) {
 	t.Helper()
@@ -250,6 +264,125 @@ func TestAgentsSyncAll_ClaimPhaseIsOptIn(t *testing.T) {
 	}
 	if len(cfg.Agents.Packages) != 1 || cfg.Agents.Packages[0].Source != "owner/other-skills" {
 		t.Fatalf("manifest = %+v, want the claimed package tracked", cfg.Agents.Packages)
+	}
+}
+
+func TestAgentsSyncAll_ProgressFollowsDependencyOrder(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	a := newSkillsTestApp(t, config.AgentsConfig{})
+	var progress []string
+
+	if _, err := a.AgentsSyncAll(context.Background(), AgentsSyncAllOptions{
+		ImportUnmanaged: true,
+		DryRun:          true,
+		Progress:        func(text string) { progress = append(progress, text) },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"would import unmanaged plugins…",
+		"would restore plugins…",
+		"would import unmanaged skills…",
+		"would restore skills…",
+		"would import unmanaged mcp servers…",
+		"would restore mcp servers…",
+	}
+	if len(progress) != len(want) {
+		t.Fatalf("progress = %v, want %v", progress, want)
+	}
+	for i := range want {
+		if progress[i] != want[i] {
+			t.Fatalf("progress = %v, want %v", progress, want)
+		}
+	}
+}
+
+func TestAgentsSyncAll_FirstDryRunProjectsPluginBeforeSkillImport(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+	t.Setenv("XDG_STATE_HOME", "")
+	stubBinariesOnPath(t, "claude")
+	legacySkillFixture(t, home, "some-skill")
+	writeSkillLockFixture(t, home, config.SkillLockFile{
+		Version: 3,
+		Skills: map[string]config.SkillLockEntry{
+			"some-skill": {Source: "owner/academic-research-skills"},
+		},
+	})
+	pluginStub := &shadowTestPluginAdapter{id: "claude-code"}
+	a := newSkillsTestApp(t, config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "some-marketplace", Source: "owner/marketplace"}},
+		Plugins: []config.Plugin{{
+			Name: "academic-research-skills", Marketplace: "some-marketplace", Agents: []string{"claude-code"},
+		}},
+	}, WithPluginAdapters([]PluginAdapter{pluginStub}))
+
+	res, err := a.AgentsSyncAll(context.Background(), AgentsSyncAllOptions{ImportUnmanaged: true, DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasSubstring(res.Plugins.WouldInstall, "claude-code/academic-research-skills") {
+		t.Fatalf("Plugins.WouldInstall = %v, want first-run plugin projection", res.Plugins.WouldInstall)
+	}
+	if hasSubstring(res.Imported.Added, "owner/academic-research-skills") {
+		t.Fatalf("Imported.Added = %v, want projected plugin-provided skill skipped", res.Imported.Added)
+	}
+	if !hasSubstring(res.Imported.Warnings, "academic-research-skills") {
+		t.Fatalf("Imported.Warnings = %v, want projected plugin shadow warning", res.Imported.Warnings)
+	}
+}
+
+func TestAgentsSyncAll_DryRunProjectsPluginsAcrossMcpPhases(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	pluginStub := &shadowTestPluginAdapter{id: "claude-code"}
+	mcpStub := &listingMcpAdapter{id: "claude-code", listed: []InstalledMcpServer{{
+		Name: "adopt-shadow", Transport: "http", URL: "https://example.com/mcp", HeadersKnown: true,
+	}}}
+	a := newSkillsTestApp(t, config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "market", Source: "owner/market"}},
+		Plugins: []config.Plugin{
+			{Name: "adopt-shadow", Marketplace: "market", Agents: []string{"claude-code"}},
+			{Name: "restore-shadow", Marketplace: "market", Agents: []string{"claude-code"}},
+		},
+		McpServers: []config.McpServer{{
+			Name: "restore-shadow", Transport: "http", URL: "https://example.com/restore", Agents: []string{"claude-code"},
+		}},
+	}, WithPluginAdapters([]PluginAdapter{pluginStub}), WithMcpAdapters([]McpAdapter{mcpStub}))
+
+	res, err := a.AgentsSyncAll(context.Background(), AgentsSyncAllOptions{ImportUnmanaged: true, DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.McpAdopted.WouldAdopt) != 0 {
+		t.Fatalf("McpAdopted.WouldAdopt = %v, want projected plugin-provided server omitted", res.McpAdopted.WouldAdopt)
+	}
+	if len(res.Mcp.WouldInstall) != 0 {
+		t.Fatalf("Mcp.WouldInstall = %v, want no duplicate planned plugin server", res.Mcp.WouldInstall)
+	}
+	if !hasSubstring(res.Mcp.ShadowedByPlugin, "claude-code/restore-shadow") {
+		t.Fatalf("Mcp.ShadowedByPlugin = %v, want projected plugin shadow", res.Mcp.ShadowedByPlugin)
+	}
+}
+
+func TestAgentsSyncAll_ProjectionKeepsKnownPluginsAfterRestoreListFailure(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	pluginStub := &secondListFailingPluginAdapter{shadowTestPluginAdapter: shadowTestPluginAdapter{
+		id: "claude-code", listedPlugins: []InstalledPlugin{{Name: "shadow-plugin"}},
+	}}
+	a := newSkillsTestApp(t, config.AgentsConfig{
+		Packages: []config.SkillPackage{{Source: "owner/shadow-plugin", Agents: []string{"claude-code"}}},
+	}, WithPluginAdapters([]PluginAdapter{pluginStub}))
+
+	res, err := a.AgentsSyncAll(context.Background(), AgentsSyncAllOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasSubstring(res.Plugins.Warnings, "transient plugin list failure") {
+		t.Fatalf("Plugins.Warnings = %v, want restore list failure preserved", res.Plugins.Warnings)
+	}
+	if !hasSubstring(res.Skills.ShadowedByPlugin, "owner/shadow-plugin") {
+		t.Fatalf("Skills.ShadowedByPlugin = %v, want known installed plugin retained in projection", res.Skills.ShadowedByPlugin)
 	}
 }
 

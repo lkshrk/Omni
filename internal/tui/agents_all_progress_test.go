@@ -473,7 +473,7 @@ func TestAgentsAll_UpdateAll_InstallMissingFailures_PropagateAsPluginAndMcpErr(t
 	}
 }
 
-// Pins the exact S order: the claim step first, then skills, mcp and plugins restore.
+// Pins the exact dependency order: plugins first, then skills, then MCP.
 func TestAgentsAll_SyncAll_StreamsProgressTextInOrder(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	m := agentsAllProgressModel(t, nil,
@@ -490,16 +490,18 @@ func TestAgentsAll_SyncAll_StreamsProgressTextInOrder(t *testing.T) {
 	var captured []string
 	got := drainProgressCmds(t, m, tea.KeyPressMsg{Code: 'S', Text: "S"}, &captured)
 
-	importIdx := indexOfContainsFold(captured, "importing unmanaged skills")
-	skillsIdx := indexOfContainsFold(captured, "restoring skills")
-	mcpIdx := indexOfContainsFold(captured, "restoring mcp")
+	pluginImportIdx := indexOfContainsFold(captured, "importing unmanaged plugins")
 	pluginsIdx := indexOfContainsFold(captured, "restoring plugins")
+	skillImportIdx := indexOfContainsFold(captured, "importing unmanaged skills")
+	skillsIdx := indexOfContainsFold(captured, "restoring skills")
+	mcpImportIdx := indexOfContainsFold(captured, "importing unmanaged mcp")
+	mcpIdx := indexOfContainsFold(captured, "restoring mcp")
 
-	if importIdx < 0 || skillsIdx < 0 || mcpIdx < 0 || pluginsIdx < 0 {
-		t.Fatalf("expected captured progressText to include 'importing unmanaged skills', 'restoring skills', 'restoring mcp', and 'restoring plugins', got %v", captured)
+	if pluginImportIdx < 0 || pluginsIdx < 0 || skillImportIdx < 0 || skillsIdx < 0 || mcpImportIdx < 0 || mcpIdx < 0 {
+		t.Fatalf("expected all six sync-all phases, got %v", captured)
 	}
-	if !(importIdx < skillsIdx && skillsIdx < mcpIdx && mcpIdx < pluginsIdx) {
-		t.Fatalf("expected order importing unmanaged skills < restoring skills < restoring mcp < restoring plugins by capture index, got importIdx=%d skillsIdx=%d mcpIdx=%d pluginsIdx=%d in %v", importIdx, skillsIdx, mcpIdx, pluginsIdx, captured)
+	if !(pluginImportIdx < pluginsIdx && pluginsIdx < skillImportIdx && skillImportIdx < skillsIdx && skillsIdx < mcpImportIdx && mcpImportIdx < mcpIdx) {
+		t.Fatalf("wrong sync-all dependency order in %v", captured)
 	}
 
 	if got.progressText != "" {

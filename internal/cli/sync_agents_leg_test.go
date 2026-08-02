@@ -65,10 +65,23 @@ func TestSyncAllFlag_DryRunPreviewsAgentsLeg(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sync --all --dry-run: %v", err)
 	}
-	for _, want := range []string{"would import unmanaged skills", "would restore skills", "would restore mcp servers", "would restore plugins"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output = %q, want %q", out, want)
+	last := -1
+	for _, want := range []string{
+		"would import unmanaged plugins",
+		"would restore plugins",
+		"would import unmanaged skills",
+		"would restore skills",
+		"would import unmanaged mcp servers",
+		"would restore mcp servers",
+	} {
+		idx := strings.Index(out, want)
+		if idx < 0 {
+			t.Fatalf("output = %q, want %q", out, want)
 		}
+		if idx <= last {
+			t.Fatalf("output = %q, want %q after the previous sync phase", out, want)
+		}
+		last = idx
 	}
 }
 

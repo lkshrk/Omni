@@ -575,6 +575,18 @@ func mcpAdoptCandidates(unmanaged map[string][]InstalledMcpServer) (map[string]m
 	return candidates, lines
 }
 
+func filterPluginShadowedMcpServers(unmanaged map[string][]InstalledMcpServer, pluginNames map[string]map[string]bool) map[string][]InstalledMcpServer {
+	filtered := make(map[string][]InstalledMcpServer, len(unmanaged))
+	for agentID, servers := range unmanaged {
+		for _, server := range servers {
+			if !pluginShadowsName(pluginNames, agentID, server.Name) {
+				filtered[agentID] = append(filtered[agentID], server)
+			}
+		}
+	}
+	return filtered
+}
+
 type mcpAdoptCandidate struct {
 	server InstalledMcpServer
 	agents []string
@@ -1011,6 +1023,8 @@ func (a *App) adoptUnmanagedMcpServers(ctx context.Context, opts mcpAdoptOptions
 	if err != nil {
 		return McpAdoptResult{}, err
 	}
+	pluginNames, _ := installedPluginNames(ctx, a)
+	diff.Unmanaged = filterPluginShadowedMcpServers(diff.Unmanaged, pluginNames)
 	candidates, conflicts := mcpAdoptCandidates(diff.Unmanaged)
 	names := make([]string, 0, len(candidates))
 	for name := range candidates {
