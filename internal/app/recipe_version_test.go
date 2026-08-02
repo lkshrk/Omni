@@ -35,8 +35,12 @@ func unpinnedActionlintConfig() *config.RootConfig {
 }
 
 func actionlintLatestReleaseClient(t *testing.T, calls *int32, tag string) *http.Client {
+	return actionlintLatestReleaseClientWithBinaryVersion(t, calls, tag, "1.7.12")
+}
+
+func actionlintLatestReleaseClientWithBinaryVersion(t *testing.T, calls *int32, tag, binaryVersion string) *http.Client {
 	t.Helper()
-	archive := executableArchive(t, "actionlint", "1.7.12")
+	archive := executableArchive(t, "actionlint", binaryVersion)
 	return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		asset := "actionlint_1.7.12_linux_amd64.tar.gz"
 		if req.URL.Path == "/rhysd/actionlint/releases/download/"+tag+"/"+asset {

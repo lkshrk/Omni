@@ -189,7 +189,7 @@ func TestInstall_UnpinnedGitHubRecipeSurfacesAConfigWriteFailure(t *testing.T) {
 	mock := executor.NewMatchMock().WithFallback(executor.MockCall{})
 	a, cfgPath := newImportApp(t, script.New(mock))
 	a.CacheDir = t.TempDir()
-	a.SetGitHubFallbackAPIForTest("https://api.github.test", actionlintLatestReleaseClient(t, nil, "v1.7.12"))
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", actionlintLatestReleaseClientWithBinaryVersion(t, nil, "v1.7.12", ""))
 	if err := saveAppConfig(t, cfgPath, unpinnedActionlintConfig()); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
