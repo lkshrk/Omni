@@ -498,60 +498,76 @@ func TestNativeInstallPipeline_NativeUninstall(t *testing.T) {
 	}
 }
 
-func TestNativeInstallPipeline_TransientFailureRetried(t *testing.T) {
-	t.Parallel()
-	binaryContent := []byte("#!/bin/sh\nexit 0\n")
-	assetContent := buildTarGz(t, "mytool", binaryContent)
+func TestNativeInstallPipeline_RetriableAssetFailureSucceeds(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		rate   bool
+	}{
+		{name: "rate limited", status: http.StatusForbidden, body: "API rate limit exceeded", rate: true},
+		{name: "server error", status: http.StatusServiceUnavailable, body: "service unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			binaryContent := []byte("#!/bin/sh\nexit 0\n")
+			assetContent := buildTarGz(t, "mytool", binaryContent)
 
-	var attempts int32
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/releases/tags/v1.0.0"),
-			strings.HasSuffix(r.URL.Path, "/releases/latest"):
-			writeJSON(w, map[string]any{
-				"id": 1, "tag_name": "v1.0.0", "published_at": "2026-06-01T00:00:00Z",
-				"assets": []map[string]any{
-					{"id": 1, "name": "tool.tar.gz", "browser_download_url": "https://" + r.Host + "/asset/tool.tar.gz"},
+			var attempts int32
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/releases/tags/v1.0.0"),
+					strings.HasSuffix(r.URL.Path, "/releases/latest"):
+					writeJSON(w, map[string]any{
+						"id": 1, "tag_name": "v1.0.0", "published_at": "2026-06-01T00:00:00Z",
+						"assets": []map[string]any{
+							{"id": 1, "name": "tool.tar.gz", "browser_download_url": "https://" + r.Host + "/asset/tool.tar.gz"},
+						},
+					})
+				case strings.HasPrefix(r.URL.Path, "/asset/"):
+					attempts++
+					if attempts == 1 {
+						if tc.rate {
+							w.Header().Set("Retry-After", "0")
+							w.Header().Set("X-RateLimit-Remaining", "0")
+						}
+						http.Error(w, tc.body, tc.status)
+						return
+					}
+					w.Header().Set("Content-Type", "application/octet-stream")
+					_, _ = w.Write(assetContent)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(srv.Close)
+
+			a, cfgPath := newImportApp(t, &stubProvider{name: "apt", available: true})
+			a.CacheDir = t.TempDir()
+			a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
+
+			fallbackSpec := githubReleaseAssetFallback(srv.URL, "tool.tar.gz", "mytool")
+			if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+				Tools: map[string]config.ToolSpec{
+					"mytool": {
+						Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+						Fallback:  &fallbackSpec,
+					},
 				},
-			})
-		case strings.HasPrefix(r.URL.Path, "/asset/"):
-			attempts++
-			if attempts == 1 {
-				http.Error(w, "service unavailable", http.StatusServiceUnavailable)
-				return
+			}); err != nil {
+				t.Fatalf("saveAppConfig: %v", err)
 			}
-			w.Header().Set("Content-Type", "application/octet-stream")
-			w.Write(assetContent) //nolint:errcheck
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(srv.Close)
 
-	a, cfgPath := newImportApp(t, &stubProvider{name: "apt", available: true})
-	a.CacheDir = t.TempDir()
-	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
-
-	fallbackSpec := githubReleaseAssetFallback(srv.URL, "tool.tar.gz", "mytool")
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"mytool": {
-				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
-				Fallback:  &fallbackSpec,
-			},
-		},
-	}); err != nil {
-		t.Fatalf("saveAppConfig: %v", err)
+			if err := a.InstallToolFallback(context.Background(), "mytool"); err != nil {
+				t.Fatalf("InstallToolFallback after retry: %v", err)
+			}
+			if attempts != 2 {
+				t.Errorf("asset endpoint called %d times, want exactly 2", attempts)
+			}
+			assertBinaryInstalled(t, a, fallbackSpec, "mytool", binaryContent)
+			assertFallbackStatusVerified(t, cfgPath, "mytool")
+		})
 	}
-
-	if err := a.InstallToolFallback(context.Background(), "mytool"); err != nil {
-		t.Fatalf("InstallToolFallback after retry: %v", err)
-	}
-	if attempts < 2 {
-		t.Errorf("asset endpoint called %d times, want ≥2 (retry)", attempts)
-	}
-	assertBinaryInstalled(t, a, fallbackSpec, "mytool", binaryContent)
-	assertFallbackStatusVerified(t, cfgPath, "mytool")
 }
 
 func TestNativeInstallPipeline_NonRetriable404NeverRetried(t *testing.T) {

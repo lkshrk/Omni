@@ -128,6 +128,14 @@ config unchanged. If the release exists but has no supported current-platform
 asset, Omni saves an `unsupported` draft with source and release metadata so the
 recipe can be edited later.
 
+For GitHub API, release asset, and checksum requests, Omni uses the trimmed
+`GH_TOKEN` when set, otherwise the trimmed `GITHUB_TOKEN`. It sends credentials
+only to `github.com` or `api.github.com` and strips them on redirects. HTTP 429
+and GitHub rate-limited 403 responses are retried up to three times, honoring
+`Retry-After`, then `X-RateLimit-Reset`, with server-directed waits capped at 30
+seconds. Exhausted requests report the HTTP status, bounded response text, and
+GitHub rate-limit headers without printing either token.
+
 Later `tools install <tool>` and `tools sync` still try the native system
 manager first. They use the saved fallback only when Omni has explicit cached
 evidence that the concrete manager, such as `apt` or `dnf`, cannot provide the

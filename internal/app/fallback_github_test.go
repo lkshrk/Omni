@@ -325,7 +325,7 @@ func TestSaveToolFallbackFromGitHub_PreservesConfigWhenGitHubLookupFails(t *test
 	if err == nil {
 		t.Fatal("SaveToolFallbackFromGitHub err = nil, want GitHub lookup failure")
 	}
-	if !strings.Contains(err.Error(), "github release lookup failed: 500 Internal Server Error") {
+	if !strings.Contains(err.Error(), "github release lookup failed: HTTP 500 Internal Server Error") {
 		t.Fatalf("SaveToolFallbackFromGitHub err = %v, want HTTP 500 lookup failure", err)
 	}
 	got, err := config.Load(cfgPath)
@@ -470,7 +470,11 @@ func liveGitHubLatestReleaseStatus(ctx context.Context, owner, repo string) (int
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "omni-tests")
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+	token := strings.TrimSpace(os.Getenv("GH_TOKEN"))
+	if token == "" {
+		token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+	}
+	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := http.DefaultClient.Do(req)

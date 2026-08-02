@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -862,6 +863,21 @@ func TestSyncAllToolProgressText(t *testing.T) {
 	want := "Syncing tools: installed missing fzf"
 	if got != want {
 		t.Fatalf("SyncAllToolProgressText without total = %q, want %q", got, want)
+	}
+}
+
+func TestSyncOperationLine_PreservesGitHubFailure(t *testing.T) {
+	err := errors.New("fallback gh: download: HTTP 403 Forbidden: API rate limit exceeded (X-RateLimit-Remaining=0)")
+	line := SyncOperationLine(isync.SyncOp{
+		Tool: provider.Tool{Name: "gh", Provider: "system"},
+		Kind: isync.OpFailed,
+		Err:  err,
+	}, SyncOperationLineOptions{})
+	if !strings.Contains(line, err.Error()) {
+		t.Fatalf("sync output lost underlying error: %q", line)
+	}
+	if strings.Contains(line, "(stderr: )") {
+		t.Fatalf("sync output collapsed error into empty stderr: %q", line)
 	}
 }
 

@@ -1375,3 +1375,153 @@ func TestGitHubHTTPClient_RedirectStripsAuthorizationHeader(t *testing.T) {
 		t.Errorf("Authorization header was forwarded to non-GitHub redirect target: %q", receivedAuth)
 	}
 }
+
+func TestAttachGitHubToken_PrefersGHTokenAndFallsBack(t *testing.T) {
+	t.Setenv("GH_TOKEN", "  gh-token  ")
+	t.Setenv("GITHUB_TOKEN", "github-token")
+
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/o/r", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer secret-token")
+	attachGitHubToken(req, req.URL.String())
+	if got := req.Header.Get("Authorization"); got != "Bearer gh-token" {
+		t.Fatalf("Authorization = %q, want GH_TOKEN", got)
+	}
+
+	t.Setenv("GH_TOKEN", " \t ")
+	req.Header.Del("Authorization")
+	attachGitHubToken(req, req.URL.String())
+	if got := req.Header.Get("Authorization"); got != "Bearer github-token" {
+		t.Fatalf("Authorization = %q, want GITHUB_TOKEN fallback", got)
+	}
+}
+
+func TestAttachGitHubToken_NeverSendsTokenToNonGitHubHost(t *testing.T) {
+	t.Setenv("GH_TOKEN", "secret-token")
+	req, err := http.NewRequest(http.MethodGet, "https://example.com/download", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer secret-token")
+	attachGitHubToken(req, req.URL.String())
+	if got := req.Header.Get("Authorization"); got != "" {
+		t.Fatalf("Authorization sent to non-GitHub host: %q", got)
+	}
+}
+
+func TestGitHubRequest_RetriesOnlyRateLimitedClientErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    int
+		body      string
+		remaining string
+		wantCalls int
+		wantErr   bool
+	}{
+		{name: "rate limited 403", status: http.StatusForbidden, body: `{"message":"API rate limit exceeded"}`, remaining: "0", wantCalls: 2},
+		{name: "secondary rate limit 403", status: http.StatusForbidden, body: `{"message":"secondary rate limit"}`, remaining: "42", wantCalls: 2},
+		{name: "ordinary 403", status: http.StatusForbidden, body: `{"message":"Resource not accessible by integration"}`, remaining: "42", wantCalls: 1, wantErr: true},
+		{name: "429", status: http.StatusTooManyRequests, body: `{"message":"slow down"}`, wantCalls: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls++
+				if calls == 1 || tc.wantErr {
+					if !tc.wantErr {
+						w.Header().Set("Retry-After", "0")
+					}
+					w.Header().Set("X-RateLimit-Limit", "60")
+					w.Header().Set("X-RateLimit-Remaining", tc.remaining)
+					http.Error(w, tc.body, tc.status)
+					return
+				}
+				_, _ = fmt.Fprint(w, `{"id":1,"tag_name":"v1","published_at":"2026-01-01T00:00:00Z","assets":[]}`)
+			}))
+			t.Cleanup(srv.Close)
+
+			a := &App{}
+			a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
+			_, err := a.fetchLatestGitHubRelease(t.Context(), "owner", "repo")
+			if tc.wantErr != (err != nil) {
+				t.Fatalf("error = %v, wantErr %v", err, tc.wantErr)
+			}
+			if calls != tc.wantCalls {
+				t.Fatalf("requests = %d, want %d", calls, tc.wantCalls)
+			}
+		})
+	}
+}
+
+func TestGitHubRetryDelay_HeaderPrecedence(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	header := make(http.Header)
+	header.Set("Retry-After", "7")
+	header.Set("X-RateLimit-Reset", fmt.Sprint(now.Add(time.Hour).Unix()))
+	if got := githubRetryDelay(header, now, 0); got != 7*time.Second {
+		t.Fatalf("Retry-After delay = %s, want 7s", got)
+	}
+
+	header.Del("Retry-After")
+	header.Set("X-RateLimit-Reset", fmt.Sprint(now.Add(11*time.Second).Unix()))
+	if got := githubRetryDelay(header, now, 0); got != 11*time.Second {
+		t.Fatalf("X-RateLimit-Reset delay = %s, want 11s", got)
+	}
+
+	header.Set("X-RateLimit-Reset", "invalid")
+	if got := githubRetryDelay(header, now, 2); got != 1500*time.Millisecond {
+		t.Fatalf("backoff delay = %s, want 1.5s", got)
+	}
+
+	header.Set("Retry-After", "3600")
+	if got := githubRetryDelay(header, now, 0); got != maxGitHubRetryDelay {
+		t.Fatalf("oversized Retry-After delay = %s, want cap %s", got, maxGitHubRetryDelay)
+	}
+}
+
+func TestWaitForGitHubRetry_StopsOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := waitForGitHubRetry(ctx, time.Hour); !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitForGitHubRetry error = %v, want context.Canceled", err)
+	}
+}
+
+func TestGitHubRequest_RetryExhaustionHasSanitizedDiagnostics(t *testing.T) {
+	t.Setenv("GH_TOKEN", "top-secret-token")
+	calls := 0
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Retry-After", "0")
+		w.Header().Set("X-RateLimit-Limit", "60")
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", "1700000000")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = fmt.Fprint(w, strings.Repeat("rate limit ", 800)+"top-secret-token")
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &App{}
+	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
+	_, err := a.fetchLatestGitHubRelease(t.Context(), "owner", "repo")
+	if err == nil {
+		t.Fatal("expected retry exhaustion error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"403 Forbidden", "rate limit", "X-RateLimit-Limit=60", "X-RateLimit-Remaining=0", "X-RateLimit-Reset=1700000000"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error missing %q: %s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "top-secret-token") || strings.Contains(strings.ToLower(msg), "authorization:") {
+		t.Fatalf("error leaked credentials: %s", msg)
+	}
+	if len(msg) > 6<<10 {
+		t.Fatalf("error is not bounded: %d bytes", len(msg))
+	}
+	if calls != downloadRetries {
+		t.Fatalf("requests = %d, want %d", calls, downloadRetries)
+	}
+}
