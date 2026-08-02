@@ -302,6 +302,7 @@ func (a *App) initProviderRegistry(settings config.Settings) {
 	for name, p := range concreteProviders {
 		a.registry.RegisterWithMetadata(p, provider.BuiltinMetadata(name))
 	}
+	a.registry.Register(&githubReleaseAssetProvider{app: a, next: concreteProviders["script"]})
 
 	a.registry.RegisterWithMetadata(provider.Named("bun", node.New(exec, "bun")), provider.BuiltinMetadata("bun"))
 	a.registry.RegisterWithMetadata(provider.Named("pnpm", node.New(exec, "pnpm")), provider.BuiltinMetadata("pnpm"))
@@ -383,6 +384,9 @@ func (a *App) effectiveSettings(cfg *config.RootConfig) config.Settings {
 
 func (a *App) forEachAvailable(ctx context.Context, fn func(provider.Provider) error) error {
 	for _, p := range a.registry.All() {
+		if p.Name() == config.ProviderGitHubReleaseAsset {
+			continue
+		}
 		avail, err := p.Available(ctx)
 		if err != nil || !avail {
 			continue
@@ -403,6 +407,9 @@ func (a *App) availableProviders(ctx context.Context) []provider.Provider {
 	avail := make([]bool, len(all))
 	g, gctx := errgroup.WithContext(ctx)
 	for i, p := range all {
+		if p.Name() == config.ProviderGitHubReleaseAsset {
+			continue
+		}
 		i, p := i, p
 		g.Go(func() error {
 			ok, err := p.Available(gctx)
@@ -416,7 +423,7 @@ func (a *App) availableProviders(ctx context.Context) []provider.Provider {
 	}
 	out := make([]provider.Provider, 0, len(all))
 	for i, p := range all {
-		if avail[i] {
+		if p.Name() != config.ProviderGitHubReleaseAsset && avail[i] {
 			out = append(out, p)
 		}
 	}

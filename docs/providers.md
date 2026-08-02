@@ -100,9 +100,15 @@ List it as a fallback candidate after native providers:
 Omni marks a command-backed script outdated when `latest` is a strictly newer
 numeric release than `version`; a lowercase `v` prefix is ignored. Failed or
 incomparable commands preserve the previous cached state.
-For an unpinned `github_release_asset` recipe, Omni instead reuses its shared
-GitHub latest-release lookup. A recipe `tag_name` or `options.release_tag` pins
-the tool and disables automatic release tracking.
+Configured `github_release_asset` recipes use Omni's native GitHub installer,
+even when their configured provider identity is `script`. They do not turn into
+shell download commands. The native path supplies GitHub authentication,
+retries, checksum verification, detailed download errors, and HTTPS-only
+redirect protection.
+
+For an unpinned recipe, Omni uses its shared GitHub latest-release lookup. A
+recipe `tag_name` or `options.release_tag` pins the tool and disables automatic
+release tracking.
 
 Use `checksum_asset_pattern` to verify a release binary against a standard
 SHA-256 manifest before atomically replacing the installed executable:
@@ -121,7 +127,9 @@ SHA-256 manifest before atomically replacing the installed executable:
 }
 ```
 
-This verified form installs one executable and cannot be combined with
+The native extractor selects the configured executable at any archive depth,
+so existing `extract_dir` and `strip_components` recipes remain supported
+without extracting unrelated files. The verified form cannot be combined with
 `options.extract_dir`.
 
 Routing behavior:

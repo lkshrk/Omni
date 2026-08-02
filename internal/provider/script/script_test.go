@@ -78,6 +78,27 @@ func TestInstall_PropagatesStderr(t *testing.T) {
 	if err == nil {
 		t.Fatal("Install() failing command: want error, got nil")
 	}
+	if !strings.Contains(err.Error(), "stderr: boom") {
+		t.Fatalf("Install() error = %q; want stderr", err)
+	}
+}
+
+func TestInstall_UsesStdoutWhenStderrIsEmpty(t *testing.T) {
+	mock := executor.NewMatchMock(executor.MatchRule{
+		Pattern:  "sh -c false",
+		Response: executor.MockCall{Stdout: "download failed\n", Err: context.DeadlineExceeded},
+	}).WithFallback(executor.MockCall{})
+	p := New(mock)
+	err := p.Install(context.Background(), tool("x", map[string]string{"install": "false"}))
+	if err == nil {
+		t.Fatal("Install() failing command: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "stdout: download failed") {
+		t.Fatalf("Install() error = %q; want stdout fallback", err)
+	}
+	if strings.Contains(err.Error(), "stderr: )") {
+		t.Fatalf("Install() error contains empty stderr: %q", err)
+	}
 }
 
 func TestIsInstalled_CheckExitZero(t *testing.T) {

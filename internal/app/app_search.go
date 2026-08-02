@@ -2100,6 +2100,9 @@ func (a *App) reconcileResolvedTools(ctx context.Context, tools []config.ToolEnt
 func (a *App) Providers(ctx context.Context) ([]ProviderInfo, error) {
 	var infos []ProviderInfo
 	for _, p := range a.registry.All() {
+		if p.Name() == config.ProviderGitHubReleaseAsset {
+			continue
+		}
 		avail, err := p.Available(ctx)
 		if err != nil {
 			avail = false // treat availability-check error as unavailable; continue

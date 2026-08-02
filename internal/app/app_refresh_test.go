@@ -712,11 +712,15 @@ func assertGitHubFallbackOutdated(t *testing.T, db *database.DB, wantOutdated bo
 
 func githubFallbackLatestReleaseClient(t *testing.T, calls *int32, body func() io.ReadCloser) *http.Client {
 	t.Helper()
+	archive := executableArchive(t, "gh", "2.93.0")
 	return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.URL.Path != "/repos/cli/cli/releases/latest" {
+		if strings.HasSuffix(req.URL.Path, ".tar.gz") {
+			return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(strings.NewReader(string(archive))), Header: make(http.Header), Request: req}, nil
+		}
+		if req.URL.Path != "/repos/cli/cli/releases/latest" && !strings.HasPrefix(req.URL.Path, "/repos/cli/cli/releases/tags/") {
 			t.Fatalf("unexpected GitHub API path %q", req.URL.Path)
 		}
-		if calls != nil {
+		if calls != nil && req.URL.Path == "/repos/cli/cli/releases/latest" {
 			atomic.AddInt32(calls, 1)
 		}
 		return &http.Response{

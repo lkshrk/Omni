@@ -176,9 +176,15 @@ func (p *Provider) scalarCommand(ctx context.Context, toolName, action, cmd stri
 }
 
 func (p *Provider) run(ctx context.Context, toolName, action, cmd string) error {
-	_, stderr, err := p.exec.Run(ctx, "sh", "-c", cmd)
+	stdout, stderr, err := p.exec.Run(ctx, "sh", "-c", cmd)
 	if err != nil {
-		return fmt.Errorf("script %s %s: %w (stderr: %s)", toolName, action, err, strings.TrimSpace(stderr))
+		if output := strings.TrimSpace(stderr); output != "" {
+			return fmt.Errorf("script %s %s: %w (stderr: %s)", toolName, action, err, output)
+		}
+		if output := strings.TrimSpace(stdout); output != "" {
+			return fmt.Errorf("script %s %s: %w (stdout: %s)", toolName, action, err, output)
+		}
+		return fmt.Errorf("script %s %s: %w", toolName, action, err)
 	}
 	return nil
 }
