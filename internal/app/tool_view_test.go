@@ -282,6 +282,7 @@ func TestBuildToolViewList_FiltersProviderAndGroupWithoutDroppingMatchingSearch(
 	}
 	search := []*app.ToolView{
 		{Name: "ripgrep", Provider: "system"},
+		{Name: "fd", Provider: "system"},
 		{Name: "prettier", Provider: "node"},
 	}
 
@@ -321,6 +322,7 @@ func TestBuildToolViewList_FiltersQueryByToolNameAndProvider(t *testing.T) {
 	got := app.BuildToolViewList(app.ToolViewListOptions{
 		Tools:           tools,
 		DiscoveredTools: discovered,
+		SearchTools:     []*app.ToolView{{Name: "ripgrep", Provider: "system"}},
 		Query:           "NODE",
 	})
 
