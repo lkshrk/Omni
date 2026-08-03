@@ -158,6 +158,9 @@ func BuildToolViewList(options ToolViewListOptions) ToolViewList {
 			if tool == nil || existing[toolViewKey(tool)] {
 				continue
 			}
+			if !toolMatchesGroup(tool, options.GroupFilter, options.ToolMemberships) || !toolMatchesQuery(tool, q) {
+				continue
+			}
 			if targetProvider == "" || ToolProviderEcosystem(tool.Provider) == targetProvider {
 				normal = append(normal, tool)
 			}
