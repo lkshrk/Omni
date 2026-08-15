@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -73,29 +72,6 @@ func manifestSkillSources(t *testing.T, cfgPath string) []string {
 	return sources
 }
 
-func TestRunSkillsImportSection_ImportFlagSkipsPromptAndAdopts(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	legacySkillsHome(t, "o/demo")
-	a, cfgPath, cmd, out := skillsImportTestApp(t, config.Settings{})
-
-	runSkillsImportSection(cmd, nil, a, skillsImportChoice{force: true})
-
-	if !strings.Contains(out.String(), "1 added") {
-		t.Fatalf("output = %q, want an import summary", out.String())
-	}
-	if got := manifestSkillSources(t, cfgPath); len(got) != 1 || got[0] != "o/demo" {
-		t.Fatalf("manifest packages = %v, want [o/demo]", got)
-	}
-	link := filepath.Join(os.Getenv("HOME"), ".agents", "skills", "demo")
-	info, err := os.Lstat(link)
-	if err != nil {
-		t.Fatalf("legacy skill dir: %v", err)
-	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("%s is still a real directory, want an adopted link", link)
-	}
-}
-
 func TestRunSkillsImportSection_NoImportFlagSkipsSilently(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	legacySkillsHome(t, "o/demo")
@@ -111,99 +87,31 @@ func TestRunSkillsImportSection_NoImportFlagSkipsSilently(t *testing.T) {
 	}
 }
 
-func TestRunSkillsImportSection_PromptDefaultsToImport(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	legacySkillsHome(t, "o/demo")
-	a, cfgPath, cmd, out := skillsImportTestApp(t, config.Settings{})
-
-	withMockStdin(t, "\n", func() {
-		runSkillsImportSection(cmd, nil, a, skillsImportChoice{})
-	})
-
-	if !strings.Contains(out.String(), "1 added") {
-		t.Fatalf("output = %q, want an import summary", out.String())
-	}
-	if got := manifestSkillSources(t, cfgPath); len(got) != 1 || got[0] != "o/demo" {
-		t.Fatalf("manifest packages = %v, want [o/demo]", got)
-	}
-}
-
-func TestRunSkillsImportSection_PromptDeclinedLeavesLegacyInstall(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	legacySkillsHome(t, "o/demo")
-	a, cfgPath, cmd, _ := skillsImportTestApp(t, config.Settings{})
-
-	withMockStdin(t, "n\n", func() {
-		runSkillsImportSection(cmd, nil, a, skillsImportChoice{})
-	})
-
-	if got := manifestSkillSources(t, cfgPath); len(got) != 0 {
-		t.Fatalf("manifest packages = %v, want none", got)
-	}
-	dir := filepath.Join(os.Getenv("HOME"), ".agents", "skills", "demo")
-	info, err := os.Lstat(dir)
-	if err != nil {
-		t.Fatalf("legacy skill dir: %v", err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		t.Errorf("%s was adopted without consent", dir)
-	}
-}
-
-func TestRunSkillsImportSection_NonTerminalStdinLeavesLegacyInstall(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	legacySkillsHome(t, "o/demo")
-	a, cfgPath, cmd, out := skillsImportTestApp(t, config.Settings{})
-
-	withMockStdin(t, "", func() {
-		withMockTerminal(t, false, func() {
-			runSkillsImportSection(cmd, nil, a, skillsImportChoice{})
-		})
-	})
-
-	if got := manifestSkillSources(t, cfgPath); len(got) != 0 {
-		t.Fatalf("manifest packages = %v, want none", got)
-	}
-	dir := filepath.Join(os.Getenv("HOME"), ".agents", "skills", "demo")
-	info, err := os.Lstat(dir)
-	if err != nil {
-		t.Fatalf("legacy skill dir: %v", err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		t.Errorf("%s was adopted without consent on non-terminal stdin", dir)
-	}
-	// The prompt itself goes to the process stdout rather than this writer; what matters here is that nothing was adopted, which the manifest and symlink checks above already establish.
-	if strings.Contains(out.String(), "added") {
-		t.Errorf("output = %q, want no import report when the prompt goes unanswered", out.String())
-	}
-}
-
-func TestRunSkillsImportSection_NoCandidatesIsSilent(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
+func TestRunSkillsImportSectionMigratesLegacyPackageToAPM(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", "")
-	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
-	a, _, cmd, out := skillsImportTestApp(t, config.Settings{})
+	cfgPath := filepath.Join(t.TempDir(), "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{AgentsUse: []string{"codex"}},
+		Agents:   config.AgentsConfig{Packages: []config.SkillPackage{{Source: "acme/demo", Agents: []string{"codex"}}}},
+	})
+	a := app.New(cfgPath)
+	out := &bytes.Buffer{}
+	cmd := &cobra.Command{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
 
 	runSkillsImportSection(cmd, nil, a, skillsImportChoice{})
 
-	if out.String() != "" {
-		t.Fatalf("output = %q, want nothing without candidates", out.String())
+	if !bytes.Contains(out.Bytes(), []byte("Migrated 1 agent packages")) {
+		t.Fatalf("output = %q", out.String())
 	}
-}
-
-func TestRunSkillsImportSection_SkillsDisabledIsSilent(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	legacySkillsHome(t, "o/demo")
-	a, cfgPath, cmd, out := skillsImportTestApp(t, config.Settings{SkillsDisabled: config.BoolPtr(true)})
-
-	runSkillsImportSection(cmd, nil, a, skillsImportChoice{force: true})
-
-	if out.String() != "" {
-		t.Fatalf("output = %q, want nothing when skills are disabled", out.String())
+	if _, err := os.Stat(filepath.Join(home, ".apm", "apm.yml")); err != nil {
+		t.Fatalf("manifest: %v", err)
 	}
 	if got := manifestSkillSources(t, cfgPath); len(got) != 0 {
-		t.Fatalf("manifest packages = %v, want none", got)
+		t.Fatalf("legacy packages = %v", got)
 	}
 }

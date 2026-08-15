@@ -654,7 +654,7 @@ func tabShortHelpBindings(m *Model) []key.Binding {
 		return footerBindings(k, actions, nil)
 	case viewSkills:
 		listActions := []key.Binding{agentsUpgradeAllBinding(), agentsSyncAllBinding(), agentsRefreshBinding()}
-		return footerBindings(k, listActions, []key.Binding{agentsFilterBinding(k), agentsAgentFilterBinding(k)})
+		return footerBindings(k, listActions, nil)
 	default:
 		if m.listConfirm.action == listConfirmSyncAll {
 			return nil
@@ -727,17 +727,6 @@ func agentsIgnoreBinding() key.Binding {
 
 func agentsDeleteBinding() key.Binding {
 	return key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
-}
-
-// Kept as separate hint entries (unlike tools' combined footerFilterBinding) since the agent chip's label means something different from tools' group filter.
-func agentsFilterBinding(k KeyMap) key.Binding {
-	help := k.PrevTab.Help()
-	return key.NewBinding(key.WithKeys(k.PrevTab.Keys()...), key.WithHelp(compactFilterLabel(help.Key), "filter"))
-}
-
-func agentsAgentFilterBinding(k KeyMap) key.Binding {
-	help := k.GroupPrev.Help()
-	return key.NewBinding(key.WithKeys(k.GroupPrev.Keys()...), key.WithHelp(compactFilterLabel(help.Key), "agent"))
 }
 
 // Display only: handleAgentsGlobalActionKeyMsg handles U/S/R directly by key string.

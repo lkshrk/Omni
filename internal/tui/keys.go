@@ -289,19 +289,19 @@ func DefaultKeyMap() KeyMap {
 		),
 		AgentsUseManaged: key.NewBinding(
 			key.WithKeys("u"),
-			key.WithHelp("u", actions.MustTUILabel(actions.AgentsSkillsUseManaged)),
+			key.WithHelp("u", "use managed"),
 		),
 		AgentsUseLocal: key.NewBinding(
 			key.WithKeys("l"),
-			key.WithHelp("l", actions.MustTUILabel(actions.AgentsSkillsUseLocal)),
+			key.WithHelp("l", "use local"),
 		),
 		AgentsUseManagedAll: key.NewBinding(
 			key.WithKeys("U"),
-			key.WithHelp("U", actions.MustTUILabel(actions.AgentsResolveAllUseManaged)),
+			key.WithHelp("U", "use managed (all)"),
 		),
 		AgentsUseLocalAll: key.NewBinding(
 			key.WithKeys("L"),
-			key.WithHelp("L", actions.MustTUILabel(actions.AgentsResolveAllUseLocal)),
+			key.WithHelp("L", "use local (all)"),
 		),
 		PinProvider: key.NewBinding(
 			key.WithKeys("p"),

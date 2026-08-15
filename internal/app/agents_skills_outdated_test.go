@@ -46,7 +46,7 @@ func outdatedTestApp(t *testing.T) (*App, string, string) {
 	return a, source, home
 }
 
-func TestSkillOutdatedSurfacesInRowsDashboardAndDoctor(t *testing.T) {
+func TestSkillOutdatedSurfacesInRowsAndDashboard(t *testing.T) {
 	a, source, _ := outdatedTestApp(t)
 	ctx := context.Background()
 
@@ -75,19 +75,11 @@ func TestSkillOutdatedSurfacesInRowsDashboardAndDoctor(t *testing.T) {
 		t.Fatalf("row Outdated = %q, want %q", rows[0].Outdated, SkillOutdatedBehind)
 	}
 
-	cfg, err := a.loadConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
 	counts := classifySkillRows(rows)
 	if len(counts.Outdated) != 1 || len(counts.Missing) != 0 || len(counts.Drifted) != 0 {
 		t.Fatalf("classified rows = %+v, want one outdated package and no sync issue", counts)
 	}
 
-	group, _ := a.doctorAgentsSkills(ctx, cfg)
-	if !groupHasItemContaining(group, "behind their source") {
-		t.Fatalf("doctor skills group did not name the outdated package: %+v", group.Items)
-	}
 }
 
 func TestSkillOutdatedIsNotCountedTwiceWhenAlsoMissing(t *testing.T) {

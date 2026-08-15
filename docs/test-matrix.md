@@ -1,6 +1,6 @@
 # Test Matrix
 
-This matrix tracks the 11 actual program flows and the 79 user-visible actions
+This matrix tracks the 11 actual program flows and the 72 user-visible actions
 in `internal/actions/catalog.go`. It separates cheap model/render checks from
 real-terminal journeys so `TUI: yes` does not imply an expensive binary test for
 every action.
@@ -154,17 +154,10 @@ real-terminal test; the eight-journey budget above owns that layer.
 | `settings.extract` | yes | n/a | n/a | n/a | CLI-only config layout migration |
 | `setup.init` | yes | yes | yes | yes | CLI command is `bootstrap`; `init` remains an alias |
 | `agents.restore` | yes | yes | yes | yes | CLI command is `agents sync`; `restore` remains a deprecated alias |
+| `agents.add` | yes | yes | n/a | yes | Thin APM CLI delegation plus real local-package integration |
+| `agents.remove` | yes | yes | n/a | yes | Thin APM CLI delegation |
+| `agents.update` | yes | yes | n/a | yes | Thin APM CLI delegation and dry-run contract |
+| `agents.search` | yes | yes | n/a | n/a | Read-only APM marketplace search delegation |
 | `agents.sync_all` | yes | yes | yes | yes | - |
-| `agents.skills_import` | yes | yes | yes | yes | - |
-| `agents.skills_update` | yes | yes | yes | yes | CLI command is `agents skills upgrade`; `update` remains a deprecated alias |
-| `agents.skills_resolve_use_managed` | yes | yes | yes | yes | - |
-| `agents.skills_resolve_use_local` | yes | yes | yes | yes | - |
-| `agents.mcp_resolve_use_managed` | yes | yes | yes | yes | - |
-| `agents.mcp_resolve_use_local` | yes | yes | yes | yes | - |
-| `agents.plugins_resolve_use_managed` | yes | yes | yes | yes | - |
-| `agents.plugins_resolve_use_local` | yes | yes | yes | yes | - |
-| `agents.resolve_all_use_managed` | yes | yes | yes | yes | - |
-| `agents.resolve_all_use_local` | yes | yes | yes | yes | - |
-| `agents.skills_status` | yes | yes | yes | n/a | Read-only CLI view; the TUI shows the same state in the agents rows. |
 | `doctor` | yes | yes | yes | yes | - |
 | `doctor.fix` | yes | yes | yes | yes | Covers include-chain dedupe, dry-run, catalog routing, TUI execution, and doctor refresh. |

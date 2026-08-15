@@ -7,75 +7,36 @@ import (
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
 
-// No writes: skills uses ImportSkills' DryRun path, mcp/plugins are already diff-only.
+// No writes: report only legacy declarations eligible for the one-time APM migration.
 func (m *Model) doSetupAgentsDiff() tea.Cmd {
-	a, ctx := m.app, m.ctx
+	a := m.app
 	return func() tea.Msg {
-		skillRows, err := a.UnmanagedSkillPackages(ctx)
+		cfg, err := a.LoadConfig()
 		if err != nil {
 			return setupAgentsDiffMsg{err: err}
-		}
-		mcpDiff, err := a.ImportMcpServers(ctx)
-		if err != nil {
-			return setupAgentsDiffMsg{err: err}
-		}
-		pluginDiff, err := a.ImportPlugins(ctx)
-		if err != nil {
-			return setupAgentsDiffMsg{err: err}
-		}
-		mcpCount := 0
-		for _, servers := range mcpDiff.Unmanaged {
-			mcpCount += len(servers)
-		}
-		pluginCount := 0
-		for _, plugins := range pluginDiff.Unmanaged {
-			pluginCount += len(plugins)
 		}
 		return setupAgentsDiffMsg{
-			unmanagedSkills:  len(skillRows),
-			unmanagedMcp:     mcpCount,
-			unmanagedPlugins: pluginCount,
+			unmanagedSkills:  len(cfg.Agents.Packages),
+			unmanagedMcp:     len(cfg.Agents.McpServers),
+			unmanagedPlugins: len(cfg.Agents.Plugins),
 		}
 	}
 }
 
 // Skills additionally take over legacy CLI-managed directories, replacing them with links into Omni's store, which is why this runs only on explicit consent.
 func (m *Model) doSetupAgentsImportAll() tea.Cmd {
-	a, ctx := m.app, m.ctx
+	a := m.app
 	return func() tea.Msg {
-		skillsDiff, err := a.ImportSkills(ctx, app.ImportSkillsOptions{})
-		if err != nil {
-			return setupAgentsImportDoneMsg{err: err}
-		}
-		mcpAdopted, err := a.AdoptUnmanagedMcpServers(ctx)
-		if err != nil {
-			return setupAgentsImportDoneMsg{err: err}
-		}
-		pluginsAdopted, err := a.AdoptUnmanagedPlugins(ctx)
+		result, err := a.MigrateAgentsToAPM()
 		if err != nil {
 			return setupAgentsImportDoneMsg{err: err}
 		}
 		return setupAgentsImportDoneMsg{
-			skills:     len(skillsDiff.Added),
-			mcp:        mcpAdopted.Adopted,
-			plugins:    pluginsAdopted.Adopted,
-			advisories: setupImportAdvisories(skillsDiff, mcpAdopted, pluginsAdopted),
+			skills:     result.MigratedPackages,
+			mcp:        result.MigratedMCPServers,
+			advisories: result.Warnings,
 		}
 	}
-}
-
-// The CLI's import output is the reference for what the user must be told; the wizard runs the same
-// adoption and may not drop any of it. Ordered by severity rather than by channel: mcp adopt warnings
-// are the ones raised for a credential that was written, and any surface that truncates the list must
-// truncate the harmless entries first.
-func setupImportAdvisories(skills app.ImportDiff, mcp app.McpAdoptResult, plugins app.PluginAdoptResult) []string {
-	var out []string
-	out = append(out, mcp.Warnings...)
-	out = append(out, mcp.Skipped...)
-	out = append(out, mcp.Conflicts...)
-	out = append(out, plugins.Skipped...)
-	out = append(out, skills.Warnings...)
-	return out
 }
 
 func (m *Model) doCreateConfig() tea.Cmd {

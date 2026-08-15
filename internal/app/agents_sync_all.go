@@ -3,6 +3,10 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
+
+	"github.com/lkshrk/omni/internal/apm"
 )
 
 const (
@@ -13,10 +17,12 @@ const (
 )
 
 type AgentsSyncAllOptions struct {
-	// Plain restore stays converge-only, matching the per-feature restores; only sync-all surfaces set it.
+	// Kept for source compatibility while APM owns adoption and deployed-file state.
 	ImportUnmanaged bool
 	DryRun          bool
+	Frozen          bool
 	Progress        func(string)
+	Output          func(stdout, stderr string)
 }
 
 type AgentsFeatureError struct {
@@ -30,6 +36,8 @@ func (e AgentsFeatureError) Error() string {
 
 // AgentsSyncAllResult — Warnings, Drift and Errors are the flattened report, so a caller printing both does not repeat itself.
 type AgentsSyncAllResult struct {
+	Output         string
+	Stderr         string
 	Imported       ImportDiff
 	McpAdopted     McpAdoptResult
 	PluginsAdopted PluginAdoptResult
@@ -40,6 +48,10 @@ type AgentsSyncAllResult struct {
 	Warnings       []string
 	Drift          []string
 	Errors         []AgentsFeatureError
+}
+
+func (a *App) APMClient(scope apm.Scope) *apm.Client {
+	return apm.New(a.fallbackExecutor(), scope)
 }
 
 func (r *AgentsSyncAllResult) addWarnings(feature string, warnings []string) {
@@ -96,76 +108,59 @@ func (r *AgentsSyncAllResult) AddPlugins(res RestorePluginResult, err error) {
 	}
 }
 
-// AgentsSyncAll — Each feature keeps its own enablement gate, and a failing feature never stops the ones after it.
+// AgentsSyncAll delegates desired state, resolution, and deployment to APM.
 func (a *App) AgentsSyncAll(ctx context.Context, opts AgentsSyncAllOptions) (AgentsSyncAllResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return AgentsSyncAllResult{}, err
 	}
-	if err := a.requireAgentsEnabled(cfg); err != nil {
-		return AgentsSyncAllResult{}, err
+	_ = cfg // Loading still validates the config before migration.
+	var migration APMMigrationResult
+	if !opts.DryRun && !opts.Frozen {
+		migration, err = a.MigrateAgentsToAPM()
+		if err != nil {
+			return AgentsSyncAllResult{}, err
+		}
+	} else {
+		migration.Path, err = a.globalAPMManifestPath()
+		if err != nil {
+			return AgentsSyncAllResult{}, err
+		}
+	}
+	res := AgentsSyncAllResult{Warnings: migration.Warnings}
+	if _, err := os.Stat(migration.Path); err != nil {
+		if os.IsNotExist(err) {
+			if opts.Frozen {
+				return res, fmt.Errorf("frozen APM install requires %s and its lockfile", migration.Path)
+			}
+			res.Warnings = append(res.Warnings, "global APM manifest not found; the next non-dry-run sync will migrate compatible legacy declarations")
+			return res, nil
+		}
+		return res, err
 	}
 
-	var res AgentsSyncAllResult
-	progress := func(doing, would string) {
-		if opts.Progress == nil {
-			return
-		}
+	if opts.Progress != nil {
 		if opts.DryRun {
-			opts.Progress(would)
-			return
-		}
-		opts.Progress(doing)
-	}
-
-	if opts.ImportUnmanaged && a.PluginsEnabled(cfg) {
-		progress("importing unmanaged plugins…", "would import unmanaged plugins…")
-		adopted, err := a.adoptUnmanagedPlugins(ctx, opts.DryRun)
-		res.PluginsAdopted = adopted
-		res.addWarnings(AgentsFeaturePlugins, adopted.Skipped)
-		if err != nil {
-			res.addError(AgentsFeaturePlugins, err.Error())
+			opts.Progress("previewing APM install…")
+		} else {
+			opts.Progress("installing APM manifest…")
 		}
 	}
-
-	pluginNames, pluginWarnings := installedPluginNames(ctx, a)
-	progress("restoring plugins…", "would restore plugins…")
-	plugins, err := a.RestorePlugins(ctx, RestorePluginOptions{DryRun: opts.DryRun})
-	res.AddPlugins(plugins, err)
-	ctx = projectPluginInstalls(ctx, pluginNames, pluginWarnings, plugins)
-
-	if opts.ImportUnmanaged && a.SkillsEnabled(cfg) {
-		progress("importing unmanaged skills…", "would import unmanaged skills…")
-		diff, err := a.ImportSkills(ctx, ImportSkillsOptions{DryRun: opts.DryRun})
-		res.AddSkillsImport(diff, err)
+	result, err := a.APMClient(apm.Global).Install(ctx, opts.Frozen, opts.DryRun)
+	if opts.Output != nil {
+		opts.Output(result.Stdout, result.Stderr)
 	}
-
-	progress("restoring skills…", "would restore skills…")
-	skills, lines, err := a.RestoreSkills(ctx, RestoreSkillsOptions{DryRun: opts.DryRun})
-	res.AddSkills(skills, lines, err)
-
-	if opts.ImportUnmanaged && a.McpEnabled(cfg) {
-		progress("importing unmanaged mcp servers…", "would import unmanaged mcp servers…")
-		adopted, err := a.adoptUnmanagedMcpServers(ctx, mcpAdoptOptions{DryRun: opts.DryRun})
-		// Conflicts, Skipped and Warnings travel on McpAdopted alone; mirroring two of the three into
-		// res.Warnings printed them twice and left the third looking like a different kind of line.
-		res.McpAdopted = adopted
-		if err != nil {
-			res.addError(AgentsFeatureMcp, err.Error())
-		}
-	}
-
-	progress("restoring mcp servers…", "would restore mcp servers…")
-	mcp, err := a.RestoreMcpServers(ctx, RestoreMcpOptions{DryRun: opts.DryRun})
-	res.AddMcp(mcp, err)
-
-	return res, nil
+	res.Output, res.Stderr = result.Stdout, result.Stderr
+	return res, err
 }
 
 // AgentsSyncAllSummaryText — The imported count spans every claimed capability, not skills alone.
 // Deliberately untouched packages are counted too: a caller that shows only this string would otherwise
 // read a sync that skipped work as a clean one.
 func AgentsSyncAllSummaryText(res AgentsSyncAllResult) string {
+	if strings.TrimSpace(res.Output) != "" || strings.TrimSpace(res.Stderr) != "" {
+		return "APM install complete"
+	}
 	imported := len(res.Imported.Added) +
 		res.McpAdopted.Adopted + len(res.McpAdopted.WouldAdopt) +
 		res.PluginsAdopted.Adopted + len(res.PluginsAdopted.WouldAdopt)

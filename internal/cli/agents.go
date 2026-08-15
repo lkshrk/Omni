@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lkshrk/omni/internal/apm"
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 )
@@ -29,6 +30,18 @@ func printImportSkillsDiff(w io.Writer, diff app.ImportDiff) {
 
 // Warnings, drift and failures come from the flattened report so nothing repeats per feature.
 func printAgentsSyncAllResult(w io.Writer, res app.AgentsSyncAllResult, dryRun bool) {
+	if res.Output != "" {
+		fmt.Fprint(w, res.Output)
+		if !strings.HasSuffix(res.Output, "\n") {
+			fmt.Fprintln(w)
+		}
+	}
+	if res.Stderr != "" {
+		fmt.Fprint(w, res.Stderr)
+		if !strings.HasSuffix(res.Stderr, "\n") {
+			fmt.Fprintln(w)
+		}
+	}
 	for _, msg := range res.Warnings {
 		fmt.Fprintf(w, "warn: %s\n", msg)
 	}
@@ -115,96 +128,116 @@ func printSkippedUnavailable(cmd *cobra.Command, skipped []string) {
 }
 
 func newAgentsCmd(state *rootState) *cobra.Command {
+	global := true
 	cmd := &cobra.Command{
 		Use:   "agents",
-		Short: "Manage AI-agent resources (skills)",
+		Short: "Manage agent packages with APM",
 	}
-	sync := newAgentsSyncCmd(state)
+	sync := newAPMAgentsSyncCmd(state, &global)
 	cmd.AddCommand(
-		newAgentsSkillsCmd(state),
-		newAgentsMcpCmd(state),
-		newAgentsPluginsCmd(state),
-		newAgentsAddCmd(state),
-		newAgentsFindCmd(state),
-		newAgentsResolveAllCmd(state),
 		sync,
 		deprecatedAlias(sync, "restore", nil),
+		newAPMAgentsAddCmd(state, &global),
+		newAPMAgentsRemoveCmd(state, &global),
+		newAPMAgentsUpdateCmd(state, &global),
+		newAPMAgentsSearchCmd(state, &global),
 	)
 	return cmd
 }
 
-// The capability-scoped resolve verbs each take one name; this settles whatever a sync left contested across all three at once.
-func newAgentsResolveAllCmd(state *rootState) *cobra.Command {
-	var useManaged bool
-	var useLocal bool
-	var dryRun bool
+func apmClient(state *rootState, global bool) *apm.Client {
+	scope := apm.Project
+	if global {
+		scope = apm.Global
+	}
+	return state.app.APMClient(scope)
+}
+
+func printAPMResult(cmd *cobra.Command, result apm.Result) {
+	fmt.Fprint(cmdOut(cmd), result.Stdout)
+	fmt.Fprint(cmd.ErrOrStderr(), result.Stderr)
+}
+
+func migrateAgentsToAPM(cmd *cobra.Command, state *rootState, dryRun bool) error {
+	if dryRun {
+		return nil
+	}
+	result, err := state.app.MigrateAgentsToAPM()
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
+	}
+	if result.MigratedPackages > 0 || result.MigratedMCPServers > 0 {
+		fmt.Fprintf(cmdOut(cmd), "migrated %d packages and %d MCP servers to %s\n", result.MigratedPackages, result.MigratedMCPServers, result.Path)
+	}
+	return err
+}
+
+func newAPMAgentsSyncCmd(state *rootState, global *bool) *cobra.Command {
+	var frozen, dryRun bool
 	cmd := &cobra.Command{
-		Use:   "resolve",
-		Short: "Settle every drifted skill, MCP server, and plugin with one side",
-		Long: "Settle every currently drifted agent resource in one pass. --use-managed keeps the " +
-			"manifest's definition and overwrites what another tool wrote; --use-local keeps what is " +
-			"live on this host, adopting it where the capability allows and otherwise narrowing the " +
-			"manifest. A per-item refusal is reported and never blocks the rest.",
-		Args: cobra.NoArgs,
+		Use:   "sync",
+		Short: "Install dependencies from apm.yml",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if useManaged == useLocal {
-				return fmt.Errorf("choose exactly one of --use-managed or --use-local")
-			}
-			if useManaged && !dryRun {
-				ok, err := confirmAction(cmd, state,
-					"Replace every drifted agent resource on this host with omni's managed version?")
-				if err != nil || !ok {
-					return err
-				}
-			}
-			res, err := state.app.ResolveAllDrift(cmd.Context(), app.ResolveAllDriftOptions{
-				UseManaged: useManaged,
-				DryRun:     dryRun,
+			result, err := state.app.AgentsSyncAll(cmd.Context(), app.AgentsSyncAllOptions{
+				Frozen: frozen, DryRun: dryRun,
+				Output: func(stdout, stderr string) {
+					fmt.Fprint(cmdOut(cmd), stdout)
+					fmt.Fprint(cmd.ErrOrStderr(), stderr)
+				},
 			})
-			if err != nil {
-				return err
-			}
-			printDriftResolution(cmdOut(cmd), res.Actions, res.Warnings, dryRun)
-			for _, e := range res.Errors {
-				fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ %s\n", e)
-			}
-			// A dry run settled nothing, so the tally has to read as a preview too.
-			verb := "resolved"
-			if dryRun {
-				verb = "would be resolved"
-			}
-			fmt.Fprintf(cmdOut(cmd), "%d skills, %d mcp servers, %d plugins %s\n",
-				res.SkillsResolved, res.McpResolved, res.PluginsResolved, verb)
-			return agentErrsFailure(len(res.Errors))
+			result.Output, result.Stderr = "", ""
+			printAgentsSyncAllResult(cmdOut(cmd), result, dryRun)
+			return err
 		},
 	}
-	cmd.Flags().BoolVar(&useManaged, "use-managed", false, "Replace every drifted resource with omni's managed version")
-	cmd.Flags().BoolVar(&useLocal, "use-local", false, "Keep every drifted resource's live version")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be resolved without making changes")
+	cmd.Flags().BoolVar(&frozen, "frozen", false, "Require apm.yml and apm.lock.yaml to match")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the install plan without deploying files")
 	return cmd
 }
 
-// Converges the manifest only; claiming unmanaged skills stays opt-in under `omni tools sync --all`.
-func newAgentsSyncCmd(state *rootState) *cobra.Command {
+func newAPMAgentsAddCmd(state *rootState, global *bool) *cobra.Command {
+	return &cobra.Command{Use: "add <package>...", Short: "Add packages to apm.yml and install them", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if err := migrateAgentsToAPM(cmd, state, false); err != nil {
+			return err
+		}
+		result, err := apmClient(state, *global).Add(cmd.Context(), args...)
+		printAPMResult(cmd, result)
+		return err
+	}}
+}
+
+func newAPMAgentsRemoveCmd(state *rootState, global *bool) *cobra.Command {
+	return &cobra.Command{Use: "remove <package>...", Aliases: []string{"uninstall"}, Short: "Remove packages and their deployed files with APM (no --purge mode)", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if err := migrateAgentsToAPM(cmd, state, false); err != nil {
+			return err
+		}
+		result, err := apmClient(state, *global).Uninstall(cmd.Context(), args...)
+		printAPMResult(cmd, result)
+		return err
+	}}
+}
+
+func newAPMAgentsUpdateCmd(state *rootState, global *bool) *cobra.Command {
 	var dryRun bool
-	cmd := &cobra.Command{
-		Use:   "sync",
-		Short: "Install the manifest's skills, MCP servers, and plugins onto this host",
-		Long: "Move every agent feature from the manifest onto this host in one pass: install what " +
-			"is missing, repair what drifted into an identical copy, and leave what already matches. " +
-			"Adopting resources the manifest does not declare is the opposite direction — see the " +
-			"per-feature import verbs.",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			res, err := state.app.AgentsSyncAll(cmd.Context(), app.AgentsSyncAllOptions{DryRun: dryRun})
-			if err != nil {
-				return err
-			}
-			printAgentsSyncAllResult(cmdOut(cmd), res, dryRun)
-			return agentErrsFailure(len(res.Errors))
-		},
-	}
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would be synced without running")
+	cmd := &cobra.Command{Use: "update [package]...", Short: "Update locked APM dependencies", Args: cobra.ArbitraryArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		if err := migrateAgentsToAPM(cmd, state, dryRun); err != nil {
+			return err
+		}
+		result, err := apmClient(state, *global).Update(cmd.Context(), dryRun, args...)
+		printAPMResult(cmd, result)
+		return err
+	}}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the update plan without writing")
 	return cmd
+}
+
+func newAPMAgentsSearchCmd(state *rootState, global *bool) *cobra.Command {
+	return &cobra.Command{Use: "search <query@marketplace>", Aliases: []string{"find"}, Short: "Search a registered APM marketplace", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		result, err := apmClient(state, *global).Search(cmd.Context(), args[0])
+		printAPMResult(cmd, result)
+		return err
+	}}
 }
 
 // Without this the process exits 0 on a partial failure and scripted callers chain onto work that did not happen.
@@ -213,28 +246,6 @@ func agentErrsFailure(n int) error {
 		return nil
 	}
 	return fmt.Errorf("%d agent operation(s) failed", n)
-}
-
-func newAgentsAddCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
-		Use:   "add <source>",
-		Short: "Declare a skill package in the manifest and install it here",
-		Long: "Record a skill package source as manifest intent, fetch it into omni's store, and " +
-			"link it into every targeted agent — declaration and one host's convergence in a single " +
-			"step. Other hosts pick it up on their next sync.",
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			pkg, warnings, err := state.app.AddSkillPackage(cmd.Context(), args[0])
-			for _, w := range warnings {
-				fmt.Fprintf(cmdOut(cmd), "  ! %s\n", w)
-			}
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(cmdOut(cmd), "added %s\n", pkg.Source)
-			return nil
-		},
-	}
 }
 
 func newAgentsFindCmd(state *rootState) *cobra.Command {

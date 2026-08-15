@@ -117,6 +117,10 @@ func (r *Registry) All() []Target {
 	return slices.Clone(r.targets)
 }
 
+func (t Target) SkillDirs(home string) []string {
+	return t.skillDirs(home)
+}
+
 func (r *Registry) ByID(id string) (Target, bool) {
 	i, ok := r.byID[id]
 	if !ok {

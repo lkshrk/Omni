@@ -21,8 +21,8 @@ syncs dotfiles through a Git-backed GNU Stow repo.
   host-specific variants, Git commit/push flows, and optional native services.
 - **Hosts and groups**: per-machine activation of reusable tool and dotfile
   groups.
-- **Agent resources**: skills, MCP servers, plugins, and marketplaces across
-  supported agent CLIs.
+- **Agent packages**: APM-backed skills, MCP servers, plugins, lockfiles, and
+  deployment across supported harnesses.
 - **Health**: dashboard checks, `doctor`, `reconcile`, cache refreshes, and
   repair actions.
 - **Two surfaces**: the interactive TUI and a scriptable CLI share the same app

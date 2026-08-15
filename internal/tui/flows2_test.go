@@ -2841,50 +2841,14 @@ func TestAgentsProgressDoneMsg_StaleGenIgnored(t *testing.T) {
 	}
 }
 
-func TestViewSkillsBody_MCPErrorShownOnMCPChip(t *testing.T) {
+func TestViewSkillsBodyShowsAPMContract(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
-	m.skillTypeIdx = agentsChipMcp
-	m.mcpErr = errors.New("mcp broke")
-
+	m.skillsErr = errors.New("apm broke")
 	out := m.viewSkillsBody()
-	if !strings.Contains(out, "error: mcp broke") {
-		t.Errorf("viewSkillsBody() missing mcp error text, got:\n%s", out)
-	}
-}
-
-func TestViewSkillsBody_PluginErrorShownOnPluginChip(t *testing.T) {
-	t.Parallel()
-	m := baseModel(nil)
-	m.skillTypeIdx = agentsChipPlugin
-	m.pluginErr = errors.New("plugin broke")
-
-	out := m.viewSkillsBody()
-	if !strings.Contains(out, "error: plugin broke") {
-		t.Errorf("viewSkillsBody() missing plugin error text, got:\n%s", out)
-	}
-}
-
-func TestViewSkillsBody_MarketplaceErrorShownOnMarketplaceChip(t *testing.T) {
-	t.Parallel()
-	m := baseModel(nil)
-	m.skillTypeIdx = agentsChipMarketplace
-	m.marketplaceErr = errors.New("marketplace broke")
-
-	out := m.viewSkillsBody()
-	if !strings.Contains(out, "error: marketplace broke") {
-		t.Errorf("viewSkillsBody() missing marketplace error text, got:\n%s", out)
-	}
-}
-
-func TestViewSkillsBody_MCPErrorHiddenOnOtherChip(t *testing.T) {
-	t.Parallel()
-	m := baseModel(nil)
-	m.skillTypeIdx = agentsChipPlugin
-	m.mcpErr = errors.New("mcp broke")
-
-	out := m.viewSkillsBody()
-	if strings.Contains(out, "mcp broke") {
-		t.Errorf("viewSkillsBody() should not show mcp error while plugin chip active, got:\n%s", out)
+	for _, want := range []string{"Microsoft APM", "~/.apm/apm.yml", "omni agents add|remove|update|search", "error: apm broke"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("viewSkillsBody() missing %q, got:\n%s", want, out)
+		}
 	}
 }

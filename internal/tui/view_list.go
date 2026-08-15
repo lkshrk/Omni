@@ -229,34 +229,6 @@ func pillText(label string, active bool) string {
 	return " " + label + " "
 }
 
-// activeIdx maps directly to names[activeIdx] with no "all" prepend; disabled pills never render active, so a disabled chip reads as unselectable even if activeIdx briefly points at it.
-func renderPillBarDim(pal palette, names []string, activeIdx, maxW int, disabled map[int]bool) string {
-	var sb strings.Builder
-	used := 0
-	for i, label := range names {
-		active := activeIdx == i && !disabled[i]
-		w := pillCellWidth(label, active, maxW-used)
-		if w <= 0 {
-			break
-		}
-		text := pillText(label, active)
-		if lipgloss.Width(text) > w {
-			if active {
-				text = "[" + fitCellText(label, max(w-2, 1)) + "]"
-			} else {
-				text = " " + fitCellText(label, max(w-2, 1)) + " "
-			}
-		}
-		if active {
-			sb.WriteString(pal.styleTitle.Render(text))
-		} else {
-			sb.WriteString(pal.styleHelp.Render(text))
-		}
-		used += w
-	}
-	return sb.String()
-}
-
 func renderList(m Model) string {
 	p := m.palette
 	var sb strings.Builder
