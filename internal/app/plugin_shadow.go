@@ -3,45 +3,10 @@ package app
 import (
 	"context"
 	"fmt"
-	"strings"
 )
-
-type projectedPluginNamesKey struct{}
-
-type projectedPluginNames struct {
-	names    map[string]map[string]bool
-	warnings []string
-}
-
-func withProjectedPluginNames(ctx context.Context, names map[string]map[string]bool, warnings []string) context.Context {
-	if names == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, projectedPluginNamesKey{}, projectedPluginNames{names: names, warnings: warnings})
-}
-
-func projectPluginInstalls(ctx context.Context, names map[string]map[string]bool, warnings []string, result RestorePluginResult) context.Context {
-	for agentID, observed := range result.observedNames {
-		names[agentID] = observed
-	}
-	for _, pair := range append(result.Installed, result.WouldInstall...) {
-		agentID, name, ok := strings.Cut(pair, "/")
-		if !ok {
-			continue
-		}
-		if names[agentID] == nil {
-			names[agentID] = make(map[string]bool)
-		}
-		names[agentID][name] = true
-	}
-	return withProjectedPluginNames(ctx, names, warnings)
-}
 
 // A failing ListPlugins is a warning, not an error: a silently skipped adapter makes shadowed packages read as unshadowed.
 func installedPluginNames(ctx context.Context, a *App) (map[string]map[string]bool, []string) {
-	if projected, ok := ctx.Value(projectedPluginNamesKey{}).(projectedPluginNames); ok {
-		return projected.names, projected.warnings
-	}
 	out := make(map[string]map[string]bool)
 	var warnings []string
 	for _, adapter := range a.pluginAdapters() {

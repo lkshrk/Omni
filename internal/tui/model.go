@@ -512,9 +512,7 @@ type Model struct {
 	// Two-step confirm, tools-tab style, spanning all three features.
 	agentsDeleteConfirm   bool
 	agentsDeleteUninstall bool // skills orphan rows uninstall from disk, not manifest delete
-	agentsDeleteFeature   agentsSection
 	agentsDeleteName      string
-	agentsDeleteOpKey     string
 
 	// Two-step confirm mirroring the tools tab's listConfirmSyncAll: it claims unmanaged skills into the manifest.
 	agentsSyncAllConfirm bool
@@ -530,14 +528,12 @@ type Model struct {
 	// Two-step confirm: 'u' keeps omni's side, 'l' keeps the local one.
 	agentsResolveConfirm  bool
 	agentsResolveUseLocal bool
-	agentsResolveFeature  agentsSection
 	agentsResolveSource   string
 	agentsResolveOpKey    string
 
 	agentsIgnoreConfirm bool
 	agentsIgnoreFeature agentsSection
 	agentsIgnoreName    string
-	agentsIgnoreOpKey   string
 
 	// Armed by pluginNeedsMarketplaceMsg, confirmed with Confirm/y — a genuine yes/no after an async round-trip, not a press-again confirm.
 	pluginMarketplaceOfferConfirm bool
@@ -573,7 +569,6 @@ type Model struct {
 	mcpCursorAgentID string
 
 	mcpAgentsPicker bool
-	mcpAgentsRow    app.McpServerRow
 
 	pluginRows          []app.PluginRow
 	pluginUnmanaged     map[string][]app.InstalledPlugin
@@ -587,7 +582,6 @@ type Model struct {
 	pluginCursorAgentID string
 
 	pluginAgentsPicker bool
-	pluginAgentsRow    app.PluginRow
 
 	pluginFormOpen        bool
 	pluginFormField       int // 0=name,1=marketplace,2=source,3=agents

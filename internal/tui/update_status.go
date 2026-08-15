@@ -503,10 +503,7 @@ func (m *Model) handleStatusAction(action statusAction, cmds *[]tea.Cmd) {
 		}
 	case statusActionRestoreSkills:
 		if !m.loading && !m.skillsRunning {
-			m.skillsRunning = true
-			m.skillsErr = nil
-			m.skillsResult = nil
-			*cmds = append(*cmds, m.spinner.Tick, m.doRestoreSkills())
+			*cmds = append(*cmds, m.doAgentsSyncAll()...)
 		}
 	}
 }

@@ -69,18 +69,11 @@ const (
 	SettingsExtract                ID = "settings.extract"
 	SetupInit                      ID = "setup.init"
 	AgentsRestore                  ID = "agents.restore"
+	AgentsAdd                      ID = "agents.add"
+	AgentsRemove                   ID = "agents.remove"
+	AgentsUpdate                   ID = "agents.update"
+	AgentsSearch                   ID = "agents.search"
 	AgentsSyncAll                  ID = "agents.sync_all"
-	AgentsSkillsImport             ID = "agents.skills_import"
-	AgentsSkillsUpdate             ID = "agents.skills_update"
-	AgentsSkillsStatus             ID = "agents.skills_status"
-	AgentsSkillsUseManaged         ID = "agents.skills_resolve_use_managed"
-	AgentsSkillsUseLocal           ID = "agents.skills_resolve_use_local"
-	AgentsMcpUseManaged            ID = "agents.mcp_resolve_use_managed"
-	AgentsMcpUseLocal              ID = "agents.mcp_resolve_use_local"
-	AgentsPluginsUseManaged        ID = "agents.plugins_resolve_use_managed"
-	AgentsPluginsUseLocal          ID = "agents.plugins_resolve_use_local"
-	AgentsResolveAllUseManaged     ID = "agents.resolve_all_use_managed"
-	AgentsResolveAllUseLocal       ID = "agents.resolve_all_use_local"
 	Doctor                         ID = "doctor"
 	DoctorFix                      ID = "doctor.fix"
 )
@@ -1005,12 +998,32 @@ var Agents = []Action{
 		Domain:          "agents",
 		Scope:           ScopeGlobal,
 		Label:           "sync agents",
-		Description:     "Install the manifest's skills, MCP servers, and plugins onto this host.",
-		LongDescription: "Run every agent feature's sync in one pass: install the manifest skill packages, MCP servers, and plugins this host is missing. Claiming installs the manifest does not track runs the other way and stays with sync-all.",
+		Description:     "Install the global APM manifest onto this host.",
+		LongDescription: "Run APM's global install against ~/.apm/apm.yml; APM owns resolution, lockfiles, security checks, and harness deployment.",
 		Mutates:         true,
-		CLI:             []CLIBinding{{Command: []string{"agents", "sync"}, Flags: []string{"--dry-run"}}},
-		Palette:         &PaletteBinding{Command: []string{"agents", "sync"}, Description: "install manifest skills, mcp servers, and plugins"},
+		CLI:             []CLIBinding{{Command: []string{"agents", "sync"}, Flags: []string{"--dry-run", "--frozen"}}},
+		Palette:         &PaletteBinding{Command: []string{"agents", "sync"}, Description: "install the global APM manifest"},
 		PaletteEligible: true,
+	},
+	{
+		ID: AgentsAdd, Domain: "agents", Scope: ScopeGlobal, Label: "add agent package",
+		Description: "Add packages to the global APM manifest and install them.", LongDescription: "Delegate package resolution, manifest editing, lockfile updates, and deployment to APM.", Mutates: true,
+		CLIOnlyReason: "Package references are entered directly on the CLI; the TUI exposes global APM sync only.", CLI: []CLIBinding{{Command: []string{"agents", "add"}}},
+	},
+	{
+		ID: AgentsRemove, Domain: "agents", Scope: ScopeGlobal, Label: "remove agent package",
+		Description: "Remove packages through APM.", LongDescription: "Remove packages from APM's global manifest, lockfile, and deployed harness files.", Mutates: true,
+		CLIOnlyReason: "Package references are entered directly on the CLI; the TUI exposes global APM sync only.", CLI: []CLIBinding{{Command: []string{"agents", "remove"}}},
+	},
+	{
+		ID: AgentsUpdate, Domain: "agents", Scope: ScopeGlobal, Label: "update agent packages",
+		Description: "Update all or selected global APM dependencies.", LongDescription: "Ask APM to resolve newer allowed package refs and update its global lockfile and deployments.", Mutates: true,
+		CLIOnlyReason: "Selected dependency updates use APM package names on the CLI; the TUI exposes global APM sync only.", CLI: []CLIBinding{{Command: []string{"agents", "update"}, Flags: []string{"--dry-run"}}},
+	},
+	{
+		ID: AgentsSearch, Domain: "agents", Scope: ScopeGlobal, Label: "search agent packages",
+		Description: "Search a registered APM marketplace.", LongDescription: "Run APM marketplace search without changing agent state.",
+		CLIOnlyReason: "Marketplace query expressions are entered directly on the CLI.", CLI: []CLIBinding{{Command: []string{"agents", "search"}}},
 	},
 	{
 		ID:                 AgentsSyncAll,
@@ -1022,154 +1035,8 @@ var Agents = []Action{
 		Mutates:            true,
 		RequiresConfirm:    true,
 		ConfirmDescription: "Claim unmanaged skill packages and sync agent skills, MCP servers, and plugins?",
+		CLIOnlyReason:      "Compatibility action used by tools sync --all; APM is the implementation.",
 		CLI:                []CLIBinding{{Command: []string{"tools", "sync"}, Flags: []string{"--all"}}},
-		Palette:            &PaletteBinding{Command: []string{"agents", "sync-all"}, Description: "claim unmanaged skills, then sync all agent resources"},
-		PaletteEligible:    true,
-	},
-	{
-		ID:              AgentsSkillsImport,
-		Domain:          "agents",
-		Scope:           ScopeGlobal,
-		Label:           "import skills",
-		Description:     "Claim skill packages another tool installed into the manifest.",
-		LongDescription: "Add the skill packages recorded in the legacy CLI lockfile but absent from the manifest, adopting their on-disk installs into omni's store.",
-		Mutates:         true,
-		CLI:             []CLIBinding{{Command: []string{"agents", "skills", "import"}, Flags: []string{"--dry-run"}}},
-		Palette:         &PaletteBinding{Command: []string{"agents", "skills", "import"}, Description: "claim unmanaged skill packages into the manifest"},
-		PaletteEligible: true,
-	},
-	{
-		ID:              AgentsSkillsUpdate,
-		Domain:          "agents",
-		Scope:           ScopeGlobal,
-		Label:           "upgrade skills",
-		Description:     "Refresh omni's stored skill packages from their sources.",
-		LongDescription: "Reacquire every manifest skill package from its source into omni's store and relink the agents that use it. The manifest is unchanged: this moves newer content, not intent.",
-		Mutates:         true,
-		CLI:             []CLIBinding{{Command: []string{"agents", "skills", "upgrade"}, Flags: []string{"--dry-run", "--check"}}},
-		Palette:         &PaletteBinding{Command: []string{"agents", "skills", "upgrade"}, Description: "refresh stored skill packages from their sources"},
-		PaletteEligible: true,
-	},
-	{
-		ID:              AgentsSkillsStatus,
-		Domain:          "agents",
-		Scope:           ScopeRow,
-		Label:           "skill status",
-		Description:     "Show one skill package's manifest, store, and per-agent entry state.",
-		LongDescription: "Report a single package's declared intent, canonical store content, update state, legacy lockfile attribution, and what every targeted agent directory actually holds, with the next step for each entry.",
-		Requirements:    []Requirement{RequiresToolName},
-		CLIOnlyReason:   "The Agents tab already renders per-agent skill state on the rows themselves; this is the scriptable one-package dump of the same state.",
-		CLI:             []CLIBinding{{Command: []string{"agents", "skills", "status"}}},
-	},
-	{
-		ID:                 AgentsSkillsUseManaged,
-		Domain:             "agents",
-		Scope:              ScopeRow,
-		Label:              "use managed",
-		Description:        "Resolve a drifted skill entry with omni's managed content.",
-		LongDescription:    "Replace the content another tool put at a managed skill entry with omni's link into the canonical package store. The displaced copy is kept aside only until the install succeeds.",
-		Mutates:            true,
-		RequiresConfirm:    true,
-		ConfirmDescription: "confirm use managed",
-		Requirements:       []Requirement{RequiresToolName},
-		TUI:                &TUIBinding{KeyMapField: "AgentsUseManaged", DefaultKey: "u", Label: "use managed", Description: "Resolve the selected drifted skill with omni's content.", ConfirmDescription: "confirm use managed"},
-		CLI:                []CLIBinding{{Command: []string{"agents", "skills", "resolve"}, Flags: []string{"--use-managed", "--agent", "--dry-run"}}},
-	},
-	{
-		ID:                 AgentsSkillsUseLocal,
-		Domain:             "agents",
-		Scope:              ScopeRow,
-		Label:              "use local",
-		Description:        "Resolve a drifted skill entry by releasing it.",
-		LongDescription:    "Leave the content another tool put at a managed skill entry in place and narrow the manifest so omni stops managing that skill, or that package on those agents.",
-		Mutates:            true,
-		RequiresConfirm:    true,
-		ConfirmDescription: "confirm use local",
-		Requirements:       []Requirement{RequiresToolName},
-		TUI:                &TUIBinding{KeyMapField: "AgentsUseLocal", DefaultKey: "l", Label: "use local", Description: "Stop managing the selected drifted skill entry.", ConfirmDescription: "confirm use local"},
-		CLI:                []CLIBinding{{Command: []string{"agents", "skills", "resolve"}, Flags: []string{"--use-local", "--agent", "--dry-run"}}},
-	},
-	{
-		ID:                 AgentsMcpUseManaged,
-		Domain:             "agents",
-		Scope:              ScopeRow,
-		Label:              "use managed",
-		Description:        "Resolve a drifted MCP server with the manifest definition.",
-		LongDescription:    "Reinstall the manifest's transport, command and URL for a server whose live registration diverged, through the agent's own CLI.",
-		Mutates:            true,
-		RequiresConfirm:    true,
-		ConfirmDescription: "confirm use managed",
-		Requirements:       []Requirement{RequiresToolName},
-		TUI:                &TUIBinding{KeyMapField: "AgentsUseManaged", DefaultKey: "u", Label: "use managed", Description: "Resolve the selected drifted MCP server with the manifest definition.", ConfirmDescription: "confirm use managed"},
-		CLI:                []CLIBinding{{Command: []string{"agents", "mcp", "resolve"}, Flags: []string{"--use-managed", "--agent", "--dry-run"}}},
-	},
-	{
-		ID:                 AgentsMcpUseLocal,
-		Domain:             "agents",
-		Scope:              ScopeRow,
-		Label:              "use local",
-		Description:        "Resolve a drifted MCP server by adopting the live definition.",
-		LongDescription:    "Record the transport, command and URL the agent actually has as the manifest's new intent for a drifted server.",
-		Mutates:            true,
-		RequiresConfirm:    true,
-		ConfirmDescription: "confirm use local",
-		Requirements:       []Requirement{RequiresToolName},
-		TUI:                &TUIBinding{KeyMapField: "AgentsUseLocal", DefaultKey: "l", Label: "use local", Description: "Adopt the selected MCP server's live definition into the manifest.", ConfirmDescription: "confirm use local"},
-		CLI:                []CLIBinding{{Command: []string{"agents", "mcp", "resolve"}, Flags: []string{"--use-local", "--agent", "--dry-run"}}},
-	},
-	{
-		ID:                 AgentsPluginsUseManaged,
-		Domain:             "agents",
-		Scope:              ScopeRow,
-		Label:              "use managed",
-		Description:        "Resolve a drifted plugin with the declared marketplace.",
-		LongDescription:    "Uninstall a plugin installed from a marketplace other than the manifest's and reinstall it from the declared one.",
-		Mutates:            true,
-		RequiresConfirm:    true,
-		ConfirmDescription: "confirm use managed",
-		Requirements:       []Requirement{RequiresToolName},
-		TUI:                &TUIBinding{KeyMapField: "AgentsUseManaged", DefaultKey: "u", Label: "use managed", Description: "Reinstall the selected plugin from the manifest's marketplace.", ConfirmDescription: "confirm use managed"},
-		CLI:                []CLIBinding{{Command: []string{"agents", "plugins", "resolve"}, Flags: []string{"--use-managed", "--agent", "--dry-run"}}},
-	},
-	{
-		ID:                 AgentsPluginsUseLocal,
-		Domain:             "agents",
-		Scope:              ScopeRow,
-		Label:              "use local",
-		Description:        "Resolve a drifted plugin by adopting the installed marketplace.",
-		LongDescription:    "Repoint the manifest entry at the marketplace the plugin is actually installed from, which must already be declared.",
-		Mutates:            true,
-		RequiresConfirm:    true,
-		ConfirmDescription: "confirm use local",
-		Requirements:       []Requirement{RequiresToolName},
-		TUI:                &TUIBinding{KeyMapField: "AgentsUseLocal", DefaultKey: "l", Label: "use local", Description: "Repoint the selected plugin at the marketplace it is installed from.", ConfirmDescription: "confirm use local"},
-		CLI:                []CLIBinding{{Command: []string{"agents", "plugins", "resolve"}, Flags: []string{"--use-local", "--agent", "--dry-run"}}},
-	},
-	{
-		ID:                 AgentsResolveAllUseManaged,
-		Domain:             "agents",
-		Scope:              ScopeGlobal,
-		Label:              "use managed (all)",
-		Description:        "Resolve every drifted agent resource with omni's managed side.",
-		LongDescription:    "Settle every currently drifted skill package, MCP server and plugin in one pass by keeping the manifest's definition and overwriting what another tool wrote.",
-		Mutates:            true,
-		RequiresConfirm:    true,
-		ConfirmDescription: "confirm use managed for all",
-		TUI:                &TUIBinding{KeyMapField: "AgentsUseManagedAll", DefaultKey: "U", Label: "use managed (all)", Description: "Resolve every drifted agent resource with omni's side.", ConfirmDescription: "confirm use managed for all"},
-		CLI:                []CLIBinding{{Command: []string{"agents", "resolve"}, Flags: []string{"--use-managed", "--dry-run"}}},
-	},
-	{
-		ID:                 AgentsResolveAllUseLocal,
-		Domain:             "agents",
-		Scope:              ScopeGlobal,
-		Label:              "use local (all)",
-		Description:        "Resolve every drifted agent resource with the local side.",
-		LongDescription:    "Settle every currently drifted skill package, MCP server and plugin in one pass by adopting or releasing whatever is live on this host.",
-		Mutates:            true,
-		RequiresConfirm:    true,
-		ConfirmDescription: "confirm use local for all",
-		TUI:                &TUIBinding{KeyMapField: "AgentsUseLocalAll", DefaultKey: "L", Label: "use local (all)", Description: "Resolve every drifted agent resource with the local side.", ConfirmDescription: "confirm use local for all"},
-		CLI:                []CLIBinding{{Command: []string{"agents", "resolve"}, Flags: []string{"--use-local", "--dry-run"}}},
 	},
 }
 

@@ -24,71 +24,7 @@ func runAgentsSubcommand(t *testing.T, a *app.App, args ...string) (string, stri
 }
 
 // A renamed verb's old spelling must reach the same operation and say so once.
-func TestDeprecatedAliasRunsCanonicalOperation(t *testing.T) {
-	for _, spec := range []struct {
-		name      string
-		canonical []string
-		alias     []string
-		notice    string
-	}{
-		{
-			name:      "agents sync",
-			canonical: []string{"sync", "--dry-run"},
-			alias:     []string{"restore", "--dry-run"},
-			notice:    `note: "agents restore" renamed to "agents sync"`,
-		},
-		{
-			name:      "agents skills sync",
-			canonical: []string{"skills", "sync", "--dry-run"},
-			alias:     []string{"skills", "restore", "--dry-run"},
-			notice:    `note: "agents skills restore" renamed to "agents skills sync"`,
-		},
-		{
-			name:      "agents skills upgrade",
-			canonical: []string{"skills", "upgrade", "--dry-run"},
-			alias:     []string{"skills", "update", "--dry-run"},
-			notice:    `note: "agents skills update" renamed to "agents skills upgrade"`,
-		},
-		{
-			name:      "agents mcp sync",
-			canonical: []string{"mcp", "sync", "--dry-run"},
-			alias:     []string{"mcp", "restore", "--dry-run"},
-			notice:    `note: "agents mcp restore" renamed to "agents mcp sync"`,
-		},
-		{
-			name:      "agents plugins sync",
-			canonical: []string{"plugins", "sync", "--dry-run"},
-			alias:     []string{"plugins", "restore", "--dry-run"},
-			notice:    `note: "agents plugins restore" renamed to "agents plugins sync"`,
-		},
-	} {
-		t.Run(spec.name, func(t *testing.T) {
-			want, wantErrOut, wantErr := runAgentsSubcommand(t, newAgentsSyncTestApp(t, config.Settings{}), spec.canonical...)
-			if wantErr != nil {
-				t.Fatalf("%v: %v", spec.canonical, wantErr)
-			}
-			if strings.Contains(wantErrOut, "note:") {
-				t.Errorf("canonical spelling printed a rename notice: %q", wantErrOut)
-			}
 
-			got, gotErrOut, err := runAgentsSubcommand(t, newAgentsSyncTestApp(t, config.Settings{}), spec.alias...)
-			if err != nil {
-				t.Fatalf("%v: %v", spec.alias, err)
-			}
-			if got != want {
-				t.Errorf("alias output = %q, want the canonical %q", got, want)
-			}
-			if strings.Count(gotErrOut, "note:") != 1 {
-				t.Errorf("alias stderr = %q, want exactly one rename notice", gotErrOut)
-			}
-			if !strings.Contains(gotErrOut, spec.notice) {
-				t.Errorf("alias stderr = %q, want %q", gotErrOut, spec.notice)
-			}
-		})
-	}
-}
-
-// Without --purge nothing is uninstalled, so no provider is needed.
 func TestToolsRemove_UndeclaresWithoutProvider(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
@@ -140,10 +76,7 @@ func TestRemoveHelpNamesItsCounterpart(t *testing.T) {
 	for _, path := range [][]string{
 		{"tools", "remove"},
 		{"dots", "remove"},
-		{"agents", "skills", "remove"},
-		{"agents", "mcp", "remove"},
-		{"agents", "plugins", "remove"},
-		{"agents", "plugins", "marketplace", "remove"},
+		{"agents", "remove"},
 		{"hosts", "remove"},
 		{"groups", "remove-tool"},
 	} {

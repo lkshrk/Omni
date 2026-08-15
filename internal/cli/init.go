@@ -266,42 +266,22 @@ type skillsImportChoice struct {
 	skip  bool
 }
 
-// Adoption rewrites existing installs as links into Omni's store, so it never runs without consent, and every failure stays non-fatal.
+// Legacy agent declarations move once into APM's global manifest; APM owns installs after that.
 func runSkillsImportSection(cmd *cobra.Command, state *rootState, a *app.App, choice skillsImportChoice) {
 	if choice.skip {
 		return
 	}
-	cfg, err := a.LoadConfig()
+	result, err := a.MigrateAgentsToAPM()
 	if err != nil {
-		fmt.Fprintf(cmdErr(cmd), "warning: checking agent skills: %v\n", err)
+		fmt.Fprintf(cmdErr(cmd), "warning: migrating agent packages to APM: %v\n", err)
 		return
 	}
-	if !a.SkillsEnabled(cfg) {
-		return
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(cmdErr(cmd), "warning: %s\n", warning)
 	}
-	unmanaged, err := a.UnmanagedSkillPackages(cmd.Context())
-	if err != nil {
-		fmt.Fprintf(cmdErr(cmd), "warning: checking agent skills: %v\n", err)
-		return
+	if result.MigratedPackages > 0 || result.MigratedMCPServers > 0 {
+		fmt.Fprintf(cmdOut(cmd), "Migrated %d agent packages and %d MCP servers to %s.\n\n", result.MigratedPackages, result.MigratedMCPServers, result.Path)
 	}
-	if len(unmanaged) == 0 {
-		return
-	}
-	if !choice.force {
-		question := fmt.Sprintf(
-			"Import %d existing agent skill package(s)? (adopts legacy CLI-managed installs)", len(unmanaged))
-		// Fail-closed: an unanswered prompt must never adopt real skill installs in CI.
-		if !promptYesNoFailClosed(state, question, true) {
-			return
-		}
-	}
-	diff, err := a.ImportSkills(cmd.Context(), app.ImportSkillsOptions{})
-	if err != nil {
-		fmt.Fprintf(cmdErr(cmd), "warning: importing agent skills: %v\n", err)
-		return
-	}
-	printImportSkillsDiff(cmdOut(cmd), diff)
-	fmt.Fprintln(cmdOut(cmd))
 }
 
 func runDotsSyncSection(ctx context.Context, a *app.App) error {

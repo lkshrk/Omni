@@ -12,6 +12,16 @@ import (
 	"github.com/lkshrk/omni/internal/provider/script"
 )
 
+func writeFakeClaudeOnPath(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "claude")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+}
+
 func TestMcpServerRows_UntargetedAgentIsNotDrift(t *testing.T) {
 	t.Parallel()
 	claude := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{
@@ -160,27 +170,6 @@ func TestAddSkillPackage_RefusesPluginShadowedPackage(t *testing.T) {
 	_, _, err := a.AddSkillPackage(t.Context(), "owner/academic-research-skills")
 	if err == nil || !strings.Contains(err.Error(), "plugin") {
 		t.Fatalf("err = %v, want the same refusal the import path gives", err)
-	}
-}
-
-func TestAgentsSyncAll_McpAdoptRefusalsTravelOnOneChannel(t *testing.T) {
-	claude := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{
-		{Name: "contested", Transport: "http", URL: "https://one.example.com"},
-	}}
-	codex := &stubMcpAdapter{id: "codex", available: true, listed: []app.InstalledMcpServer{
-		{Name: "contested", Transport: "http", URL: "https://two.example.com"},
-	}}
-	a := parityTestApp(t, config.AgentsConfig{}, []app.McpAdapter{claude, codex}, nil)
-
-	res, err := a.AgentsSyncAll(t.Context(), app.AgentsSyncAllOptions{ImportUnmanaged: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !hasItem(res.McpAdopted.Conflicts, "conflicting configuration") {
-		t.Fatalf("McpAdopted.Conflicts = %v, want the refusal", res.McpAdopted.Conflicts)
-	}
-	if hasItem(res.Warnings, "conflicting configuration") {
-		t.Errorf("Warnings = %v, want the adopt refusal on McpAdopted alone", res.Warnings)
 	}
 }
 

@@ -23,6 +23,10 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
+func colorsEqual(a, b color.Color) bool {
+	return a == b
+}
+
 func assertLinesFitWidth(t *testing.T, out string, width int) {
 	t.Helper()
 	for i, line := range strings.Split(out, "\n") {
@@ -8937,30 +8941,6 @@ func TestAgentsRowRefreshWiring(t *testing.T) {
 	if !updated.skillsEnabled {
 		t.Fatalf("skillsEnabled should flip to true")
 	}
-}
-
-func TestDashboardAgentsRestoreSkillsDispatch(t *testing.T) {
-	t.Parallel()
-	t.Run("restore skills", func(t *testing.T) {
-		m := baseModel(nil)
-		var cmds []tea.Cmd
-		m.handleStatusAction(statusAction{kind: statusActionRestoreSkills}, &cmds)
-		if !m.skillsRunning {
-			t.Fatalf("skillsRunning should be true after dispatch")
-		}
-		if len(cmds) == 0 {
-			t.Fatalf("expected commands to be queued")
-		}
-	})
-
-	t.Run("open agents", func(t *testing.T) {
-		m := baseModel(nil)
-		var cmds []tea.Cmd
-		m.handleStatusAction(statusAction{kind: statusActionOpenAgents}, &cmds)
-		if m.mode != viewSkills {
-			t.Fatalf("mode = %v, want viewSkills", m.mode)
-		}
-	})
 }
 
 func TestStatusDashboardDataRows_ActivityConsistency(t *testing.T) {

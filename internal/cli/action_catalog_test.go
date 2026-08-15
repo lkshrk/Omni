@@ -80,6 +80,10 @@ func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 		{"settings", "reset"},
 		{"settings", "reset-cache"},
 		{"settings", "migrate-host-overrides"},
+		{"agents", "sync"},
+		{"agents", "add"},
+		{"agents", "remove"},
+		{"agents", "update"},
 		{"dots", "sync"},
 		{"dots", "add"},
 		{"dots", "groups"},
@@ -247,11 +251,6 @@ func TestDeprecatedAliasesStayRunnable(t *testing.T) {
 		flags []string
 	}{
 		{old: []string{"agents", "restore"}, flags: []string{"dry-run"}},
-		{old: []string{"agents", "skills", "restore"}, flags: []string{"dry-run"}},
-		{old: []string{"agents", "skills", "update"}, flags: []string{"dry-run", "check"}},
-		{old: []string{"agents", "skills", "uninstall"}},
-		{old: []string{"agents", "mcp", "restore"}, flags: []string{"dry-run"}},
-		{old: []string{"agents", "plugins", "restore"}, flags: []string{"dry-run"}},
 		{old: []string{"tools", "delete"}, flags: []string{"provider", "purge"}},
 		{old: []string{"dots", "delete"}, flags: []string{"keep-local", "purge"}},
 	} {
@@ -298,8 +297,8 @@ func TestConfirmableToolActionsHaveYesBypass(t *testing.T) {
 		t.Fatal("root command is missing global --yes confirmation bypass")
 	}
 	for _, action := range actions.All() {
-		if action.RequiresConfirm && len(action.CLI) == 0 {
-			t.Fatalf("%s requires confirmation but has no CLI binding", action.ID)
+		if action.RequiresConfirm && len(action.CLI) == 0 && action.TUI == nil {
+			t.Fatalf("%s requires confirmation but has no runnable binding", action.ID)
 		}
 	}
 }

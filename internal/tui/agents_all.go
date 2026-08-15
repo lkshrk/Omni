@@ -2,13 +2,12 @@ package tui
 
 import (
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/lkshrk/omni/internal/apm"
 	"github.com/lkshrk/omni/internal/app"
 )
 
@@ -267,30 +266,6 @@ func agentsAllEntryAt(m Model, cursor int) (agentsAllRow, bool) {
 	return rows[cursor], true
 }
 
-func agentsChipEnabled(m Model, chip int) bool {
-	switch chip {
-	case agentsChipSkills:
-		return m.skillsSectionEnabled()
-	case agentsChipMcp:
-		return m.mcpSectionEnabled()
-	case agentsChipPlugin:
-		return m.pluginsSectionEnabled()
-	case agentsChipMarketplace:
-		return m.marketplacesSectionEnabled()
-	default:
-		return true
-	}
-}
-
-func (m *Model) agentsChipMove(delta int) {
-	for next := m.skillTypeIdx + delta; next >= agentsChipAll && next <= agentsChipMarketplace; next += delta {
-		if agentsChipEnabled(*m, next) {
-			m.setAgentsChip(next)
-			return
-		}
-	}
-}
-
 // Same per-agent-row flatten renderAgentsGroupedTab renders, so navigation and rendering always agree on row identity.
 func agentsFilteredRowsList(m Model, feature agentsSection) []agentsAllRow {
 	var out []agentsAllRow
@@ -420,21 +395,6 @@ func (m *Model) setAgentsChip(next int) {
 	m.resetAgentsChipCursor()
 }
 
-func (m *Model) agentFilterMove(delta int) {
-	if delta < 0 {
-		if m.skillAgentIdx > 0 {
-			m.skillAgentIdx--
-			clampSkillsCursor(m)
-		}
-		return
-	}
-	agentIDs := skillAgentIDs(m.skillsRows, m.enabledAgents)
-	if m.skillAgentIdx < len(agentIDs) {
-		m.skillAgentIdx++
-		clampSkillsCursor(m)
-	}
-}
-
 func (m *Model) resetAgentsChipCursor() {
 	switch m.skillTypeIdx {
 	case agentsChipAll:
@@ -507,103 +467,31 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (handled boo
 	case "e":
 		return true, []tea.Cmd{m.openTraceLog()}
 	default:
-		return true, m.doAgentsRefreshAll()
+		return true, m.doAgentsSyncAll()
 	}
 }
 
 // Marketplaces must refresh before outdated plugins are computed: LatestVersion/LatestSha come from the marketplace's local clone, so cached rows cannot know about an update until it is pulled.
 func (m *Model) doAgentsUpdateAll() []tea.Cmd {
-	runSkills := m.skillsSectionEnabled() && len(m.skillsRows) > 0
-	runPlugins := m.pluginsSectionEnabled()
-	runMarketplaces := m.marketplacesSectionEnabled()
-	runMcp := m.mcpSectionEnabled()
-	if !runSkills && !runPlugins && !runMarketplaces && !runMcp {
-		return nil
-	}
-	if runSkills {
-		m.skillsRunning = true
-		m.skillsErr = nil
-	}
-	if runPlugins {
-		m.pluginRunning = true
-		m.pluginErr = nil
-	}
-	if runMarketplaces {
-		m.marketplaceRunning = true
-		m.marketplaceErr = nil
-	}
-	if runMcp {
-		m.mcpRunning = true
-		m.mcpErr = nil
-	}
+	m.skillsRunning = true
+	m.skillsErr = nil
+	m.skillsResult = nil
 	ch, gen := m.beginProgressStream()
 	a, ctx := m.app, m.ctx
 	work := func() tea.Msg {
 		defer close(ch)
-		done := agentsProgressDoneMsg{gen: gen, skills: runSkills, mcp: runMcp, plugin: runPlugins, marketplace: runMarketplaces}
-		if runSkills {
-			sendProgress(ch, gen, "updating skills…")
-			_, _, err := a.UpdateSkills(ctx, app.UpdateSkillsOptions{})
-			done.skillsErr = err
+		sendProgress(ch, gen, "updating APM manifest…")
+		result, err := a.APMClient(apm.Global).Update(ctx, false)
+		return agentsProgressDoneMsg{
+			gen: gen, skills: true, skillsErr: err,
+			report: &app.AgentsSyncAllResult{Output: result.Stdout, Stderr: result.Stderr},
 		}
-		if runPlugins || runMarketplaces {
-			sendProgress(ch, gen, "updating marketplaces…")
-			res, err := a.UpdateMarketplaces(ctx)
-			mErr := combinePluginErrors(err, res.Errors)
-			if runMarketplaces {
-				done.marketplaceErr = mErr
-			} else {
-				done.pluginErr = mErr
-			}
-		}
-		if runPlugins && done.pluginErr == nil {
-			rows, _, err := a.PluginRows(ctx)
-			if err != nil {
-				done.pluginErr = err
-			} else {
-				var outdated []string
-				for _, row := range rows {
-					if row.Outdated() {
-						outdated = append(outdated, row.Name)
-					}
-				}
-				if len(outdated) > 0 {
-					res, err := a.UpdatePluginsPreRefreshed(ctx, outdated, func(name string) {
-						sendProgress(ch, gen, "updating plugin "+name+"…")
-					})
-					done.pluginErr = combinePluginErrors(err, res.Errors)
-				}
-			}
-		}
-		if runPlugins && done.pluginErr == nil {
-			sendProgress(ch, gen, "installing missing plugins…")
-			res, err := a.RestorePluginsPreRefreshed(ctx, app.RestorePluginOptions{})
-			done.pluginErr = combinePluginErrors(err, res.Errors)
-		}
-		if runMcp {
-			sendProgress(ch, gen, "installing missing mcp servers…")
-			res, err := a.RestoreMcpServers(ctx, app.RestoreMcpOptions{})
-			done.mcpErr = combineMcpErrors(err, res.Errors)
-		}
-		return done
 	}
 	return []tea.Cmd{m.spinner.Tick, work, waitForProgress(ch, gen)}
 }
 
 func skillWarningsText(warnings []string) string {
 	return strings.Join(warnings, "; ")
-}
-
-// RestoreSkills only reports per-package failures via res.Failed, so a nil err alone does not mean every package installed.
-func combineSkillErrors(err error, res app.RestoreSkillsResult) error {
-	all := make([]error, 0, len(res.Failed)+1)
-	if err != nil {
-		all = append(all, err)
-	}
-	for _, f := range res.Failed {
-		all = append(all, fmt.Errorf("%s: %s", f.Name, f.Message))
-	}
-	return errors.Join(all...)
 }
 
 // The claim step adopts on-disk directories, so the action is confirmed before it runs (see handleAgentsGlobalActionKeyMsg).
@@ -616,30 +504,14 @@ func (m *Model) doAgentsRestoreAll() []tea.Cmd {
 }
 
 func (m *Model) doAgentsComposedRun(claim bool) []tea.Cmd {
-	runSkills := m.skillsSectionEnabled()
-	runMcp := m.mcpSectionEnabled()
-	runPlugins := m.pluginsSectionEnabled()
-	if !runSkills && !runMcp && !runPlugins {
-		return nil
-	}
-	if runSkills {
-		m.skillsRunning = true
-		m.skillsErr = nil
-		m.skillsResult = nil
-	}
-	if runMcp {
-		m.mcpRunning = true
-		m.mcpErr = nil
-	}
-	if runPlugins {
-		m.pluginRunning = true
-		m.pluginErr = nil
-	}
+	m.skillsRunning = true
+	m.skillsErr = nil
+	m.skillsResult = nil
 	ch, gen := m.beginProgressStream()
 	a, ctx := m.app, m.ctx
 	work := func() tea.Msg {
 		defer close(ch)
-		done := agentsProgressDoneMsg{gen: gen, skills: runSkills, mcp: runMcp, plugin: runPlugins}
+		done := agentsProgressDoneMsg{gen: gen, skills: true}
 		report, err := a.AgentsSyncAll(ctx, app.AgentsSyncAllOptions{
 			ImportUnmanaged: claim,
 			Progress: func(text string) {
@@ -647,15 +519,7 @@ func (m *Model) doAgentsComposedRun(claim bool) []tea.Cmd {
 			},
 		})
 		if err != nil {
-			if runSkills {
-				done.skillsErr = err
-			}
-			if runMcp {
-				done.mcpErr = err
-			}
-			if runPlugins {
-				done.pluginErr = err
-			}
+			done.skillsErr = err
 		} else {
 			for _, featureErr := range report.Errors {
 				switch featureErr.Feature {
@@ -672,102 +536,4 @@ func (m *Model) doAgentsComposedRun(claim bool) []tea.Cmd {
 		return done
 	}
 	return []tea.Cmd{m.spinner.Tick, work, waitForProgress(ch, gen)}
-}
-
-func (m *Model) doAgentsRefreshAll() []tea.Cmd {
-	var cmds []tea.Cmd
-	if m.skillsSectionEnabled() {
-		m.skillsLoaded = true
-		cmds = append(cmds, m.loadSkillsManifest(true))
-	}
-	if m.mcpSectionEnabled() {
-		m.mcpRunning = true
-		cmds = append(cmds, m.spinner.Tick, m.doLoadMcpRows())
-	}
-	if m.pluginsSectionEnabled() {
-		m.pluginRunning = true
-		cmds = append(cmds, m.spinner.Tick, m.doLoadPluginRows())
-	}
-	if m.marketplacesSectionEnabled() {
-		m.marketplaceRunning = true
-		cmds = append(cmds, m.spinner.Tick, m.doLoadMarketplaceRows())
-	}
-	return cmds
-}
-
-// Other keys route to the section under the cursor with that section's cursor synced first, so mutating actions work uniformly across the stacked view.
-func (m *Model) handleAgentsAllKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
-	if m.agentsDeleteConfirm {
-		return m.handleAgentsDeleteConfirmKeyMsg(msg)
-	}
-	if m.agentsIgnoreConfirm {
-		return m.handleAgentsIgnoreConfirmKeyMsg(msg)
-	}
-	if m.agentsResolveConfirm {
-		return m.handleAgentsResolveConfirmKeyMsg(msg)
-	}
-	if m.pluginMarketplaceOfferConfirm {
-		return m.handlePluginMarketplaceOfferConfirmKeyMsg(msg)
-	}
-	switch msg.String() {
-	case "up", "k":
-		agentsAllCursorMove(m, -1)
-		return nil
-	case "down", "j":
-		agentsAllCursorMove(m, 1)
-		return nil
-	case "left", "h":
-		m.agentsChipMove(-1)
-		return nil
-	case "right":
-		m.agentsChipMove(1)
-		return nil
-	case "l":
-		// A drifted skills row spends 'l' on use-local (dots' mnemonic); "right" still switches chips there.
-		if entry, ok := agentsAllEntryAt(*m, m.agentsAllCursor); !ok || !agentsResolveEligible(entry) {
-			m.agentsChipMove(1)
-			return nil
-		}
-	case "{":
-		m.agentFilterMove(-1)
-		clampAgentsAllCursor(m)
-		return nil
-	case "}":
-		m.agentFilterMove(1)
-		clampAgentsAllCursor(m)
-		return nil
-	case "/":
-		m.openAgentsSearch()
-		return []tea.Cmd{textinput.Blink}
-	}
-	if handled, cmds := m.handleAgentsAllRowActionKeyMsg(msg); handled {
-		clampAgentsAllCursor(m)
-		return cmds
-	}
-
-	entry, ok := agentsAllEntryAt(*m, m.agentsAllCursor)
-	if !ok {
-		return nil
-	}
-	var cmds []tea.Cmd
-	switch entry.feature {
-	case agentsSectionSkills:
-		m.skillsCursor = entry.localIdx
-		cmds = m.handleSkillsKeyMsg(msg)
-	case agentsSectionMcp:
-		m.mcpCursor = entry.localIdx
-		m.mcpCursorAgentID = entry.agentID
-		cmds = m.handleMcpKeyMsg(msg)
-	case agentsSectionPlugins:
-		m.pluginCursor = entry.localIdx
-		m.pluginCursorAgentID = entry.agentID
-		cmds = m.handlePluginKeyMsg(msg)
-	case agentsSectionMarketplaces:
-		m.marketplaceCursor = entry.localIdx
-		m.marketplaceCursorAgentID = entry.agentID
-		cmds = m.handleMarketplaceKeyMsg(msg)
-	}
-	// load-bearing: delegated handlers ([/] filter, removals) clamp only their section cursor
-	clampAgentsAllCursor(m)
-	return cmds
 }

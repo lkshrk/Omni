@@ -5,11 +5,6 @@ import (
 	"strings"
 )
 
-func (m *Model) startAgentsOp(key string) {
-	m.agentsOpKey = key
-}
-
-// Every agents/mcp/plugin msg handler that completes an op started via startAgentsOp must call this exactly once, so a stuck spinner cannot survive an error path that forgets it.
 func (m *Model) clearAgentsOp() {
 	m.agentsOpKey = ""
 }

@@ -183,9 +183,6 @@ func (m *Model) runGroupPickerAction(group string, cmds *[]tea.Cmd) bool {
 		*cmds = append(*cmds, m.doSetToolGroupMembership(t.Name, group, true))
 		return true
 	}
-	if m.pickerPurposeClaim && m.pickerClaimAgentsSet {
-		return m.runAgentsClaimGroupPickerAction(group, cmds)
-	}
 	t, ok := m.groupPickerActionTool()
 	if !ok {
 		return true
@@ -219,78 +216,6 @@ func (m *Model) runGroupPickerAction(group string, cmds *[]tea.Cmd) bool {
 	}
 	m.loading = false
 	*cmds = append(*cmds, setStatus(m, "✗ group picker has no assignment action", true))
-	return true
-}
-
-// Closes the picker so the manifest reload lands on the underlying list view.
-func (m *Model) runAgentsClaimGroupPickerAction(group string, cmds *[]tea.Cmd) bool {
-	e := m.pickerClaimAgentsRow
-	claimGroup := group
-	if isProtectedGroupName(claimGroup) {
-		claimGroup = ""
-	}
-	switch e.feature {
-	case agentsSectionSkills:
-		rows, _, _ := skillsVisibleRows(*m)
-		if e.localIdx < 0 || e.localIdx >= len(rows) {
-			m.loading = false
-			return true
-		}
-		src := rows[e.localIdx].Source
-		m.skillAddRunning = true
-		m.skillsErr = nil
-		m.startAgentsOp(agentsRowRunKey(e))
-		*cmds = append(*cmds, m.spinner.Tick, m.doAdoptSkillPackageWithGroup(src, claimGroup, m.pickerCreatedGroups, m.activeHostForCreatedGroup(group)))
-	case agentsSectionMcp:
-		if e.localIdx < len(m.mcpRows) || e.agentID == "" {
-			m.loading = false
-			return true
-		}
-		flat := mcpUnmanagedFlat(m.mcpUnmanaged)
-		idx := e.localIdx - len(m.mcpRows)
-		if idx < 0 || idx >= len(flat) {
-			m.loading = false
-			return true
-		}
-		srv := flat[idx].srv
-		m.mcpRunning = true
-		m.mcpErr = nil
-		m.startAgentsOp(agentsRowRunKey(e))
-		*cmds = append(*cmds, m.spinner.Tick, m.doImportMcpServerWithGroup(e.agentID, srv, claimGroup))
-	case agentsSectionMarketplaces:
-		if e.localIdx < len(m.marketplaceRows) || e.agentID == "" {
-			m.loading = false
-			return true
-		}
-		flat := marketplaceUnmanagedFlat(m.marketplaceUnmanaged)
-		idx := e.localIdx - len(m.marketplaceRows)
-		if idx < 0 || idx >= len(flat) {
-			m.loading = false
-			return true
-		}
-		mk := flat[idx].marketplace
-		m.marketplaceRunning = true
-		m.marketplaceErr = nil
-		m.startAgentsOp(agentsRowRunKey(e))
-		*cmds = append(*cmds, m.spinner.Tick, m.doImportMarketplaceWithGroup(e.agentID, mk, claimGroup))
-	default:
-		if e.localIdx < len(m.pluginRows) || e.agentID == "" {
-			m.loading = false
-			return true
-		}
-		flat := pluginUnmanagedFlat(m.pluginUnmanaged)
-		idx := e.localIdx - len(m.pluginRows)
-		if idx < 0 || idx >= len(flat) {
-			m.loading = false
-			return true
-		}
-		plg := flat[idx].plugin
-		m.pluginRunning = true
-		m.pluginErr = nil
-		m.startAgentsOp(agentsRowRunKey(e))
-		*cmds = append(*cmds, m.spinner.Tick, m.doImportPluginWithGroup(e.agentID, plg, claimGroup))
-	}
-	m.loading = false
 	return true
 }
 
@@ -357,87 +282,11 @@ func (m *Model) closeGroupMembershipPicker() {
 	m.finishGroupMembershipPicker()
 }
 
-func agentsClaimMembershipKind(feature agentsSection) string {
-	switch feature {
-	case agentsSectionSkills:
-		return pickerMembershipSkill
-	case agentsSectionMcp:
-		return pickerMembershipMcp
-	case agentsSectionMarketplaces:
-		return pickerMembershipMarketplace
-	default:
-		return pickerMembershipPlugin
-	}
-}
-
-// No adoption happens here, only on confirm (runGroupPickerAction).
-func (m *Model) openAgentsClaimGroupPicker(e agentsAllRow) {
-	m.mode = viewGroupPicker
-	m.pickerGroups = append(prioritizedPickerGroups(*m), groupPickerNewSentinel)
-	m.pickerCursor = 0
-	m.pickerCreatingGroup = false
-	m.pickerPurposeClaim = true
-	m.pickerPurposeInstall = false
-	m.pickerCreatedGroups = nil
-	m.pickerActionTool = app.ToolView{}
-	m.pickerActionToolSet = false
-	m.pickerMembershipKind = agentsClaimMembershipKind(e.feature)
-	m.pickerClaimAgentsRow = e
-	m.pickerClaimAgentsSet = true
-}
-
-func (m *Model) openSkillGroupMembershipPicker() {
-	visible, findStart, unmanagedStart := skillsVisibleRows(*m)
-	if m.skillsCursor < 0 || m.skillsCursor >= len(visible) {
-		return
-	}
-	if findStart >= 0 && m.skillsCursor >= findStart {
-		return
-	}
-	if unmanagedStart >= 0 && m.skillsCursor >= unmanagedStart {
-		return
-	}
-	r := visible[m.skillsCursor]
-	m.mode = viewGroupMembership
-	m.pickerGroups = append(prioritizedPickerGroups(*m), groupPickerNewSentinel)
-	m.pickerCursor = 0
-	m.pickerCreatingGroup = false
-	m.pickerCreatedGroups = nil
-	m.pickerMembershipKind = pickerMembershipSkill
-	m.pickerMembershipName = r.Source
-	m.pickerMembershipKey = ""
-	m.pickerOriginalGroups = append([]string(nil), r.Groups...)
-	if m.skillsMemberships == nil {
-		m.skillsMemberships = make(map[string][]string)
-	}
-	m.skillsMemberships[r.Source] = append([]string(nil), r.Groups...)
-}
-
 func (m *Model) skillPickerMemberships() []string {
 	if m.skillsMemberships == nil {
 		return nil
 	}
 	return m.skillsMemberships[m.pickerMembershipName]
-}
-
-func (m *Model) openMcpGroupMembershipPicker() {
-	if m.mcpCursor < 0 || m.mcpCursor >= len(m.mcpRows) {
-		return
-	}
-	r := m.mcpRows[m.mcpCursor]
-	m.mode = viewGroupMembership
-	m.pickerGroups = append(prioritizedPickerGroups(*m), groupPickerNewSentinel)
-	m.pickerCursor = 0
-	m.pickerCreatingGroup = false
-	m.pickerCreatedGroups = nil
-	m.pickerMembershipKind = pickerMembershipMcp
-	m.pickerMembershipName = r.Name
-	m.pickerMembershipKey = ""
-	m.pickerOriginalGroups = append([]string(nil), r.Groups...)
-	if m.mcpMemberships == nil {
-		m.mcpMemberships = make(map[string][]string)
-	}
-	m.mcpMemberships[r.Name] = append([]string(nil), r.Groups...)
 }
 
 func (m *Model) mcpPickerMemberships() []string {
@@ -447,51 +296,11 @@ func (m *Model) mcpPickerMemberships() []string {
 	return m.mcpMemberships[m.pickerMembershipName]
 }
 
-func (m *Model) openPluginGroupMembershipPicker() {
-	if m.pluginCursor < 0 || m.pluginCursor >= len(m.pluginRows) {
-		return
-	}
-	r := m.pluginRows[m.pluginCursor]
-	m.mode = viewGroupMembership
-	m.pickerGroups = append(prioritizedPickerGroups(*m), groupPickerNewSentinel)
-	m.pickerCursor = 0
-	m.pickerCreatingGroup = false
-	m.pickerCreatedGroups = nil
-	m.pickerMembershipKind = pickerMembershipPlugin
-	m.pickerMembershipName = r.Name
-	m.pickerMembershipKey = ""
-	m.pickerOriginalGroups = append([]string(nil), r.Groups...)
-	if m.pluginMemberships == nil {
-		m.pluginMemberships = make(map[string][]string)
-	}
-	m.pluginMemberships[r.Name] = append([]string(nil), r.Groups...)
-}
-
 func (m *Model) pluginPickerMemberships() []string {
 	if m.pluginMemberships == nil {
 		return nil
 	}
 	return m.pluginMemberships[m.pickerMembershipName]
-}
-
-func (m *Model) openMarketplaceGroupMembershipPicker() {
-	if m.marketplaceCursor < 0 || m.marketplaceCursor >= len(m.marketplaceRows) {
-		return
-	}
-	r := m.marketplaceRows[m.marketplaceCursor]
-	m.mode = viewGroupMembership
-	m.pickerGroups = append(prioritizedPickerGroups(*m), groupPickerNewSentinel)
-	m.pickerCursor = 0
-	m.pickerCreatingGroup = false
-	m.pickerCreatedGroups = nil
-	m.pickerMembershipKind = pickerMembershipMarketplace
-	m.pickerMembershipName = r.Name
-	m.pickerMembershipKey = ""
-	m.pickerOriginalGroups = append([]string(nil), r.Groups...)
-	if m.marketplaceMemberships == nil {
-		m.marketplaceMemberships = make(map[string][]string)
-	}
-	m.marketplaceMemberships[r.Name] = append([]string(nil), r.Groups...)
 }
 
 func (m *Model) marketplacePickerMemberships() []string {
