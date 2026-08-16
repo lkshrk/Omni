@@ -18,7 +18,7 @@ func (a *App) DotsResolveConflict(ctx context.Context, name string, strategy Dot
 	}
 	pf, err := a.dotService().preflight()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dots resolve: %w", err)
 	}
 	defer func() {
 		a.recordDotsHistoryResult(ctx, "resolve "+string(strategy), name, pf.repoPath, ops, err, false)
@@ -64,7 +64,7 @@ func (a *App) DotsResolveConflictPath(ctx context.Context, name, relPath string,
 	}
 	pf, err := a.dotService().preflight()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dots resolve: %w", err)
 	}
 	qualifiedName := name + "/" + filepath.ToSlash(relPath)
 	defer func() {

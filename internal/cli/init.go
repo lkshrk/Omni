@@ -271,6 +271,10 @@ func runSkillsImportSection(cmd *cobra.Command, state *rootState, a *app.App, ch
 	if choice.skip {
 		return
 	}
+	if err := a.RequireAPMForMigration(); err != nil {
+		fmt.Fprintf(cmdErr(cmd), "warning: agent migration deferred until 'omni agents sync': %v\n", err)
+		return
+	}
 	result, err := a.MigrateAgentsToAPM()
 	if err != nil {
 		fmt.Fprintf(cmdErr(cmd), "warning: migrating agent packages to APM: %v\n", err)

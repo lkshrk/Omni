@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"strings"
 
 	commandexec "github.com/lkshrk/omni/internal/executor"
 )
@@ -22,6 +21,8 @@ var (
 	ErrNotInstalled     = errors.New("apm executable not found")
 	ErrUnsupportedScope = errors.New("APM operation does not support this scope")
 )
+
+const InstallHint = "install APM with 'uv tool install apm-cli' (or 'pip install apm-cli'), or run 'omni doctor --fix', and ensure apm is on PATH"
 
 type Result struct {
 	Stdout string
@@ -118,16 +119,12 @@ func (c *Client) run(ctx context.Context, args ...string) (Result, error) {
 		return result, nil
 	}
 	if errors.Is(err, exec.ErrNotFound) {
-		return result, fmt.Errorf("%w: install APM and ensure apm is on PATH", ErrNotInstalled)
+		return result, fmt.Errorf("%w: %s", ErrNotInstalled, InstallHint)
 	}
 
 	command := "apm"
 	if len(args) > 0 {
 		command += " " + args[0]
 	}
-	detail := strings.TrimSpace(stderr)
-	if detail == "" {
-		return result, fmt.Errorf("%s failed: %w", command, err)
-	}
-	return result, fmt.Errorf("%s failed: %w: %s", command, err, detail)
+	return result, commandexec.WrapError(err, command+" failed", stdout, stderr)
 }

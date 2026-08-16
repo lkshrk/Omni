@@ -42,6 +42,11 @@ func (m *MockExecutor) run(name string, args, env []string) (string, string, err
 	return "", "", nil
 }
 
+// CommandAvailable — mocked commands are assumed to exist; availability-gated tests use their own stub.
+func (m *MockExecutor) CommandAvailable(string) bool {
+	return true
+}
+
 func (m *MockExecutor) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

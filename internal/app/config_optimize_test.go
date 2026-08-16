@@ -23,6 +23,7 @@ func TestRunDoctorFixers_IgnoreCleanupStillRunsAfterOptimizeError(t *testing.T) 
 			storeRan = true
 			return SkillStoreFixReport{Debris: []string{"/store/.install-1"}}, nil
 		},
+		func(bool) (APMInstallFixReport, error) { return APMInstallFixReport{AlreadyInstalled: true}, nil },
 	)
 
 	if !ignoreRan {
@@ -56,6 +57,7 @@ func TestRunDoctorFixers_DryRunSkipsIgnoreCleanup(t *testing.T) {
 			storeDryRun = dryRun
 			return SkillStoreFixReport{}, nil
 		},
+		func(bool) (APMInstallFixReport, error) { return APMInstallFixReport{AlreadyInstalled: true}, nil },
 	)
 
 	if ignoreRan {

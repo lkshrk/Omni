@@ -19,7 +19,7 @@ func (a *App) doctorAgents(ctx context.Context, result *DoctorResult, cfg *confi
 		return
 	}
 	if _, err := lookPath("apm"); err != nil {
-		result.addCheck("agents", "Agent packages (APM)", DoctorStatusWarn, "apm executable not found on PATH")
+		result.addCheck("agents", "Agent packages (APM)", DoctorStatusWarn, "apm executable not found on PATH; run 'omni doctor --fix' to install it")
 		return
 	}
 	if _, err := os.Stat(manifest); err != nil {

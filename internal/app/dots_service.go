@@ -44,7 +44,7 @@ type dotsPreflight struct {
 func (s *dotsService) preflight() (dotsPreflight, error) {
 	rootCfg, err := s.host.loadConfig()
 	if err != nil {
-		return dotsPreflight{}, fmt.Errorf("dots: load config: %w", err)
+		return dotsPreflight{}, fmt.Errorf("load config: %w", err)
 	}
 	if err := s.host.requireDotsEnabled(rootCfg); err != nil {
 		return dotsPreflight{}, err

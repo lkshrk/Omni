@@ -10,23 +10,53 @@ import (
 	"github.com/lkshrk/omni/internal/executor"
 )
 
+// MockExecutor implements CommandAvailable, so CheckInstalled asks it instead of probing stow --version.
 func TestCheckInstalled_True(t *testing.T) {
-	mock := &executor.MockExecutor{} // no error = stow found
+	mock := &executor.MockExecutor{}
 	if !dots.CheckInstalled(context.Background(), mock) {
-		t.Error("expected CheckInstalled == true when stow exits 0")
+		t.Error("expected CheckInstalled == true when the executor reports stow available")
 	}
-	if len(mock.Calls) != 1 || mock.Calls[0].Name != "stow" {
-		t.Errorf("expected one stow call, got %v", mock.Calls)
+	if len(mock.Calls) != 0 {
+		t.Errorf("expected no probe call, got %v", mock.Calls)
 	}
 }
 
+type runOnlyExecutor struct {
+	executor.MockExecutor
+}
+
+func (e *runOnlyExecutor) CommandAvailable(string) bool {
+	return false
+}
+
 func TestCheckInstalled_False(t *testing.T) {
-	mock := &executor.MockExecutor{
-		Responses: []executor.MockCall{{Err: errors.New("exit 1")}},
+	if dots.CheckInstalled(context.Background(), &runOnlyExecutor{}) {
+		t.Error("expected CheckInstalled == false when the executor reports stow missing")
 	}
-	if dots.CheckInstalled(context.Background(), mock) {
+}
+
+func TestCheckInstalled_ProbesWithoutChecker(t *testing.T) {
+	fail := &probeExecutor{err: errors.New("exit 1")}
+	if dots.CheckInstalled(context.Background(), fail) {
 		t.Error("expected CheckInstalled == false when stow exits non-zero")
 	}
+	ok := &probeExecutor{}
+	if !dots.CheckInstalled(context.Background(), ok) {
+		t.Error("expected CheckInstalled == true when stow exits 0")
+	}
+	if ok.calls != 1 {
+		t.Errorf("expected one probe call, got %d", ok.calls)
+	}
+}
+
+type probeExecutor struct {
+	calls int
+	err   error
+}
+
+func (e *probeExecutor) Run(context.Context, string, ...string) (string, string, error) {
+	e.calls++
+	return "", "", e.err
 }
 
 func TestRestow_CallsStow(t *testing.T) {
