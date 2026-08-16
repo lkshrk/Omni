@@ -164,7 +164,7 @@ func load(path string, normalize bool) (*RootConfig, bool, error) {
 
 	var cfg RootConfig
 	if err := unmarshalJSONObject(data, &cfg); err != nil {
-		return nil, false, fmt.Errorf("parsing config file: %w", err)
+		return nil, false, fmt.Errorf("parsing config file %q: %w", path, err)
 	}
 	if err := loadIncludes(path, &cfg); err != nil {
 		return nil, false, err
@@ -549,7 +549,7 @@ func PatchRaw(path string, patch map[string]json.RawMessage) error {
 	if data, err := os.ReadFile(path); err == nil {
 		exists = true
 		if err := unmarshalJSONObject(data, &raw); err != nil {
-			return fmt.Errorf("parsing existing config: %w", err)
+			return fmt.Errorf("parsing existing config %q: %w", path, err)
 		}
 		if err := migrateRawVersion(raw); err != nil {
 			return err
@@ -631,7 +631,7 @@ func toolSource(path, name string, stack *includePathStack) (string, bool, error
 	}
 	var raw map[string]json.RawMessage
 	if err := unmarshalJSONObject(data, &raw); err != nil {
-		return "", false, fmt.Errorf("parsing config file: %w", err)
+		return "", false, fmt.Errorf("parsing config file %q: %w", path, err)
 	}
 
 	var source string
@@ -680,7 +680,7 @@ func PatchTool(path, name string, mutate func(*ToolSpec) error) error {
 	}
 	var raw map[string]json.RawMessage
 	if err := unmarshalJSONObject(data, &raw); err != nil {
-		return fmt.Errorf("parsing config file: %w", err)
+		return fmt.Errorf("parsing config file %q: %w", source, err)
 	}
 	tools := make(map[string]ToolSpec)
 	if toolsRaw := raw["tools"]; len(toolsRaw) > 0 {

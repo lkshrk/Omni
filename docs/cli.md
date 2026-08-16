@@ -56,6 +56,12 @@ the one that installed a package deletes that package's copy from the shared
 store. Run it with the config that declares your packages, or preview it with
 `--fix --dry-run` first.
 
+When the `apm` executable is missing and agent features are enabled,
+`omni doctor --fix` installs `apm-cli` through the first available installer
+(`uv tool install`, `pipx install`, then `pip3 install --user`). Until APM is
+installed, `omni agents sync|add|remove|update` refuse to migrate legacy agent
+config so declarations never move into a manifest no installed tool can act on.
+
 `omni doctor` exits nonzero when any check fails, and `--fix` and `--dry-run`
 do not suppress that: `--fix --dry-run` still runs the full diagnostic pass, so
 a preview on a host with unrelated failing checks exits nonzero. A `--fix`

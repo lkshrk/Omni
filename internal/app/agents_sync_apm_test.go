@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -83,6 +84,44 @@ func TestAgentsSyncAllDryRunDoesNotMigrateLegacyConfig(t *testing.T) {
 	}
 	if len(result.Warnings) == 0 {
 		t.Fatal("dry-run without a manifest should explain that migration is deferred")
+	}
+}
+
+func TestAgentsUpdateAllDryRunDoesNotMigrateLegacyConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "settings.json")
+	home := filepath.Join(dir, "home")
+	want := &config.RootConfig{Version: config.CurrentVersion, Agents: config.AgentsConfig{
+		Packages: []config.SkillPackage{{Source: "acme/shared"}},
+	}}
+	if err := config.Save(configPath, want); err != nil {
+		t.Fatal(err)
+	}
+	mock := &executor.MockExecutor{}
+	a := New(configPath, WithEnvLookup(func(name string) string {
+		if name == "HOME" {
+			return home
+		}
+		return ""
+	}))
+	a.SetFallbackExecutor(mock)
+
+	_, _, err := a.AgentsUpdateAll(context.Background(), true)
+	if err == nil || !strings.Contains(err.Error(), "omni agents sync") {
+		t.Fatalf("error lacks guidance: %v", err)
+	}
+	if len(mock.Calls) != 0 {
+		t.Fatalf("dry-run invoked APM without a manifest: %#v", mock.Calls)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".apm", "apm.yml")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run created manifest: %v", err)
+	}
+	got, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Agents.Packages, want.Agents.Packages) {
+		t.Fatalf("legacy config changed: %#v", got.Agents.Packages)
 	}
 }
 

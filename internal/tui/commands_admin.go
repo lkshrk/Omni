@@ -571,7 +571,7 @@ func (m *Model) doInstallAndAddTool(t *app.ToolView, groupAndHost ...string) tea
 	a, ctx := m.app, m.beginCancellableAction()
 	return m.stampGate(func() tea.Msg {
 		if t == nil {
-			return opCompleteMsg{err: fmt.Errorf("missing tool")}
+			return opCompleteMsg{err: fmt.Errorf("no tool selected for install")}
 		}
 		name := t.Name
 		pkg := t.Package

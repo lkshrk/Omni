@@ -12,6 +12,8 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
@@ -2849,6 +2851,23 @@ func TestViewSkillsBodyShowsAPMContract(t *testing.T) {
 	for _, want := range []string{"Microsoft APM", "~/.apm/apm.yml", "omni agents add|remove|update|search", "error: apm broke"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("viewSkillsBody() missing %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestViewSkillsBodyWrapsLongErrorInsteadOfClipping(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.width = 80
+	m.skillsErr = errors.New("legacy group-scoped agent configuration cannot be migrated automatically; remove group agent references before syncing with APM")
+	out := ansi.Strip(m.viewSkillsBody())
+	joined := strings.Join(strings.Fields(out), " ")
+	if !strings.Contains(joined, "remove group agent references before syncing with APM") {
+		t.Fatalf("error tail lost:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(line); w > 80 {
+			t.Fatalf("line wider than terminal (%d): %q", w, line)
 		}
 	}
 }

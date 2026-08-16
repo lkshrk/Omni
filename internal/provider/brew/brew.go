@@ -270,18 +270,18 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 }
 
 func (p *Provider) installedFormulae(ctx context.Context) ([]provider.InstalledTool, error) {
-	stdout, _, err := p.exec.Run(ctx, "brew", "leaves", "--installed-on-request")
+	stdout, stderr, err := p.exec.Run(ctx, "brew", "leaves", "--installed-on-request")
 	if err != nil {
-		return nil, fmt.Errorf("brew leaves --installed-on-request: %w", err)
+		return nil, executor.WrapError(err, "brew leaves --installed-on-request", stdout, stderr)
 	}
 	packages := strings.Fields(stdout)
 	if len(packages) == 0 {
 		return nil, nil
 	}
 	args := append([]string{"list", "--versions"}, packages...)
-	stdout, _, err = p.exec.Run(ctx, "brew", args...)
+	stdout, stderr, err = p.exec.Run(ctx, "brew", args...)
 	if err != nil {
-		return nil, fmt.Errorf("brew list --versions: %w", err)
+		return nil, executor.WrapError(err, "brew list --versions", stdout, stderr)
 	}
 	versions := parseBrewListVersions(stdout)
 	tools := make([]provider.InstalledTool, 0, len(packages))
@@ -309,9 +309,9 @@ func (p *Provider) installedCasks(ctx context.Context) ([]provider.InstalledTool
 		return nil, nil
 	}
 	args := append([]string{"list", "--versions", "--cask"}, tokens...)
-	stdout, _, err := p.exec.Run(ctx, "brew", args...)
+	stdout, stderr, err := p.exec.Run(ctx, "brew", args...)
 	if err != nil {
-		return nil, fmt.Errorf("brew list --versions --cask: %w", err)
+		return nil, executor.WrapError(err, "brew list --versions --cask", stdout, stderr)
 	}
 	versions := parseBrewListVersions(stdout)
 	tools := make([]provider.InstalledTool, 0, len(tokens))
@@ -330,9 +330,9 @@ func (p *Provider) installedCasks(ctx context.Context) ([]provider.InstalledTool
 }
 
 func (p *Provider) installedCaskTokens(ctx context.Context) ([]string, error) {
-	stdout, _, err := p.exec.Run(ctx, "brew", "list", "--cask")
+	stdout, stderr, err := p.exec.Run(ctx, "brew", "list", "--cask")
 	if err != nil {
-		return nil, fmt.Errorf("brew list --cask: %w", err)
+		return nil, executor.WrapError(err, "brew list --cask", stdout, stderr)
 	}
 	return strings.Fields(stdout), nil
 }
@@ -442,9 +442,9 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 	}
 
 	// tap-trust hides untrusted-tap formulae from `brew info`, so union in `brew list --formula`; a failed list is an error, not partial state.
-	listOut, _, listErr := p.exec.Run(ctx, "brew", "list", "--versions", "--formula")
+	listOut, listStderr, listErr := p.exec.Run(ctx, "brew", "list", "--versions", "--formula")
 	if listErr != nil {
-		return nil, fmt.Errorf("brew list --versions --formula: %w", listErr)
+		return nil, executor.WrapError(listErr, "brew list --versions --formula", listOut, listStderr)
 	}
 	for _, line := range strings.Split(listOut, "\n") {
 		fields := strings.Fields(line)
@@ -478,9 +478,9 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 }
 
 func (p *Provider) info(ctx context.Context, args ...string) (brewInfoOutput, error) {
-	stdout, _, err := p.exec.Run(ctx, "brew", args...)
+	stdout, stderr, err := p.exec.Run(ctx, "brew", args...)
 	if err != nil {
-		return brewInfoOutput{}, fmt.Errorf("brew info: %w", err)
+		return brewInfoOutput{}, executor.WrapError(err, "brew info", stdout, stderr)
 	}
 	if strings.TrimSpace(stdout) == "null" {
 		return brewInfoOutput{}, fmt.Errorf("parsing brew info output: top-level null")
@@ -653,9 +653,9 @@ type brewOutdatedOutput struct {
 func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	stdout, _, err := p.exec.Run(ctx, "brew", "outdated", "--json=v2", "--greedy")
+	stdout, stderr, err := p.exec.Run(ctx, "brew", "outdated", "--json=v2", "--greedy")
 	if err != nil {
-		return nil, fmt.Errorf("brew outdated: %w", err)
+		return nil, executor.WrapError(err, "brew outdated", stdout, stderr)
 	}
 	if strings.TrimSpace(stdout) == "null" {
 		return nil, fmt.Errorf("parsing brew outdated: top-level null")
@@ -796,9 +796,9 @@ func (p *Provider) Untap(ctx context.Context, name string) error {
 func (p *Provider) ListTaps(ctx context.Context) ([]string, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	stdout, _, err := p.exec.Run(ctx, "brew", "tap")
+	stdout, stderr, err := p.exec.Run(ctx, "brew", "tap")
 	if err != nil {
-		return nil, fmt.Errorf("brew tap: %w", err)
+		return nil, executor.WrapError(err, "brew tap", stdout, stderr)
 	}
 	var taps []string
 	for _, line := range strings.Split(stdout, "\n") {

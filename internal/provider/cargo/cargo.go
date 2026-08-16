@@ -82,9 +82,9 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 }
 
 func (p *Provider) installed(ctx context.Context) ([]installedCrate, error) {
-	stdout, _, err := p.exec.Run(ctx, "cargo", "install", "--list")
+	stdout, stderr, err := p.exec.Run(ctx, "cargo", "install", "--list")
 	if err != nil {
-		return nil, fmt.Errorf("cargo install --list: %w", err)
+		return nil, executor.WrapError(err, "cargo install --list", stdout, stderr)
 	}
 	return parseInstalled(stdout), nil
 }
@@ -111,9 +111,9 @@ func parseInstalled(output string) []installedCrate {
 }
 
 func (p *Provider) Search(ctx context.Context, query string) ([]provider.SearchResult, error) {
-	stdout, _, err := p.exec.Run(ctx, "cargo", "search", "--color", "never", "--limit", "20", query)
+	stdout, stderr, err := p.exec.Run(ctx, "cargo", "search", "--color", "never", "--limit", "20", query)
 	if err != nil {
-		return nil, fmt.Errorf("cargo search %s: %w", query, err)
+		return nil, executor.WrapError(err, fmt.Sprintf("cargo search %s", query), stdout, stderr)
 	}
 	return parseSearch(stdout), nil
 }

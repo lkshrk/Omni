@@ -2,12 +2,12 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/lkshrk/omni/internal/apm"
 	"github.com/lkshrk/omni/internal/app"
 )
 
@@ -481,10 +481,14 @@ func (m *Model) doAgentsUpdateAll() []tea.Cmd {
 	work := func() tea.Msg {
 		defer close(ch)
 		sendProgress(ch, gen, "updating APM manifest…")
-		result, err := a.APMClient(apm.Global).Update(ctx, false)
+		result, migration, err := a.AgentsUpdateAll(ctx, false)
+		// Migration warnings name the entries its error tells the user to resolve; the error view is the only surface here.
+		if err != nil && len(migration.Warnings) > 0 {
+			err = fmt.Errorf("%w (%s)", err, strings.Join(migration.Warnings, "; "))
+		}
 		return agentsProgressDoneMsg{
 			gen: gen, skills: true, skillsErr: err,
-			report: &app.AgentsSyncAllResult{Output: result.Stdout, Stderr: result.Stderr},
+			report: &app.AgentsSyncAllResult{Output: result.Stdout, Stderr: result.Stderr, Warnings: migration.Warnings},
 		}
 	}
 	return []tea.Cmd{m.spinner.Tick, work, waitForProgress(ch, gen)}

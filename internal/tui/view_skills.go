@@ -142,7 +142,13 @@ func (m Model) viewSkillsBody() string {
 		p.styleHelp.Render(pad + "CLI: omni agents add|remove|update|search"),
 	}
 	if m.skillsErr != nil {
-		lines = append(lines, "", p.styleErr.Render(pad+"error: "+m.skillsErr.Error()))
+		text := strings.Join(strings.Fields("error: "+m.skillsErr.Error()), " ")
+		const maxErrorRunes = 600
+		if runes := []rune(text); len(runes) > maxErrorRunes {
+			text = string(runes[:maxErrorRunes-1]) + "…"
+		}
+		avail := max(screenContentWidth(m.width)-screenEdgePadding, 20)
+		lines = append(lines, "", p.styleErr.PaddingLeft(screenEdgePadding).Width(avail).Render(text))
 	}
 	return strings.Join(lines, "\n") + "\n"
 }

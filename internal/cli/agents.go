@@ -162,14 +162,21 @@ func migrateAgentsToAPM(cmd *cobra.Command, state *rootState, dryRun bool) error
 	if dryRun {
 		return nil
 	}
+	if err := state.app.RequireAPMForMigration(); err != nil {
+		return err
+	}
 	result, err := state.app.MigrateAgentsToAPM()
+	printAPMMigration(cmd, result)
+	return err
+}
+
+func printAPMMigration(cmd *cobra.Command, result app.APMMigrationResult) {
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
 	}
 	if result.MigratedPackages > 0 || result.MigratedMCPServers > 0 {
 		fmt.Fprintf(cmdOut(cmd), "migrated %d packages and %d MCP servers to %s\n", result.MigratedPackages, result.MigratedMCPServers, result.Path)
 	}
-	return err
 }
 
 func newAPMAgentsSyncCmd(state *rootState, global *bool) *cobra.Command {
@@ -221,10 +228,8 @@ func newAPMAgentsRemoveCmd(state *rootState, global *bool) *cobra.Command {
 func newAPMAgentsUpdateCmd(state *rootState, global *bool) *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{Use: "update [package]...", Short: "Update locked APM dependencies", Args: cobra.ArbitraryArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		if err := migrateAgentsToAPM(cmd, state, dryRun); err != nil {
-			return err
-		}
-		result, err := apmClient(state, *global).Update(cmd.Context(), dryRun, args...)
+		result, migration, err := state.app.AgentsUpdateAll(cmd.Context(), dryRun, args...)
+		printAPMMigration(cmd, migration)
 		printAPMResult(cmd, result)
 		return err
 	}}

@@ -200,7 +200,7 @@ func fetchCatalog(ctx context.Context, client *http.Client, endpoint, query, own
 		return nil, fmt.Errorf("invalid skills catalog response: %w", err)
 	}
 	if payload.Skills == nil {
-		return nil, fmt.Errorf("invalid skills catalog response")
+		return nil, fmt.Errorf("invalid skills catalog response: missing skills field")
 	}
 	if len(payload.Skills) > catalogSearchLimit {
 		payload.Skills = payload.Skills[:catalogSearchLimit]
@@ -222,7 +222,7 @@ func fetchCatalog(ctx context.Context, client *http.Client, endpoint, query, own
 		})
 	}
 	if len(results) == 0 && len(payload.Skills) > 0 {
-		return nil, fmt.Errorf("invalid skills catalog result")
+		return nil, fmt.Errorf("skills catalog returned %d entries but none had a valid source", len(payload.Skills))
 	}
 	return results, nil
 }

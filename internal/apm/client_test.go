@@ -111,6 +111,37 @@ func TestClientMapsMissingExecutableFromPATH(t *testing.T) {
 	}
 }
 
+// APM is a click CLI and reports most failures on stdout with an empty stderr.
+func TestClientNonzeroExitFallsBackToStdoutDetail(t *testing.T) {
+	sentinel := errors.New("exit status 1")
+	mock := &executor.MockExecutor{Responses: []executor.MockCall{{
+		Stdout: "No apm.yml found in ~/.apm/. Run 'apm install -g <org/repo>' to create one.\n",
+		Err:    sentinel,
+	}}}
+	_, err := apm.New(mock, apm.Global).Update(context.Background(), false)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("error does not wrap executor error: %v", err)
+	}
+	if got := err.Error(); !strings.Contains(got, "apm update failed") || !strings.Contains(got, "No apm.yml found") {
+		t.Fatalf("unclear error: %v", err)
+	}
+}
+
+func TestClientNonzeroExitTruncatesLongDetailToTail(t *testing.T) {
+	long := strings.Repeat("progress line\n", 500) + "final error: ref not found\n"
+	mock := &executor.MockExecutor{Responses: []executor.MockCall{{Stdout: long, Err: errors.New("exit status 1")}}}
+	_, err := apm.New(mock, apm.Global).Update(context.Background(), false)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got := err.Error(); !strings.Contains(got, "final error: ref not found") {
+		t.Fatalf("tail lost: %v", err)
+	}
+	if len(err.Error()) > 3000 {
+		t.Fatalf("error too long: %d bytes", len(err.Error()))
+	}
+}
+
 func TestClientNonzeroExitPreservesResultAndErrorDetail(t *testing.T) {
 	sentinel := errors.New("exit status 1")
 	mock := &executor.MockExecutor{Responses: []executor.MockCall{{

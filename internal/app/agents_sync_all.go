@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/lkshrk/omni/internal/apm"
+	"github.com/lkshrk/omni/internal/executor"
 )
 
 const (
@@ -52,6 +53,34 @@ type AgentsSyncAllResult struct {
 
 func (a *App) APMClient(scope apm.Scope) *apm.Client {
 	return apm.New(a.fallbackExecutor(), scope)
+}
+
+func (a *App) commandAvailable(name string) bool {
+	if checker, ok := a.fallbackExecutor().(interface{ CommandAvailable(string) bool }); ok {
+		return checker.CommandAvailable(name)
+	}
+	return executor.CommandAvailable(name)
+}
+
+// APMAvailable gates legacy migration: config must not move into a manifest no installed tool can act on.
+func (a *App) APMAvailable() bool {
+	return a.commandAvailable("apm")
+}
+
+func errAPMNotInstalled() error {
+	return fmt.Errorf("%w: %s", apm.ErrNotInstalled, apm.InstallHint)
+}
+
+// RequireAPMForMigration blocks only when legacy entries would actually move; a config with nothing to migrate stays runnable.
+func (a *App) RequireAPMForMigration() error {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return err
+	}
+	if hasLegacyAgents(cfg.Agents) && !a.APMAvailable() {
+		return errAPMNotInstalled()
+	}
+	return nil
 }
 
 func (r *AgentsSyncAllResult) addWarnings(feature string, warnings []string) {
@@ -114,9 +143,11 @@ func (a *App) AgentsSyncAll(ctx context.Context, opts AgentsSyncAllOptions) (Age
 	if err != nil {
 		return AgentsSyncAllResult{}, err
 	}
-	_ = cfg // Loading still validates the config before migration.
 	var migration APMMigrationResult
 	if !opts.DryRun && !opts.Frozen {
+		if hasLegacyAgents(cfg.Agents) && !a.APMAvailable() {
+			return AgentsSyncAllResult{}, errAPMNotInstalled()
+		}
 		migration, err = a.MigrateAgentsToAPM()
 		if err != nil {
 			return AgentsSyncAllResult{}, err
@@ -152,6 +183,31 @@ func (a *App) AgentsSyncAll(ctx context.Context, opts AgentsSyncAllOptions) (Age
 	}
 	res.Output, res.Stderr = result.Stdout, result.Stderr
 	return res, err
+}
+
+// AgentsUpdateAll migrates legacy config first so a TUI or CLI update never races ahead of migration.
+func (a *App) AgentsUpdateAll(ctx context.Context, dryRun bool, packages ...string) (apm.Result, APMMigrationResult, error) {
+	var migration APMMigrationResult
+	var err error
+	if dryRun {
+		migration.Path, err = a.globalAPMManifestPath()
+	} else {
+		if err := a.RequireAPMForMigration(); err != nil {
+			return apm.Result{}, migration, err
+		}
+		migration, err = a.MigrateAgentsToAPM()
+	}
+	if err != nil {
+		return apm.Result{}, migration, err
+	}
+	if _, statErr := os.Stat(migration.Path); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return apm.Result{}, migration, fmt.Errorf("global APM manifest %s not found: run 'omni agents sync' to create it and migrate legacy agent config", migration.Path)
+		}
+		return apm.Result{}, migration, statErr
+	}
+	result, err := a.APMClient(apm.Global).Update(ctx, dryRun, packages...)
+	return result, migration, err
 }
 
 // AgentsSyncAllSummaryText — The imported count spans every claimed capability, not skills alone.

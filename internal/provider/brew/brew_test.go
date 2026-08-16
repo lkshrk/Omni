@@ -138,8 +138,16 @@ func TestAvailable_True(t *testing.T) {
 	}
 }
 
+type brewMissingExecutor struct {
+	executor.MockExecutor
+}
+
+func (e *brewMissingExecutor) CommandAvailable(string) bool {
+	return false
+}
+
 func TestAvailable_False(t *testing.T) {
-	p, _ := newBrew(executor.MockCall{Err: errors.New("not found")})
+	p := brew.New(&brewMissingExecutor{})
 	ok, err := p.Available(context.Background())
 	if err != nil || ok {
 		t.Errorf("Available() = (%v, %v), want (false, nil)", ok, err)
@@ -1159,5 +1167,25 @@ func TestBulkDescribe_Error(t *testing.T) {
 	tools := []provider.Tool{{Name: "bad", Provider: "brew", Package: "bad"}}
 	if _, err := p.BulkDescribe(context.Background(), tools); err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestListInstalledSurfacesCommandOutputDetail(t *testing.T) {
+	sentinel := errors.New("exit status 1")
+	p, _ := newBrew(executor.MockCall{Err: sentinel, Stderr: "boom: repo unreachable\n"})
+	if _, err := p.ListInstalled(context.Background()); err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("ListInstalled() error = %v, want wrapped sentinel", err)
+	} else if !strings.Contains(err.Error(), "boom: repo unreachable") {
+		t.Fatalf("ListInstalled() error = %v, want stderr detail", err)
+	}
+}
+
+func TestListInstalledSurfacesStdoutDetailWhenStderrEmpty(t *testing.T) {
+	sentinel := errors.New("exit status 1")
+	p, _ := newBrew(executor.MockCall{Err: sentinel, Stdout: "fail written to stdout\n"})
+	if _, err := p.ListInstalled(context.Background()); err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("ListInstalled() error = %v, want wrapped sentinel", err)
+	} else if !strings.Contains(err.Error(), "fail written to stdout") {
+		t.Fatalf("ListInstalled() error = %v, want stdout detail", err)
 	}
 }

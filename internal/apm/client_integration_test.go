@@ -163,6 +163,31 @@ func TestGlobalPackageLifecycleAndLocalMarketplaceSearch(t *testing.T) {
 	}
 }
 
+// APM reports this failure on stdout only; the wrapper must surface it as error detail.
+func TestGlobalUpdateFailureSurfacesStdoutDetail(t *testing.T) {
+	if _, err := exec.LookPath("apm"); err != nil {
+		t.Fatalf("integration tests require apm on PATH: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	blockExternalNetwork(t)
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
+
+	_, err := apm.New(commandexec.New(), apm.Global).Update(ctx, false)
+	if err == nil {
+		t.Fatal("expected update failure without a global manifest")
+	}
+	if !strings.Contains(err.Error(), "No apm.yml found") {
+		t.Fatalf("error lacks apm stdout detail: %v", err)
+	}
+}
+
 func TestGlobalUpdateRefreshesRemoteGitPackage(t *testing.T) {
 	if _, err := exec.LookPath("apm"); err != nil {
 		t.Fatalf("integration tests require apm on PATH: %v", err)

@@ -191,8 +191,8 @@ func TestApplyProviderSolutionWithStateRejectsMissingTarget(t *testing.T) {
 	if err == nil {
 		t.Fatal("ApplyProviderSolutionWithState error = nil, want missing target error")
 	}
-	if !strings.Contains(err.Error(), "missing target provider") {
-		t.Fatalf("error = %q, want missing target provider", err)
+	if !strings.Contains(err.Error(), `provider solution for "black" names no target provider`) {
+		t.Fatalf("error = %q, want no-target-provider message naming the tool", err)
 	}
 }
 

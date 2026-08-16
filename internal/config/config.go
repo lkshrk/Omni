@@ -66,9 +66,9 @@ func (e *ToolEntry) UnmarshalJSON(data []byte) error {
 	}
 	var obj map[string]any
 	if err := json.Unmarshal(data, &obj); err == nil {
-		return fmt.Errorf("old group tool object config is no longer supported; use a logical tool name string")
+		return fmt.Errorf("old group tool object config is no longer supported; use a logical tool name string (got %.80s)", string(data))
 	}
-	return fmt.Errorf("tool membership must be a string")
+	return fmt.Errorf("tool membership must be a string (got %.80s)", string(data))
 }
 
 func (e ToolEntry) MarshalJSON() ([]byte, error) {

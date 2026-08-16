@@ -276,15 +276,15 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 		return nil, err
 	}
 	if b.usesTool {
-		stdout, _, err := p.exec.Run(ctx, b.binary, "tool", "list")
+		stdout, stderr, err := p.exec.Run(ctx, b.binary, "tool", "list")
 		if err != nil {
-			return nil, fmt.Errorf("uv tool list: %w", err)
+			return nil, executor.WrapError(err, "uv tool list", stdout, stderr)
 		}
 		return parseUVToolList(stdout), nil
 	}
-	stdout, _, err := p.exec.Run(ctx, b.binary, "list", "--not-required", "--format=json")
+	stdout, stderr, err := p.exec.Run(ctx, b.binary, "list", "--not-required", "--format=json")
 	if err != nil {
-		return nil, fmt.Errorf("pip list --not-required: %w", err)
+		return nil, executor.WrapError(err, fmt.Sprintf("%s list --not-required", b.binary), stdout, stderr)
 	}
 	tools, err := parsePipList(stdout)
 	if err != nil {
@@ -325,9 +325,9 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 				return err
 			}
 		} else {
-			stdout, _, err := p.exec.Run(ctx, b.binary, "list", "--not-required", "--format=json")
+			stdout, stderr, err := p.exec.Run(ctx, b.binary, "list", "--not-required", "--format=json")
 			if err != nil {
-				return fmt.Errorf("%s list --not-required --format=json: %w", b.binary, err)
+				return executor.WrapError(err, fmt.Sprintf("%s list --not-required --format=json", b.binary), stdout, stderr)
 			}
 			var parseErr error
 			m, parseErr = parsePipInstalledMap(stdout)
@@ -376,9 +376,9 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 	if b.usesTool {
 		return p.uvInstalledMap(ctx, b)
 	}
-	stdout, _, err := p.exec.Run(ctx, b.binary, "list", "--not-required", "--format=json")
+	stdout, stderr, err := p.exec.Run(ctx, b.binary, "list", "--not-required", "--format=json")
 	if err != nil {
-		return nil, fmt.Errorf("pip list --not-required: %w", err)
+		return nil, executor.WrapError(err, fmt.Sprintf("%s list --not-required", b.binary), stdout, stderr)
 	}
 	m, err := parsePipInstalledMap(stdout)
 	if err != nil {
@@ -405,13 +405,13 @@ for d in importlib.metadata.distributions():
 print(json.dumps(owned))`
 
 func (p *Provider) pipOwnedPackageSet(ctx context.Context, b *backend) (map[string]bool, error) {
-	stdout, _, err := p.exec.Run(ctx, b.pythonBinary, "-c", pipOwnedPackageSetScript)
+	stdout, stderr, err := p.exec.Run(ctx, b.pythonBinary, "-c", pipOwnedPackageSetScript)
 	if err != nil {
-		return nil, fmt.Errorf("%s ownership probe: %w", b.binary, err)
+		return nil, executor.WrapError(err, fmt.Sprintf("%s ownership probe", b.pythonBinary), stdout, stderr)
 	}
 	var raw map[string]int
 	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &raw); err != nil {
-		return nil, fmt.Errorf("parsing %s ownership probe: %w", b.binary, err)
+		return nil, fmt.Errorf("parsing %s ownership probe: %w", b.pythonBinary, err)
 	}
 	owned := make(map[string]bool, len(raw))
 	for name := range raw {
@@ -466,9 +466,9 @@ func (p *Provider) CLIToolSet(ctx context.Context) (map[string]bool, error) {
 		}
 		return out, nil
 	}
-	stdout, _, err := p.exec.Run(ctx, b.pythonBinary, "-c", cliToolSetScript)
+	stdout, stderr, err := p.exec.Run(ctx, b.pythonBinary, "-c", cliToolSetScript)
 	if err != nil {
-		return nil, fmt.Errorf("python cli tool set: %w", err)
+		return nil, executor.WrapError(err, "python cli tool set", stdout, stderr)
 	}
 	var raw map[string]int
 	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &raw); err != nil {
@@ -520,15 +520,15 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 		var outdated map[string]string
 		var err error
 		if b.usesTool {
-			stdout, _, runErr := p.exec.Run(ctx, b.binary, "tool", "list", "--outdated")
+			stdout, stderr, runErr := p.exec.Run(ctx, b.binary, "tool", "list", "--outdated")
 			if runErr != nil {
-				return fmt.Errorf("%s tool list --outdated: %w", b.binary, runErr)
+				return executor.WrapError(runErr, fmt.Sprintf("%s tool list --outdated", b.binary), stdout, stderr)
 			}
 			outdated = parseUVOutdatedList(stdout)
 		} else {
-			stdout, _, runErr := p.exec.Run(ctx, b.binary, "list", "--outdated", "--format=json")
+			stdout, stderr, runErr := p.exec.Run(ctx, b.binary, "list", "--outdated", "--format=json")
 			if runErr != nil {
-				return fmt.Errorf("%s list --outdated --format=json: %w", b.binary, runErr)
+				return executor.WrapError(runErr, fmt.Sprintf("%s list --outdated --format=json", b.binary), stdout, stderr)
 			}
 			outdated, err = parsePipOutdatedMap(stdout)
 			if err != nil {
@@ -725,9 +725,9 @@ func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map
 	} else {
 		args = append([]string{"show"}, pkgs...)
 	}
-	stdout, _, err := p.exec.Run(ctx, b.binary, args...)
+	stdout, stderr, err := p.exec.Run(ctx, b.binary, args...)
 	if err != nil {
-		return nil, fmt.Errorf("%s show: %w", b.binary, err)
+		return nil, executor.WrapError(err, fmt.Sprintf("%s show", b.binary), stdout, stderr)
 	}
 	return parsePipShowDescriptions(stdout), nil
 }
@@ -764,9 +764,9 @@ func parsePipShowDescriptions(output string) map[string]string {
 
 // uvInstalledMap fetches `uv tool list` and returns lowercase-name→version.
 func (p *Provider) uvInstalledMap(ctx context.Context, b *backend) (map[string]string, error) {
-	stdout, _, err := p.exec.Run(ctx, b.binary, "tool", "list")
+	stdout, stderr, err := p.exec.Run(ctx, b.binary, "tool", "list")
 	if err != nil {
-		return nil, fmt.Errorf("uv tool list: %w", err)
+		return nil, executor.WrapError(err, "uv tool list", stdout, stderr)
 	}
 	tools := parseUVToolList(stdout)
 	m := make(map[string]string, len(tools))
