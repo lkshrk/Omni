@@ -77,7 +77,7 @@ func (a *App) RequireAPMForMigration() error {
 	if err != nil {
 		return err
 	}
-	if hasLegacyAgents(cfg.Agents) && !a.APMAvailable() {
+	if hasAPMMigratableAgents(cfg.Agents) && !a.APMAvailable() {
 		return errAPMNotInstalled()
 	}
 	return nil
@@ -145,7 +145,7 @@ func (a *App) AgentsSyncAll(ctx context.Context, opts AgentsSyncAllOptions) (Age
 	}
 	var migration APMMigrationResult
 	if !opts.DryRun && !opts.Frozen {
-		if hasLegacyAgents(cfg.Agents) && !a.APMAvailable() {
+		if hasAPMMigratableAgents(cfg.Agents) && !a.APMAvailable() {
 			return AgentsSyncAllResult{}, errAPMNotInstalled()
 		}
 		migration, err = a.MigrateAgentsToAPM()
