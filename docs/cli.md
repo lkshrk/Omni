@@ -59,8 +59,8 @@ store. Run it with the config that declares your packages, or preview it with
 When the `apm` executable is missing and agent features are enabled,
 `omni doctor --fix` installs `apm-cli` through the first available installer
 (`uv tool install`, `pipx install`, then `pip3 install --user`). Until APM is
-installed, `omni agents sync|add|remove|update` refuse to migrate legacy agent
-config so declarations never move into a manifest no installed tool can act on.
+installed, `omni agents sync` refuses to run when the config declares agent
+packages, and reports how to install APM.
 
 `omni doctor` exits nonzero when any check fails, and `--fix` and `--dry-run`
 do not suppress that: `--fix --dry-run` still runs the full diagnostic pass, so
@@ -180,13 +180,15 @@ to the tool leg alone.
 
 ## Agents Commands
 
-Agent desired state lives in APM's user manifest at `~/.apm/apm.yml`.
-`apm.lock.yaml`, package resolution, security checks, and harness deployment are
-owned by APM; Omni is only a command front end.
+Agent packages are declared in Omni's config (`agents.packages`, optionally
+scoped to hosts through group `skills` lists) and installed through APM's
+positional install form. The Omni config stays the fleet's source of truth and
+is never mutated by a sync; APM owns `~/.apm/apm.yml`, `apm.lock.yaml`, package
+resolution, security checks, and harness deployment.
 
 | Command | Description |
 | --- | --- |
-| `omni agents sync [--frozen] [--dry-run]` | Run `apm install --global` against the user manifest. `--frozen` gives lockfile-only, CI-style installation. |
+| `omni agents sync [--frozen] [--dry-run]` | Install this host's config-declared packages via `apm install --global`, honoring group host scoping. With no declared packages, replays an existing user manifest. `--frozen` gives lockfile-only, CI-style installation. |
 | `omni agents add <package>...` | Run APM's positional install form, updating the user manifest and installing the packages. |
 | `omni agents remove <package>...` | Uninstall packages through APM. `uninstall` is an alias. |
 | `omni agents update [package]... [--dry-run]` | Refresh all or selected locked dependencies through APM. |

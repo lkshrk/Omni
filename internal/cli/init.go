@@ -266,25 +266,26 @@ type skillsImportChoice struct {
 	skip  bool
 }
 
-// Legacy agent declarations move once into APM's global manifest; APM owns installs after that.
+// Config-declared packages install through APM directly; the Omni config stays the fleet's source of truth.
 func runSkillsImportSection(cmd *cobra.Command, state *rootState, a *app.App, choice skillsImportChoice) {
 	if choice.skip {
 		return
 	}
-	if err := a.RequireAPMForMigration(); err != nil {
-		fmt.Fprintf(cmdErr(cmd), "warning: agent migration deferred until 'omni agents sync': %v\n", err)
-		return
-	}
-	result, err := a.MigrateAgentsToAPM()
-	if err != nil {
-		fmt.Fprintf(cmdErr(cmd), "warning: migrating agent packages to APM: %v\n", err)
-		return
-	}
+	result, err := a.AgentsSyncAll(cmd.Context(), app.AgentsSyncAllOptions{
+		Output: func(stdout, stderr string) {
+			fmt.Fprint(cmdOut(cmd), stdout)
+			fmt.Fprint(cmdErr(cmd), stderr)
+		},
+	})
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(cmdErr(cmd), "warning: %s\n", warning)
 	}
-	if result.MigratedPackages > 0 || result.MigratedMCPServers > 0 {
-		fmt.Fprintf(cmdOut(cmd), "Migrated %d agent packages and %d MCP servers to %s.\n\n", result.MigratedPackages, result.MigratedMCPServers, result.Path)
+	if err != nil {
+		fmt.Fprintf(cmdErr(cmd), "warning: installing agent packages through APM: %v\n", err)
+		return
+	}
+	if result.InstalledPackages > 0 {
+		fmt.Fprintf(cmdOut(cmd), "Installed %d agent packages through APM.\n\n", result.InstalledPackages)
 	}
 }
 

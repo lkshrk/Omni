@@ -31,6 +31,12 @@ func TestClientCommands(t *testing.T) {
 		{"update project", apm.Project, func(c *apm.Client) (apm.Result, error) { return c.Update(context.Background(), false) }, []string{"update", "--yes"}},
 		{"update selected dry run", apm.Project, func(c *apm.Client) (apm.Result, error) { return c.Update(context.Background(), true, "owner/pkg") }, []string{"update", "owner/pkg", "--dry-run"}},
 		{"update global", apm.Global, func(c *apm.Client) (apm.Result, error) { return c.Update(context.Background(), false) }, []string{"update", "--yes", "--global"}},
+		{"install packages targeted", apm.Global, func(c *apm.Client) (apm.Result, error) {
+			return c.InstallPackages(context.Background(), false, []string{"claude", "codex"}, "owner/pkg#v1")
+		}, []string{"install", "--global", "--target", "claude,codex", "owner/pkg#v1"}},
+		{"install packages dry run no targets", apm.Global, func(c *apm.Client) (apm.Result, error) {
+			return c.InstallPackages(context.Background(), true, nil, "owner/one", "owner/two")
+		}, []string{"install", "--global", "--dry-run", "owner/one", "owner/two"}},
 		{"search", apm.Project, func(c *apm.Client) (apm.Result, error) {
 			return c.Search(context.Background(), "security@skills")
 		}, []string{"search", "security@skills"}},
@@ -62,6 +68,7 @@ func TestClientRejectsEmptyPackageLists(t *testing.T) {
 	for _, run := range []func(*apm.Client) error{
 		func(c *apm.Client) error { _, err := c.Add(context.Background()); return err },
 		func(c *apm.Client) error { _, err := c.Uninstall(context.Background()); return err },
+		func(c *apm.Client) error { _, err := c.InstallPackages(context.Background(), false, nil); return err },
 	} {
 		mock := &executor.MockExecutor{}
 		err := run(apm.New(mock, apm.Project))

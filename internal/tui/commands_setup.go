@@ -23,17 +23,16 @@ func (m *Model) doSetupAgentsDiff() tea.Cmd {
 	}
 }
 
-// Skills additionally take over legacy CLI-managed directories, replacing them with links into Omni's store, which is why this runs only on explicit consent.
+// Installing config-declared packages contacts the network and writes agent files, which is why this runs only on explicit consent.
 func (m *Model) doSetupAgentsImportAll() tea.Cmd {
-	a := m.app
+	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		result, err := a.MigrateAgentsToAPM()
+		result, err := a.AgentsSyncAll(ctx, app.AgentsSyncAllOptions{})
 		if err != nil {
 			return setupAgentsImportDoneMsg{err: err}
 		}
 		return setupAgentsImportDoneMsg{
-			skills:     result.MigratedPackages,
-			mcp:        result.MigratedMCPServers,
+			skills:     result.InstalledPackages,
 			advisories: result.Warnings,
 		}
 	}

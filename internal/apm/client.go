@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 
 	commandexec "github.com/lkshrk/omni/internal/executor"
 )
@@ -55,6 +56,21 @@ func (c *Client) Add(ctx context.Context, packages ...string) (Result, error) {
 		return Result{}, errors.New("add requires at least one package")
 	}
 	return c.run(ctx, append(c.scoped("install"), packages...)...)
+}
+
+// InstallPackages — positional install with an explicit target set; APM records the packages in its own manifest.
+func (c *Client) InstallPackages(ctx context.Context, dryRun bool, targets []string, packages ...string) (Result, error) {
+	if len(packages) == 0 {
+		return Result{}, errors.New("install requires at least one package")
+	}
+	args := c.scoped("install")
+	if dryRun {
+		args = append(args, "--dry-run")
+	}
+	if len(targets) > 0 {
+		args = append(args, "--target", strings.Join(targets, ","))
+	}
+	return c.run(ctx, append(args, packages...)...)
 }
 
 func (c *Client) Uninstall(ctx context.Context, packages ...string) (Result, error) {

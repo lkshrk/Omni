@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/spf13/cobra"
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/executor"
 )
 
 // A CLI-era install: recorded in the legacy lockfile, absent from the manifest.
@@ -87,7 +89,7 @@ func TestRunSkillsImportSection_NoImportFlagSkipsSilently(t *testing.T) {
 	}
 }
 
-func TestRunSkillsImportSectionMigratesLegacyPackageToAPM(t *testing.T) {
+func TestRunSkillsImportSectionInstallsConfiguredPackages(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", "")
@@ -98,6 +100,8 @@ func TestRunSkillsImportSectionMigratesLegacyPackageToAPM(t *testing.T) {
 		Agents:   config.AgentsConfig{Packages: []config.SkillPackage{{Source: "acme/demo", Agents: []string{"codex"}}}},
 	})
 	a := app.New(cfgPath)
+	mock := &executor.MockExecutor{}
+	a.SetFallbackExecutor(mock)
 	out := &bytes.Buffer{}
 	cmd := &cobra.Command{}
 	cmd.SetOut(out)
@@ -105,13 +109,14 @@ func TestRunSkillsImportSectionMigratesLegacyPackageToAPM(t *testing.T) {
 
 	runSkillsImportSection(cmd, nil, a, skillsImportChoice{})
 
-	if !bytes.Contains(out.Bytes(), []byte("Migrated 1 agent packages")) {
+	if !bytes.Contains(out.Bytes(), []byte("Installed 1 agent packages")) {
 		t.Fatalf("output = %q", out.String())
 	}
-	if _, err := os.Stat(filepath.Join(home, ".apm", "apm.yml")); err != nil {
-		t.Fatalf("manifest: %v", err)
+	want := []string{"install", "--global", "--target", "codex", "acme/demo"}
+	if len(mock.Calls) != 1 || !reflect.DeepEqual(mock.Calls[0].Args, want) {
+		t.Fatalf("calls = %#v, want apm %v", mock.Calls, want)
 	}
-	if got := manifestSkillSources(t, cfgPath); len(got) != 0 {
-		t.Fatalf("legacy packages = %v", got)
+	if got := manifestSkillSources(t, cfgPath); len(got) != 1 {
+		t.Fatalf("config mutated: %v", got)
 	}
 }
