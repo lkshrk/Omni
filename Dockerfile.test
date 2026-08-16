@@ -8,6 +8,7 @@ RUN apk add --no-cache \
         bash \
         build-base \
         git \
+        git-daemon \
         nodejs \
         npm \
         py3-pip \
@@ -33,7 +34,7 @@ RUN case "$TARGETARCH" in \
     grok --version
 
 # --break-system-packages is required by externally-managed system Python installs.
-RUN pip3 install --break-system-packages cowsay==6.1
+RUN pip3 install --break-system-packages cowsay==6.1 apm-cli==0.28.0
 
 WORKDIR /app
 
@@ -58,7 +59,7 @@ RUN --mount=type=cache,target=/app/.tmp,uid=10001,gid=10001 \
 
 COPY --chown=omni:omni . .
 
-ARG TEST_PACKAGES="./integration_tests/... ./internal/provider/..."
+ARG TEST_PACKAGES="./integration_tests/... ./internal/provider/... ./internal/apm/... ./internal/app/..."
 RUN --mount=type=cache,target=/home/omni/.cache/go-build,uid=10001,gid=10001 \
     --mount=type=cache,target=/app/.tmp,uid=10001,gid=10001 \
     go test -count=1 -tags=integration -race -trimpath $TEST_PACKAGES
