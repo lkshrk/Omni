@@ -2,7 +2,6 @@ package tui
 
 import (
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 
@@ -480,15 +479,11 @@ func (m *Model) doAgentsUpdateAll() []tea.Cmd {
 	a, ctx := m.app, m.ctx
 	work := func() tea.Msg {
 		defer close(ch)
-		sendProgress(ch, gen, "updating APM manifest…")
-		result, migration, err := a.AgentsUpdateAll(ctx, false)
-		// Migration warnings name the entries its error tells the user to resolve; the error view is the only surface here.
-		if err != nil && len(migration.Warnings) > 0 {
-			err = fmt.Errorf("%w (%s)", err, strings.Join(migration.Warnings, "; "))
-		}
+		sendProgress(ch, gen, "updating APM dependencies…")
+		result, err := a.AgentsUpdateAll(ctx, false)
 		return agentsProgressDoneMsg{
 			gen: gen, skills: true, skillsErr: err,
-			report: &app.AgentsSyncAllResult{Output: result.Stdout, Stderr: result.Stderr, Warnings: migration.Warnings},
+			report: &app.AgentsSyncAllResult{Output: result.Stdout, Stderr: result.Stderr},
 		}
 	}
 	return []tea.Cmd{m.spinner.Tick, work, waitForProgress(ch, gen)}

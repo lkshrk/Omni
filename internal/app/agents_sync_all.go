@@ -49,6 +49,8 @@ type AgentsSyncAllResult struct {
 	Warnings       []string
 	Drift          []string
 	Errors         []AgentsFeatureError
+	// InstalledPackages counts the config-declared packages handed to APM by the last sync.
+	InstalledPackages int
 }
 
 func (a *App) APMClient(scope apm.Scope) *apm.Client {
@@ -69,18 +71,6 @@ func (a *App) APMAvailable() bool {
 
 func errAPMNotInstalled() error {
 	return fmt.Errorf("%w: %s", apm.ErrNotInstalled, apm.InstallHint)
-}
-
-// RequireAPMForMigration blocks only when legacy entries would actually move; a config with nothing to migrate stays runnable.
-func (a *App) RequireAPMForMigration() error {
-	cfg, err := a.loadConfig()
-	if err != nil {
-		return err
-	}
-	if hasAPMMigratableAgents(cfg.Agents) && !a.APMAvailable() {
-		return errAPMNotInstalled()
-	}
-	return nil
 }
 
 func (r *AgentsSyncAllResult) addWarnings(feature string, warnings []string) {
@@ -137,77 +127,108 @@ func (r *AgentsSyncAllResult) AddPlugins(res RestorePluginResult, err error) {
 	}
 }
 
-// AgentsSyncAll delegates desired state, resolution, and deployment to APM.
+// AgentsSyncAll installs this host's config-declared packages directly through APM; the Omni config is
+// never mutated, so a fleet sharing it via dotfiles keeps its declarations and per-host group scoping.
 func (a *App) AgentsSyncAll(ctx context.Context, opts AgentsSyncAllOptions) (AgentsSyncAllResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return AgentsSyncAllResult{}, err
 	}
-	var migration APMMigrationResult
-	if !opts.DryRun && !opts.Frozen {
-		if hasAPMMigratableAgents(cfg.Agents) && !a.APMAvailable() {
-			return AgentsSyncAllResult{}, errAPMNotInstalled()
-		}
-		migration, err = a.MigrateAgentsToAPM()
-		if err != nil {
-			return AgentsSyncAllResult{}, err
-		}
-	} else {
-		migration.Path, err = a.globalAPMManifestPath()
-		if err != nil {
-			return AgentsSyncAllResult{}, err
-		}
+	manifestPath, err := a.globalAPMManifestPath()
+	if err != nil {
+		return AgentsSyncAllResult{}, err
 	}
-	res := AgentsSyncAllResult{Warnings: migration.Warnings}
-	if _, err := os.Stat(migration.Path); err != nil {
-		if os.IsNotExist(err) {
-			if opts.Frozen {
-				return res, fmt.Errorf("frozen APM install requires %s and its lockfile", migration.Path)
-			}
-			res.Warnings = append(res.Warnings, "global APM manifest not found; the next non-dry-run sync will migrate compatible legacy declarations")
-			return res, nil
+	manifestExists := false
+	if _, statErr := os.Stat(manifestPath); statErr == nil {
+		manifestExists = true
+	} else if !os.IsNotExist(statErr) {
+		return AgentsSyncAllResult{}, statErr
+	}
+	if opts.Frozen {
+		if !manifestExists {
+			return AgentsSyncAllResult{}, fmt.Errorf("frozen APM install requires %s and its lockfile", manifestPath)
 		}
-		return res, err
+		if opts.Progress != nil {
+			opts.Progress("replaying frozen APM manifest…")
+		}
+		result, err := a.APMClient(apm.Global).Install(ctx, true, opts.DryRun)
+		if opts.Output != nil {
+			opts.Output(result.Stdout, result.Stderr)
+		}
+		return AgentsSyncAllResult{Output: result.Stdout, Stderr: result.Stderr}, err
 	}
 
+	desired, warnings := a.resolveDesiredAgentPackages(cfg)
+	res := AgentsSyncAllResult{Warnings: warnings}
+	if len(desired) == 0 && !manifestExists {
+		res.Warnings = append(res.Warnings, "no agent packages configured for this host; nothing to install")
+		return res, nil
+	}
+	if !a.APMAvailable() {
+		return res, errAPMNotInstalled()
+	}
 	if opts.Progress != nil {
 		if opts.DryRun {
 			opts.Progress("previewing APM install…")
 		} else {
-			opts.Progress("installing APM manifest…")
+			opts.Progress("installing agent packages through APM…")
 		}
 	}
-	result, err := a.APMClient(apm.Global).Install(ctx, opts.Frozen, opts.DryRun)
-	if opts.Output != nil {
-		opts.Output(result.Stdout, result.Stderr)
+	client := a.APMClient(apm.Global)
+	var outputs, errOutputs []string
+	appendResult := func(result apm.Result) {
+		if result.Stdout != "" {
+			outputs = append(outputs, result.Stdout)
+		}
+		if result.Stderr != "" {
+			errOutputs = append(errOutputs, result.Stderr)
+		}
+		if opts.Output != nil {
+			opts.Output(result.Stdout, result.Stderr)
+		}
 	}
-	res.Output, res.Stderr = result.Stdout, result.Stderr
-	return res, err
+	finish := func(err error) (AgentsSyncAllResult, error) {
+		res.Output, res.Stderr = strings.Join(outputs, ""), strings.Join(errOutputs, "")
+		if err == nil {
+			res.InstalledPackages = len(desired)
+		}
+		return res, err
+	}
+	for _, batch := range groupDesiredByTargets(desired) {
+		specs := make([]string, 0, len(batch))
+		for _, pkg := range batch {
+			specs = append(specs, pkg.installSpec())
+		}
+		result, err := client.InstallPackages(ctx, opts.DryRun, batch[0].Targets, specs...)
+		appendResult(result)
+		if err != nil {
+			return finish(err)
+		}
+	}
+	// A manifest can hold user-added packages beyond the Omni config; replay it so those deploy too.
+	if manifestExists && len(desired) == 0 {
+		result, err := client.Install(ctx, false, opts.DryRun)
+		appendResult(result)
+		if err != nil {
+			return finish(err)
+		}
+	}
+	return finish(nil)
 }
 
-// AgentsUpdateAll migrates legacy config first so a TUI or CLI update never races ahead of migration.
-func (a *App) AgentsUpdateAll(ctx context.Context, dryRun bool, packages ...string) (apm.Result, APMMigrationResult, error) {
-	var migration APMMigrationResult
-	var err error
-	if dryRun {
-		migration.Path, err = a.globalAPMManifestPath()
-	} else {
-		if err := a.RequireAPMForMigration(); err != nil {
-			return apm.Result{}, migration, err
-		}
-		migration, err = a.MigrateAgentsToAPM()
-	}
+// AgentsUpdateAll refreshes locked APM dependencies; sync owns creating the manifest from config.
+func (a *App) AgentsUpdateAll(ctx context.Context, dryRun bool, packages ...string) (apm.Result, error) {
+	path, err := a.globalAPMManifestPath()
 	if err != nil {
-		return apm.Result{}, migration, err
+		return apm.Result{}, err
 	}
-	if _, statErr := os.Stat(migration.Path); statErr != nil {
+	if _, statErr := os.Stat(path); statErr != nil {
 		if os.IsNotExist(statErr) {
-			return apm.Result{}, migration, fmt.Errorf("global APM manifest %s not found: run 'omni agents sync' to create it and migrate legacy agent config", migration.Path)
+			return apm.Result{}, fmt.Errorf("global APM manifest %s not found: run 'omni agents sync' to install this host's configured packages first", path)
 		}
-		return apm.Result{}, migration, statErr
+		return apm.Result{}, statErr
 	}
-	result, err := a.APMClient(apm.Global).Update(ctx, dryRun, packages...)
-	return result, migration, err
+	return a.APMClient(apm.Global).Update(ctx, dryRun, packages...)
 }
 
 // AgentsSyncAllSummaryText — The imported count spans every claimed capability, not skills alone.

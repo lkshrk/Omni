@@ -146,11 +146,11 @@ func TestFixMissingAPMErrorsWithoutInstaller(t *testing.T) {
 	}
 }
 
-func TestAgentsSyncAllRefusesToMigrateWithoutAPM(t *testing.T) {
+func TestAgentsSyncAllRefusesToInstallWithoutAPM(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "settings.json")
 	if err := config.Save(configPath, &config.RootConfig{Version: config.CurrentVersion, Agents: config.AgentsConfig{
-		Packages: []config.SkillPackage{{Source: "acme/shared"}},
+		Packages: []config.SkillPackage{{Source: "acme/shared", Agents: []string{"codex"}}},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -167,41 +167,7 @@ func TestAgentsSyncAllRefusesToMigrateWithoutAPM(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "apm-cli") {
 		t.Fatalf("error lacks install hint: %v", err)
 	}
-	got, loadErr := config.Load(configPath)
-	if loadErr != nil {
-		t.Fatal(loadErr)
-	}
-	if len(got.Agents.Packages) != 1 {
-		t.Fatalf("legacy config migrated despite missing apm: %#v", got.Agents.Packages)
-	}
-}
-
-func TestAgentsUpdateAllRefusesToMigrateWithoutAPM(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "settings.json")
-	if err := config.Save(configPath, &config.RootConfig{Version: config.CurrentVersion, Agents: config.AgentsConfig{
-		Packages: []config.SkillPackage{{Source: "acme/shared"}},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	mock := &availExecutor{available: nil}
-	a := New(configPath, WithEnvLookup(func(name string) string {
-		if name == "HOME" {
-			return filepath.Join(dir, "home")
-		}
-		return ""
-	}))
-	a.SetFallbackExecutor(mock)
-
-	_, _, err := a.AgentsUpdateAll(context.Background(), false)
-	if err == nil || !strings.Contains(err.Error(), "apm-cli") {
-		t.Fatalf("error lacks install hint: %v", err)
-	}
-	got, loadErr := config.Load(configPath)
-	if loadErr != nil {
-		t.Fatal(loadErr)
-	}
-	if len(got.Agents.Packages) != 1 {
-		t.Fatalf("legacy config migrated despite missing apm: %#v", got.Agents.Packages)
+	if len(mock.Calls) != 0 {
+		t.Fatalf("apm invoked despite missing binary: %#v", mock.Calls)
 	}
 }

@@ -78,73 +78,6 @@ func TestAgentsTabUpdateDelegatesToGlobalAPM(t *testing.T) {
 	}
 }
 
-func TestAgentsTabUpdateMigratesLegacyConfigFirst(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	configPath := filepath.Join(t.TempDir(), "settings.json")
-	if err := config.Save(configPath, &config.RootConfig{
-		Version:  config.CurrentVersion,
-		Settings: config.Settings{AgentsUse: []string{"codex"}},
-		Agents:   config.AgentsConfig{Packages: []config.SkillPackage{{Source: "acme/demo", Agents: []string{"codex"}}}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	a := app.New(configPath)
-	if err := a.InitTestMode(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = a.Close() })
-	m := modelForCmds(a)
-	mock := &executor.MockExecutor{}
-	m.app.SetFallbackExecutor(mock)
-	cmds := m.doAgentsUpdateAll()
-	done, ok := cmds[1]().(agentsProgressDoneMsg)
-	if !ok || done.skillsErr != nil {
-		t.Fatalf("update result = %#v", done)
-	}
-	if _, err := os.Stat(filepath.Join(home, ".apm", "apm.yml")); err != nil {
-		t.Fatalf("migration did not create manifest: %v", err)
-	}
-	want := []string{"update", "--yes", "--global"}
-	if len(mock.Calls) != 1 || !reflect.DeepEqual(mock.Calls[0].Args, want) {
-		t.Fatalf("calls = %#v, want apm %v", mock.Calls, want)
-	}
-}
-
-func TestAgentsTabUpdateSurfacesMigrationWarningsInError(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	configPath := filepath.Join(t.TempDir(), "settings.json")
-	if err := config.Save(configPath, &config.RootConfig{
-		Version:  config.CurrentVersion,
-		Settings: config.Settings{AgentsUse: []string{"codex"}},
-		Agents: config.AgentsConfig{Packages: []config.SkillPackage{
-			{Source: "acme/ok", Agents: []string{"codex"}},
-			{Source: "acme/bad", Agents: []string{"zed"}},
-		}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	a := app.New(configPath)
-	if err := a.InitTestMode(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = a.Close() })
-	m := modelForCmds(a)
-	mock := &executor.MockExecutor{}
-	m.app.SetFallbackExecutor(mock)
-	done, ok := m.doAgentsUpdateAll()[1]().(agentsProgressDoneMsg)
-	if !ok || done.skillsErr == nil {
-		t.Fatalf("update result = %#v", done)
-	}
-	if !strings.Contains(done.skillsErr.Error(), `"acme/bad"`) {
-		t.Fatalf("error does not name the blocking entry: %v", done.skillsErr)
-	}
-	if len(mock.Calls) != 0 {
-		t.Fatalf("apm invoked despite failed migration: %#v", mock.Calls)
-	}
-}
-
 func TestAgentsTabUpdateWithoutManifestReturnsGuidance(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -173,7 +106,7 @@ func TestAgentsTabUpdateWithoutManifestReturnsGuidance(t *testing.T) {
 	}
 }
 
-func TestSetupAgentsImportMigratesLegacyPackageToAPM(t *testing.T) {
+func TestSetupAgentsImportInstallsConfiguredPackages(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	configPath := filepath.Join(t.TempDir(), "settings.json")
@@ -185,13 +118,20 @@ func TestSetupAgentsImportMigratesLegacyPackageToAPM(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := app.New(configPath)
+	mock := &executor.MockExecutor{}
+	a.SetFallbackExecutor(mock)
 	m := modelForCmds(a)
 	msg := m.doSetupAgentsImportAll()()
 	done, ok := msg.(setupAgentsImportDoneMsg)
 	if !ok || done.err != nil || done.skills != 1 {
-		t.Fatalf("setup migration = %#v", msg)
+		t.Fatalf("setup install = %#v", msg)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".apm", "apm.yml")); err != nil {
-		t.Fatalf("manifest: %v", err)
+	want := []string{"install", "--global", "--target", "codex", "acme/demo"}
+	if len(mock.Calls) != 1 || !reflect.DeepEqual(mock.Calls[0].Args, want) {
+		t.Fatalf("calls = %#v, want apm %v", mock.Calls, want)
+	}
+	got, err := config.Load(configPath)
+	if err != nil || len(got.Agents.Packages) != 1 {
+		t.Fatalf("config mutated: %+v, %v", got.Agents, err)
 	}
 }

@@ -158,27 +158,6 @@ func printAPMResult(cmd *cobra.Command, result apm.Result) {
 	fmt.Fprint(cmd.ErrOrStderr(), result.Stderr)
 }
 
-func migrateAgentsToAPM(cmd *cobra.Command, state *rootState, dryRun bool) error {
-	if dryRun {
-		return nil
-	}
-	if err := state.app.RequireAPMForMigration(); err != nil {
-		return err
-	}
-	result, err := state.app.MigrateAgentsToAPM()
-	printAPMMigration(cmd, result)
-	return err
-}
-
-func printAPMMigration(cmd *cobra.Command, result app.APMMigrationResult) {
-	for _, warning := range result.Warnings {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
-	}
-	if result.MigratedPackages > 0 || result.MigratedMCPServers > 0 {
-		fmt.Fprintf(cmdOut(cmd), "migrated %d packages and %d MCP servers to %s\n", result.MigratedPackages, result.MigratedMCPServers, result.Path)
-	}
-}
-
 func newAPMAgentsSyncCmd(state *rootState, global *bool) *cobra.Command {
 	var frozen, dryRun bool
 	cmd := &cobra.Command{
@@ -205,9 +184,6 @@ func newAPMAgentsSyncCmd(state *rootState, global *bool) *cobra.Command {
 
 func newAPMAgentsAddCmd(state *rootState, global *bool) *cobra.Command {
 	return &cobra.Command{Use: "add <package>...", Short: "Add packages to apm.yml and install them", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		if err := migrateAgentsToAPM(cmd, state, false); err != nil {
-			return err
-		}
 		result, err := apmClient(state, *global).Add(cmd.Context(), args...)
 		printAPMResult(cmd, result)
 		return err
@@ -216,9 +192,6 @@ func newAPMAgentsAddCmd(state *rootState, global *bool) *cobra.Command {
 
 func newAPMAgentsRemoveCmd(state *rootState, global *bool) *cobra.Command {
 	return &cobra.Command{Use: "remove <package>...", Aliases: []string{"uninstall"}, Short: "Remove packages and their deployed files with APM (no --purge mode)", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		if err := migrateAgentsToAPM(cmd, state, false); err != nil {
-			return err
-		}
 		result, err := apmClient(state, *global).Uninstall(cmd.Context(), args...)
 		printAPMResult(cmd, result)
 		return err
@@ -228,8 +201,7 @@ func newAPMAgentsRemoveCmd(state *rootState, global *bool) *cobra.Command {
 func newAPMAgentsUpdateCmd(state *rootState, global *bool) *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{Use: "update [package]...", Short: "Update locked APM dependencies", Args: cobra.ArbitraryArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		result, migration, err := state.app.AgentsUpdateAll(cmd.Context(), dryRun, args...)
-		printAPMMigration(cmd, migration)
+		result, err := state.app.AgentsUpdateAll(cmd.Context(), dryRun, args...)
 		printAPMResult(cmd, result)
 		return err
 	}}
