@@ -67,18 +67,18 @@ func (a *App) MigrateAgentsToAPM() (APMMigrationResult, error) {
 	}
 	if _, err := os.Stat(path); err == nil {
 		result.AlreadyExists = true
-		if hasLegacyAgents(cfg.Agents) {
+		if hasAPMMigratableAgents(cfg.Agents) {
 			return result, fmt.Errorf("existing APM manifest preserved; merge legacy Omni agent entries into %s before syncing", path)
 		}
 		return result, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return result, fmt.Errorf("checking APM manifest: %w", err)
 	}
-	if groupAgentConfigPresent(cfg.Groups) {
-		return result, fmt.Errorf("legacy group-scoped agent configuration cannot be migrated automatically; remove group agent references before syncing with APM")
+	if groups := groupSkillConfigPresent(cfg.Groups); len(groups) > 0 {
+		return result, fmt.Errorf("legacy group-scoped skill configuration cannot be migrated automatically: remove the skills lists from group(s) %s before syncing with APM", strings.Join(groups, ", "))
 	}
 	use := a.effectiveSettings(cfg).AgentsUse
-	if use != nil && len(use) == 0 && hasLegacyAgents(cfg.Agents) {
+	if use != nil && len(use) == 0 && hasAPMMigratableAgents(cfg.Agents) {
 		return result, fmt.Errorf("legacy agent configuration cannot be migrated losslessly: agents_use explicitly disables every target")
 	}
 	legacyTargets := a.effectiveAgentTargets(cfg)
@@ -90,12 +90,14 @@ func (a *App) MigrateAgentsToAPM() (APMMigrationResult, error) {
 	migratedPackages := make([]config.SkillPackage, 0, len(cfg.Agents.Packages))
 	deploymentTargets := make([]string, 0)
 	unscopedWithoutTargets := false
+	// Skill packages have no legacy deployment surface left, so a package that cannot migrate is stranded and must block.
+	packageBlockers := make([]string, 0)
 	for _, pkg := range cfg.Agents.Packages {
 		candidate := pkg
 		if use != nil {
 			candidate.Agents = effectiveSkillAgents(use, pkg)
 			if len(candidate.Agents) == 0 {
-				result.Warnings = append(result.Warnings, fmt.Sprintf("package %q remains in Omni: its targets are disabled by agents_use", pkg.Source))
+				packageBlockers = append(packageBlockers, fmt.Sprintf("package %q: its targets are disabled by agents_use", pkg.Source))
 				continue
 			}
 		} else if len(candidate.Agents) == 0 {
@@ -104,7 +106,7 @@ func (a *App) MigrateAgentsToAPM() (APMMigrationResult, error) {
 		}
 		dependency, warning, ok := a.migrateAPMPackage(candidate)
 		if !ok {
-			result.Warnings = append(result.Warnings, warning)
+			packageBlockers = append(packageBlockers, warning)
 			continue
 		}
 		manifest.Dependencies.APM = append(manifest.Dependencies.APM, dependency)
@@ -140,9 +142,8 @@ func (a *App) MigrateAgentsToAPM() (APMMigrationResult, error) {
 	if !agentsIgnoreEmpty(cfg.Agents.Ignore) {
 		result.Warnings = append(result.Warnings, "agent ignore rules remain in Omni: APM has no equivalent ignore manifest")
 	}
-	if len(migratedPackages) != len(cfg.Agents.Packages) || len(migratedMCP) != len(cfg.Agents.McpServers) ||
-		len(cfg.Agents.Marketplaces) > 0 || len(cfg.Agents.Plugins) > 0 || !agentsIgnoreEmpty(cfg.Agents.Ignore) {
-		return result, fmt.Errorf("legacy agent configuration cannot be migrated losslessly; resolve the reported entries before syncing with APM")
+	if len(packageBlockers) > 0 {
+		return result, fmt.Errorf("legacy skill packages cannot be migrated losslessly: %s", strings.Join(packageBlockers, "; "))
 	}
 	if len(migratedMCP) > 0 {
 		for _, target := range manifest.Targets {
@@ -365,13 +366,15 @@ func (a *App) legacySkillDeployment(home string, targetIDs []string) (string, er
 	return "", nil
 }
 
-func groupAgentConfigPresent(groups []*config.GroupConfig) bool {
+// Group-scoped mcp/plugins/marketplaces stay natively managed; only group skills are stranded by the APM move.
+func groupSkillConfigPresent(groups []*config.GroupConfig) []string {
+	names := make([]string, 0)
 	for _, group := range groups {
-		if group != nil && (len(group.Skills) > 0 || len(group.McpServers) > 0 || len(group.Plugins) > 0 || len(group.Marketplaces) > 0) {
-			return true
+		if group != nil && len(group.Skills) > 0 {
+			names = append(names, group.Name)
 		}
 	}
-	return false
+	return names
 }
 
 func migrateAPMTargets(legacy []string) ([]string, []string) {
@@ -442,6 +445,15 @@ func agentsIgnoreEmpty(ignore config.AgentsIgnore) bool {
 	return len(ignore.Skills) == 0 && len(ignore.McpServers) == 0 && len(ignore.Plugins) == 0 && len(ignore.Marketplaces) == 0
 }
 
-func hasLegacyAgents(agents config.AgentsConfig) bool {
-	return len(agents.Packages) > 0 || len(agents.McpServers) > 0 || len(agents.Marketplaces) > 0 || len(agents.Plugins) > 0 || !agentsIgnoreEmpty(agents.Ignore)
+// hasAPMMigratableAgents — packages always move; MCP servers move only when unscoped, the rest stays native in Omni.
+func hasAPMMigratableAgents(agents config.AgentsConfig) bool {
+	if len(agents.Packages) > 0 {
+		return true
+	}
+	for _, server := range agents.McpServers {
+		if len(server.Agents) == 0 {
+			return true
+		}
+	}
+	return false
 }

@@ -122,7 +122,7 @@ func TestMigrateAgentsToAPMRejectsGroupScopedAgentState(t *testing.T) {
 		}
 		return ""
 	}))
-	if _, err := a.MigrateAgentsToAPM(); err == nil || !strings.Contains(err.Error(), "group-scoped") {
+	if _, err := a.MigrateAgentsToAPM(); err == nil || !strings.Contains(err.Error(), "group-scoped") || !strings.Contains(err.Error(), `work`) {
 		t.Fatalf("error = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".apm", "apm.yml")); !os.IsNotExist(err) {
@@ -338,13 +338,35 @@ func TestMigrateAgentsToAPMRejectsMixedPackageOnlyAndMCPTargets(t *testing.T) {
 	}
 }
 
-func TestMigrateAgentsToAPMRejectsInvalidAPMEntries(t *testing.T) {
+func TestMigrateAgentsToAPMBlocksInvalidPackagesByName(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "settings.json")
+	agents := config.AgentsConfig{Packages: []config.SkillPackage{{Source: "./local", Ref: "main"}}}
+	if err := config.Save(configPath, &config.RootConfig{Version: config.CurrentVersion, Agents: agents}); err != nil {
+		t.Fatal(err)
+	}
+	a := New(configPath, WithEnvLookup(func(name string) string {
+		if name == "HOME" {
+			return filepath.Join(dir, "home")
+		}
+		return ""
+	}))
+	_, err := a.MigrateAgentsToAPM()
+	if err == nil || !strings.Contains(err.Error(), "local paths cannot preserve a Git ref") || !strings.Contains(err.Error(), `"./local"`) {
+		t.Fatalf("error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "home", ".apm", "apm.yml")); !os.IsNotExist(err) {
+		t.Fatalf("manifest created: %v", err)
+	}
+}
+
+// Invalid MCP entries stay natively managed by Omni; they warn but never abort the migration.
+func TestMigrateAgentsToAPMKeepsInvalidMcpEntriesNative(t *testing.T) {
 	tests := []struct {
 		name   string
 		agents config.AgentsConfig
 		want   string
 	}{
-		{name: "local ref", agents: config.AgentsConfig{Packages: []config.SkillPackage{{Source: "./local", Ref: "main"}}}, want: "local paths cannot preserve a Git ref"},
 		{name: "mcp name", agents: config.AgentsConfig{McpServers: []config.McpServer{{Name: "my server", Transport: "http", URL: "https://example.test"}}}, want: "name is not valid"},
 		{name: "mcp url", agents: config.AgentsConfig{McpServers: []config.McpServer{{Name: "demo", Transport: "http", URL: "example.test"}}}, want: "absolute HTTPS URL"},
 		{name: "long mcp name", agents: config.AgentsConfig{McpServers: []config.McpServer{{Name: strings.Repeat("a", 129), Transport: "http", URL: "https://example.test"}}}, want: "name is not valid"},
@@ -365,21 +387,36 @@ func TestMigrateAgentsToAPMRejectsInvalidAPMEntries(t *testing.T) {
 				return ""
 			}))
 			result, err := a.MigrateAgentsToAPM()
-			if err == nil || !slices.ContainsFunc(result.Warnings, func(w string) bool { return strings.Contains(w, tc.want) }) {
-				t.Fatalf("result = %+v, error = %v", result, err)
+			if err != nil {
+				t.Fatalf("error = %v", err)
+			}
+			if !slices.ContainsFunc(result.Warnings, func(w string) bool { return strings.Contains(w, tc.want) }) {
+				t.Fatalf("warnings = %v", result.Warnings)
+			}
+			got, loadErr := config.Load(configPath)
+			if loadErr != nil || len(got.Agents.McpServers) != 1 {
+				t.Fatalf("mcp entry removed from config: %+v, %v", got.Agents, loadErr)
 			}
 		})
 	}
 }
 
-func TestMigrateAgentsToAPMIsAtomicWhenLegacyEntriesAreUnsupported(t *testing.T) {
+// Plugins, marketplaces, scoped MCP servers, and group-scoped non-skill entries stay natively managed;
+// packages migrate around them instead of aborting the whole migration.
+func TestMigrateAgentsToAPMMigratesPackagesAroundNativeEntries(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "settings.json")
 	home := filepath.Join(dir, "home")
-	want := &config.RootConfig{Version: config.CurrentVersion, Agents: config.AgentsConfig{
-		Packages: []config.SkillPackage{{Source: "acme/shared"}},
-		Plugins:  []config.Plugin{{Name: "weather", Marketplace: "private"}},
-	}}
+	want := &config.RootConfig{Version: config.CurrentVersion,
+		Settings: config.Settings{AgentsUse: []string{"codex"}},
+		Agents: config.AgentsConfig{
+			Packages:     []config.SkillPackage{{Source: "acme/shared", Agents: []string{"codex"}}},
+			McpServers:   []config.McpServer{{Name: "scoped", Transport: "http", URL: "https://example.test", Agents: []string{"claude-code"}}},
+			Plugins:      []config.Plugin{{Name: "weather", Marketplace: "private"}},
+			Marketplaces: []config.Marketplace{{Name: "private", Source: "acme/market"}},
+		},
+		Groups: []*config.GroupConfig{{Name: "ai-plugins", McpServers: []string{"scoped"}, Plugins: []string{"weather"}, Marketplaces: []string{"private"}}},
+	}
 	if err := config.Save(configPath, want); err != nil {
 		t.Fatal(err)
 	}
@@ -390,21 +427,29 @@ func TestMigrateAgentsToAPMIsAtomicWhenLegacyEntriesAreUnsupported(t *testing.T)
 		return ""
 	}))
 	result, err := a.MigrateAgentsToAPM()
-	if err == nil || !strings.Contains(err.Error(), "cannot be migrated losslessly") {
-		t.Fatalf("error = %v", err)
+	if err != nil {
+		t.Fatalf("MigrateAgentsToAPM: %v", err)
 	}
-	if !slices.ContainsFunc(result.Warnings, func(w string) bool { return strings.Contains(w, "plugin") }) {
-		t.Fatalf("warnings = %v", result.Warnings)
+	if result.MigratedPackages != 1 || result.MigratedMCPServers != 0 {
+		t.Fatalf("result = %+v", result)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".apm", "apm.yml")); !os.IsNotExist(err) {
-		t.Fatalf("partial manifest created: %v", err)
+	for _, fragment := range []string{"plugin", "marketplace", "scope"} {
+		if !slices.ContainsFunc(result.Warnings, func(w string) bool { return strings.Contains(w, fragment) }) {
+			t.Fatalf("warnings missing %q: %v", fragment, result.Warnings)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".apm", "apm.yml")); err != nil {
+		t.Fatalf("manifest not created: %v", err)
 	}
 	got, err := config.Load(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Agents.Packages) != 1 || len(got.Agents.Plugins) != 1 {
-		t.Fatalf("legacy config changed: %+v", got.Agents)
+	if len(got.Agents.Packages) != 0 {
+		t.Fatalf("migrated package still in config: %+v", got.Agents.Packages)
+	}
+	if len(got.Agents.McpServers) != 1 || len(got.Agents.Plugins) != 1 || len(got.Agents.Marketplaces) != 1 {
+		t.Fatalf("native entries changed: %+v", got.Agents)
 	}
 }
 
