@@ -96,8 +96,14 @@ const importProvenEnvValue = "ambient-value-4b71"
 
 func importEnvTestApp(t *testing.T, adapter *importStubMcpAdapter, env map[string]string) *app.App {
 	t.Helper()
+	home := t.TempDir()
 	return newImportTestApp(t, []app.McpAdapter{adapter},
-		app.WithEnvLookup(func(name string) string { return env[name] }))
+		app.WithEnvLookup(func(name string) string {
+			if name == "HOME" {
+				return home
+			}
+			return env[name]
+		}))
 }
 
 func TestAgentsMcpImport_ProvenEnvKeepsValueOutOfTheManifestFile(t *testing.T) {
@@ -242,16 +248,18 @@ func TestAgentsMcpImport_RefusesUnprovenEnvAlongsideAResolvedHeader(t *testing.T
 	}
 }
 
-func TestPrintAgentsSyncAllResult_DryRunListsAdoptedClaims(t *testing.T) {
+// The dry run reports the generated manifest's own delta whenever APM could not be handed it.
+func TestPrintAgentsSyncAllResult_DryRunListsThePlan(t *testing.T) {
 	var out bytes.Buffer
 	printAgentsSyncAllResult(&out, app.AgentsSyncAllResult{
-		McpAdopted:     app.McpAdoptResult{WouldAdopt: []string{`would claim mcp server "linear" on claude`}},
-		PluginsAdopted: app.PluginAdoptResult{WouldAdopt: []string{`would claim plugin "ecc" from marketplace on claude`}},
+		Plan:     []string{"packages: would add acme/demo", "mcp: would remove linear"},
+		Warnings: []string{"dry run: APM was not consulted"},
 	}, true)
 
 	for _, want := range []string{
-		`mcp: would claim mcp server "linear" on claude`,
-		`plugins: would claim plugin "ecc" from marketplace on claude`,
+		"plan: packages: would add acme/demo",
+		"plan: mcp: would remove linear",
+		"warn: dry run: APM was not consulted",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("dry-run output missing %q:\n%s", want, out.String())

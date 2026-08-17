@@ -13,11 +13,11 @@ func TestMcpServerRows_IdentityDriftPerField(t *testing.T) {
 	t.Parallel()
 	manifest := config.McpServer{
 		Name: "srv", Transport: "http", URL: "https://mcp.example.com",
-		Agents: []string{"claude-code"},
+		Agents: []string{"codex"},
 	}
 	stdio := config.McpServer{
 		Name: "srv", Transport: "stdio", Command: "npx -y srv",
-		Agents: []string{"claude-code"},
+		Agents: []string{"codex"},
 	}
 	tests := []struct {
 		name     string
@@ -81,7 +81,7 @@ func TestMcpServerRows_IdentityDriftPerField(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			stub := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{tc.live}}
+			stub := &stubMcpAdapter{id: "codex", available: true, listed: []app.InstalledMcpServer{tc.live}}
 			a := newMcpTestApp(t,
 				config.AgentsConfig{McpServers: []config.McpServer{tc.declared}},
 				app.WithMcpAdapters([]app.McpAdapter{stub}),
@@ -93,7 +93,7 @@ func TestMcpServerRows_IdentityDriftPerField(t *testing.T) {
 			if len(rows) != 1 {
 				t.Fatalf("rows = %d, want 1", len(rows))
 			}
-			if got := rows[0].PerAgentStatus["claude-code"]; got != tc.want {
+			if got := rows[0].PerAgentStatus["codex"]; got != tc.want {
 				t.Fatalf("status = %q, want %q", got, tc.want)
 			}
 			if tc.want != app.McpStatusDrifted {
@@ -105,7 +105,7 @@ func TestMcpServerRows_IdentityDriftPerField(t *testing.T) {
 			if !rows[0].Drifted {
 				t.Fatal("Drifted not set on a drifted row")
 			}
-			fields := rows[0].DriftFields["claude-code"]
+			fields := rows[0].DriftFields["codex"]
 			if len(fields) != 1 || fields[0] != tc.field {
 				t.Fatalf("DriftFields = %v, want [%s]", fields, tc.field)
 			}
@@ -115,10 +115,10 @@ func TestMcpServerRows_IdentityDriftPerField(t *testing.T) {
 
 func TestRestoreMcpServers_SkipsDriftedIdentity(t *testing.T) {
 	t.Parallel()
-	stub := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{
+	stub := &stubMcpAdapter{id: "codex", available: true, listed: []app.InstalledMcpServer{{
 		Name: "srv", Transport: "http", URL: "https://elsewhere.example.com",
 	}}}
-	srv := config.McpServer{Name: "srv", Transport: "http", URL: "https://mcp.example.com", Agents: []string{"claude-code"}}
+	srv := config.McpServer{Name: "srv", Transport: "http", URL: "https://mcp.example.com", Agents: []string{"codex"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 
 	res, err := a.RestoreMcpServers(context.Background(), app.RestoreMcpOptions{})
@@ -141,13 +141,13 @@ func TestRestoreMcpServers_SkipsDriftedIdentity(t *testing.T) {
 
 func TestRestoreMcpServers_HeadersStayManifestAuthoritative(t *testing.T) {
 	t.Parallel()
-	stub := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{
+	stub := &stubMcpAdapter{id: "codex", available: true, listed: []app.InstalledMcpServer{{
 		Name: "srv", Transport: "http", URL: "https://mcp.example.com",
 		Headers: map[string]string{"X-Key": "old"}, HeadersKnown: true,
 	}}}
 	srv := config.McpServer{
 		Name: "srv", Transport: "http", URL: "https://mcp.example.com",
-		Headers: map[string]string{"X-Key": "new"}, Agents: []string{"claude-code"},
+		Headers: map[string]string{"X-Key": "new"}, Agents: []string{"codex"},
 	}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 
@@ -158,7 +158,7 @@ func TestRestoreMcpServers_HeadersStayManifestAuthoritative(t *testing.T) {
 	if len(res.Drift) != 0 {
 		t.Fatalf("Drift = %v, want none for a header change", res.Drift)
 	}
-	if len(res.Updated) != 1 || res.Updated[0] != "claude-code/srv" {
+	if len(res.Updated) != 1 || res.Updated[0] != "codex/srv" {
 		t.Fatalf("Updated = %v, want the header update applied", res.Updated)
 	}
 	if len(stub.addedServers) != 1 || stub.addedServers[0].Headers["X-Key"] != "new" {
@@ -168,10 +168,10 @@ func TestRestoreMcpServers_HeadersStayManifestAuthoritative(t *testing.T) {
 
 func TestResolveMcpDrift_UseManagedReinstallsManifestDefinition(t *testing.T) {
 	t.Parallel()
-	stub := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{
+	stub := &stubMcpAdapter{id: "codex", available: true, listed: []app.InstalledMcpServer{{
 		Name: "srv", Transport: "stdio", Command: "npx -y hijacked",
 	}}}
-	srv := config.McpServer{Name: "srv", Transport: "stdio", Command: "npx -y srv", Agents: []string{"claude-code"}}
+	srv := config.McpServer{Name: "srv", Transport: "stdio", Command: "npx -y srv", Agents: []string{"codex"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 
 	res, err := a.ResolveMcpDrift(context.Background(), app.ResolveMcpDriftOptions{
@@ -180,8 +180,8 @@ func TestResolveMcpDrift_UseManagedReinstallsManifestDefinition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Agents) != 1 || res.Agents[0] != "claude-code" {
-		t.Fatalf("Agents = %v, want [claude-code]", res.Agents)
+	if len(res.Agents) != 1 || res.Agents[0] != "codex" {
+		t.Fatalf("Agents = %v, want [codex]", res.Agents)
 	}
 	if len(stub.removedNames) != 1 || len(stub.addedServers) != 1 {
 		t.Fatalf("remove/add = %v/%v, want one reinstall", stub.removedNames, stub.addedServers)
@@ -196,14 +196,14 @@ func TestResolveMcpDrift_UseManagedReinstallsManifestDefinition(t *testing.T) {
 
 func TestResolveMcpDrift_UseLocalAdoptsLiveIdentityKeepingSecrets(t *testing.T) {
 	t.Parallel()
-	stub := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{
+	stub := &stubMcpAdapter{id: "codex", available: true, listed: []app.InstalledMcpServer{{
 		Name: "srv", Transport: "http", URL: "https://elsewhere.example.com",
 		Headers: map[string]string{"X-Key": "live"}, HeadersKnown: true,
 	}}}
 	srv := config.McpServer{
 		Name: "srv", Transport: "http", URL: "https://mcp.example.com",
 		Headers: map[string]string{"X-Key": "${ROTATED}"}, Env: []string{"TOKEN"},
-		Agents: []string{"claude-code"},
+		Agents: []string{"codex"},
 	}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 
@@ -226,15 +226,15 @@ func TestResolveMcpDrift_UseLocalAdoptsLiveIdentityKeepingSecrets(t *testing.T) 
 
 func TestResolveMcpDrift_UseLocalRefusesCrossAgentConflict(t *testing.T) {
 	t.Parallel()
-	claude := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{
+	codex := &stubMcpAdapter{id: "codex", available: true, listed: []app.InstalledMcpServer{{
 		Name: "srv", Transport: "http", URL: "https://one.example.com",
 	}}}
-	codex := &stubMcpAdapter{id: "codex", available: true, listed: []app.InstalledMcpServer{{
+	hermes := &stubMcpAdapter{id: "hermes-agent", available: true, listed: []app.InstalledMcpServer{{
 		Name: "srv", Transport: "http", URL: "https://two.example.com",
 	}}}
 	srv := config.McpServer{Name: "srv", Transport: "http", URL: "https://mcp.example.com"}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}},
-		app.WithMcpAdapters([]app.McpAdapter{claude, codex}))
+		app.WithMcpAdapters([]app.McpAdapter{codex, hermes}))
 
 	_, err := a.ResolveMcpDrift(context.Background(), app.ResolveMcpDriftOptions{
 		Name: "srv", Strategy: app.McpDriftUseLocal,
@@ -249,10 +249,10 @@ func TestResolveMcpDrift_UseLocalRefusesCrossAgentConflict(t *testing.T) {
 
 func TestResolveMcpDrift_DryRunAndNotDrifted(t *testing.T) {
 	t.Parallel()
-	stub := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{
+	stub := &stubMcpAdapter{id: "codex", available: true, listed: []app.InstalledMcpServer{{
 		Name: "srv", Transport: "http", URL: "https://elsewhere.example.com",
 	}}}
-	srv := config.McpServer{Name: "srv", Transport: "http", URL: "https://mcp.example.com", Agents: []string{"claude-code"}}
+	srv := config.McpServer{Name: "srv", Transport: "http", URL: "https://mcp.example.com", Agents: []string{"codex"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 
 	res, err := a.ResolveMcpDrift(context.Background(), app.ResolveMcpDriftOptions{
@@ -261,7 +261,7 @@ func TestResolveMcpDrift_DryRunAndNotDrifted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Actions) != 1 || !strings.Contains(res.Actions[0], "reinstall srv on claude-code") {
+	if len(res.Actions) != 1 || !strings.Contains(res.Actions[0], "reinstall srv on codex") {
 		t.Fatalf("Actions = %v, want a reinstall preview", res.Actions)
 	}
 	if len(stub.addedServers)+len(stub.removedNames) != 0 {
@@ -278,31 +278,31 @@ func TestResolveMcpDrift_DryRunAndNotDrifted(t *testing.T) {
 
 func TestResolveMcpDrift_AgentFlagNarrowsAndValidates(t *testing.T) {
 	t.Parallel()
-	claude := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{
+	codex := &stubMcpAdapter{id: "codex", available: true, listed: []app.InstalledMcpServer{{
 		Name: "srv", Transport: "stdio", Command: "npx -y hijacked",
 	}}}
-	codex := &stubMcpAdapter{id: "codex", available: true, listed: []app.InstalledMcpServer{{
+	hermes := &stubMcpAdapter{id: "hermes-agent", available: true, listed: []app.InstalledMcpServer{{
 		Name: "srv", Transport: "stdio", Command: "npx -y srv",
 	}}}
 	srv := config.McpServer{Name: "srv", Transport: "stdio", Command: "npx -y srv"}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}},
-		app.WithMcpAdapters([]app.McpAdapter{claude, codex}))
+		app.WithMcpAdapters([]app.McpAdapter{codex, hermes}))
 
 	if _, err := a.ResolveMcpDrift(context.Background(), app.ResolveMcpDriftOptions{
-		Name: "srv", Agents: []string{"codex"}, Strategy: app.McpDriftUseManaged,
-	}); err == nil || !strings.Contains(err.Error(), "not drifted on codex") {
+		Name: "srv", Agents: []string{"hermes-agent"}, Strategy: app.McpDriftUseManaged,
+	}); err == nil || !strings.Contains(err.Error(), "not drifted on hermes-agent") {
 		t.Fatalf("error = %v, want a per-agent not-drifted refusal", err)
 	}
 	res, err := a.ResolveMcpDrift(context.Background(), app.ResolveMcpDriftOptions{
-		Name: "srv", Agents: []string{"claude-code"}, Strategy: app.McpDriftUseManaged,
+		Name: "srv", Agents: []string{"codex"}, Strategy: app.McpDriftUseManaged,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Agents) != 1 || res.Agents[0] != "claude-code" {
-		t.Fatalf("Agents = %v, want only claude-code", res.Agents)
+	if len(res.Agents) != 1 || res.Agents[0] != "codex" {
+		t.Fatalf("Agents = %v, want only codex", res.Agents)
 	}
-	if len(codex.removedNames) != 0 {
+	if len(hermes.removedNames) != 0 {
 		t.Fatal("the healthy agent was reinstalled")
 	}
 }

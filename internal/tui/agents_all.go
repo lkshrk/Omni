@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 
@@ -38,6 +39,20 @@ type agentsAllRow struct {
 	outdated bool
 	// Manufactured for an ignore-list entry with no live row; carries no valid localIdx, so every consumer must check this flag before touching localIdx. Renders name-only, supports only unignore ('x').
 	synthetic bool
+}
+
+// The declared agents plus the ones APM reaches regardless: global MCP has no per-server scoping, so a
+// deployment the config never asked for is still this row's business.
+func mcpRowAgentIDs(row app.McpServerRow, enabledAgents []string) []string {
+	// skillExpandAgents hands back row.Agents itself; appending into its spare capacity would overwrite a neighbouring row.
+	ids := slices.Clone(skillExpandAgents(app.SkillPackageRow{Agents: row.Agents}, enabledAgents))
+	for _, id := range row.APMAgents {
+		if !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func skillExpandAgents(r app.SkillPackageRow, enabledAgents []string) []string {
@@ -97,7 +112,7 @@ func agentsAllRowsList(m Model) []agentsAllRow {
 				out = append(out, agentsAllRow{feature: agentsSectionMcp, localIdx: i, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: row.Name})
 				continue
 			}
-			for _, agentID := range skillExpandAgents(app.SkillPackageRow{Agents: row.Agents}, m.enabledAgents) {
+			for _, agentID := range mcpRowAgentIDs(row, m.enabledAgents) {
 				if agentFilterID != "" && agentID != agentFilterID {
 					continue
 				}
@@ -480,10 +495,10 @@ func (m *Model) doAgentsUpdateAll() []tea.Cmd {
 	work := func() tea.Msg {
 		defer close(ch)
 		sendProgress(ch, gen, "updating APM dependencies…")
-		result, err := a.AgentsUpdateAll(ctx, false)
+		result, warnings, err := a.AgentsUpdateAll(ctx, false)
 		return agentsProgressDoneMsg{
 			gen: gen, skills: true, skillsErr: err,
-			report: &app.AgentsSyncAllResult{Output: result.Stdout, Stderr: result.Stderr},
+			report: &app.AgentsSyncAllResult{Output: result.Stdout, Stderr: result.Stderr, Warnings: warnings},
 		}
 	}
 	return []tea.Cmd{m.spinner.Tick, work, waitForProgress(ch, gen)}
@@ -493,16 +508,7 @@ func skillWarningsText(warnings []string) string {
 	return strings.Join(warnings, "; ")
 }
 
-// The claim step adopts on-disk directories, so the action is confirmed before it runs (see handleAgentsGlobalActionKeyMsg).
 func (m *Model) doAgentsSyncAll() []tea.Cmd {
-	return m.doAgentsComposedRun(true)
-}
-
-func (m *Model) doAgentsRestoreAll() []tea.Cmd {
-	return m.doAgentsComposedRun(false)
-}
-
-func (m *Model) doAgentsComposedRun(claim bool) []tea.Cmd {
 	m.skillsRunning = true
 	m.skillsErr = nil
 	m.skillsResult = nil
@@ -512,7 +518,6 @@ func (m *Model) doAgentsComposedRun(claim bool) []tea.Cmd {
 		defer close(ch)
 		done := agentsProgressDoneMsg{gen: gen, skills: true}
 		report, err := a.AgentsSyncAll(ctx, app.AgentsSyncAllOptions{
-			ImportUnmanaged: claim,
 			Progress: func(text string) {
 				sendProgress(ch, gen, text)
 			},
@@ -522,12 +527,10 @@ func (m *Model) doAgentsComposedRun(claim bool) []tea.Cmd {
 		} else {
 			for _, featureErr := range report.Errors {
 				switch featureErr.Feature {
-				case app.AgentsFeatureImport, app.AgentsFeatureSkills:
+				case app.AgentsFeatureSkills:
 					done.skillsErr = errors.Join(done.skillsErr, featureErr)
 				case app.AgentsFeatureMcp:
 					done.mcpErr = errors.Join(done.mcpErr, featureErr)
-				case app.AgentsFeaturePlugins:
-					done.pluginErr = errors.Join(done.pluginErr, featureErr)
 				}
 			}
 		}

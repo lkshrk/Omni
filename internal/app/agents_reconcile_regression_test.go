@@ -265,12 +265,12 @@ func mustParseURL(t *testing.T, raw string) *url.URL {
 func TestAgentsSyncAllSummaryText_CountsUntouchedWork(t *testing.T) {
 	t.Parallel()
 	res := AgentsSyncAllResult{
-		Skills:   RestoreSkillsResult{ShadowedByPlugin: []string{"o/shadowed"}},
+		Plan:     []string{"packages: would add o/pkg"},
 		Drift:    []string{"o/pkg: drifted on claude-code"},
 		Warnings: []string{"skills: something"},
 	}
 	got := AgentsSyncAllSummaryText(res)
-	for _, want := range []string{"1 drifted", "1 skipped (provided by plugin)", "1 warnings"} {
+	for _, want := range []string{"1 planned changes", "1 drifted", "1 warnings"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("summary = %q, want it to mention %q", got, want)
 		}

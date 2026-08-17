@@ -205,14 +205,14 @@ func (a *App) Reconcile(ctx context.Context, opts ReconcileOptions) (*ReconcileR
 // Agent installation is global APM state; deployment targeting belongs in ~/.apm/apm.yml.
 func (a *App) reconcileAgents(ctx context.Context, opts ReconcileOptions, result *ReconcileResult) error {
 	a.reconcileProgress(opts, "syncing agents...")
-	res, err := a.AgentsSyncAll(ctx, AgentsSyncAllOptions{
-		ImportUnmanaged: true,
-		Progress:        opts.Progress,
-	})
+	res, err := a.AgentsSyncAll(ctx, AgentsSyncAllOptions{Progress: opts.Progress})
 	if err != nil {
 		res.addError("apm", err.Error())
 	}
 	result.Agents = &res
+	if err == nil {
+		err = AgentsSyncAllFailure(res)
+	}
 	return err
 }
 

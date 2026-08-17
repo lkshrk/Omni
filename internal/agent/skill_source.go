@@ -28,6 +28,9 @@ func ParseSkillSource(input string) (SkillSource, error) {
 	var skills []string
 	at := strings.LastIndex(raw, "@")
 	hash := strings.LastIndex(raw, "#")
+	if at < scpLocatorEnd(raw) {
+		at = -1
+	}
 	if at > strings.LastIndex(raw, "/") {
 		end := len(raw)
 		if hash > at {
@@ -95,9 +98,26 @@ func normalizeSkillPackage(pkg config.SkillPackage) (config.SkillPackage, error)
 	return pkg, nil
 }
 
+// scpLocatorEnd offsets past the colon of a user@host: locator, or 0 for anything else; the '@' in one is never a skill selector.
+func scpLocatorEnd(raw string) int {
+	at := strings.Index(raw, "@")
+	if at <= 0 || strings.ContainsAny(raw[:at], "/:") {
+		return 0
+	}
+	colon := strings.Index(raw[at+1:], ":")
+	if colon <= 0 || strings.ContainsAny(raw[at+1:at+1+colon], "/@") {
+		return 0
+	}
+	return at + colon + 2
+}
+
 func normalizeSourceLocator(raw string) (string, string, error) {
 	if strings.HasPrefix(raw, "git@github.com:") {
 		return normalizeGitHubPath(strings.TrimPrefix(raw, "git@github.com:"))
+	}
+	// url.Parse rejects the colon in an scp locator's host, so it never reaches the scp branch below.
+	if scpLocatorEnd(raw) > 0 {
+		return raw, "", nil
 	}
 
 	u, err := url.Parse(raw)

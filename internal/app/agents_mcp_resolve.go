@@ -46,12 +46,25 @@ func (a *App) ResolveMcpDrift(ctx context.Context, opts ResolveMcpDriftOptions) 
 	if target == nil {
 		return McpDriftResolution{}, fmt.Errorf("mcp server %q is not in this host's manifest", name)
 	}
+	apmAgentIDs, _, _, _ := a.partitionMcpAgents(cfg)
+	for _, id := range opts.Agents {
+		if slices.Contains(apmAgentIDs, id) {
+			return McpDriftResolution{}, fmt.Errorf(
+				"APM owns %s's registration on %s, so this verb cannot settle it: reconcile with %s",
+				name, id, mcpAPMDriftRemedy)
+		}
+	}
 	live, synced, err := a.mcpRegistrationsByState(ctx, *target)
 	if err != nil {
 		return McpDriftResolution{}, err
 	}
 	selected, err := driftedMcpResolveTargets(*target, a.mcpAdapters(), live, opts.Agents)
 	if err != nil {
+		if len(live) == 0 && len(opts.Agents) == 0 && a.apmDrivesMcpServer(cfg, *target) {
+			return McpDriftResolution{}, fmt.Errorf(
+				"mcp server %s is not drifted on any agent this verb drives; its APM-owned agents reconcile with %s",
+				name, mcpAPMDriftRemedy)
+		}
 		return McpDriftResolution{}, err
 	}
 	res := McpDriftResolution{Name: name, Agents: selected}

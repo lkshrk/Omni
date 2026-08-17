@@ -24,7 +24,7 @@ func capabilityResolveCases() []capabilityResolveCase {
 	return []capabilityResolveCase{
 		{
 			name:    "mcp",
-			group:   newAgentsMcpCmd,
+			group:   newAgentsMcpVisibleCmd,
 			resolve: newAgentsMcpResolveCmd,
 			prompt:  "Replace the live registration",
 		},

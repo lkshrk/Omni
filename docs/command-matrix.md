@@ -182,80 +182,37 @@ omni dots groups nvim --remove old-host
 
 | Command | Host required | State touched | Safer first step |
 | --- | --- | --- | --- |
-| `omni agents add <source>` | no | Config, files, cache, network | `omni agents find <query>` |
-| `omni agents find <query>` | no | Cache | already read-only apart from the catalog cache |
-| `omni agents sync` | no | Config, files, cache, network | `--dry-run` |
-| `omni agents resolve` | no | Config, agent files and registrations, cache, network | `--dry-run` |
-| `omni agents skills sync` | no | Files, cache, network | `--dry-run` |
-| `omni agents skills upgrade` | no | Files, cache, network | `--dry-run`, or `--check` to probe sources without refreshing |
-| `omni agents skills import [<source>]` | no | Config, files | `--dry-run` |
-| `omni agents skills status <source>[@skill]` | no | Local state (records the read) | already read-only |
-| `omni agents skills resolve <source>[@skill]` | no | Files or config, cache, network | `--dry-run` |
-| `omni agents skills remove <source>` | no | Config | `omni doctor` |
-| `omni agents skills remove <source> --purge` | no | Config, files | `omni agents skills remove <source>` |
-| `omni agents skills group <source> <group>...` | no | Config | `omni groups` |
+| `omni agents sync [--frozen] [--dry-run]` | no | Global APM manifest, deployed agent files and MCP registrations, network | `--dry-run` |
+| `omni agents add <package>...` | no | Config, global APM manifest, deployed agent files, network | `omni agents search <query@marketplace>` |
+| `omni agents remove <package>...` | no | Global APM manifest, deployed agent files | `omni agents sync --dry-run` |
+| `omni agents update [package]...` | no | Global APM lockfile, deployed agent files, network | `--dry-run` |
+| `omni agents search <query@marketplace>` | no | Network | already read-only |
+| `omni agents import [<source>]` | no | Config | `omni agents import` with no source lists the candidates |
 | `omni agents mcp list` | no | Read-only | already read-only |
-| `omni agents mcp add --name <name> --transport <transport>` | no | Config, agent registrations | `omni agents mcp list` |
-| `omni agents mcp import [<name>]` | no | Config | `omni agents mcp list` |
-| `omni agents mcp sync` | no | Agent registrations | `--dry-run` |
-| `omni agents mcp remove <name>` | no | Config, agent registrations | `omni agents mcp list` |
+| `omni agents mcp add --name <name> --transport <transport>` | no | Config, global APM manifest, agent registrations | `omni agents mcp list` |
+| `omni agents mcp import [<name>]` | no | Config, global APM manifest, agent registrations | `omni agents mcp list` |
+| `omni agents mcp remove <name>` | no | Config, global APM manifest, agent registrations | `omni agents mcp list` |
+| `omni agents mcp resolve <name>` | no | Agent config or omni config | `--dry-run` |
 | `omni agents mcp group <name> <group>...` | no | Config | `omni groups` |
-| `omni agents mcp resolve <name>` | no | Agent config or manifest | `--dry-run` |
-| `omni agents plugins list` | no | Read-only | already read-only |
-| `omni agents plugins add --name <name> (--marketplace <marketplace> \| --source <source>)` | no | Config, agent files, network | `omni agents plugins list` |
-| `omni agents plugins import [<name>] [--source <source>]` | no | Config | `omni agents plugins list` |
-| `omni agents plugins sync` | no | Agent files, network | `--dry-run` |
-| `omni agents plugins remove <name>` | no | Config, agent files | `omni agents plugins list` |
-| `omni agents plugins group <name> <group>...` | no | Config | `omni groups` |
-| `omni agents plugins resolve <name>` | no | Agent files or manifest, network | `--dry-run` |
-| `omni agents plugins marketplace list` | no | Read-only | already read-only |
-| `omni agents plugins marketplace add <name>` | no | Config, agent registrations, network | `omni agents plugins marketplace list` |
-| `omni agents plugins marketplace remove <name>` | no | Config | `omni agents plugins marketplace list` |
-| `omni agents plugins marketplace group <name> <group>...` | no | Config | `omni groups` |
 
-`agents skills remove` undeclares a package and leaves the installed content
-alone; `--purge` composes the two halves, deleting the target links and any
-unreferenced shared content as well, which is how you fully undo an add. The
-deprecated `agents skills uninstall` still does only the disk half.
+`agents sync` regenerates `~/.apm/apm.yml` from this host's resolved config and
+reconciles each surface with one scoped `apm install`. The omni config is never
+mutated by a sync, and manifest entries omni does not declare are preserved.
 
-`agents skills sync` and `agents skills upgrade` are the only commands that
-write into an Agent Target's skills directory on their own. Neither adopts a
-skill directory an older CLI installed; use `agents skills import` for that,
-with a source argument to claim exactly one package.
+`agents add` and `agents mcp add` are not declaration-only. Each records config
+intent *and* converges this host immediately, so running one on a machine you
+meant to leave alone deploys there too. `agents mcp remove` is symmetric: the
+deployed registration always goes with the config entry, which is why it takes
+no `--purge`.
 
-`agents skills status` reads one package end to end — manifest intent, store
-content, update state, lockfile attribution, and what every targeted agent
-directory actually holds — and names the next step for each entry that is not
-a managed link. `agents skills upgrade --check` probes every source and reports
-which packages are behind without refreshing any of them.
-`agents skills resolve --use-managed` is the one command that overwrites a
-directory another tool owns, which is why it confirms first; its `--use-local`
-side touches no files and only narrows the manifest.
+`agents import` and `agents mcp import` run the other way: they adopt what this
+host already has — a live agent registration, or an `apm.yml` entry sync
+preserved — into the config. A manifest entry is vetted on the way in exactly
+like a typed one, so a remote-helper or credential-bearing source is refused.
 
-`agents mcp resolve` and `agents plugins resolve` settle the same kind of
-conflict for the other two capabilities and confirm on the same side:
-`--use-managed` discards the live registration or the foreign plugin copy.
-Their `--use-local` side writes only the manifest — unlike skills, an MCP
-server definition and a plugin's marketplace are configuration Omni can adopt
-outright (see [CLI](cli.md#agents-commands)).
-
-`agents mcp add`, `agents plugins add`, and `agents plugins marketplace add`
-are not declaration-only. Each records manifest intent *and* converges this
-host immediately through the targeted agents' own CLIs, so running one on a
-machine you meant to leave alone registers a server, installs a plugin, or adds
-a marketplace there. `agents mcp remove` and `agents plugins remove` are
-symmetric: the live side always goes with the manifest entry, which is why
-neither takes a `--purge`. `agents plugins marketplace remove` is the one
-exception — it drops the manifest entry only, because pulling a marketplace out
-from under plugins an agent still installs from would break them.
-
-`agents resolve` settles every drifted agent resource across all three
-capabilities in one pass, so it is the broadest of the resolve verbs; prefer the
-per-capability `resolve` when only one row is in question.
-
-`agents sync` restores plugins, skills, then MCP servers and stays converge-only.
-`omni tools sync --all` also imports each capability immediately before its
-restore; see the [exact order and dry-run shadow rules](cli.md#sync-all).
+`agents mcp resolve --use-managed` discards the live registration and reinstalls
+the config definition; `--use-local` writes only the config. Drift on an
+APM-owned agent has no remedy verb: the next `agents sync` reconciles it.
 
 ## Group Commands
 

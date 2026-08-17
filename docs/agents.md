@@ -72,9 +72,10 @@ list; omitting that list uses the resource's enabled targets.
   discovered skill. See [Upgrading From CLI-Managed Skills](migrating-skills.md)
   for storage, legacy adoption, and drift details.
 - MCP `stdio` servers require `command`; `http` and `sse` servers require
-  `url`. `env` stores variable names whose values are read during restore.
-  `env_literal` stores non-secret literal values, and `headers` configures
-  remote-server headers.
+  `url`. `env` stores variable names, deployed as `${env:NAME}` references the
+  agent resolves when it starts the server. `env_literal` stores non-secret
+  literal values, and `headers` configures remote-server headers; a `${VAR}`
+  reference in either is deployed the same way.
 - A marketplace has a stable manifest `name` and the `source` accepted by the
   target agent CLI.
 - A plugin uses exactly one installation source: a declared `marketplace`, or

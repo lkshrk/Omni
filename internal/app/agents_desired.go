@@ -14,8 +14,7 @@ type desiredAgentPackage struct {
 	Targets []string
 }
 
-// resolveDesiredAgentPackages maps the legacy host-scoped resolution (ungrouped packages plus packages
-// referenced by a host-active group) onto APM install targets. Warnings cover entries excluded for this host.
+// resolveDesiredAgentPackages maps the legacy host-scoped resolution (ungrouped packages plus packages referenced by a host-active group) onto APM install targets. Warnings cover entries excluded for this host.
 func (a *App) resolveDesiredAgentPackages(cfg *config.RootConfig) ([]desiredAgentPackage, []string) {
 	warnings := make([]string, 0)
 	if w := unconfiguredHostSkillsWarning(cfg); w != "" {
@@ -28,8 +27,12 @@ func (a *App) resolveDesiredAgentPackages(cfg *config.RootConfig) ([]desiredAgen
 	}
 
 	resolved := a.resolveSkillPackages(cfg, currentMachineGroupName())
+	ignored, _, _, _ := a.AgentsIgnoreSet(cfg)
 	out := make([]desiredAgentPackage, 0, len(resolved))
 	for _, pkg := range resolved {
+		if ignored[skillPackageRepoName(pkg.Source)] {
+			continue
+		}
 		agents := pkg.Agents
 		if use != nil {
 			agents = effectiveSkillAgents(use, pkg.SkillPackage)
@@ -59,25 +62,45 @@ func (a *App) resolveDesiredAgentPackages(cfg *config.RootConfig) ([]desiredAgen
 	return out, warnings
 }
 
-func (p desiredAgentPackage) installSpec() string {
-	if strings.TrimSpace(p.Ref) != "" {
-		return p.Source + "#" + p.Ref
+func (p desiredAgentPackage) manifestEntry() apmPackageDependency {
+	return apmPackageDependency{
+		Git:     strings.TrimSpace(p.Source),
+		Ref:     strings.TrimSpace(p.Ref),
+		Targets: p.Targets,
 	}
-	return p.Source
 }
 
-// groupDesiredByTargets batches packages sharing a target set into one apm install invocation, preserving order.
-func groupDesiredByTargets(desired []desiredAgentPackage) [][]desiredAgentPackage {
-	byKey := make(map[string]int)
-	batches := make([][]desiredAgentPackage, 0, len(desired))
+func desiredPackageEntries(desired []desiredAgentPackage) []apmPackageDependency {
+	entries := make([]apmPackageDependency, 0, len(desired))
 	for _, pkg := range desired {
-		key := strings.Join(pkg.Targets, ",")
-		if i, ok := byKey[key]; ok {
-			batches[i] = append(batches[i], pkg)
-			continue
-		}
-		byKey[key] = len(batches)
-		batches = append(batches, []desiredAgentPackage{pkg})
+		entries = append(entries, pkg.manifestEntry())
 	}
-	return batches
+	return entries
+}
+
+// unionAPMTargets — one invocation reconciles every declared package, so every target it should reach must be selected at once; per-dependency targets narrow the reach from there.
+func unionAPMTargets(desired []desiredAgentPackage) []string {
+	union := make([]string, 0)
+	for _, pkg := range desired {
+		for _, target := range pkg.Targets {
+			if !slices.Contains(union, target) {
+				union = append(union, target)
+			}
+		}
+	}
+	sort.Strings(union)
+	return union
+}
+
+// Identities normalize exactly as the generator writes them, and a group-inactive package stays omni's to retire rather than foreign.
+func managedPackageIdentities(cfg *config.RootConfig) map[string]bool {
+	managed := make(map[string]bool, len(cfg.Agents.Packages))
+	for _, pkg := range cfg.Agents.Packages {
+		managed[apmPackageIdentityOf(pkg.Source)] = true
+	}
+	return managed
+}
+
+func apmPackageIdentityOf(source string) string {
+	return normalizeAPMPackageIdentity(normalizeConfiguredSkillPackage(config.SkillPackage{Source: source}).Source)
 }

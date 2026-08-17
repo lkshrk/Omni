@@ -15,7 +15,7 @@ func inferenceManifestServer() config.McpServer {
 		Transport: "sse",
 		URL:       "https://mcp.example.com/sse",
 		Headers:   map[string]string{"Authorization": "Bearer ${DOCS_TOKEN}"},
-		Agents:    []string{"grok"},
+		Agents:    []string{"hermes-agent"},
 	}
 }
 
@@ -36,7 +36,7 @@ func inferenceLiveServer(inferred bool) app.InstalledMcpServer {
 // is the damage, so the test pins convergence as well as the absent drift line.
 func TestRestoreMcpServers_InferredTransportConvergesHeadersInsteadOfDrifting(t *testing.T) {
 	t.Parallel()
-	stub := &stubMcpAdapter{id: "grok", available: true, listed: []app.InstalledMcpServer{inferenceLiveServer(true)}}
+	stub := &stubMcpAdapter{id: "hermes-agent", available: true, listed: []app.InstalledMcpServer{inferenceLiveServer(true)}}
 	a := newMcpTestApp(t,
 		config.AgentsConfig{McpServers: []config.McpServer{inferenceManifestServer()}},
 		app.WithMcpAdapters([]app.McpAdapter{stub}),
@@ -49,7 +49,7 @@ func TestRestoreMcpServers_InferredTransportConvergesHeadersInsteadOfDrifting(t 
 	if len(res.Drift) != 0 {
 		t.Fatalf("drift = %v, want none for a transport the agent never reported", res.Drift)
 	}
-	if len(res.Updated) != 1 || res.Updated[0] != "grok/docs" {
+	if len(res.Updated) != 1 || res.Updated[0] != "hermes-agent/docs" {
 		t.Fatalf("updated = %v, want the header pass to have run", res.Updated)
 	}
 	if len(stub.addedServers) != 1 || stub.addedServers[0].Headers["Authorization"] != "Bearer ${DOCS_TOKEN}" {
@@ -64,7 +64,7 @@ func TestRestoreMcpServers_InferredTransportConvergesHeadersInsteadOfDrifting(t 
 // does report sse against a manifest declaring http is still drift, and is still left untouched.
 func TestRestoreMcpServers_ReportedTransportStillDrifts(t *testing.T) {
 	t.Parallel()
-	stub := &stubMcpAdapter{id: "grok", available: true, listed: []app.InstalledMcpServer{inferenceLiveServer(false)}}
+	stub := &stubMcpAdapter{id: "hermes-agent", available: true, listed: []app.InstalledMcpServer{inferenceLiveServer(false)}}
 	a := newMcpTestApp(t,
 		config.AgentsConfig{McpServers: []config.McpServer{inferenceManifestServer()}},
 		app.WithMcpAdapters([]app.McpAdapter{stub}),
@@ -89,7 +89,7 @@ func TestRestoreMcpServers_InferredTransportDoesNotMaskOtherDrift(t *testing.T) 
 	t.Parallel()
 	live := inferenceLiveServer(true)
 	live.URL = "https://elsewhere.example.com/sse"
-	stub := &stubMcpAdapter{id: "grok", available: true, listed: []app.InstalledMcpServer{live}}
+	stub := &stubMcpAdapter{id: "hermes-agent", available: true, listed: []app.InstalledMcpServer{live}}
 	a := newMcpTestApp(t,
 		config.AgentsConfig{McpServers: []config.McpServer{inferenceManifestServer()}},
 		app.WithMcpAdapters([]app.McpAdapter{stub}),

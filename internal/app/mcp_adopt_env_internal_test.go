@@ -14,7 +14,7 @@ const provenEnvValue = "ambient-value-9f2c"
 func adoptEnvTestApp(t *testing.T, servers []InstalledMcpServer, env map[string]string) *App {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	mcp := &listingMcpAdapter{id: "claude-code", listed: servers}
+	mcp := &listingMcpAdapter{id: "codex", listed: servers}
 	return newSkillsTestApp(t, config.AgentsConfig{},
 		WithMcpAdapters([]McpAdapter{mcp}),
 		WithEnvLookup(func(name string) string { return env[name] }))

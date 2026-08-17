@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,12 +34,13 @@ func newAPMFixApp(t *testing.T, available map[string]bool) (*App, *availExecutor
 }
 
 func TestFixMissingAPMNoopWhenInstalled(t *testing.T) {
-	a, mock := newAPMFixApp(t, map[string]bool{"apm": true})
+	a, mock := newAPMFixApp(t, map[string]bool{"apm": true, "uv": true})
+	mock.Responses = []executor.MockCall{{Stdout: "Agent Package Manager (APM) CLI version " + apmVersionFloor + "\n"}}
 	report, err := a.FixMissingAPM(context.Background(), false)
 	if err != nil || !report.AlreadyInstalled {
 		t.Fatalf("report = %#v, err = %v", report, err)
 	}
-	if len(mock.Calls) != 0 {
+	if len(mock.Calls) != 1 || mock.Calls[0].Name != "apm" {
 		t.Fatalf("unexpected calls: %#v", mock.Calls)
 	}
 }
@@ -146,22 +149,67 @@ func TestFixMissingAPMErrorsWithoutInstaller(t *testing.T) {
 	}
 }
 
-func TestAgentsSyncAllRefusesToInstallWithoutAPM(t *testing.T) {
+// apm is on PATH but below the floor: the first upgrader failing means it was installed by another one, so
+// the fix tries the rest before reporting the upgrade impossible.
+func TestFixMissingAPMFallsThroughToTheNextUpgrader(t *testing.T) {
+	a, mock := newAPMFixApp(t, map[string]bool{"apm": true, "uv": true, "pipx": true})
+	mock.Responses = []executor.MockCall{
+		{Stdout: "Agent Package Manager (APM) CLI version 0.0.1\n"},
+		{Stderr: "`apm-cli` is not installed\n", Err: errors.New("exit status 1")},
+		{Stdout: "upgraded\n"},
+	}
+
+	report, err := a.FixMissingAPM(context.Background(), false)
+	if err != nil || report.Upgraded != "pipx upgrade apm-cli" {
+		t.Fatalf("report = %#v, err = %v", report, err)
+	}
+	if len(mock.Calls) != 3 {
+		t.Fatalf("calls = %#v, want the failed uv upgrade followed by pipx", mock.Calls)
+	}
+}
+
+func TestFixMissingAPMReportsEveryFailedUpgrader(t *testing.T) {
+	a, mock := newAPMFixApp(t, map[string]bool{"apm": true, "uv": true, "pipx": true})
+	mock.Responses = []executor.MockCall{
+		{Stdout: "Agent Package Manager (APM) CLI version 0.0.1\n"},
+		{Stderr: "uv refused\n", Err: errors.New("exit status 1")},
+		{Stderr: "pipx refused\n", Err: errors.New("exit status 1")},
+	}
+
+	_, err := a.FixMissingAPM(context.Background(), false)
+	if err == nil {
+		t.Fatal("every upgrader failed but the fix reported success")
+	}
+	for _, want := range []string{"uv refused", "pipx refused"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %v, want it to name %q", err, want)
+		}
+	}
+}
+
+func newSyncWithoutAPMApp(t *testing.T, cfg *config.RootConfig) (*App, *availExecutor, string) {
+	t.Helper()
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "settings.json")
-	if err := config.Save(configPath, &config.RootConfig{Version: config.CurrentVersion, Agents: config.AgentsConfig{
-		Packages: []config.SkillPackage{{Source: "acme/shared", Agents: []string{"codex"}}},
-	}}); err != nil {
+	if err := config.Save(configPath, cfg); err != nil {
 		t.Fatal(err)
 	}
+	home := filepath.Join(dir, "home")
 	mock := &availExecutor{available: nil}
-	a := New(configPath, WithEnvLookup(func(name string) string {
+	a := New(configPath, WithMcpAdapters([]McpAdapter{}), WithEnvLookup(func(name string) string {
 		if name == "HOME" {
-			return filepath.Join(dir, "home")
+			return home
 		}
 		return ""
 	}))
 	a.SetFallbackExecutor(mock)
+	return a, mock, home
+}
+
+func TestAgentsSyncAllRefusesToInstallWithoutAPM(t *testing.T) {
+	a, mock, home := newSyncWithoutAPMApp(t, &config.RootConfig{Version: config.CurrentVersion, Agents: config.AgentsConfig{
+		Packages: []config.SkillPackage{{Source: "acme/shared", Agents: []string{"codex"}}},
+	}})
 
 	_, err := a.AgentsSyncAll(context.Background(), AgentsSyncAllOptions{})
 	if err == nil || !strings.Contains(err.Error(), "apm-cli") {
@@ -169,5 +217,31 @@ func TestAgentsSyncAllRefusesToInstallWithoutAPM(t *testing.T) {
 	}
 	if len(mock.Calls) != 0 {
 		t.Fatalf("apm invoked despite missing binary: %#v", mock.Calls)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".apm")); !os.IsNotExist(err) {
+		t.Fatalf("stat ~/.apm = %v, want no manifest written for a host that cannot run APM", err)
+	}
+}
+
+// Nothing declared is nothing to refuse: a host without apm-cli still syncs its other surfaces, and never
+// gets a ~/.apm it did not ask for — which is a hard failure where HOME is not writable.
+func TestAgentsSyncAllSucceedsWithoutAPMWhenNothingIsDeclared(t *testing.T) {
+	a, mock, home := newSyncWithoutAPMApp(t, &config.RootConfig{Version: config.CurrentVersion})
+
+	res, err := a.AgentsSyncAll(context.Background(), AgentsSyncAllOptions{})
+	if err != nil {
+		t.Fatalf("AgentsSyncAll = %v, want the sync to succeed", err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("errors = %v, want none", res.Errors)
+	}
+	if !strings.Contains(strings.Join(res.Warnings, " "), "nothing to install") {
+		t.Fatalf("warnings = %v", res.Warnings)
+	}
+	if len(mock.Calls) != 0 {
+		t.Fatalf("apm invoked despite missing binary: %#v", mock.Calls)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".apm")); !os.IsNotExist(err) {
+		t.Fatalf("stat ~/.apm = %v, want the APM directory left uncreated", err)
 	}
 }

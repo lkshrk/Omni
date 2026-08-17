@@ -39,9 +39,13 @@ func TestAgentsSyncRunsRealAPMFromGlobalManifest(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	writeIntegrationFile(t, filepath.Join(pkg, "apm.yml"), "name: fixture-skill\nversion: 1.0.0\ntype: skill\ndependencies:\n  apm: []\n  mcp: []\n")
 	writeIntegrationFile(t, filepath.Join(pkg, "SKILL.md"), "---\nname: fixture-skill\ndescription: CLI integration fixture\n---\n")
-	writeIntegrationFile(t, filepath.Join(home, ".apm", "apm.yml"), "name: omni-integration\nversion: 1.0.0\ntargets:\n  - codex\ndependencies:\n  apm:\n    - "+pkg+"\n  mcp: []\n")
+	writeIntegrationFile(t, filepath.Join(home, ".apm", "apm.yml"), "name: omni-integration\nversion: 1.0.0\ntargets:\n  - codex\ndependencies:\n  apm: []\n  mcp: []\n")
 	configPath := filepath.Join(root, "settings.json")
-	if err := config.Save(configPath, &config.RootConfig{Version: config.CurrentVersion}); err != nil {
+	if err := config.Save(configPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{AgentsUse: []string{"codex"}},
+		Agents:   config.AgentsConfig{Packages: []config.SkillPackage{{Source: pkg, Agents: []string{"codex"}}}},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	a := app.New(configPath, app.WithEnvLookup(os.Getenv))
@@ -87,7 +91,10 @@ func TestAgentsCommandsRunRealOfflineAPMLifecycle(t *testing.T) {
 	writeIntegrationFile(t, filepath.Join(pkg, "SKILL.md"), "---\nname: searchable-skill\ndescription: Searchable offline fixture\n---\n")
 	writeIntegrationFile(t, filepath.Join(market, "apm.yml"), "name: local-marketplace\nversion: 0.1.0\nmarketplace:\n  owner:\n    name: omni\n    url: https://example.invalid/omni\n  outputs:\n    claude: {}\n  packages:\n    - name: searchable-skill\n      description: Searchable offline fixture\n      source: ./packages/searchable-skill\n      version: 1.0.0\n")
 	configPath := filepath.Join(root, "settings.json")
-	if err := config.Save(configPath, &config.RootConfig{Version: config.CurrentVersion}); err != nil {
+	if err := config.Save(configPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{AgentsUse: []string{"codex"}},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	a := app.New(configPath, app.WithEnvLookup(os.Getenv))
@@ -130,6 +137,11 @@ func TestAgentsCommandsRunRealOfflineAPMLifecycle(t *testing.T) {
 	}
 	if _, err := os.Stat(deployed); !os.IsNotExist(err) {
 		t.Fatalf("remove left deployed skill: %v", err)
+	}
+	// Undeclaring and uninstalling are one step: leaving the config entry would have the next sync reinstall it.
+	after, err := config.Load(configPath)
+	if err != nil || len(after.Agents.Packages) != 0 {
+		t.Fatalf("packages = %+v, %v; want the removed package undeclared", after.Agents.Packages, err)
 	}
 }
 

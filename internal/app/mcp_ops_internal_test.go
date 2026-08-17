@@ -24,7 +24,7 @@ func (s *listingMcpAdapter) Remove(context.Context, string) error        { retur
 func adoptTestApp(t *testing.T) *App {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
-	mcp := &listingMcpAdapter{id: "claude-code", listed: []InstalledMcpServer{
+	mcp := &listingMcpAdapter{id: "codex", listed: []InstalledMcpServer{
 		{
 			Name: "secret-remote", Transport: "http", URL: "https://secret.example.com",
 			Headers: map[string]string{"Authorization": "Bearer sk-live-1"}, HeadersKnown: true,
@@ -36,7 +36,7 @@ func adoptTestApp(t *testing.T) *App {
 			HeadersKnown: true,
 		},
 	}}
-	plugins := &shadowTestPluginAdapter{id: "claude-code", listedPlugins: []InstalledPlugin{
+	plugins := &shadowTestPluginAdapter{id: "codex", listedPlugins: []InstalledPlugin{
 		{Name: "helper", Marketplace: "declared"},
 	}}
 	return newSkillsTestApp(t,
@@ -146,12 +146,12 @@ func TestAdoptUnmanagedMcpServers_FiltersPluginShadowPerAgent(t *testing.T) {
 	}
 	a := newSkillsTestApp(t, config.AgentsConfig{},
 		WithMcpAdapters([]McpAdapter{
-			&listingMcpAdapter{id: "claude-code", listed: []InstalledMcpServer{server}},
 			&listingMcpAdapter{id: "codex", listed: []InstalledMcpServer{server}},
+			&listingMcpAdapter{id: "hermes-agent", listed: []InstalledMcpServer{server}},
 		}),
 		WithPluginAdapters([]PluginAdapter{
-			&shadowTestPluginAdapter{id: "claude-code", listedPlugins: []InstalledPlugin{{Name: "shared"}}},
-			&shadowTestPluginAdapter{id: "codex"},
+			&shadowTestPluginAdapter{id: "codex", listedPlugins: []InstalledPlugin{{Name: "shared"}}},
+			&shadowTestPluginAdapter{id: "hermes-agent"},
 		}),
 	)
 
@@ -159,11 +159,11 @@ func TestAdoptUnmanagedMcpServers_FiltersPluginShadowPerAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.WouldAdopt) != 1 || !strings.Contains(res.WouldAdopt[0], "on codex") {
-		t.Fatalf("WouldAdopt = %v, want shared adopted only for unshadowed codex", res.WouldAdopt)
+	if len(res.WouldAdopt) != 1 || !strings.Contains(res.WouldAdopt[0], "on hermes-agent") {
+		t.Fatalf("WouldAdopt = %v, want shared adopted only for unshadowed hermes-agent", res.WouldAdopt)
 	}
-	if strings.Contains(res.WouldAdopt[0], "claude-code") {
-		t.Fatalf("WouldAdopt = %v, want plugin-shadowed claude-code filtered only", res.WouldAdopt)
+	if strings.Contains(res.WouldAdopt[0], "codex") {
+		t.Fatalf("WouldAdopt = %v, want plugin-shadowed codex filtered only", res.WouldAdopt)
 	}
 }
 

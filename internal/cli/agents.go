@@ -45,52 +45,17 @@ func printAgentsSyncAllResult(w io.Writer, res app.AgentsSyncAllResult, dryRun b
 	for _, msg := range res.Warnings {
 		fmt.Fprintf(w, "warn: %s\n", msg)
 	}
-	if len(res.Imported.Added) > 0 || len(res.Imported.Updated) > 0 {
-		fmt.Fprintf(w, "skills import: %s\n", app.ImportDiffSummaryText(res.Imported))
-		for _, n := range res.Imported.Added {
-			fmt.Fprintf(w, "  + %s\n", n)
-		}
-		for _, n := range res.Imported.Updated {
-			fmt.Fprintf(w, "  ~ %s\n", n)
-		}
-	}
-	if res.McpAdopted.Adopted > 0 {
-		fmt.Fprintf(w, "mcp import: %d claimed\n", res.McpAdopted.Adopted)
-	}
-	// A server omni declined to claim is the reason the user would look at this output at all; silence here reads as a clean adoption.
-	for _, line := range res.McpAdopted.Conflicts {
-		fmt.Fprintf(w, "  ! mcp import: %s\n", line)
-	}
-	for _, line := range res.McpAdopted.Skipped {
-		fmt.Fprintf(w, "  ! mcp import: %s\n", line)
-	}
-	for _, line := range res.McpAdopted.Warnings {
-		fmt.Fprintf(w, "  ! mcp import: %s\n", line)
-	}
-	if res.PluginsAdopted.Adopted > 0 {
-		fmt.Fprintf(w, "plugins import: %d claimed\n", res.PluginsAdopted.Adopted)
+	for _, line := range res.Plan {
+		fmt.Fprintf(w, "plan: %s\n", line)
 	}
 	if dryRun {
-		for _, line := range res.SkillsDryRun {
-			fmt.Fprintf(w, "skills: %s\n", line)
-		}
 		for _, s := range res.Mcp.WouldInstall {
 			fmt.Fprintf(w, "mcp: would install %s\n", s)
 		}
 		for _, s := range res.Mcp.WouldUpdate {
 			fmt.Fprintf(w, "mcp: would update %s\n", s)
 		}
-		for _, p := range res.Plugins.WouldInstall {
-			fmt.Fprintf(w, "plugins: would install %s\n", p)
-		}
-		for _, s := range res.McpAdopted.WouldAdopt {
-			fmt.Fprintf(w, "mcp: %s\n", s)
-		}
-		for _, p := range res.PluginsAdopted.WouldAdopt {
-			fmt.Fprintf(w, "plugins: %s\n", p)
-		}
 	} else {
-		fmt.Fprintf(w, "skills: %s\n", app.RestoreSkillsSummaryText(res.Skills))
 		for _, s := range res.Mcp.Installed {
 			fmt.Fprintf(w, "mcp: installed %s\n", s)
 		}
@@ -100,15 +65,6 @@ func printAgentsSyncAllResult(w io.Writer, res app.AgentsSyncAllResult, dryRun b
 		for _, s := range res.Mcp.AlreadyInstalled {
 			fmt.Fprintf(w, "mcp: already installed %s\n", s)
 		}
-		for _, p := range res.Plugins.Installed {
-			fmt.Fprintf(w, "plugins: installed %s\n", p)
-		}
-		for _, p := range res.Plugins.AlreadyInstalled {
-			fmt.Fprintf(w, "plugins: already installed %s\n", p)
-		}
-	}
-	for _, s := range res.Skills.ShadowedByPlugin {
-		fmt.Fprintf(w, "  skipped (provided by plugin): %s\n", s)
 	}
 	for _, s := range res.Mcp.ShadowedByPlugin {
 		fmt.Fprintf(w, "  skipped (provided by plugin): %s\n", s)
@@ -137,12 +93,79 @@ func newAgentsCmd(state *rootState) *cobra.Command {
 	cmd.AddCommand(
 		sync,
 		deprecatedAlias(sync, "restore", nil),
-		newAPMAgentsAddCmd(state, &global),
-		newAPMAgentsRemoveCmd(state, &global),
+		newAPMAgentsAddCmd(state),
+		newAPMAgentsRemoveCmd(state),
 		newAPMAgentsUpdateCmd(state, &global),
 		newAPMAgentsSearchCmd(state, &global),
+		newAgentsMcpVisibleCmd(state),
+		newAPMAgentsImportCmd(state),
 	)
 	return cmd
+}
+
+// APM owns registration, so declaring a server is `omni agents mcp add`'s job only through the config: the
+// verbs here read what APM deploys, adopt an undeclared server, and undeclare or re-scope a declared one.
+func newAgentsMcpVisibleCmd(state *rootState) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "mcp",
+		Short: "Inspect, adopt, and undeclare MCP servers",
+	}
+	cmd.AddCommand(
+		newAgentsMcpListCmd(state),
+		newAgentsMcpAddCmd(state),
+		newAgentsMcpImportCmd(state),
+		newAgentsMcpRemoveCmd(state),
+		newAgentsMcpResolveCmd(state),
+		newAgentsMcpGroupCmd(state),
+	)
+	return cmd
+}
+
+// Foreign manifest entries are the ones sync preserves but cannot resolve from config, so adopting them is
+// the only way they stop being invisible to every other omni verb.
+func newAPMAgentsImportCmd(state *rootState) *cobra.Command {
+	return &cobra.Command{
+		Use:   "import [<source>]",
+		Short: "Adopt apm.yml packages this host's config does not declare",
+		Long: "List the package dependencies present in ~/.apm/apm.yml that omni's config does not " +
+			"declare, and adopt one into the config by source. Sync preserves these entries but never " +
+			"imports them: writing config is an authoring step the user asks for.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			entries, err := state.app.ForeignAPMEntries()
+			if err != nil {
+				return err
+			}
+			w := cmdOut(cmd)
+			if len(args) == 1 {
+				imported, warnings, err := state.app.ImportForeignAPMEntry(cmd.Context(), args[0])
+				if err != nil {
+					return err
+				}
+				for _, warning := range warnings {
+					fmt.Fprintf(w, "warn: %s\n", warning)
+				}
+				fmt.Fprintf(w, "imported %s\n", imported)
+				return nil
+			}
+			if len(entries.Packages) == 0 {
+				fmt.Fprintln(w, "no undeclared packages in the APM manifest")
+				return nil
+			}
+			fmt.Fprintln(w, "-- undeclared in the APM manifest --")
+			for _, pkg := range entries.Packages {
+				line := pkg.Source
+				if pkg.Ref != "" {
+					line += "#" + pkg.Ref
+				}
+				if len(pkg.Agents) > 0 {
+					line += "  " + strings.Join(pkg.Agents, ",")
+				}
+				fmt.Fprintln(w, line)
+			}
+			return nil
+		},
+	}
 }
 
 func apmClient(state *rootState, global bool) *apm.Client {
@@ -174,7 +197,7 @@ func newAPMAgentsSyncCmd(state *rootState, global *bool) *cobra.Command {
 			})
 			result.Output, result.Stderr = "", ""
 			printAgentsSyncAllResult(cmdOut(cmd), result, dryRun)
-			return err
+			return errors.Join(err, agentErrsFailure(len(result.Errors)))
 		},
 	}
 	cmd.Flags().BoolVar(&frozen, "frozen", false, "Require apm.yml and apm.lock.yaml to match")
@@ -182,29 +205,58 @@ func newAPMAgentsSyncCmd(state *rootState, global *bool) *cobra.Command {
 	return cmd
 }
 
-func newAPMAgentsAddCmd(state *rootState, global *bool) *cobra.Command {
-	return &cobra.Command{Use: "add <package>...", Short: "Add packages to apm.yml and install them", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := apmClient(state, *global).Add(cmd.Context(), args...)
-		printAPMResult(cmd, result)
-		return err
-	}}
+func newAPMAgentsAddCmd(state *rootState) *cobra.Command {
+	return &cobra.Command{
+		Use:   "add <package>...",
+		Short: "Declare packages in omni's config and install them through APM",
+		Long: "Record the packages as fleet config and regenerate the APM manifest from it, then install " +
+			"the package surface. Editing apm.yml directly would work only until the next sync regenerates it.",
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			result, warnings, err := state.app.AddAgentPackages(cmd.Context(), args)
+			printAPMResult(cmd, result)
+			for _, warning := range warnings {
+				fmt.Fprintf(cmdOut(cmd), "warn: %s\n", warning)
+			}
+			return err
+		},
+	}
 }
 
-func newAPMAgentsRemoveCmd(state *rootState, global *bool) *cobra.Command {
-	return &cobra.Command{Use: "remove <package>...", Aliases: []string{"uninstall"}, Short: "Remove packages and their deployed files with APM (no --purge mode)", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := apmClient(state, *global).Uninstall(cmd.Context(), args...)
-		printAPMResult(cmd, result)
-		return err
-	}}
+func newAPMAgentsRemoveCmd(state *rootState) *cobra.Command {
+	return &cobra.Command{
+		Use:     "remove <package>...",
+		Aliases: []string{"uninstall"},
+		Short:   "Undeclare packages and remove their deployed files (no --purge mode)",
+		Long: "Drop the packages from omni's config and remove what APM deployed for them. The live side " +
+			"always goes with the declaration: leaving one behind would have the next sync undo the other.",
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			result, err := state.app.RemoveAgentPackages(cmd.Context(), args)
+			printAPMResult(cmd, result)
+			return err
+		},
+	}
 }
 
 func newAPMAgentsUpdateCmd(state *rootState, global *bool) *cobra.Command {
 	var dryRun bool
-	cmd := &cobra.Command{Use: "update [package]...", Short: "Update locked APM dependencies", Args: cobra.ArbitraryArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		result, err := state.app.AgentsUpdateAll(cmd.Context(), dryRun, args...)
-		printAPMResult(cmd, result)
-		return err
-	}}
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update locked APM dependencies",
+		Long: "Refresh every APM dependency this host's manifest declares to the latest ref it matches.\n\n" +
+			"Packages and MCP servers are refreshed separately, each into the targets this host selects for that\n" +
+			"surface. Narrowing the refresh to named packages is not offered: APM refreshes a named subset only\n" +
+			"through a command that redeploys the MCP surface into every target of the run.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			result, warnings, err := state.app.AgentsUpdateAll(cmd.Context(), dryRun)
+			printAPMResult(cmd, result)
+			for _, w := range warnings {
+				fmt.Fprintln(cmd.ErrOrStderr(), w)
+			}
+			return err
+		}}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the update plan without writing")
 	return cmd
 }
@@ -606,25 +658,6 @@ func skillStatusUpdatesLine(s app.SkillPackageStatus) string {
 	return line
 }
 
-func newAgentsMcpCmd(state *rootState) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "mcp",
-		Short: "Manage MCP servers in the agent manifest",
-	}
-	sync := newAgentsMcpSyncCmd(state)
-	cmd.AddCommand(
-		newAgentsMcpListCmd(state),
-		newAgentsMcpAddCmd(state),
-		newAgentsMcpRemoveCmd(state),
-		sync,
-		deprecatedAlias(sync, "restore", nil),
-		newAgentsMcpImportCmd(state),
-		newAgentsMcpResolveCmd(state),
-		newAgentsMcpGroupCmd(state),
-	)
-	return cmd
-}
-
 func newAgentsMcpResolveCmd(state *rootState) *cobra.Command {
 	var useManaged bool
 	var useLocal bool
@@ -705,22 +738,21 @@ func newAgentsMcpListCmd(state *rootState) *cobra.Command {
 				sort.Strings(agentIDs)
 				agentParts := make([]string, 0, len(agentIDs))
 				for _, id := range agentIDs {
-					marker := "-"
-					switch row.PerAgentStatus[id] {
-					case app.McpStatusInstalled:
-						marker = "✓"
-					case app.McpStatusShadowed:
-						marker = "via-plugin"
-					case app.McpStatusDrifted:
-						marker = "drift"
-					}
-					agentParts = append(agentParts, fmt.Sprintf("%s(%s)", id, marker))
+					agentParts = append(agentParts, fmt.Sprintf("%s(%s %s)", id, mcpStatusMarker(row.PerAgentStatus[id]), mcpOwnerLabel(row, id)))
 				}
-				line := row.Name + "  " + row.Transport
+				line := row.Name + "  " + row.Transport + "  " + mcpVersionText(row.Version)
 				if len(agentParts) > 0 {
 					line += "  " + strings.Join(agentParts, " ")
 				}
 				fmt.Fprintln(w, line)
+				if scope := mcpScopeDivergenceLine(row); scope != "" {
+					fmt.Fprintf(w, "    %s\n", scope)
+				}
+				for _, id := range agentIDs {
+					if advice := row.DriftAdvice(id); advice != "" {
+						fmt.Fprintf(w, "    ~ %s: %s\n", id, advice)
+					}
+				}
 			}
 			agentIDs := make([]string, 0, len(unmanaged))
 			for id := range unmanaged {
@@ -736,6 +768,44 @@ func newAgentsMcpListCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func mcpStatusMarker(status app.McpStatus) string {
+	switch status {
+	case app.McpStatusInstalled:
+		return "✓"
+	case app.McpStatusShadowed:
+		return "via-plugin"
+	case app.McpStatusDrifted:
+		return "drift"
+	default:
+		return "-"
+	}
+}
+
+// Which side owns the registration decides what any remedy can be, so it travels with every status.
+func mcpOwnerLabel(row app.McpServerRow, agentID string) string {
+	if row.APMManaged(agentID) {
+		return "apm"
+	}
+	return "native"
+}
+
+func mcpVersionText(version string) string {
+	if version == "" {
+		return "-"
+	}
+	return version
+}
+
+// Global MCP has no per-server scoping, so a narrower agents list is intent APM does not enforce; the row
+// must never render it as if it did.
+func mcpScopeDivergenceLine(row app.McpServerRow) string {
+	if len(row.UndeclaredAPMAgents) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("declared: %s — deployed: all APM targets (APM limitation): %s",
+		strings.Join(row.Agents, ", "), strings.Join(row.APMAgents, ", "))
 }
 
 func newAgentsMcpAddCmd(state *rootState) *cobra.Command {
@@ -846,10 +916,12 @@ func newAgentsMcpRemoveCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "remove <name>",
 		Short: "Undeclare an MCP server and unregister it from targeted agents",
-		Long: "Drop an MCP server from the manifest and unregister it through the agent CLIs that " +
-			"held it. Unlike `agents skills remove`, the live side always goes with it — a server " +
-			"only exists as its registration, so there is nothing left to keep and no --purge. " +
-			"Adopting a live server instead of dropping it runs the other way — see import.",
+		Long: "Drop an MCP server from the manifest and unregister it wherever it was deployed — " +
+			"through the agent's own CLI for natively managed agents, and by regenerating the APM " +
+			"manifest and reinstalling for the rest. Unlike `agents skills remove`, the live side " +
+			"always goes with it — a server only exists as its registration, so there is nothing " +
+			"left to keep and no --purge. Adopting a live server instead of dropping it runs the " +
+			"other way — see import.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			res, err := state.app.RemoveMcpServer(cmd.Context(), args[0])
@@ -866,75 +938,39 @@ func newAgentsMcpRemoveCmd(state *rootState) *cobra.Command {
 	}
 }
 
-func newAgentsMcpSyncCmd(state *rootState) *cobra.Command {
-	var opts app.RestoreMcpOptions
-	cmd := &cobra.Command{
-		Use:   "sync",
-		Short: "Install the manifest MCP servers onto this host",
-		Long: "Move the manifest's MCP servers onto this host through each agent's own CLI: register " +
-			"the missing ones, update registrations that drifted, and leave matching ones alone. " +
-			"Adopting servers the manifest does not declare runs the other way — see import.",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			res, err := state.app.RestoreMcpServers(cmd.Context(), opts)
-			if err != nil {
-				return err
-			}
-			w := cmdOut(cmd)
-			for _, msg := range res.Warnings {
-				fmt.Fprintf(w, "warn: %s\n", msg)
-			}
-			if opts.DryRun {
-				for _, s := range res.WouldInstall {
-					fmt.Fprintf(w, "would install: %s\n", s)
-				}
-				for _, s := range res.WouldUpdate {
-					fmt.Fprintf(w, "would update: %s\n", s)
-				}
-				return nil
-			}
-			for _, s := range res.Installed {
-				fmt.Fprintf(w, "installed: %s\n", s)
-			}
-			for _, s := range res.Updated {
-				fmt.Fprintf(w, "updated: %s\n", s)
-			}
-			for _, s := range res.AlreadyInstalled {
-				fmt.Fprintf(w, "already installed: %s\n", s)
-			}
-			for _, s := range res.ShadowedByPlugin {
-				fmt.Fprintf(w, "skipped (provided by plugin): %s\n", s)
-			}
-			for _, d := range res.Drift {
-				fmt.Fprintf(w, "  ~ drift: %s\n", d)
-			}
-			for _, e := range res.Errors {
-				fmt.Fprintf(w, "  ! %s/%s: %v\n", e.AgentID, e.ServerName, e.Err)
-			}
-			return agentErrsFailure(len(res.Errors))
-		},
-	}
-	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "print what would be installed without running")
-	return cmd
-}
-
 func newAgentsMcpImportCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "import [<name>]",
-		Short: "Adopt an MCP server this host already registers into the manifest",
-		Long: "Move a live MCP server registration into the manifest. Without a name it lists what " +
-			"each agent holds unmanaged; with one it adopts that server's transport, command or URL " +
-			"as the manifest's intent. Installing what the manifest declares runs the other way — " +
-			"see sync.",
+		Short: "Adopt an MCP server this host already has into the manifest",
+		Long: "Move an MCP server omni does not declare into the manifest, from a live agent " +
+			"registration or from an apm.yml entry sync preserved. Without a name it lists both " +
+			"sources; with one it adopts that server's transport, command or URL as the manifest's " +
+			"intent. Installing what the manifest declares runs the other way — see sync.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			diff, err := state.app.ImportMcpServers(cmd.Context())
 			if err != nil {
 				return err
 			}
-			if len(args) == 1 {
-				return importMcpServerByName(cmd, state, diff, args[0])
+			foreign, err := state.app.ForeignAPMEntries()
+			if err != nil {
+				return err
 			}
 			w := cmdOut(cmd)
+			if len(args) == 1 {
+				if mcpUnmanagedHas(diff, args[0]) {
+					return importMcpServerByName(cmd, state, diff, args[0])
+				}
+				imported, warnings, importErr := state.app.ImportForeignAPMEntry(cmd.Context(), args[0])
+				if importErr != nil {
+					return importErr
+				}
+				for _, warning := range warnings {
+					fmt.Fprintf(w, "warn: %s\n", warning)
+				}
+				fmt.Fprintf(w, "imported %s\n", imported)
+				return nil
+			}
 			agentIDs := make([]string, 0, len(diff.Unmanaged))
 			for id := range diff.Unmanaged {
 				agentIDs = append(agentIDs, id)
@@ -946,9 +982,26 @@ func newAgentsMcpImportCmd(state *rootState) *cobra.Command {
 					fmt.Fprintf(w, "%s\n", s.Name)
 				}
 			}
+			if len(foreign.Mcp) > 0 {
+				fmt.Fprintln(w, "-- undeclared in the APM manifest --")
+				for _, s := range foreign.Mcp {
+					fmt.Fprintf(w, "%s  %s\n", s.Name, s.Transport)
+				}
+			}
 			return nil
 		},
 	}
+}
+
+func mcpUnmanagedHas(diff app.McpImportDiff, name string) bool {
+	for _, servers := range diff.Unmanaged {
+		for _, s := range servers {
+			if s.Name == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func importMcpServerByName(cmd *cobra.Command, state *rootState, diff app.McpImportDiff, name string) error {

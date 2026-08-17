@@ -43,14 +43,13 @@ func WithMcpAdapters(adapters []McpAdapter) Option {
 	}
 }
 
+// WithDefaultMcpAdapters registers only the agents APM cannot serve; every other target's MCP state is APM's.
 func WithDefaultMcpAdapters(
 	execFn func(context.Context, string, ...string) (string, string, error),
 	lookupEnv func(string) (string, bool),
 ) Option {
 	return WithMcpAdapters([]McpAdapter{
-		NewClaudeCodeMcpAdapter(execFn, lookupEnv),
 		NewCodexMcpAdapter(execFn, lookupEnv),
-		NewGrokMcpAdapter(execFn, lookupEnv),
 		NewHermesMcpAdapter(execFn, lookupEnv),
 	})
 }

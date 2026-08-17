@@ -64,7 +64,7 @@ description: Offline APM integration fixture
 	writeFile(t, filepath.Join(home, ".apm", "apm.yml"), "name: omni-integration\nversion: 1.0.0\ntargets:\n  - codex\n  - claude\ndependencies:\n  apm:\n    - "+pkg+"\n  mcp: []\n")
 
 	client := apm.New(commandexec.New(), apm.Global)
-	if result, err := client.Install(ctx, false, true); err != nil {
+	if result, err := client.InstallOnly(ctx, apm.SurfacePackages, nil, apm.InstallOptions{DryRun: true}); err != nil {
 		t.Fatalf("global dry-run: %v\nstdout:\n%s\nstderr:\n%s", err, result.Stdout, result.Stderr)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".apm", "apm.lock.yaml")); !os.IsNotExist(err) {
@@ -73,7 +73,7 @@ description: Offline APM integration fixture
 	if _, err := os.Stat(filepath.Join(home, ".agents", "skills", "fixture-skill", "SKILL.md")); !os.IsNotExist(err) {
 		t.Fatalf("dry-run deployed a skill: %v", err)
 	}
-	if result, err := client.Install(ctx, false, false); err != nil {
+	if result, err := client.InstallOnly(ctx, apm.SurfacePackages, nil, apm.InstallOptions{}); err != nil {
 		t.Fatalf("initial global install: %v\nstdout:\n%s\nstderr:\n%s", err, result.Stdout, result.Stderr)
 	}
 
@@ -97,7 +97,7 @@ description: Offline APM integration fixture
 	if err := os.RemoveAll(filepath.Dir(deployed)); err != nil {
 		t.Fatal(err)
 	}
-	if result, err := client.Install(ctx, true, false); err != nil {
+	if result, err := client.InstallOnly(ctx, apm.SurfacePackages, nil, apm.InstallOptions{Frozen: true}); err != nil {
 		t.Fatalf("frozen global install: %v\nstdout:\n%s\nstderr:\n%s", err, result.Stdout, result.Stderr)
 	}
 	if _, err := os.Stat(deployed); err != nil {
@@ -124,20 +124,20 @@ func TestGlobalPackageLifecycleAndLocalMarketplaceSearch(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
-	writeFile(t, filepath.Join(home, ".apm", "apm.yml"), "name: lifecycle\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm: []\n  mcp: []\n")
+	writeFile(t, filepath.Join(home, ".apm", "apm.yml"), "name: lifecycle\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm:\n    - "+pkg+"\n  mcp: []\n")
 	writeFile(t, filepath.Join(pkg, "apm.yml"), "name: searchable-skill\nversion: 1.0.0\ntype: skill\ndependencies:\n  apm: []\n  mcp: []\n")
 	writeFile(t, filepath.Join(pkg, "SKILL.md"), "---\nname: searchable-skill\ndescription: Searchable offline fixture\n---\n")
 	writeFile(t, filepath.Join(market, "apm.yml"), "name: local-marketplace\nversion: 0.1.0\nmarketplace:\n  owner:\n    name: omni\n    url: https://example.invalid/omni\n  outputs:\n    claude: {}\n  packages:\n    - name: searchable-skill\n      description: Searchable offline fixture\n      source: ./packages/searchable-skill\n      version: 1.0.0\n")
 
 	client := apm.New(commandexec.New(), apm.Global)
-	if result, err := client.Add(ctx, pkg); err != nil {
-		t.Fatalf("add: %v\n%s\n%s", err, result.Stdout, result.Stderr)
+	if result, err := client.InstallOnly(ctx, apm.SurfacePackages, nil, apm.InstallOptions{}); err != nil {
+		t.Fatalf("install: %v\n%s\n%s", err, result.Stdout, result.Stderr)
 	}
 	deployed := filepath.Join(home, ".agents", "skills", "searchable-skill", "SKILL.md")
 	if _, err := os.Stat(deployed); err != nil {
-		t.Fatalf("add did not deploy skill: %v", err)
+		t.Fatalf("install did not deploy skill: %v", err)
 	}
-	if result, err := client.Update(ctx, false, "searchable-skill"); err != nil {
+	if result, err := client.InstallOnly(ctx, apm.SurfacePackages, nil, apm.InstallOptions{Update: true}); err != nil {
 		t.Fatalf("update: %v\n%s\n%s", err, result.Stdout, result.Stderr)
 	}
 
@@ -164,7 +164,7 @@ func TestGlobalPackageLifecycleAndLocalMarketplaceSearch(t *testing.T) {
 }
 
 // APM reports this failure on stdout only; the wrapper must surface it as error detail.
-func TestGlobalUpdateFailureSurfacesStdoutDetail(t *testing.T) {
+func TestGlobalInstallFailureSurfacesStdoutDetail(t *testing.T) {
 	if _, err := exec.LookPath("apm"); err != nil {
 		t.Fatalf("integration tests require apm on PATH: %v", err)
 	}
@@ -179,11 +179,11 @@ func TestGlobalUpdateFailureSurfacesStdoutDetail(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
 
-	_, err := apm.New(commandexec.New(), apm.Global).Update(ctx, false)
+	_, err := apm.New(commandexec.New(), apm.Global).InstallOnly(ctx, apm.SurfacePackages, []string{"claude"}, apm.InstallOptions{Frozen: true})
 	if err == nil {
-		t.Fatal("expected update failure without a global manifest")
+		t.Fatal("expected the replay to fail without a global manifest")
 	}
-	if !strings.Contains(err.Error(), "No apm.yml found") {
+	if !strings.Contains(err.Error(), "apm.yml found") {
 		t.Fatalf("error lacks apm stdout detail: %v", err)
 	}
 }
@@ -231,7 +231,7 @@ func TestGlobalUpdateRefreshesRemoteGitPackage(t *testing.T) {
 	gitURL := server.URL + "/owner/fixture"
 	writeFile(t, filepath.Join(home, ".apm", "apm.yml"), "name: update-integration\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm:\n    - git: "+gitURL+"\n      ref: main\n  mcp: []\n")
 	client := apm.New(commandexec.New(), apm.Global)
-	if result, err := client.Install(ctx, false, false); err != nil {
+	if result, err := client.InstallOnly(ctx, apm.SurfacePackages, nil, apm.InstallOptions{}); err != nil {
 		t.Fatalf("install v1: %v\n%s\n%s", err, result.Stdout, result.Stderr)
 	}
 	deployed := filepath.Join(home, ".agents", "skills", "fixture", "SKILL.md")
@@ -248,7 +248,7 @@ func TestGlobalUpdateRefreshesRemoteGitPackage(t *testing.T) {
 	runGit(t, work, "add", "SKILL.md")
 	runGit(t, work, "commit", "-m", "v2")
 	runGit(t, work, "push", "origin", "main")
-	if result, err := client.Update(ctx, false); err != nil {
+	if result, err := client.InstallOnly(ctx, apm.SurfacePackages, nil, apm.InstallOptions{Update: true}); err != nil {
 		t.Fatalf("update v2: %v\n%s\n%s", err, result.Stdout, result.Stderr)
 	}
 	if content, err := os.ReadFile(deployed); err != nil || !strings.Contains(string(content), "version two") {

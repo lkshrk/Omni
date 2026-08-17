@@ -141,6 +141,12 @@ func (m Model) viewSkillsBody() string {
 		p.styleHelp.Render(pad + "S sync   U update   e logs"),
 		p.styleHelp.Render(pad + "CLI: omni agents add|remove|update|search"),
 	}
+	if mcp := agentsMcpSummaryLines(m); len(mcp) > 0 {
+		lines = append(lines, "", p.styleHelp.Render(pad+"MCP servers"))
+		for _, line := range mcp {
+			lines = append(lines, p.styleNormal.Render(pad+"  "+line))
+		}
+	}
 	if m.skillsErr != nil {
 		text := strings.Join(strings.Fields("error: "+m.skillsErr.Error()), " ")
 		const maxErrorRunes = 600
