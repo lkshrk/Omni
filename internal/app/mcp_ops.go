@@ -16,8 +16,10 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
+// RestoreMcpOptions — an empty OnlyAgents restores every adapter; sync narrows it to the agents APM cannot drive.
 type RestoreMcpOptions struct {
-	DryRun bool
+	DryRun     bool
+	OnlyAgents []string
 }
 
 type RestoreMcpResult struct {
@@ -241,7 +243,15 @@ func (a *App) RestoreMcpServers(ctx context.Context, opts RestoreMcpOptions) (Re
 	pluginNames, shadowWarnings := installedPluginNames(ctx, a)
 	var res RestoreMcpResult
 	res.Warnings = append(res.Warnings, shadowWarnings...)
+	if apmAgentIDs, _, _, _ := a.partitionMcpAgents(cfg); len(opts.OnlyAgents) == 0 && len(apmAgentIDs) > 0 && len(servers) > 0 {
+		res.Warnings = append(res.Warnings, fmt.Sprintf(
+			"%s receive their mcp servers through APM, which this verb does not drive: run \"omni agents sync\"",
+			strings.Join(apmAgentIDs, ", ")))
+	}
 	for _, adapter := range a.mcpAdapters() {
+		if len(opts.OnlyAgents) > 0 && !slices.Contains(opts.OnlyAgents, adapter.ID()) {
+			continue
+		}
 		if !adapter.Available() {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("agent %s not available, skipping", adapter.ID()))
 			continue
@@ -325,6 +335,7 @@ func (a *App) AddMcpServer(ctx context.Context, s config.McpServer) (AddMcpResul
 	if errs := fatalValidationErrors(config.ValidateRoot(preview, config.ProviderValidation{})); len(errs) > 0 {
 		return AddMcpResult{}, config.ValidationErrors(errs)
 	}
+	apmDriven := a.apmDrivesMcpServer(cfg, s)
 	var res AddMcpResult
 	for _, adapter := range a.mcpAdapters() {
 		if !serverTargetsAdapter(s, adapter.ID()) {
@@ -363,6 +374,11 @@ func (a *App) AddMcpServer(ctx context.Context, s config.McpServer) (AddMcpResul
 	}); err != nil {
 		return res, fmt.Errorf("installed %s but failed to save to manifest (re-run to persist): %w", s.Name, err)
 	}
+	if apmDriven {
+		if err := a.convergeAPMMcpSurface(ctx, s.Name); err != nil {
+			return res, fmt.Errorf("declared %s but the APM install failed (re-run 'omni agents sync'): %w", s.Name, err)
+		}
+	}
 	return res, nil
 }
 
@@ -379,6 +395,7 @@ func (a *App) RemoveMcpServer(ctx context.Context, name string) (RemoveMcpResult
 	if target == nil {
 		return RemoveMcpResult{}, fmt.Errorf("mcp server %q not found in manifest; omni only removes servers it added", name)
 	}
+	apmDriven := a.apmDrivesMcpServer(cfg, *target)
 	var res RemoveMcpResult
 	for _, adapter := range a.mcpAdapters() {
 		if !serverTargetsAdapter(*target, adapter.ID()) {
@@ -402,6 +419,11 @@ func (a *App) RemoveMcpServer(ctx context.Context, name string) (RemoveMcpResult
 	}); err != nil {
 		return res, fmt.Errorf("removed %s from agents but failed to update manifest (re-run to persist): %w", name, err)
 	}
+	if apmDriven {
+		if err := a.convergeAPMMcpSurface(ctx, name); err != nil {
+			return res, fmt.Errorf("undeclared %s but the APM reconcile failed, so it may still be deployed (re-run 'omni agents sync'): %w", name, err)
+		}
+	}
 	return res, nil
 }
 
@@ -421,6 +443,7 @@ func (a *App) SetMcpServerAgents(ctx context.Context, name string, agents []stri
 	updated := *target
 	updated.Agents = agents
 
+	apmDriven := a.apmDrivesMcpServer(cfg, *target) || a.apmDrivesMcpServer(cfg, updated)
 	var res AddMcpResult
 	for _, adapter := range a.mcpAdapters() {
 		wasTargeted := serverTargetsAdapter(*target, adapter.ID())
@@ -466,6 +489,11 @@ func (a *App) SetMcpServerAgents(ctx context.Context, name string, agents []stri
 		return nil
 	}); err != nil {
 		return res, fmt.Errorf("updated agents for %s but failed to save to manifest (re-run to persist): %w", name, err)
+	}
+	if apmDriven {
+		if err := a.convergeAPMMcpSurface(ctx, name); err != nil {
+			return res, fmt.Errorf("scoped %s but the APM reconcile failed (re-run 'omni agents sync'): %w", name, err)
+		}
 	}
 	return res, nil
 }
@@ -519,6 +547,15 @@ func (a *App) ImportMcpServers(ctx context.Context) (McpImportDiff, error) {
 				diff.Unmanaged[adapter.ID()] = append(diff.Unmanaged[adapter.ID()], srv)
 			}
 		}
+	}
+	claudeState := a.claudeStateForAPMAgents(a.apmMcpAgentIDs(cfg))
+	if len(claudeState) == 0 {
+		return diff, nil
+	}
+	// A server a plugin already provides is not a claim offer: adopting it would declare a name omni does not own.
+	pluginNames, _ := installedPluginNames(ctx, a)
+	if claudeUnmanaged := claudeUnmanagedMcpServers(claudeState, managed, pluginNames); len(claudeUnmanaged) > 0 {
+		diff.Unmanaged[claudeAgentID] = append(diff.Unmanaged[claudeAgentID], claudeUnmanaged...)
 	}
 	return diff, nil
 }

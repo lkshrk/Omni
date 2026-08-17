@@ -31,16 +31,16 @@ func (s *recordingMcpAdapter) Remove(_ context.Context, name string) error {
 	return nil
 }
 
-// grok installs whatever transport it is handed but reported every url server back as http, so an sse
-// server was permanently drifted — and the drift branch returns before headers are reconciled, which
-// froze header convergence for that server too. Once the adapter round-trips sse, both resume.
+// An adapter that installs whatever transport it is handed but reports every url server back as http
+// leaves an sse server permanently drifted — and the drift branch returns before headers are reconciled,
+// which freezes header convergence for that server too. Once the adapter round-trips sse, both resume.
 func TestRestoreMcpServers_FaithfulSseReportConvergesHeaders(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	desired := config.McpServer{
 		Name: "docs", Transport: "sse", URL: "https://docs.example.com/mcp",
 		Headers: map[string]string{"X-Key": "${DOCS_TOKEN}"},
 	}
-	adapter := &recordingMcpAdapter{id: "grok", listed: []InstalledMcpServer{{
+	adapter := &recordingMcpAdapter{id: "hermes-agent", listed: []InstalledMcpServer{{
 		Name: "docs", Transport: "sse", URL: "https://docs.example.com/mcp",
 		Headers: map[string]string{"X-Key": "${OLD_TOKEN}"}, HeadersKnown: true,
 	}}}
@@ -80,13 +80,13 @@ func TestMcpDefinitionsConflict_URLFlavourDisagreementIsNotAConflict(t *testing.
 
 func TestAdoptUnmanagedMcpServers_ClaimsServerWhenAgentsDisagreeOnURLFlavour(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	claude := &listingMcpAdapter{id: "claude-code", listed: []InstalledMcpServer{{
+	codex := &listingMcpAdapter{id: "codex", listed: []InstalledMcpServer{{
 		Name: "docs", Transport: "sse", URL: "https://docs.example.com/mcp", HeadersKnown: true,
 	}}}
-	grok := &listingMcpAdapter{id: "grok", listed: []InstalledMcpServer{{
+	hermes := &listingMcpAdapter{id: "hermes-agent", listed: []InstalledMcpServer{{
 		Name: "docs", Transport: "http", URL: "https://docs.example.com/mcp", HeadersKnown: true,
 	}}}
-	a := newSkillsTestApp(t, config.AgentsConfig{}, WithMcpAdapters([]McpAdapter{claude, grok}))
+	a := newSkillsTestApp(t, config.AgentsConfig{}, WithMcpAdapters([]McpAdapter{codex, hermes}))
 
 	res, err := a.AdoptUnmanagedMcpServers(context.Background())
 	if err != nil {
@@ -106,23 +106,23 @@ func TestMcpIdentityDrift_StillReportsARealTransportChange(t *testing.T) {
 	}
 }
 
-// codex never populates EnvLiteral, so comparing it against claude's declared the same server conflicting and left it unadoptable on both agents.
+// codex never populates EnvLiteral, so comparing it against hermes's declared the same server conflicting and left it unadoptable on both agents.
 func TestMcpDefinitionsConflict_SurfaceOneAdapterCannotReportIsNotAConflict(t *testing.T) {
 	t.Parallel()
-	claude := InstalledMcpServer{
+	hermes := InstalledMcpServer{
 		Name: "github", Transport: "stdio", Command: "npx -y @modelcontextprotocol/server-github",
 		EnvLiteral: map[string]string{"GITHUB_TOKEN": "ghp_abc"},
 	}
 	codex := InstalledMcpServer{
 		Name: "github", Transport: "stdio", Command: "npx  -y  @modelcontextprotocol/server-github",
 	}
-	if mcpDefinitionsConflict(claude, codex) {
+	if mcpDefinitionsConflict(hermes, codex) {
 		t.Fatal("an unreported env map is missing information, not a competing definition")
 	}
 
-	grok := claude
-	grok.EnvLiteral = map[string]string{"GITHUB_TOKEN": "ghp_different"}
-	if !mcpDefinitionsConflict(claude, grok) {
+	divergent := hermes
+	divergent.EnvLiteral = map[string]string{"GITHUB_TOKEN": "ghp_different"}
+	if !mcpDefinitionsConflict(hermes, divergent) {
 		t.Fatal("two adapters that both report env and disagree is a real conflict")
 	}
 
@@ -141,15 +141,15 @@ func TestMcpDefinitionsConflict_SurfaceOneAdapterCannotReportIsNotAConflict(t *t
 func TestAdoptUnmanagedMcpServers_ClaimsServerWhenOnlyOneAdapterReportsEnv(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	const ambient = "ambient-token-4b1e"
-	claude := &listingMcpAdapter{id: "claude-code", listed: []InstalledMcpServer{{
+	codex := &listingMcpAdapter{id: "codex", listed: []InstalledMcpServer{{
 		Name: "github", Transport: "stdio", Command: "npx -y server-github",
 		EnvLiteral: map[string]string{"GITHUB_TOKEN": ambient},
 	}}}
-	codex := &listingMcpAdapter{id: "codex", listed: []InstalledMcpServer{{
+	hermes := &listingMcpAdapter{id: "hermes-agent", listed: []InstalledMcpServer{{
 		Name: "github", Transport: "stdio", Command: "npx -y server-github",
 	}}}
 	a := newSkillsTestApp(t, config.AgentsConfig{},
-		WithMcpAdapters([]McpAdapter{claude, codex}),
+		WithMcpAdapters([]McpAdapter{codex, hermes}),
 		WithEnvLookup(func(name string) string {
 			if name == "GITHUB_TOKEN" {
 				return ambient
@@ -162,7 +162,7 @@ func TestAdoptUnmanagedMcpServers_ClaimsServerWhenOnlyOneAdapterReportsEnv(t *te
 		t.Fatal(err)
 	}
 	if len(res.Conflicts) != 0 {
-		t.Fatalf("Conflicts = %v, want no conflict from a surface codex cannot report", res.Conflicts)
+		t.Fatalf("Conflicts = %v, want no conflict from a surface hermes-agent cannot report", res.Conflicts)
 	}
 	if res.Adopted != 1 {
 		t.Fatalf("result = %+v, want the server claimed once across both agents", res)
@@ -172,7 +172,7 @@ func TestAdoptUnmanagedMcpServers_ClaimsServerWhenOnlyOneAdapterReportsEnv(t *te
 		t.Fatal(err)
 	}
 	adopted := findMcpServer(cfg.Agents.McpServers, "github")
-	if adopted == nil || strings.Join(adopted.Agents, ",") != "claude-code,codex" {
+	if adopted == nil || strings.Join(adopted.Agents, ",") != "codex,hermes-agent" {
 		t.Fatalf("adopted = %+v, want both agents targeted", adopted)
 	}
 	if len(adopted.Env) != 1 || adopted.Env[0] != "GITHUB_TOKEN" {

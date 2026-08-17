@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/executor"
 )
 
 func runSyncAll(t *testing.T, a *app.App, args ...string) (string, error) {
@@ -74,5 +78,51 @@ func TestSyncAllFlag_ExitsNonZeroWhenAToolFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed") {
 		t.Fatalf("error = %q, want it to name the tool failure", err)
+	}
+}
+
+type failingAPMExecutor struct {
+	executor.MockExecutor
+	orphan string
+}
+
+func (e *failingAPMExecutor) Run(ctx context.Context, name string, args ...string) (string, string, error) {
+	if name == "apm" {
+		if err := os.MkdirAll(filepath.Dir(e.orphan), 0o700); err == nil {
+			_ = os.WriteFile(e.orphan, []byte("deployed\n"), 0o600)
+		}
+	}
+	return e.MockExecutor.Run(ctx, name, args...)
+}
+
+// The reversal warnings describe what the failed install left behind and what was undone; returning the error
+// without printing them loses the only record this host gets.
+func TestSyncAllAgentsLegPrintsReversalsWhenTheInstallFails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgPath := filepath.Join(t.TempDir(), "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{AgentsUse: []string{"codex"}},
+		Agents:   config.AgentsConfig{Packages: []config.SkillPackage{{Source: "acme/shared", Agents: []string{"codex"}}}},
+	})
+	a := app.New(cfgPath)
+	orphan := filepath.Join(home, ".agents", "skills", "acme-shared", "SKILL.md")
+	failing := &failingAPMExecutor{orphan: orphan}
+	failing.Responses = []executor.MockCall{{Stderr: "install aborted\n", Err: errors.New("exit status 1")}}
+	a.SetFallbackExecutor(failing)
+
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	err := runSyncAllAgentsLeg(cmd, &rootState{app: a}, false)
+	if err == nil {
+		t.Fatalf("failed install exited 0; output:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), orphan) {
+		t.Fatalf("output = %q, want the reversal reported", out.String())
 	}
 }

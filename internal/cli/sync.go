@@ -197,16 +197,16 @@ func runSyncAllAgentsLeg(cmd *cobra.Command, state *rootState, dryRun bool) erro
 	}
 	out := cmdOut(cmd)
 	res, err := state.app.AgentsSyncAll(cmd.Context(), app.AgentsSyncAllOptions{
-		ImportUnmanaged: true,
-		DryRun:          dryRun,
+		DryRun: dryRun,
 		Progress: func(msg string) {
 			fmt.Fprintf(out, "  %s\n", msg)
 		},
 	})
-	if err != nil {
-		return err
-	}
+	// Printed even on a failed install: the reversal warnings describe what was undone on this host.
 	printAgentsSyncAllResult(out, res, dryRun)
+	if err != nil {
+		return errors.Join(err, agentErrsFailure(len(res.Errors)))
+	}
 	fmt.Fprintf(out, "Agents sync complete — %s.\n", app.AgentsSyncAllSummaryText(res))
 	return agentErrsFailure(len(res.Errors))
 }

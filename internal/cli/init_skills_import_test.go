@@ -3,9 +3,11 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -79,7 +81,9 @@ func TestRunSkillsImportSection_NoImportFlagSkipsSilently(t *testing.T) {
 	legacySkillsHome(t, "o/demo")
 	a, cfgPath, cmd, out := skillsImportTestApp(t, config.Settings{})
 
-	runSkillsImportSection(cmd, nil, a, skillsImportChoice{skip: true})
+	if err := runSkillsImportSection(cmd, nil, a, skillsImportChoice{skip: true}); err != nil {
+		t.Fatal(err)
+	}
 
 	if out.String() != "" {
 		t.Fatalf("output = %q, want nothing", out.String())
@@ -107,16 +111,82 @@ func TestRunSkillsImportSectionInstallsConfiguredPackages(t *testing.T) {
 	cmd.SetOut(out)
 	cmd.SetErr(out)
 
-	runSkillsImportSection(cmd, nil, a, skillsImportChoice{})
+	if err := runSkillsImportSection(cmd, nil, a, skillsImportChoice{}); err != nil {
+		t.Fatal(err)
+	}
 
 	if !bytes.Contains(out.Bytes(), []byte("Installed 1 agent packages")) {
 		t.Fatalf("output = %q", out.String())
 	}
-	want := []string{"install", "--global", "--target", "codex", "acme/demo"}
+	want := []string{"install", "-g", "--only", "apm", "--target", "codex"}
 	if len(mock.Calls) != 1 || !reflect.DeepEqual(mock.Calls[0].Args, want) {
 		t.Fatalf("calls = %#v, want apm %v", mock.Calls, want)
 	}
 	if got := manifestSkillSources(t, cfgPath); len(got) != 1 {
 		t.Fatalf("config mutated: %v", got)
+	}
+}
+
+// A failed install leaves res.Errors empty and reports through the returned error alone; dropping it exits 0
+// with nothing deployed.
+func TestRunSkillsImportSectionReportsAFailedInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	cfgPath := filepath.Join(t.TempDir(), "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{AgentsUse: []string{"codex"}},
+		Agents:   config.AgentsConfig{Packages: []config.SkillPackage{{Source: "acme/demo", Agents: []string{"codex"}}}},
+	})
+	a := app.New(cfgPath)
+	a.SetFallbackExecutor(&executor.MockExecutor{
+		Responses: []executor.MockCall{{Stderr: "install aborted\n", Err: errors.New("exit status 1")}},
+	})
+	out := &bytes.Buffer{}
+	cmd := &cobra.Command{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+
+	err := runSkillsImportSection(cmd, nil, a, skillsImportChoice{})
+	if err == nil {
+		t.Fatalf("bootstrap exited 0 with a failed install; output:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "install aborted") {
+		t.Fatalf("output = %q, want the install failure surfaced", out.String())
+	}
+}
+
+// A surface that failed is not a warning: bootstrap must print it and exit nonzero, or a scripted setup
+// chains onto agent state it never got.
+func TestRunSkillsImportSectionReportsSurfaceFailures(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	cfgPath := filepath.Join(t.TempDir(), "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{AgentsUse: []string{"claude-code"}},
+		Agents: config.AgentsConfig{
+			Packages:   []config.SkillPackage{{Source: "acme/demo", Agents: []string{"claude-code"}}},
+			McpServers: []config.McpServer{{Name: "demo", Transport: "stdio", Command: "npx demo-mcp"}},
+		},
+	})
+	a := app.New(cfgPath)
+	a.SetFallbackExecutor(&executor.MockExecutor{Responses: []executor.MockCall{
+		{},
+		{Stderr: "mcp install aborted\n", Err: errors.New("exit status 1")},
+	}})
+	out := &bytes.Buffer{}
+	cmd := &cobra.Command{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+
+	err := runSkillsImportSection(cmd, nil, a, skillsImportChoice{})
+	if err == nil {
+		t.Fatalf("bootstrap exited 0 with a failed surface; output:\n%s", out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("! mcp:")) {
+		t.Fatalf("output = %q, want the surface failure printed", out.String())
 	}
 }

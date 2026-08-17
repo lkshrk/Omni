@@ -20,7 +20,7 @@ func newDoctorCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Run read-only health checks",
-		Long:  "Run read-only diagnostics for config, host setup, providers, dotfiles, native services, and local cache state. With --fix, apply safe auto-fixes (duplicate $include definitions, dead ignore patterns, installing the missing apm CLI) first.",
+		Long:  "Run read-only diagnostics for config, host setup, providers, dotfiles, native services, and local cache state. With --fix, apply safe auto-fixes (duplicate $include definitions, dead ignore patterns, installing or upgrading the apm CLI) first.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Fix progress is prose, so in JSON mode it goes to stderr rather than into the document stdout parsers consume.
 			out := cmd.OutOrStdout()
@@ -45,7 +45,10 @@ func newDoctorCmd(state *rootState) *cobra.Command {
 					fmt.Fprintf(out, "cleaned ignore patterns for: %s\n", strings.Join(fixResult.IgnoreModified, ", "))
 				}
 				if fixResult.APMInstall.Planned != "" {
-					fmt.Fprintf(out, "dry run: would install APM via: %s\n", fixResult.APMInstall.Planned)
+					fmt.Fprintf(out, "dry run: would install or upgrade APM via: %s\n", fixResult.APMInstall.Planned)
+				}
+				if fixResult.APMInstall.Upgraded != "" {
+					fmt.Fprintf(out, "upgraded APM via: %s\n", fixResult.APMInstall.Upgraded)
 				}
 				if fixResult.APMInstall.Installed != "" {
 					fmt.Fprintf(out, "installed APM via: %s\n", fixResult.APMInstall.Installed)

@@ -64,6 +64,16 @@ func TestParseSkillSource(t *testing.T) {
 			},
 		},
 		{
+			name:  "scp locator without a path separator",
+			input: "git@example.com:myrepo",
+			want:  SkillSource{Source: "git@example.com:myrepo"},
+		},
+		{
+			name:  "scp locator without a path separator and a skill selector",
+			input: "git@example.com:myrepo@review",
+			want:  SkillSource{Source: "git@example.com:myrepo", Skills: []string{"review"}},
+		},
+		{
 			name:  "generic ssh",
 			input: "ssh://git@git.example.com/team/skills.git#main",
 			want:  SkillSource{Source: "ssh://git@git.example.com/team/skills.git", Ref: "main"},

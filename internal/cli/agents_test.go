@@ -12,8 +12,8 @@ import (
 
 func TestAgentsMcpSubcmdsRegistered(t *testing.T) {
 	state := &rootState{}
-	cmd := newAgentsMcpCmd(state)
-	want := map[string]bool{"list": false, "add": false, "remove": false, "restore": false, "import": false}
+	cmd := newAgentsMcpVisibleCmd(state)
+	want := map[string]bool{"list": false, "import": false, "remove": false, "resolve": false, "group": false}
 	for _, sub := range cmd.Commands() {
 		want[sub.Name()] = true
 	}
@@ -49,7 +49,18 @@ func newImportTestApp(t *testing.T, adapters []app.McpAdapter, opts ...func(*app
 	if err := config.Save(cfgPath, &root); err != nil {
 		t.Fatal(err)
 	}
-	a := app.New(cfgPath, append([]func(*app.App){app.WithMcpAdapters(adapters)}, opts...)...)
+	// A real HOME would let the developer's own claude config leak in as a second definition of a stubbed server.
+	home := t.TempDir()
+	base := []func(*app.App){
+		app.WithEnvLookup(func(name string) string {
+			if name == "HOME" {
+				return home
+			}
+			return ""
+		}),
+		app.WithMcpAdapters(adapters),
+	}
+	a := app.New(cfgPath, append(base, opts...)...)
 	if err := a.InitTestMode(context.Background()); err != nil {
 		t.Fatal(err)
 	}

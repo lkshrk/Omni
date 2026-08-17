@@ -1,6 +1,9 @@
 package app
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // ResolveAllDriftOptions selects the side every drifted resource is settled with.
 type ResolveAllDriftOptions struct {
@@ -65,6 +68,11 @@ func (a *App) ResolveAllDrift(ctx context.Context, opts ResolveAllDriftOptions) 
 	} else {
 		for _, row := range mcpRows {
 			if !row.Drifted {
+				continue
+			}
+			if len(row.NativeDriftAgents()) == 0 {
+				result.Warnings = append(result.Warnings, fmt.Sprintf(
+					"mcp server %s drifted on APM-owned agents; the next %s reconciles it", row.Name, mcpAPMDriftRemedy))
 				continue
 			}
 			res, err := a.ResolveMcpDrift(ctx, ResolveMcpDriftOptions{

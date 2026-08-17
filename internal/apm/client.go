@@ -39,38 +39,48 @@ func New(exec commandexec.Executor, scope Scope) *Client {
 	return &Client{exec: exec, scope: scope}
 }
 
-func (c *Client) Install(ctx context.Context, frozen, dryRun bool) (Result, error) {
-	args := c.scoped("install")
-	if frozen {
+// Manifest surfaces for --only. MCP never goes through the `apm mcp` alias group, which exits 0 on failure.
+const (
+	SurfacePackages = "apm"
+	SurfaceMcp      = "mcp"
+)
+
+// InstallOptions — Frozen requires the manifest and lockfile to agree instead of re-resolving.
+type InstallOptions struct {
+	Frozen bool
+	DryRun bool
+	// Update refreshes each dependency to the latest ref its declaration matches. `apm update` does the same
+	// but takes no --only, so it always redeploys the MCP surface into whichever targets the run selected.
+	Update bool
+	// ScrubEnv names variables removed from the install's environment. Most client adapters resolve a
+	// ${VAR} reference at install time, so a variable APM can read is written to the agent config as its
+	// value; unset, the placeholder deploys verbatim and the agent resolves it at runtime instead.
+	ScrubEnv []string
+}
+
+// InstallOnly reconciles one surface into comma-joined targets: a repeated --target keeps only the last value, and an unscoped install reaches every surface APM detects.
+func (c *Client) InstallOnly(ctx context.Context, surface string, targets []string, opts InstallOptions) (Result, error) {
+	if strings.TrimSpace(surface) == "" {
+		return Result{}, errors.New("install requires a manifest surface")
+	}
+	if c.scope != Global {
+		return Result{}, fmt.Errorf("apm install --only %s: %w", surface, ErrUnsupportedScope)
+	}
+	args := []string{"install", "-g"}
+	if opts.Frozen {
 		args = append(args, "--frozen")
 	}
-	if dryRun {
-		args = append(args, "--dry-run")
+	args = append(args, "--only", surface)
+	if opts.Update {
+		args = append(args, "--update")
 	}
-	return c.run(ctx, args...)
-}
-
-// Add uses APM's positional install form, which updates apm.yml before installing.
-func (c *Client) Add(ctx context.Context, packages ...string) (Result, error) {
-	if len(packages) == 0 {
-		return Result{}, errors.New("add requires at least one package")
-	}
-	return c.run(ctx, append(c.scoped("install"), packages...)...)
-}
-
-// InstallPackages — positional install with an explicit target set; APM records the packages in its own manifest.
-func (c *Client) InstallPackages(ctx context.Context, dryRun bool, targets []string, packages ...string) (Result, error) {
-	if len(packages) == 0 {
-		return Result{}, errors.New("install requires at least one package")
-	}
-	args := c.scoped("install")
-	if dryRun {
+	if opts.DryRun {
 		args = append(args, "--dry-run")
 	}
 	if len(targets) > 0 {
 		args = append(args, "--target", strings.Join(targets, ","))
 	}
-	return c.run(ctx, append(args, packages...)...)
+	return c.runEnv(ctx, opts.ScrubEnv, args...)
 }
 
 func (c *Client) Uninstall(ctx context.Context, packages ...string) (Result, error) {
@@ -78,19 +88,6 @@ func (c *Client) Uninstall(ctx context.Context, packages ...string) (Result, err
 		return Result{}, errors.New("uninstall requires at least one package")
 	}
 	return c.run(ctx, append(c.scoped("uninstall"), packages...)...)
-}
-
-func (c *Client) Update(ctx context.Context, dryRun bool, packages ...string) (Result, error) {
-	args := append([]string{"update"}, packages...)
-	if dryRun {
-		args = append(args, "--dry-run")
-	} else {
-		args = append(args, "--yes")
-	}
-	if c.scope == Global {
-		args = append(args, "--global")
-	}
-	return c.run(ctx, args...)
 }
 
 func (c *Client) Search(ctx context.Context, query string) (Result, error) {
@@ -129,7 +126,18 @@ func (c *Client) projectOnly(operation string) error {
 }
 
 func (c *Client) run(ctx context.Context, args ...string) (Result, error) {
-	stdout, stderr, err := c.exec.Run(ctx, "apm", args...)
+	return c.runEnv(ctx, nil, args...)
+}
+
+// scrub carries bare variable names, which the executor overlay reads as an unset rather than an assignment.
+func (c *Client) runEnv(ctx context.Context, scrub []string, args ...string) (Result, error) {
+	run := func() (string, string, error) { return c.exec.Run(ctx, "apm", args...) }
+	if len(scrub) > 0 {
+		run = func() (string, string, error) {
+			return commandexec.RunWithEnv(ctx, c.exec, scrub, "apm", args...)
+		}
+	}
+	stdout, stderr, err := run()
 	result := Result{Stdout: stdout, Stderr: stderr}
 	if err == nil {
 		return result, nil

@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"fmt"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/lkshrk/omni/internal/app"
 )
@@ -42,6 +45,76 @@ func agentsRowName(m Model, e agentsAllRow) string {
 		}
 	}
 	return ""
+}
+
+func agentsMcpStatusMarker(status app.McpStatus) string {
+	switch status {
+	case app.McpStatusInstalled:
+		return "✓"
+	case app.McpStatusShadowed:
+		return "via-plugin"
+	case app.McpStatusDrifted:
+		return "drift"
+	default:
+		return "-"
+	}
+}
+
+func agentsMcpVersionText(version string) string {
+	if version == "" {
+		return "-"
+	}
+	return version
+}
+
+// Which side owns the registration decides what any remedy can be, so it travels with every cell; global MCP
+// has no per-server scoping, so an agent the config never named is called out as deployed anyway.
+func agentsMcpRowCells(row app.McpServerRow, agentIDs []string) []string {
+	cells := make([]string, 0, len(agentIDs))
+	for _, id := range agentIDs {
+		status, ok := row.PerAgentStatus[id]
+		if !ok || status == app.McpStatusAgentUnavailable {
+			continue
+		}
+		owner := "native"
+		if row.APMManaged(id) {
+			owner = "apm"
+		}
+		cell := fmt.Sprintf("%s(%s %s)", id, agentsMcpStatusMarker(status), owner)
+		if slices.Contains(row.UndeclaredAPMAgents, id) {
+			cell += " deployed, undeclared (APM)"
+		}
+		cells = append(cells, cell)
+	}
+	return cells
+}
+
+func agentsMcpRowLine(row app.McpServerRow, agentIDs []string) string {
+	line := row.Name + "  " + row.Transport + "  " + agentsMcpVersionText(row.Version)
+	if cells := agentsMcpRowCells(row, agentIDs); len(cells) > 0 {
+		line += "  " + strings.Join(cells, " ")
+	}
+	return line
+}
+
+// APM owns deployment now, so the tab lists rather than edits — but ownership and APM's wider reach are
+// state only omni can report, and a row that showed neither read as if the config had been honoured.
+func agentsMcpSummaryLines(m Model) []string {
+	if !m.mcpSectionEnabled() || !m.mcpRowsKnown {
+		return nil
+	}
+	ignored := map[string]bool{}
+	for _, name := range m.agentsIgnore.McpServers {
+		ignored[name] = true
+	}
+	var lines []string
+	for _, row := range m.mcpRows {
+		if ignored[row.Name] {
+			continue
+		}
+		lines = append(lines, agentsMcpRowLine(row, mcpRowAgentIDs(row, m.enabledAgents)))
+	}
+	return lines
 }
 
 func skillAgentsWithStatus(r app.SkillPackageRow, enabledAgents []string, wanted app.SkillStatus) []string {

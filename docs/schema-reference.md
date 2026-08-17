@@ -258,7 +258,7 @@ resolved hashes, timestamps, and cache paths are never stored here.
 | `transport` | string | `stdio`, `http`, or `sse`. Required. |
 | `command` | string | Launch command. Required for `stdio`. |
 | `url` | string | Remote endpoint. Required for `http` and `sse`. |
-| `env` | array | Environment variable names resolved during restore; values are not stored. |
+| `env` | array | Environment variable names, deployed as `${env:NAME}` references the agent resolves at runtime; values are never stored or written to an agent config. |
 | `env_literal` | object | Literal non-secret environment values. |
 | `headers` | object | HTTP headers for remote transports. |
 | `agents` | array | Target agent IDs. Omitted or empty means the host's enabled targets. |

@@ -142,7 +142,7 @@ func appendAgentsPaletteCommands(m Model, cmds []palCmd) []palCmd {
 			desc: restore.Description,
 			run: func(m *Model) tea.Cmd {
 				return m.runAgentsPaletteCommand(func(m *Model) []tea.Cmd {
-					return m.doAgentsRestoreAll()
+					return m.doAgentsSyncAll()
 				})
 			},
 		},

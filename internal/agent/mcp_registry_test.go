@@ -28,7 +28,7 @@ func TestNewRegistryRejectsDuplicateTargetIDs(t *testing.T) {
 func TestWithDefaultMcpAdaptersUsesCanonicalProductionSet(t *testing.T) {
 	r := mustRegistry(t, WithDefaultMcpAdapters(nil, nil))
 	got := r.McpAdapters()
-	want := []string{"claude-code", "codex", "grok", "hermes-agent"}
+	want := []string{"codex", "hermes-agent"}
 	if len(got) != len(want) {
 		t.Fatalf("Registry.McpAdapters() count = %d, want %d", len(got), len(want))
 	}

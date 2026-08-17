@@ -396,7 +396,10 @@ canonical package store.
 MCP servers require `name` and `transport`. `stdio` requires `command`; `http`
 and `sse` require `url`. `env` stores environment variable names,
 `env_literal` stores literal non-secret values, and `headers` stores remote
-headers.
+headers. Sync runs the MCP install with every variable these fields reference
+removed from its environment, so the agent config receives the reference rather
+than the resolved secret; a variable the agent still needs must be set in its
+own runtime environment.
 
 Marketplaces require `name` and `source`. Plugins require `name` and exactly
 one of `marketplace` or `source`; a `marketplace` value must name a declared

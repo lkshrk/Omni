@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -122,7 +123,7 @@ Run 'omni bootstrap' on every new machine to reproduce your environment.`,
 				fmt.Fprintln(out)
 			}
 
-			runSkillsImportSection(cmd, state, a, skillsChoice)
+			agentsErr := runSkillsImportSection(cmd, state, a, skillsChoice)
 
 			if promptYesNo(state, "Run sync now to install all tools from config?", doImport) {
 				if err := runToolSyncSection(ctx, a); err != nil {
@@ -143,7 +144,7 @@ Run 'omni bootstrap' on every new machine to reproduce your environment.`,
 			fmt.Fprintln(out, "  omni ui          — explore and manage tools interactively")
 			fmt.Fprintln(out, "  omni add <pkg>   — add a tool to the config")
 			fmt.Fprintln(out, "  omni dots sync   — create all dotfile symlinks")
-			return nil
+			return agentsErr
 		},
 	}
 
@@ -217,7 +218,7 @@ func runExistingConfigBootstrap(cmd *cobra.Command, state *rootState, a *app.App
 		}
 	}
 
-	runSkillsImportSection(cmd, state, a, skills)
+	agentsErr := runSkillsImportSection(cmd, state, a, skills)
 
 	if promptYesNo(state, "Run sync now to install configured tools?", true) {
 		if err := runToolSyncSection(ctx, a); err != nil {
@@ -233,7 +234,7 @@ func runExistingConfigBootstrap(cmd *cobra.Command, state *rootState, a *app.App
 		return err
 	}
 	fmt.Fprintln(out, "✓ Bootstrap complete.")
-	return nil
+	return agentsErr
 }
 
 func runToolSyncSection(ctx context.Context, a *app.App) error {
@@ -266,10 +267,10 @@ type skillsImportChoice struct {
 	skip  bool
 }
 
-// Config-declared packages install through APM directly; the Omni config stays the fleet's source of truth.
-func runSkillsImportSection(cmd *cobra.Command, state *rootState, a *app.App, choice skillsImportChoice) {
+// Config-declared packages install through APM directly; the Omni config stays the fleet's source of truth. Everything is printed before the verdict, so a surface failure does not cut the rest of bootstrap short.
+func runSkillsImportSection(cmd *cobra.Command, state *rootState, a *app.App, choice skillsImportChoice) error {
 	if choice.skip {
-		return
+		return nil
 	}
 	result, err := a.AgentsSyncAll(cmd.Context(), app.AgentsSyncAllOptions{
 		Output: func(stdout, stderr string) {
@@ -280,13 +281,13 @@ func runSkillsImportSection(cmd *cobra.Command, state *rootState, a *app.App, ch
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(cmdErr(cmd), "warning: %s\n", warning)
 	}
-	if err != nil {
-		fmt.Fprintf(cmdErr(cmd), "warning: installing agent packages through APM: %v\n", err)
-		return
+	for _, e := range result.Errors {
+		fmt.Fprintf(cmdErr(cmd), "  ! %s: %s\n", e.Feature, e.Message)
 	}
 	if result.InstalledPackages > 0 {
 		fmt.Fprintf(cmdOut(cmd), "Installed %d agent packages through APM.\n\n", result.InstalledPackages)
 	}
+	return errors.Join(err, agentErrsFailure(len(result.Errors)))
 }
 
 func runDotsSyncSection(ctx context.Context, a *app.App) error {

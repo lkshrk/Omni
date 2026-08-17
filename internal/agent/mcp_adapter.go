@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"sort"
+	"regexp"
 
 	"github.com/lkshrk/omni/internal/config"
 )
@@ -22,20 +22,6 @@ type McpAdapter interface {
 // McpInPlaceUpdater preserves adapter-specific configuration that is not represented in McpServer.
 type McpInPlaceUpdater interface {
 	UpdateMcpServer(ctx context.Context, s config.McpServer) error
-}
-
-func headerFlags(headers map[string]string) []string {
-	names := make([]string, 0, len(headers))
-	for name := range headers {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	args := make([]string, 0, 2*len(names))
-	for _, name := range names {
-		args = append(args, "--header", name+": "+headers[name])
-	}
-	return args
 }
 
 type InstalledMcpServer struct {
@@ -68,4 +54,16 @@ func resolveEnvFlags(s config.McpServer, lookupEnv func(string) (string, bool), 
 		args = append(args, flagName, k+"="+v)
 	}
 	return args, nil
+}
+
+// The name group excludes "@" so a scoped package's "@scope/" is not read as the version separator, and the version group requires digits so "@latest" never matches.
+var mcpPinnedVersionRe = regexp.MustCompile(`(?:npx|bunx)\s+(?:-\S+\s+)*(?:@[^\s@]+/)?[^\s@]+@(\d+\.\d+\.\d+[^\s]*)`)
+
+// ExtractMcpPinnedVersion — Regex parsing only: no exec and no network.
+func ExtractMcpPinnedVersion(command string) string {
+	m := mcpPinnedVersionRe.FindStringSubmatch(command)
+	if m == nil {
+		return ""
+	}
+	return m[1]
 }
