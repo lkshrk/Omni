@@ -141,7 +141,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
 
       # container driver: type=gha export fails on the default docker driver
-      - uses: docker/setup-buildx-action@v4.2.0
+      - uses: docker/setup-buildx-action@v4.3.0
 
       # exposes the GHA runtime env that type=gha cache needs outside build-push-action
       - uses: crazy-max/ghaction-github-runtime@v4.0.0
