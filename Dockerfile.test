@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.26
 
-FROM golang:1.26-alpine AS integration-test
+FROM golang:1.27-alpine AS integration-test
 
 # Integration tests exercise Bash commands, Git-backed dots, and Stow symlinks.
 # build-base provides the C toolchain required by `go test -race`.
