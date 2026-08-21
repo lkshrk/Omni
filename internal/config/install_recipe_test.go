@@ -89,6 +89,29 @@ func TestMaterializeInstallSpec_AptRepo(t *testing.T) {
 	}
 }
 
+func TestMaterializeInstallSpec_AptRepoDeb822WritesSourcesFile(t *testing.T) {
+	spec := config.ToolInstallSpec{
+		Provider: "script",
+		Options: map[string]string{
+			"key_url": "https://example.com/key.asc", "signed_by": "/etc/apt/keyrings/example.asc",
+			"sources_format": "Types: deb\nURIs: https://example.com/debian\nSuites: {suite}\nComponents: stable\nArchitectures: {arch}\nSigned-By: {signed_by}",
+			"packages":       "example-cli",
+		},
+		Recipe: &config.FallbackRecipe{Type: config.FallbackRecipeAptRepo},
+	}
+	got, err := config.MaterializeInstallSpec("example-cli", spec, "")
+	if err != nil {
+		t.Fatalf("MaterializeInstallSpec: %v", err)
+	}
+	setup := got.Options["setup"]
+	if !strings.Contains(setup, "/etc/apt/sources.list.d/omni-'example-cli'.sources") {
+		t.Fatalf("deb822 setup should write .sources file, got %q", setup)
+	}
+	if strings.Contains(setup, ".list ") {
+		t.Fatalf("deb822 setup must not write .list file, got %q", setup)
+	}
+}
+
 func TestGitHubReleaseAssetNameUsesArchitectureAlias(t *testing.T) {
 	spec := config.ToolInstallSpec{
 		Recipe:  &config.FallbackRecipe{Type: config.FallbackRecipeGitHubReleaseAsset, AssetPattern: "tool_{version}_{os}_{arch}"},

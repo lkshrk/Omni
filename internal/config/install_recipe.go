@@ -199,18 +199,23 @@ func materializeAptRepo(logicalName string, spec ToolInstallSpec) (ToolInstallSp
 		suite := optionValue(spec.Options, "suite")
 		format := strings.ReplaceAll(sourcesFormat, "{arch}", arch)
 		format = strings.ReplaceAll(format, "{signed_by}", signedBy)
+		// apt picks the parser by extension: one-line entries need .list, deb822 stanzas need .sources.
+		ext := "list"
+		if isDeb822Sources(sourcesFormat) {
+			ext = "sources"
+		}
 		if suite != "" {
 			sourcesLine := strings.ReplaceAll(format, "{suite}", suite)
 			setup = fmt.Sprintf(
-				`install -m 0755 -d /etc/apt/keyrings && `+CurlFetch+` %s -o %s && chmod a+r %s && printf '%%s\n' %s > /etc/apt/sources.list.d/omni-%s.list && apt-get update`,
+				`install -m 0755 -d /etc/apt/keyrings && `+CurlFetch+` %s -o %s && chmod a+r %s && printf '%%s\n' %s > /etc/apt/sources.list.d/omni-%s.%s && apt-get update`,
 				shellSingleQuote(keyURL), shellSingleQuote(signedBy), shellSingleQuote(signedBy),
-				shellSingleQuote(sourcesLine), shellSingleQuote(logicalName),
+				shellSingleQuote(sourcesLine), shellSingleQuote(logicalName), ext,
 			)
 		} else {
 			setup = fmt.Sprintf(
-				`install -m 0755 -d /etc/apt/keyrings && `+CurlFetch+` %s -o %s && chmod a+r %s && suite=$({ . /etc/os-release; echo "${VERSION_CODENAME:-${UBUNTU_CODENAME:-stable}}"; }) && printf '%%s\n' %s | sed "s/{suite}/$suite/g" > /etc/apt/sources.list.d/omni-%s.list && apt-get update`,
+				`install -m 0755 -d /etc/apt/keyrings && `+CurlFetch+` %s -o %s && chmod a+r %s && suite=$({ . /etc/os-release; echo "${VERSION_CODENAME:-${UBUNTU_CODENAME:-stable}}"; }) && printf '%%s\n' %s | sed "s/{suite}/$suite/g" > /etc/apt/sources.list.d/omni-%s.%s && apt-get update`,
 				shellSingleQuote(keyURL), shellSingleQuote(signedBy), shellSingleQuote(signedBy),
-				shellSingleQuote(format), shellSingleQuote(logicalName),
+				shellSingleQuote(format), shellSingleQuote(logicalName), ext,
 			)
 		}
 	}
@@ -228,6 +233,12 @@ func materializeAptRepo(logicalName string, spec ToolInstallSpec) (ToolInstallSp
 		out.Options["upgrade"] = upgrade
 	}
 	return out, nil
+}
+
+func isDeb822Sources(format string) bool {
+	fields := strings.Fields(format)
+	// deb822 stanzas open with a "Key:" field; one-line entries open with deb/deb-src.
+	return len(fields) > 0 && strings.HasSuffix(fields[0], ":")
 }
 
 func parseArchMap(raw string) map[string]string {
