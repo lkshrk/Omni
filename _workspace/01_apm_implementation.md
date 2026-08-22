@@ -1,6 +1,6 @@
 # APM implementation handoff
 
-Status: **producer complete; ready for test and review lanes**
+Status: **complete; test, review, and native platform gates approved**
 
 ## Implemented
 
@@ -32,6 +32,11 @@ Status: **producer complete; ready for test and review lanes**
 - Reviewed MCP secret mappings retain each environment/header key, replace only its value with `${ENV_VAR}`, canonicalize legacy-only secret containers, and write self-defined servers directly to root `dependencies.mcp`. The import service runs native MCP reconciliation so target config plus lockfile ownership exist before audit; separate secured metadata records the imported candidate without creating a fake local MCP package.
 - Native plugin activation is captured before install as byte-exact secured backup content plus original mode. Verification/audit failure restores through a no-follow atomic filesystem capability, verifies bytes/hash/mode exactly, resets to `ownership-verified`, and remains idempotent across repeated resume.
 - Codex discovery, configuration, and user-scope primitive deployment share the same `CODEX_HOME` override, defaulting to `~/.codex`; package deployment no longer splits from the runtime’s configured state root.
+- Import CI explicitly installs and selects Python 3.12 for sync/build on every OS. Windows DACL verification now uses Win32 security APIs instead of PowerShell module autoload, refuses nonexistent leaves before ACL mutation, and preserves create/write/protect/verify ordering. Windows `file:///C:/...` legacy sources normalize to absolute drive paths.
+- Windows SDDL validation parses DACL flags structurally instead of assuming protection is serialized as the literal prefix `D:P`; both `D:P...` and `D:AIP...` are accepted only when `P` is present. It still requires exactly two allow/full-control ACEs for normalized current-user SID plus SYSTEM and emits sanitized ACL metadata on failure.
+- Windows ACL hardening no longer shells out to `icacls`/`whoami`: it reads the current process token SID, constructs a protected two-ACE SDDL (current user + SYSTEM, OICI only for directories), converts/applies it through Win32 security APIs, and verifies the exact DACL through the existing strict parser. Pre-existing Local Account, Administrators, Owner Rights, or foreign ACEs are removed rather than tolerated.
+- Strict DACL verification also binds ACE inheritance flags to object type: both directory ACEs must contain exactly OI+CI, while file ACEs must contain no inheritance flags. Unknown, missing, duplicated, inherited, or cross-type flags fail closed.
+- Win32 SDDL alias normalization accepts `LA` only when the verified current process user SID has RID 500, because Windows canonicalizes that exact local Administrator SID. `LA` for non-500 users and all `BA`/`OW` substitutions remain rejected.
 - Required Linux unit/transaction, macOS/Windows platform, clean-wheel smoke CI jobs wired into the merge gate.
 - CLI reference documentation.
 
@@ -99,9 +104,15 @@ Status: **producer complete; ready for test and review lanes**
 - Native MCP reconciliation/lockfile regression subset -> **67 passed**.
 - Final activation-restoration/importer subset -> **71 passed, 4 Windows-only skipped**; both post-retirement verification and audit failures restore exact compact bytes/mode and two resumes complete. Ruff and diff-check -> **pass**.
 - APM target/scope/Codex focused subset -> **192 passed**, including required custom-`CODEX_HOME` deployment; complete `tests/unit/integration` -> **1,959 passed**; Ruff/diff-check -> **pass**. The Omni tagged fixture’s prior `~/.codex` expectation was stale and is owned by the Omni lane.
+- Platform-CI repair subset -> **72 passed, 5 platform-only skipped** on Linux; Ruff, actionlint, and diff-check -> **pass**. Windows runtime coverage includes exact DACL, extra-ACE rejection, reparse/component swaps, nonexistent leaves, and drive-letter file URLs; macOS/Windows jobs are pinned to Python 3.12.
+- SDDL parser repair subset -> **8 passed, 5 Windows-only skipped**; Ruff, actionlint, and diff-check -> **pass**.
+- Exact Win32 DACL hardening subset -> **62 passed, 5 Windows-only skipped**; extra-ACE injection is rejected before hardening and proven removed afterward. Ruff, actionlint, and diff-check -> **pass**.
+- ACE inheritance repair subset -> **63 passed, 5 Windows-only skipped**; pure wrong/missing-flag cases plus Windows directory/file read-back are covered. Ruff, actionlint, and diff-check -> **pass**.
+- RID-500 `LA` alias repair subset -> **64 passed, 5 Windows-only skipped**; positive RID-500 and negative non-500/BA/OW cases are covered. Ruff, actionlint, and diff-check -> **pass**.
 - Full unit command after CLI help repair -> **19,937 passed, 7 skipped, 21 xfailed, 99 subtests passed**.
 
 ## Remaining evidence / blockers
 
 - No known implementation blocker.
-- macOS/Windows ACL/path jobs and the harness cross-repository pinned-binary/DinD test remain for the independent test lane; they are defined in CI but were not locally executable on this Linux producer host.
+- APM Import Onboarding run `32605452767` passed Linux unit/transaction/wheel and native macOS/Windows platform jobs at final commit `fe2d55f37062a9147ae297d7d4c8a034c327661c`.
+- Omni CI run `32605540672` passed every unit, lint, vet, native platform, pinned onboarding DinD, and Docker integration job against that commit.

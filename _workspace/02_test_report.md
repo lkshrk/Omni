@@ -1,6 +1,6 @@
 # APM-native onboarding test report
 
-Status: PASS — all local and immutable-pin DinD gates green; Windows/macOS runtime jobs remain CI-pending
+Status: PASS — local, immutable-pin DinD, native macOS/Windows, and full CI gates are green
 
 ## Leader release gate
 
@@ -9,7 +9,8 @@ Status: PASS — all local and immutable-pin DinD gates green; Windows/macOS run
 - Real DinD onboarding shard passed against the remote immutable commit:
   `TestAgentsOnboardRealPinnedAPM` and `TestTUIAgentsOnboardingPreviewConfirmAndApply` executed under `-race -trimpath`.
 - The first quoted build-arg attempt ran zero tests; CI quoting was corrected and the unquoted rerun executed both packages successfully.
-- Remaining external evidence: the wired Windows ACL/reparse and macOS filesystem runtime jobs must run on their native CI runners.
+- APM Import Onboarding run `32605452767` passed Linux unit/transaction/wheel plus native macOS/Windows jobs at `fe2d55f37062a9147ae297d7d4c8a034c327661c`.
+- Omni CI run `32605834432` passed all unit, lint, vet, native platform, pinned onboarding DinD, and Docker integration jobs.
 
 ## Execution round 8 — final round-three verification
 
