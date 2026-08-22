@@ -140,7 +140,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install pinned APM
-        run: python -m pip install git+https://github.com/lkshrk/apm.git@cfd1fc9f873e193f2cd5b834361ee092b546a828
+        run: python -m pip install git+https://github.com/lkshrk/apm.git@a3c89209d1da00ae4a1d1c64b0bb94e41e44e541
 
       - name: Test portable APM target contracts
         run: go test ./internal/app -run '^TestAPM(Target|User)'

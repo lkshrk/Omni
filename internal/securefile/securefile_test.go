@@ -48,3 +48,25 @@ func TestRootRejectsSymlinkAncestor(t *testing.T) {
 		t.Fatal("symlink ancestor accepted")
 	}
 }
+
+func TestRootCanonicalizesExistingSymlinkedParent(t *testing.T) {
+	base := t.TempDir()
+	realParent := filepath.Join(base, "real")
+	if err := os.Mkdir(realParent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(realParent, link); err != nil {
+		t.Skip(err)
+	}
+	root, err := NewRoot(filepath.Join(link, "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(root.Path()) != realParent {
+		t.Fatalf("canonical root=%s want parent %s", root.Path(), realParent)
+	}
+	if err := root.WriteFileAtomic("journal", []byte("ok")); err != nil {
+		t.Fatal(err)
+	}
+}

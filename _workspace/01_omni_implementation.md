@@ -61,6 +61,9 @@ Round-3 repairs complete locally: grouped conflict origin selection with durable
   - Real terminal cancellation, target selection, secret mapping, executable approval, conflict origin, conditional exclusion, apply, status, and cleanup PASS.
   - Five vendored protocol artifacts have fixed SHA-256 regression gates; current APM/Omni envelope schema and golden bytes match.
   - Focused race, `make lint` (0), vet, Windows cross-compile, actionlint, strict docs, and diff check PASS.
+- Native macOS repair:
+  - SecureRoot canonicalizes an existing ancestor chain once (covering macOS `/var` -> `/private/var`) while still rejecting a symlink at the supplied root; all descendant I/O remains descriptor-relative/no-follow under the canonical capability.
+  - Exact Linux race regressions and symlinked-parent regression PASS; Darwin amd64 securefile and Darwin arm64 app cross-compilation PASS; lint/vet/diff remain green.
 
 ## Protocol assumptions
 
