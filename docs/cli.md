@@ -47,34 +47,20 @@ Git or agent binary reachability, and reports manifest counts. Git is checked
 only when a configured skill source needs it. A feature
 disabled for this host is reported as disabled rather than actively probed.
 
-`omni doctor --fix` also repairs Omni's own skill store: artifacts an
-interrupted operation left behind, links into a package that no longer exists,
-canonical packages nothing references any more, and missing local install
-metadata. The unreferenced-package cleanup judges every package against the
-active config's manifest, so running `--fix` with a different `--config` than
-the one that installed a package deletes that package's copy from the shared
-store. Run it with the config that declares your packages, or preview it with
-`--fix --dry-run` first.
+`omni doctor --fix` repairs Omni-owned tool and dotfile state. APM owns agent
+package cleanup and diagnostics.
 
 When the `apm` executable is missing and agent features are enabled,
-`omni doctor --fix` installs `apm-cli` through the first available installer
-(`uv tool install`, `pipx install`, then `pip3 install --user`). Until APM is
-installed, `omni agents sync` refuses to run when the config declares agent
-packages, and reports how to install APM.
+`omni doctor --fix` installs the exact APM build required by Omni through the
+first available installer (`uv tool install`, `pipx install`, then
+`pip3 install --user`). Until APM is installed, `omni agents sync` refuses to
+run when the config declares agent packages, and reports how to install APM.
 
-`omni doctor` fails the "APM version" check when the installed `apm` is older
-than 0.28.0 or reports a version Omni cannot parse; `--fix` upgrades it through
-the same installer preference (`uv tool upgrade`, `pipx upgrade`, then
-`pip3 install --user --upgrade`). Older releases exit 0 on failed service
-writes and do not round-trip per-dependency targets, so Omni's generated
-manifest is not safe on them.
-
-`omni doctor` also reports APM orphans: entries under APM's user-scope deploy
-roots (`~/.agents`, `~/.claude/agents`, `~/.claude/commands`,
-`~/.claude/skills`) that `~/.apm/apm.lock.yaml` does not account for, and MCP
-servers in `~/.claude.json` the lockfile never recorded. A failed APM install
-leaves deployed primitives behind that no APM verb can reach at global scope.
-The check is report-only and names the paths; removing them is a manual step.
+`omni doctor` requires the exact patched build `0.28.0+omni.2`; another version
+or an unparseable version fails the "APM version" check. `--fix` restores the
+required build from the immutable fork commit through the same installer
+preference. See [Patched APM Build](agents.md#patched-apm-build) for provenance
+and the upstream-release transition.
 
 `omni doctor` exits nonzero when any check fails, and `--fix` and `--dry-run`
 do not suppress that: `--fix --dry-run` still runs the full diagnostic pass, so
@@ -93,22 +79,8 @@ should read `--format json` output and ignore the status.
 | `--import` | Import installed tools during bootstrap. |
 | `--no-import` | Skip import and leave installed tools unclaimed. |
 | `--import-config <path>` | Import an existing settings file as part of bootstrap. |
-| `--import-skills` | Import existing agent skill packages during bootstrap. |
-| `--no-import-skills` | Skip the agent skill package import. |
 
-When a legacy skill CLI installed skill packages that the manifest does not
-track, bootstrap prints `Import N existing agent skill package(s)?` and
-defaults to yes. Accepting merges the lockfile packages into `agents.packages`
-so the next `omni agents sync` hands them to APM, and their legacy
-CLI-managed directories are replaced with links into Omni's package store.
-The prompt is skipped when skills are disabled for the host or when nothing is
-unmanaged, and either flag answers it without asking.
-
-Because adoption rewrites real directories, it never happens implicitly. When
-stdin is not a terminal — a provisioning script, a CI step, `omni bootstrap <
-/dev/null` — bootstrap prints how many packages it found and leaves them alone
-instead of taking the prompt's default. Pass `--import-skills` (or the global
-`--yes`) to adopt them unattended.
+Agent package state is owned by APM and is never imported by bootstrap.
 
 ## Tools Commands
 
@@ -123,7 +95,7 @@ instead of taking the prompt's default. Pass `--import-skills` (or the global
 | `omni tools add <package>` | Add a tool to config. |
 | `omni tools install [tool]` | Install one missing tool. |
 | `omni tools sync [group]` | Install missing tools from config. |
-| `omni tools sync --all` | Claim and sync tools, then import and restore agent plugins, skills, and MCP servers in dependency order. |
+| `omni tools sync --all` | Claim and sync tools, then run the APM agent sync. |
 | `omni tools sync --prune` | Remove local installations no longer in config. |
 | `omni tools upgrade [tool]` | Upgrade one tool or use `--all`. |
 | `omni tools import` | Import installed tools into config. |
@@ -165,69 +137,41 @@ order:
 1. Claim discovered installed tools into config (into the machine group, or
    into `--group` when given).
 2. Install configured tools that are missing locally.
-3. Import unmanaged plugins.
-4. Restore plugins. Missing marketplaces are installed before their plugins;
-   marketplaces already present on an agent are not reinstalled.
-5. Import unmanaged skill packages.
-6. Restore skills.
-7. Adopt unmanaged MCP servers.
-8. Restore MCP servers.
+3. Run the APM-backed agent sync.
 
-Steps 3–8 keep the master and per-feature enablement gates: a disabled feature
-warns and installs nothing, while a failure in one feature does not stop later
-features. Plugin state is tracked per agent. Skills and MCP servers supplied by
-an installed plugin are skipped only for that agent; an MCP server shadowed for
-Claude can still be adopted for Codex. Dry-run includes plugins it would
-install in that projected state, so it does not preview duplicate skill or MCP
-installs from those plugins. Drift is reported and never resolved
-automatically. Use `omni agents sync` for the agents leg alone.
+The agent leg is a single APM operation. Use `omni agents sync` directly when
+only agent state is needed.
 
-Exit code: `omni tools sync --all` exits nonzero when either leg reports a
-failure — a tool that could not be installed or whose provider is
-unavailable, a skill source that could not be acquired, an agent CLI that
-errored. Both legs run to completion first, so a single failure never
-short-circuits the rest, and a run that fails in both legs reports both. A
-clean exit means every step succeeded; scripts can check it directly rather
-than parsing the printed lines. Plain `omni tools sync` applies the same rule
-to the tool leg alone.
+The aggregate command runs the APM agent leg only when `~/.apm/apm.yml` exists.
+APM owns agent errors and output; Omni reports the aggregate exit status.
 
 ## Agents Commands
 
-Agent packages and MCP servers are declared in Omni's config (`agents.packages`
-and `agents.mcp_servers`, optionally scoped to hosts through group `skills`
-lists). Sync regenerates `~/.apm/apm.yml` from what this host resolves and
-reconciles each surface with one scoped `apm install --global --only <surface>`;
-manifest entries Omni does not declare are preserved verbatim. The Omni config
-stays the fleet's source of truth and is never mutated by a sync; APM owns
-`apm.lock.yaml`, package resolution, security checks, and harness deployment.
-Alongside the manifest, `~/.apm/.omni-managed.json` records which entries the
-last generation wrote and which of them an install then deployed, so a
-declaration deleted from the config by hand is retired from the manifest —
-even if its install never succeeded — instead of being mistaken for someone
-else's entry.
+Agent desired and runtime state are owned by APM. Omni dispatches the thin
+wrappers below in the global APM workspace; APM owns manifests, locks,
+resolution, security checks, marketplace metadata, and deployment. Omni does
+not provide a native fallback.
 
 | Command | Description |
 | --- | --- |
-| `omni agents sync [--frozen] [--dry-run]` | Regenerate the manifest from this host's config, honoring group host scoping, and install each surface. `--frozen` replays the existing manifest and lockfile without regenerating either. `--dry-run` reports the plan; when the manifest on disk no longer matches the config, it reports Omni's own delta rather than asking APM to preview a stale file. |
-| `omni agents add <package>...` | Declare packages in omni's config, regenerate the manifest from it, and install the package surface. |
-| `omni agents remove <package>...` | Undeclare packages from omni's config and remove what APM deployed for them. `uninstall` is an alias. |
-| `omni agents update [--dry-run]` | Refresh every dependency the manifest declares to the latest ref it matches, one surface at a time and each into the targets this host selects for it. Narrowing to named packages is not offered: APM refreshes a named subset only through a command that redeploys the MCP surface into every target of the run. |
-| `omni agents search <query@marketplace>` | Search one registered APM marketplace. `find` is an alias. |
-| `omni agents import [<source>]` | List the `apm.yml` package dependencies this host's config does not declare, or adopt one into the config by source. |
-| `omni agents mcp list` | Show declared MCP servers with their resolved version and, per agent, whether APM or a native adapter owns the registration. |
-| `omni agents mcp add --name <name> --transport <transport> …` | Declare an MCP server in the config and converge this host: regenerate the manifest and reinstall the MCP surface. |
-| `omni agents mcp import [<name>]` | List MCP servers omni does not declare — live agent registrations and preserved `apm.yml` entries alike — or adopt one into the config. |
-| `omni agents mcp remove <name>` | Undeclare an MCP server and unregister it wherever it was deployed. |
-| `omni agents mcp resolve <name> (--use-managed \| --use-local)` | Settle a server whose live registration diverged from the config. |
-| `omni agents mcp group <name> <group>...` | Set an MCP server's full group membership. |
+| `omni agents sync [--frozen] [--dry-run]` | Dispatch APM install in the global workspace. |
+| `omni agents add <package>...` | Dispatch APM package install. |
+| `omni agents remove <package>...` | Dispatch APM package removal. |
+| `omni agents update [--dry-run]` | Dispatch APM dependency update. |
+| `omni agents search <query@marketplace>` | Dispatch APM marketplace search. |
+| `omni agents audit` | Audit the global APM workspace. |
+| `omni agents targets` | Show resolved APM targets. |
+| `omni agents outdated` | Show outdated global APM dependencies. |
+| `omni agents prune` | Remove unused APM dependencies. |
+| `omni agents deps list|why` | Inspect global APM dependencies. |
+| `omni agents marketplace ...` | List, browse, update, validate, add, or remove APM marketplaces. |
 
-APM deploys one global MCP surface: every declared server reaches every
-MCP-capable target on the host, whatever an entry's `agents` list says. `omni
-agents mcp list` therefore reports the effective deployment and spells out the
-divergence (`declared: … — deployed: all APM targets (APM limitation): …`)
-rather than rendering the declared scoping as if APM enforced it. Drift on an
-APM-owned agent is reported without a remedy verb: the next `omni agents sync`
-reconciles it.
+APM deploys one host-global MCP surface: every declared server reaches every
+enabled target that supports user-global MCP configuration. MCP entries do not
+accept an `agents` list. Cursor and OpenCode are workspace-only MCP targets and
+are rejected from this surface. Hermes is supported as an explicit target and
+is not selected by automatic target discovery. APM owns target deployment,
+removal, drift reporting, repair, and lifecycle serialization.
 
 Common agents flags:
 
