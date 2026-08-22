@@ -3,8 +3,8 @@ module github.com/lkshrk/omni
 go 1.26.2
 
 require (
-	charm.land/bubbles/v2 v2.1.1
-	charm.land/bubbletea/v2 v2.0.8
+	charm.land/bubbles/v2 v2.2.0
+	charm.land/bubbletea/v2 v2.0.9
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/aymanbagabas/go-udiff v0.4.1
 	github.com/charmbracelet/colorprofile v0.4.3
@@ -13,7 +13,7 @@ require (
 	github.com/charmbracelet/x/vttest v0.0.0-20260730164118-7e2d3e6c5238
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/rogpeppe/go-internal v1.15.0
+	github.com/rogpeppe/go-internal v1.16.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/ulikunitz/xz v0.5.16
@@ -21,7 +21,7 @@ require (
 	github.com/uptrace/bun/dialect/sqlitedialect v1.2.18
 	golang.org/x/sync v0.22.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.56.0
+	modernc.org/sqlite v1.57.0
 )
 
 require golang.org/x/exp v0.0.0-20260727155853-b88d891fe743 // indirect
