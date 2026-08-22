@@ -45,14 +45,14 @@ func secureWriteRoot(root, relative string, data []byte) error {
 	path := filepath.Join(root, relative)
 	handles, err := openSafeComponentHandles(root, filepath.Dir(path))
 	if err != nil {
-		return err
+		return fmt.Errorf("open secure write ancestors: %w", err)
 	}
 	defer closeHandles(handles)
-	if err := rejectReparseAncestors(root, path); err != nil {
-		return err
+	if err := rejectReparseAncestors(root, filepath.Dir(path)); err != nil {
+		return fmt.Errorf("verify secure write ancestors: %w", err)
 	}
 	if err := secureMkdirAll(filepath.Dir(path)); err != nil {
-		return err
+		return fmt.Errorf("protect secure write directory: %w", err)
 	}
 	return secureWriteAtomic(path, data)
 }
@@ -153,13 +153,13 @@ func secureWriteAtomic(path string, data []byte) (retErr error) {
 	dir, name := filepath.Dir(path), filepath.Base(path)
 	root, err := os.OpenRoot(dir)
 	if err != nil {
-		return err
+		return fmt.Errorf("open private write root: %w", err)
 	}
 	defer func() { retErr = errors.Join(retErr, root.Close()) }()
 	staging := ".secure-" + rand.Text()
 	f, err := root.OpenFile(staging, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
-		return err
+		return fmt.Errorf("create private staging file: %w", err)
 	}
 	closed := false
 	committed := false
@@ -174,21 +174,21 @@ func secureWriteAtomic(path string, data []byte) (retErr error) {
 		}
 	}()
 	if err = protectPath(filepath.Join(dir, staging)); err != nil {
-		return err
+		return fmt.Errorf("protect private staging file: %w", err)
 	}
 	if _, err = f.Write(data); err != nil {
-		return err
+		return fmt.Errorf("write private staging file: %w", err)
 	}
 	if err = f.Sync(); err != nil {
-		return err
+		return fmt.Errorf("sync private staging file: %w", err)
 	}
 	if err = f.Close(); err != nil {
 		closed = true
-		return err
+		return fmt.Errorf("close private staging file: %w", err)
 	}
 	closed = true
 	if err := root.Rename(staging, name); err != nil {
-		return err
+		return fmt.Errorf("commit private staging file: %w", err)
 	}
 	committed = true
 	committedFile, err := root.Open(name)
