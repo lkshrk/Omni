@@ -5,9 +5,9 @@
     "plan": {
       "schema_version": 1,
       "coordinator": "standalone",
-      "operation_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "plan_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-      "resolution_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "operation_id": "28b35d40744b893fac1a0e495b7da248",
+      "plan_id": "7f626b2fb2288cb8c272e9f2f975b6c7aa96884d5ddb6fe0a3337eeb130f1483",
+      "resolution_id": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
       "scope": "global",
       "sources": ["claude", "codex"],
       "candidate_set_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",

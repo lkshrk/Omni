@@ -33,7 +33,7 @@ func TestParseAPMVersion(t *testing.T) {
 }
 
 func TestAPMVersionPin(t *testing.T) {
-	if apmVersionPin != "0.28.0+omni.3" || apmPackagePin != "git+https://github.com/lkshrk/apm.git@cfd1fc9f873e193f2cd5b834361ee092b546a828" {
+	if apmVersionPin != "0.28.0+omni.3" || apmPackagePin != "git+https://github.com/lkshrk/apm.git@a3c89209d1da00ae4a1d1c64b0bb94e41e44e541" {
 		t.Fatalf("unexpected APM pins: version=%q package=%q", apmVersionPin, apmPackagePin)
 	}
 	for _, tt := range []struct {

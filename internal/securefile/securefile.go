@@ -20,7 +20,7 @@ func NewRoot(stateDir string) (*Root, error) {
 	if strings.TrimSpace(stateDir) == "" {
 		return nil, errors.New("secure root is required")
 	}
-	abs, err := filepath.Abs(stateDir)
+	abs, err := canonicalRootPath(stateDir, false)
 	if err != nil {
 		return nil, fmt.Errorf("resolve secure root: %w", err)
 	}
@@ -38,7 +38,7 @@ func OpenRoot(stateDir string) (*Root, error) {
 	if strings.TrimSpace(stateDir) == "" {
 		return nil, errors.New("secure root is required")
 	}
-	abs, err := filepath.Abs(stateDir)
+	abs, err := canonicalRootPath(stateDir, true)
 	if err != nil {
 		return nil, err
 	}
@@ -47,6 +47,52 @@ func OpenRoot(stateDir string) (*Root, error) {
 		return nil, err
 	}
 	return r, nil
+}
+
+// canonicalRootPath resolves existing ancestor symlinks (notably macOS
+// /var -> /private/var) once, before the descriptor-relative capability is
+// opened. The supplied root itself is never allowed to be a symlink.
+func canonicalRootPath(path string, requireExisting bool) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	if info, statErr := os.Lstat(abs); statErr == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", errors.New("secure root must not be a symlink")
+		}
+		resolved, err := filepath.EvalSymlinks(abs)
+		if err != nil {
+			return "", err
+		}
+		return filepath.Clean(resolved), nil
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return "", statErr
+	} else if requireExisting {
+		return "", statErr
+	}
+	existing := abs
+	for {
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return "", errors.New("secure root has no existing ancestor")
+		}
+		existing = parent
+		if _, err := os.Lstat(existing); err == nil {
+			break
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
+		}
+	}
+	resolved, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(existing, abs)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(filepath.Join(resolved, rel)), nil
 }
 
 func (r *Root) Path() string { return r.path }
