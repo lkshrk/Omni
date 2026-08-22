@@ -177,15 +177,11 @@ func secureWriteAtomic(path string, data []byte) (retErr error) {
 		return err
 	}
 	closed = true
-	from, err := windows.UTF16PtrFromString(tmp)
-	if err != nil {
-		return err
-	}
-	to, err := windows.UTF16PtrFromString(path)
-	if err != nil {
-		return err
-	}
-	if err := windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH); err != nil {
+	// os.Rename uses the Go runtime's long-path-aware MoveFileEx wrapper.
+	// MOVEFILE_WRITE_THROUGH is intentionally omitted: on Windows Server 2025
+	// it can report success for a same-volume new destination before the name is
+	// observable, causing the following security verification to see no file.
+	if err := os.Rename(tmp, path); err != nil {
 		return err
 	}
 	return secureVerify(path)

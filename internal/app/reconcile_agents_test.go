@@ -22,6 +22,7 @@ func newReconcileAgentsApp(t *testing.T, hostname string) (*App, string) {
 }
 
 func TestReconcileWithoutAPMWorkspaceContinuesDotPhases(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	a, _ := newReconcileAgentsApp(t, "reconcile-agents-fail-host")
 
 	result, err := a.Reconcile(context.Background(), ReconcileOptions{})

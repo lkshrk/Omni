@@ -12,7 +12,7 @@ import (
 
 // APM is contract-tested as an exact dependency; newer releases require rerunning that suite.
 const apmVersionPin = "0.28.0+omni.3"
-const apmPackagePin = "git+https://github.com/lkshrk/apm.git@a3c89209d1da00ae4a1d1c64b0bb94e41e44e541"
+const apmPackagePin = "git+https://github.com/lkshrk/apm.git@6a3bdd34e40024f2c58636dbb13951a7b33bfbcb"
 
 const apmVersionFixHint = "run 'omni doctor --fix' to upgrade apm-cli"
 
