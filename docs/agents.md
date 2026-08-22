@@ -36,11 +36,11 @@ conflicts, and target broadening block mutation.
 
 Omni temporarily requires APM `0.28.0+omni.3`, built from the immutable
 `lkshrk/apm` commit
-[`20eb25d98fc73bb688f846d499b035de2b2fb325`](https://github.com/lkshrk/apm/commit/20eb25d98fc73bb688f846d499b035de2b2fb325).
+[`fe2d55f37062a9147ae297d7d4c8a034c327661c`](https://github.com/lkshrk/apm/commit/fe2d55f37062a9147ae297d7d4c8a034c327661c).
 Installers use this exact source specification:
 
 ```text
-git+https://github.com/lkshrk/apm.git@20eb25d98fc73bb688f846d499b035de2b2fb325
+git+https://github.com/lkshrk/apm.git@fe2d55f37062a9147ae297d7d4c8a034c327661c
 ```
 
 The patch makes Hermes a stable explicit target, fixes global Antigravity MCP
