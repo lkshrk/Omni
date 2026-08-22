@@ -115,13 +115,9 @@ and the package managers or Git remotes they invoke:
 - provider search, refresh, install, upgrade, and delete commands can contact
   package registries or OS package mirrors
 - `dots pull` and `dots push` contact the configured Git remote
-- native skill add/sync/upgrade can contact configured Git remotes or
-  well-known HTTP endpoints; an HTTP index must declare the supported
-  discovery schema and a SHA-256 digest per artifact, and Omni verifies each
-  digest before staging the content, so there is no unverified HTTP install
-  path
-- `agents find` contacts skills.sh; catalog failure never blocks sync,
-  update, remove, or reconcile
+- APM agent add/sync/update/search and marketplace operations can contact
+  configured package sources and marketplaces; APM owns validation, artifact
+  handling, and network failures
 - release downloads happen only through your chosen install channel
 - the `$schema` URI in `settings.json` is editor metadata; Omni writes it but
   does not fetch it as part of normal config writes

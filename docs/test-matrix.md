@@ -1,6 +1,6 @@
 # Test Matrix
 
-This matrix tracks the 11 actual program flows and the 72 user-visible actions
+This matrix tracks the 11 actual program flows and the 67 user-visible actions
 in `internal/actions/catalog.go`. It separates cheap model/render checks from
 real-terminal journeys so `TUI: yes` does not imply an expensive binary test for
 every action.
@@ -48,7 +48,7 @@ both cheaper and sufficient.
 | TS-06 | UNKNOWN | Dotfile lifecycle | Classification, path validation, and config mutation branches | Adopt/discover/sync/status/extract/variant/unignore/delete filesystem journeys | covered: discovered sync and ignored-candidate include persist state | GNU Stow remains in the integration environment |
 | TS-07 | UNKNOWN | Dotfile safety and services | Conflict detection, nested ignores, rollback, and service-state branches | Conflict resolution, pull/commit/push, reminder, watch, and data-preservation journeys | covered: destructive resolution is cancelled, then confirmed with backup/symlink filesystem proof | Platform service checks only where host isolation is available |
 | TS-08 | UNKNOWN | Hosts, groups, settings, and migration | Migration and unrelated-config preservation | Mutations persist across reload; lint/extract/migration flows | covered: host-group assignment and a setting toggle persist through config reload | n/a |
-| TS-09 | UNKNOWN | Agents, skills, MCP, plugins, and marketplaces | Adapter parsing, identity, status, and feature-gate contracts | Add/import/group/remove/sync/upgrade for each resource family | covered: fake-Claude plugin install persists adapter and config state; real-Git fixture covers versionless PATH-outdated; skill outdated detection covered per source type (local dir, Git branch, pinned tag, well-known index) with a request-counting stub for the recheck cadence | Fake agent CLIs, real local Git fixture, and a local HTTP index stub; no network |
+| TS-09 | UNKNOWN | Agents, skills, MCP, plugins, and marketplaces | Thin-wrapper routing, exact patched-build validation and install source, target JSON parsing, and the no-native-fallback guard | Real patched APM package and host-global MCP install/update/dry-run/frozen/remove; Hermes explicit targeting; Antigravity removal and prune; audit drift; unsupported-target pre-mutation | covered: Agents-tab confirmation runs real APM MCP sync and verifies manifest, lock, and Codex config | Immutable APM `0.28.0+omni.2` exercises Hermes, Antigravity cleanup, correct user-scope audit roots, cross-process lifecycle locking, offline plugin marketplace lifecycle, and the race-enabled agent packages; local Git/HTTP fixtures, no external test traffic |
 | TS-10 | UNKNOWN | TUI shell and parity | Reducer branches, layout, key routing, modal, progress, and error state | n/a | covered: `x/vttest` current-screen checks exercise resize, help/search, cancel/confirm, async failure/recovery, nested PTY, and clean quit | n/a |
 | TS-11 | UNKNOWN | Provider families | Install/query/upgrade/uninstall parsing and command contracts | Routing through fake executors | n/a: provider permutations do not become safer through the TUI | Tagged Docker package-manager lane |
 
@@ -66,7 +66,7 @@ one unless it proves a new interaction contract.
 | TUI-03 Tool mutation | Edit fallback -> install with fake provider -> progress -> persisted state -> cancel then confirm delete | Durable fallback save and fake-Brew lifecycle tests | covered |
 | TUI-04 Reconcile recovery | Open plan -> run failure -> retain error -> retry -> durable success | Injected fake-Brew failure/retry plus dot-ignore reconcile | covered |
 | TUI-05 Dot safety | Discover/sync candidate -> conflict -> cancel -> confirm resolution; verify config and filesystem | Candidate include/sync and conflict backup/symlink tests | covered |
-| TUI-06 Agents mutation | Render/filter -> install missing plugin; verify adapter/config state and versionless PATH-outdated classification | Fake-Claude install and real-Git PATH-outdated tests | covered |
+| TUI-06 Agents mutation | Open Agents -> confirm global sync -> observe real APM progress/success; verify manifest, lock, and Codex MCP config | `TestTUIAgentsTabSyncsMCPThroughRealAPM` | covered |
 | TUI-07 Groups/settings | Assign current host group -> toggle one setting -> reload config -> verify persistence | `TestTUIAssignsHostGroupAndPersistsSetting` | covered |
 | TUI-08 Admin terminal | Run fake privileged command -> exchange input/output -> observe completion/dismissal without corrupting the parent UI | Real nested PTY plus component-level nonzero-exit coverage | covered |
 
@@ -153,11 +153,6 @@ real-terminal test; the eight-journey budget above owns that layer.
 | `settings.migrate_host_overrides` | yes | n/a | n/a | n/a | CLI-only config migration |
 | `settings.extract` | yes | n/a | n/a | n/a | CLI-only config layout migration |
 | `setup.init` | yes | yes | yes | yes | CLI command is `bootstrap`; `init` remains an alias |
-| `agents.restore` | yes | yes | yes | yes | CLI command is `agents sync`; `restore` remains a deprecated alias |
-| `agents.add` | yes | yes | n/a | yes | Thin APM CLI delegation plus real local-package integration |
-| `agents.remove` | yes | yes | n/a | yes | Thin APM CLI delegation |
-| `agents.update` | yes | yes | n/a | yes | Thin APM CLI delegation and dry-run contract |
-| `agents.search` | yes | yes | n/a | n/a | Read-only APM marketplace search delegation |
-| `agents.sync_all` | yes | yes | yes | yes | - |
+| `agents.sync` | yes | yes | yes | yes | Single APM-backed lifecycle; dry-run and frozen replay covered |
 | `doctor` | yes | yes | yes | yes | - |
 | `doctor.fix` | yes | yes | yes | yes | Covers include-chain dedupe, dry-run, catalog routing, TUI execution, and doctor refresh. |

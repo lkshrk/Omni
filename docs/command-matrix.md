@@ -63,8 +63,6 @@ Bootstrap flags:
 | `--import` | Import installed tools during setup. |
 | `--no-import` | Create/load config and host state without claiming installed tools. |
 | `--import-config <path>` | Seed setup from an existing config file. |
-| `--import-skills` | Adopt legacy CLI-managed agent skill packages during setup. |
-| `--no-import-skills` | Leave legacy CLI-managed agent skill packages alone. |
 
 ## Tool Commands
 
@@ -83,7 +81,7 @@ Bootstrap flags:
 | `omni tools install [tool]` | yes, unless `--group`/`--force` | Packages, cache | `omni tools list [tool]` |
 | `omni tools sync [group]` | yes | Packages, cache | `--dry-run` |
 | `omni tools sync --prune` | yes | Packages, cache | `--dry-run` |
-| `omni tools sync --all` | yes | Config, packages, cache, agent skill/MCP/plugin state | `--dry-run` |
+| `omni tools sync --all` | yes | Config, packages, cache, and APM agent state | `--dry-run` |
 | `omni tools upgrade [tool]` | yes | Packages, cache | `omni tools list [tool]`; `--force` bypasses update quarantine |
 | `omni tools upgrade --all` | yes | Packages, cache | `omni tools list`; `--force` bypasses update quarantine |
 | `omni tools remove <name>` | yes | Config | `omni tools list <name>` |
@@ -103,7 +101,7 @@ Important flags:
 | --- | --- | --- |
 | `--dry-run` | `sync`, `import`, `consolidate`, `normalize`, `heal-taps`, `baseline` | Show planned changes without writing config or mutating packages where supported. |
 | `--prune` | `sync` | Remove local installations no longer in config. Cannot be combined with `sync --all`. |
-| `--all` | `sync`, `migrate-nvm` | For sync, claim and install tools, then run plugin → skill → MCP import/restore in dependency order (see [CLI](cli.md#sync-all)). For migrate-nvm, migrate every nvm-managed system-provider tool. |
+| `--all` | `sync`, `migrate-nvm` | For sync, claim and install tools, then run the APM agent sync. For migrate-nvm, migrate every nvm-managed system-provider tool. |
 | `--group` | `install`, `sync`, `import`, `list`, `add` | Target, filter, or assign a reusable group explicitly. |
 | `--force` | `install`, `upgrade`, `reconcile` | For install, skip bootstrap and host assignment checks for an explicit install path. For upgrade and reconcile, bypass update quarantine. |
 | `--allow-weak` | `install`, `sync` | Permit the best weak provider discovery match when no high-confidence match exists. |
@@ -183,36 +181,26 @@ omni dots groups nvim --remove old-host
 | Command | Host required | State touched | Safer first step |
 | --- | --- | --- | --- |
 | `omni agents sync [--frozen] [--dry-run]` | no | Global APM manifest, deployed agent files and MCP registrations, network | `--dry-run` |
-| `omni agents add <package>...` | no | Config, global APM manifest, deployed agent files, network | `omni agents search <query@marketplace>` |
+| `omni agents add <package>...` | no | Global APM manifest, deployed agent files, network | `omni agents sync --dry-run` |
 | `omni agents remove <package>...` | no | Global APM manifest, deployed agent files | `omni agents sync --dry-run` |
-| `omni agents update [package]...` | no | Global APM lockfile, deployed agent files, network | `--dry-run` |
-| `omni agents search <query@marketplace>` | no | Network | already read-only |
-| `omni agents import [<source>]` | no | Config | `omni agents import` with no source lists the candidates |
-| `omni agents mcp list` | no | Read-only | already read-only |
-| `omni agents mcp add --name <name> --transport <transport>` | no | Config, global APM manifest, agent registrations | `omni agents mcp list` |
-| `omni agents mcp import [<name>]` | no | Config, global APM manifest, agent registrations | `omni agents mcp list` |
-| `omni agents mcp remove <name>` | no | Config, global APM manifest, agent registrations | `omni agents mcp list` |
-| `omni agents mcp resolve <name>` | no | Agent config or omni config | `--dry-run` |
-| `omni agents mcp group <name> <group>...` | no | Config | `omni groups` |
+| `omni agents update [--dry-run]` | no | Global APM lockfile, deployed agent files, network | `--dry-run` |
+| `omni agents search <query>` | no | Network | already read-only |
+| `omni agents audit` | no | Read-only APM state | already read-only |
+| `omni agents targets` | no | Read-only APM state | already read-only |
+| `omni agents outdated` | no | Read-only APM state, network | already read-only |
+| `omni agents prune` | no | APM dependency state | `omni agents audit` |
+| `omni agents deps list|why` | no | Read-only APM state | already read-only |
+| `omni agents marketplace ...` | no | APM marketplace state, network | `omni agents marketplace list` |
 
-`agents sync` regenerates `~/.apm/apm.yml` from this host's resolved config and
-reconciles each surface with one scoped `apm install`. The omni config is never
-mutated by a sync, and manifest entries omni does not declare are preserved.
+`agents sync` directly invokes APM's global install lifecycle against the
+existing `~/.apm/apm.yml`. APM owns manifest and lockfile mutation, dependency
+resolution, target deployment, cleanup, and rollback. The MCP surface is
+host-global: every declared server is installed to every enabled user-global
+MCP target. Cursor and OpenCode are workspace-only MCP targets and are
+rejected.
 
-`agents add` and `agents mcp add` are not declaration-only. Each records config
-intent *and* converges this host immediately, so running one on a machine you
-meant to leave alone deploys there too. `agents mcp remove` is symmetric: the
-deployed registration always goes with the config entry, which is why it takes
-no `--purge`.
-
-`agents import` and `agents mcp import` run the other way: they adopt what this
-host already has — a live agent registration, or an `apm.yml` entry sync
-preserved — into the config. A manifest entry is vetted on the way in exactly
-like a typed one, so a remote-helper or credential-bearing source is refused.
-
-`agents mcp resolve --use-managed` discards the live registration and reinstalls
-the config definition; `--use-local` writes only the config. Drift on an
-APM-owned agent has no remedy verb: the next `agents sync` reconciles it.
+Agent lifecycle operations are thin APM wrappers. Omni does not provide native
+import/adopt/resolve commands or per-agent MCP assignment.
 
 ## Group Commands
 
