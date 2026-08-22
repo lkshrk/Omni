@@ -119,6 +119,7 @@ func TestGlobalPackageLifecycleAndLocalMarketplaceSearch(t *testing.T) {
 		}
 	}
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	writeFile(t, filepath.Join(home, ".apm", "apm.yml"), "name: lifecycle\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm:\n    - "+pkg+"\n  mcp: []\n")
@@ -597,6 +598,7 @@ func newGlobalMCPIntegrationClient(t *testing.T, targets, mcp string) (context.C
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	writeFile(t, filepath.Join(home, ".apm", "apm.yml"), globalMCPManifest(targets, mcp))
