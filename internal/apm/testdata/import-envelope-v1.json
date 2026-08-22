@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://microsoft.github.io/apm/schemas/import-envelope-v1.json",
+  "title": "APM native import CLI envelope v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "kind", "plan"],
+      "properties": {
+        "ok": {"const": true},
+        "kind": {"const": "import-plan"},
+        "plan": {"$ref": "import-plan-v1.json"}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "kind", "result"],
+      "properties": {
+        "ok": {"const": true},
+        "kind": {
+          "enum": [
+            "import-apply-result",
+            "import-status-result",
+            "import-resume-result",
+            "import-finalize-result",
+            "import-rollback-result",
+            "import-cleanup-result"
+          ]
+        },
+        "result": {"$ref": "import-result-v1.json"}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "kind", "exclusions"],
+      "properties": {
+        "ok": {"const": true},
+        "kind": {"enum": ["import-exclusions-list", "import-exclusions-remove"]},
+        "exclusions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "kind", "name", "root_id", "targets", "content_fingerprint"],
+            "properties": {
+              "id": {"type": "string"},
+              "kind": {"type": "string"},
+              "name": {"type": "string"},
+              "root_id": {"type": "string"},
+              "targets": {"type": "array", "items": {"type": "string"}},
+              "content_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "kind", "error"],
+      "properties": {
+        "ok": {"const": false},
+        "kind": {"const": "import-error"},
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message"],
+          "properties": {
+            "code": {"enum": ["protocol-incompatible", "recoverable-partial"]},
+            "message": {"type": "string"},
+            "operation_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"}
+          }
+        }
+      }
+    }
+  ]
+}

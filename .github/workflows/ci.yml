@@ -140,13 +140,29 @@ jobs:
           python-version: '3.12'
 
       - name: Install pinned APM
-        run: python -m pip install git+https://github.com/lkshrk/apm.git@ea3f74ae5547059aca214e7a395d09e874205dce
+        run: python -m pip install git+https://github.com/lkshrk/apm.git@cfd1fc9f873e193f2cd5b834361ee092b546a828
 
       - name: Test portable APM target contracts
         run: go test ./internal/app -run '^TestAPM(Target|User)'
 
+      - name: Test onboarding protocol and private-state contracts
+        run: go test ./internal/securefile ./internal/config ./internal/apm ./internal/app -run 'Onboard|ImportSchema|DefaultStateDir|RootPrivate|RootRejects|VerifyDetects|Fragment|DescriptorRelative|WriteConfigLocks|InitDetects'
+
       - name: Test real stable-target MCP lifecycle
         run: go test -tags=integration ./internal/apm -run '^TestGlobalMCPLifecycleForEveryStableTarget$' -count=1
+
+  onboarding-unit:
+    name: Onboarding Unit (race)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test onboarding coordinator, protocol, security, and CLI
+        run: go test -race -count=1 ./internal/securefile ./internal/config ./internal/executor ./internal/apm ./internal/app ./internal/cli ./internal/tui -run 'Onboard|Legacy|CommitLegacy|ImportSchema|DefaultStateDir|ActionCatalog|RootPrivate|RootRejects|APMCommand|Fragment|DescriptorRelative|WriteConfigLocks|InitDetects'
 
   integration:
     name: Docker Integration Tests (${{ matrix.name }})
@@ -171,6 +187,9 @@ jobs:
           - name: apm
             packages: ./internal/apm/... ./internal/cli/...
             cache: integration-apm
+          - name: onboarding
+            packages: -parallel=1 -run=TestAgentsOnboardRealPinnedAPM|TestTUIAgentsOnboarding ./internal/app/... ./integration_tests/...
+            cache: integration-onboarding
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -190,4 +209,5 @@ jobs:
             --cache-from type=gha,scope=integration-non-cli
             --cache-from type=gha,scope=provider-tests
             --cache-from type=gha,scope=integration-apm
+            --cache-from type=gha,scope=integration-onboarding
             --cache-to type=gha,scope=${{ matrix.cache }},mode=max

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	commandexec "github.com/lkshrk/omni/internal/executor"
@@ -52,6 +53,15 @@ func (c *Client) Run(ctx context.Context, args ...string) (Result, error) {
 		return Result{}, errors.New("APM command is required")
 	}
 	return c.runEnv(ctx, nil, normalizeArgs(args)...)
+}
+
+// RunPrivate invokes APM with secret input on stdin. The bytes never enter
+// argv, environment, command traces, stdout, or error text.
+func (c *Client) RunPrivate(ctx context.Context, stdin []byte, args ...string) (Result, error) {
+	if len(stdin) == 0 {
+		return Result{}, errors.New("private stdin is required")
+	}
+	return c.runEnvStdin(ctx, nil, stdin, normalizeArgs(args)...)
 }
 
 // Manifest surfaces for --only. MCP never goes through the `apm mcp` alias group, which exits 0 on failure.
@@ -146,6 +156,10 @@ func (c *Client) run(ctx context.Context, args ...string) (Result, error) {
 
 // scrub carries bare variable names, which the executor overlay reads as an unset rather than an assignment.
 func (c *Client) runEnv(ctx context.Context, scrub []string, args ...string) (Result, error) {
+	return c.runEnvStdin(ctx, scrub, nil, args...)
+}
+
+func (c *Client) runEnvStdin(ctx context.Context, scrub []string, stdin []byte, args ...string) (Result, error) {
 	if c == nil || c.exec == nil {
 		return Result{}, errors.New("APM client missing executor")
 	}
@@ -154,11 +168,17 @@ func (c *Client) runEnv(ctx context.Context, scrub []string, args ...string) (Re
 	}
 	run := func() (string, string, error) {
 		if !usesGlobalWorkspace(args) {
+			if stdin != nil {
+				return commandexec.RunInDirWithEnvAndStdin(ctx, c.exec, ".", scrub, stdin, "apm", args...)
+			}
 			return commandexec.RunWithEnv(ctx, c.exec, scrub, "apm", args...)
 		}
 		dir, err := ensureGlobalWorkspaceDir()
 		if err != nil {
 			return "", "", err
+		}
+		if stdin != nil {
+			return commandexec.RunInDirWithEnvAndStdin(ctx, c.exec, dir, scrub, stdin, "apm", args...)
 		}
 		return runInDir(ctx, c.exec, scrub, dir, "apm", args...)
 	}
@@ -183,6 +203,16 @@ func usesGlobalWorkspace(args []string) bool {
 		return false
 	}
 	switch args[0] {
+	case "import":
+		if len(args) > 1 && slices.Contains([]string{"status", "resume", "finalize", "rollback", "cleanup", "exclusions"}, args[1]) {
+			return true
+		}
+		for _, arg := range args[1:] {
+			if arg == "--apply-plan" {
+				return true
+			}
+		}
+		return false
 	case "audit", "marketplace", "prune", "targets":
 		return true
 	case "deps", "install", "outdated", "uninstall", "update", "view":

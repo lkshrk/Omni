@@ -77,6 +77,9 @@ type ToolGroupState struct {
 
 func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 	defer profile.Start("app.startup.total")()
+	if a.legacyOnboarding {
+		return &StartupSnapshot{Tools: []*ToolView{}, Discovered: []*ToolView{}, Groups: []*config.GroupConfig{}, GroupNames: []string{}, ToolMemberships: map[string][]string{}, ToolGroups: map[string]string{}, DotMemberships: map[string][]string{}, IgnoreLabels: map[string]string{}, ToolIgnores: map[string]bool{}, GroupIgnores: map[string]map[string]bool{}}, nil
+	}
 
 	stop := profile.Start("app.startup.load_config")
 	cfg, err := a.loadConfig()

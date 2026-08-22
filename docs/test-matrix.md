@@ -48,7 +48,7 @@ both cheaper and sufficient.
 | TS-06 | UNKNOWN | Dotfile lifecycle | Classification, path validation, and config mutation branches | Adopt/discover/sync/status/extract/variant/unignore/delete filesystem journeys | covered: discovered sync and ignored-candidate include persist state | GNU Stow remains in the integration environment |
 | TS-07 | UNKNOWN | Dotfile safety and services | Conflict detection, nested ignores, rollback, and service-state branches | Conflict resolution, pull/commit/push, reminder, watch, and data-preservation journeys | covered: destructive resolution is cancelled, then confirmed with backup/symlink filesystem proof | Platform service checks only where host isolation is available |
 | TS-08 | UNKNOWN | Hosts, groups, settings, and migration | Migration and unrelated-config preservation | Mutations persist across reload; lint/extract/migration flows | covered: host-group assignment and a setting toggle persist through config reload | n/a |
-| TS-09 | UNKNOWN | Agents, skills, MCP, plugins, and marketplaces | Thin-wrapper routing, exact patched-build validation and install source, target JSON parsing, and the no-native-fallback guard | Real patched APM package and host-global MCP install/update/dry-run/frozen/remove; Hermes explicit targeting; Antigravity removal and prune; audit drift; unsupported-target pre-mutation | covered: Agents-tab confirmation runs real APM MCP sync and verifies manifest, lock, and Codex config | Immutable APM `0.28.0+omni.2` exercises Hermes, Antigravity cleanup, correct user-scope audit roots, cross-process lifecycle locking, offline plugin marketplace lifecycle, and the race-enabled agent packages; local Git/HTTP fixtures, no external test traffic |
+| TS-09 | UNKNOWN | Agents, skills, MCP, plugins, marketplaces, and onboarding | Thin-wrapper routing, strict import envelopes, legacy candidate extraction, private journals, fragment CAS/recovery, exact patched-build validation, target JSON parsing, and the no-native-fallback guard | Real patched APM package, onboarding plan/apply/finalize, and host-global MCP lifecycle | covered: Agents-tab confirmation runs real APM onboarding and MCP sync, then verifies durable APM/native state | Immutable pinned APM exercises import plus normal lifecycle contracts; local fixtures, no external test traffic |
 | TS-10 | UNKNOWN | TUI shell and parity | Reducer branches, layout, key routing, modal, progress, and error state | n/a | covered: `x/vttest` current-screen checks exercise resize, help/search, cancel/confirm, async failure/recovery, nested PTY, and clean quit | n/a |
 | TS-11 | UNKNOWN | Provider families | Install/query/upgrade/uninstall parsing and command contracts | Routing through fake executors | n/a: provider permutations do not become safer through the TUI | Tagged Docker package-manager lane |
 
@@ -66,7 +66,7 @@ one unless it proves a new interaction contract.
 | TUI-03 Tool mutation | Edit fallback -> install with fake provider -> progress -> persisted state -> cancel then confirm delete | Durable fallback save and fake-Brew lifecycle tests | covered |
 | TUI-04 Reconcile recovery | Open plan -> run failure -> retain error -> retry -> durable success | Injected fake-Brew failure/retry plus dot-ignore reconcile | covered |
 | TUI-05 Dot safety | Discover/sync candidate -> conflict -> cancel -> confirm resolution; verify config and filesystem | Candidate include/sync and conflict backup/symlink tests | covered |
-| TUI-06 Agents mutation | Open Agents -> confirm global sync -> observe real APM progress/success; verify manifest, lock, and Codex MCP config | `TestTUIAgentsTabSyncsMCPThroughRealAPM` | covered |
+| TUI-06 Agents mutation | Open Agents -> cancel/reopen -> inspect and resolve targets, secrets, executables, conflicts, conditional drops/exclusions -> review/apply -> joined status -> preview/confirm cleanup; verify imported/manifest/lock/native state | `TestTUIAgentsTabSyncsMCPThroughRealAPM`, `TestTUIAgentsOnboardingPreviewConfirmAndApply` | covered |
 | TUI-07 Groups/settings | Assign current host group -> toggle one setting -> reload config -> verify persistence | `TestTUIAssignsHostGroupAndPersistsSetting` | covered |
 | TUI-08 Admin terminal | Run fake privileged command -> exchange input/output -> observe completion/dismissal without corrupting the parent UI | Real nested PTY plus component-level nonzero-exit coverage | covered |
 
@@ -80,6 +80,15 @@ one unless it proves a new interaction contract.
 - Target two seconds per transition and ten seconds per journey, but measure before enforcing a suite budget.
 - Assert semantic text/cells and durable state. Use full-screen goldens only when layout itself is the behavior.
 - On failure retain the current screen, command/fake-executor log, config, and DB diagnostics.
+
+## Non-action workflow coverage
+
+Onboarding is a coordinated CLI/TUI workflow, not an `internal/actions`
+catalog entry. Its evidence is tracked here instead of inventing an action ID.
+
+| Workflow | App/protocol | CLI/model | Real integration | Remaining gate |
+| --- | --- | --- | --- | --- |
+| Existing agent-state onboarding | strict candidate/plan/result envelopes and fixed hashes, legacy includes/redaction/dispositions, conflict winner/loser binding, conditional authorized drop, locks, private journal, fragment CAS/resume/finalize | CLI target/secret/executable/exclusion flags plus TUI inspect/resolve/review/apply/status/resume/cleanup | `TestAgentsOnboardRealPinnedAPM`, `TestTUIAgentsOnboardingPreviewConfirmAndApply` | Immutable APM pin in DinD plus macOS/Windows platform jobs |
 
 ## Action-level coverage
 

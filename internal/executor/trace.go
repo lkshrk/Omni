@@ -87,6 +87,12 @@ func (t *TracingExecutor) RunDirEnv(ctx context.Context, dir string, env []strin
 	})
 }
 
+func (t *TracingExecutor) RunDirEnvStdin(ctx context.Context, dir string, env []string, stdin []byte, name string, args ...string) (string, string, error) {
+	return t.run(ctx, name, args, func() (string, string, error) {
+		return RunInDirWithEnvAndStdin(ctx, t.Next, dir, env, stdin, name, args...)
+	})
+}
+
 func (t *TracingExecutor) run(ctx context.Context, name string, args []string, run func() (string, string, error)) (string, string, error) {
 	if t == nil || t.Next == nil {
 		return "", "", errors.New("tracing executor missing wrapped executor")

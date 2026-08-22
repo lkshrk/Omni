@@ -14,7 +14,12 @@ import (
 var ErrSkipSave = errors.New("config: skip save")
 
 // WriteConfig — The single safe seam for editing settings in place: only changed top-level keys are written, each routed to its owning fragment with stale copies nulled so removed entries cannot resurrect on the next load.
-func WriteConfig(path string, load func() (*RootConfig, error), providers *ProviderValidation, mutate func(*RootConfig) error) error {
+func WriteConfig(path string, load func() (*RootConfig, error), providers *ProviderValidation, mutate func(*RootConfig) error) (retErr error) {
+	lock, err := AcquireWriteLock(path)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, lock.Close()) }()
 	cfg, err := load()
 	if err != nil {
 		return err
@@ -63,7 +68,7 @@ func WriteConfig(path string, load func() (*RootConfig, error), providers *Provi
 			return fmt.Errorf("creating config directory: %w", err)
 		}
 	}
-	return PatchRawRouted(path, diff)
+	return patchRawRoutedUnlocked(path, diff)
 }
 
 // Fallback-pathed and warn-level errors are advisory and must not block a write; `omni doctor` reports the full set.

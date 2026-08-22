@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"fmt"
+	"strings"
+
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 )
@@ -336,6 +339,64 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
 		} else {
 			cmds = append(cmds, setStatus(&m, "✓ "+msg.command, false))
+		}
+
+	case agentsOnboardPlanDoneMsg:
+		m.apmRunning = false
+		m.apmErr = msg.err
+		if msg.err != nil {
+			cmds = append(cmds, setStatus(&m, "✗ onboarding preview: "+msg.err.Error(), true))
+			break
+		}
+		m.apmOutput = onboardPlanSummary(msg.result)
+		m.agentsOnboardPlan = &msg.result
+		m.agentsOnboardItem = 0
+		if msg.result.Envelope.Plan != nil && onboardBlockerCount(msg.result.Envelope.Plan) == 0 {
+			m.agentsOnboardConfirm = true
+			cmds = append(cmds, setStatus(&m, "Apply this onboarding plan? y/N", false))
+		} else {
+			cmds = append(cmds, setStatus(&m, "Onboarding blockers must be resolved before apply.", true))
+		}
+
+	case agentsOnboardApplyDoneMsg:
+		m.apmRunning = false
+		m.apmErr = msg.err
+		m.agentsOnboardPlan = nil
+		if msg.result.Envelope.OperationID != "" {
+			m.agentsOnboardOperation = msg.result.Envelope.OperationID
+		}
+		if msg.err != nil {
+			cmds = append(cmds, setStatus(&m, "✗ onboarding apply: "+msg.err.Error()+" — run omni agents onboard resume", true))
+			break
+		}
+		m.apmOutput = "Agent onboarding complete."
+		cmds = append(cmds, setStatus(&m, "✓ Agent onboarding complete.", false))
+	case agentsOnboardStatusDoneMsg:
+		m.apmRunning = false
+		m.apmErr = msg.err
+		if msg.result.OperationID != "" {
+			m.agentsOnboardOperation = msg.result.OperationID
+		}
+		if msg.err != nil {
+			cmds = append(cmds, setStatus(&m, "✗ onboarding recovery: "+msg.err.Error(), true))
+		} else {
+			m.apmOutput = fmt.Sprintf("Onboarding status: Omni=%s APM=%s", msg.result.OmniPhase, msg.result.APM.State)
+			cmds = append(cmds, setStatus(&m, "✓ onboarding recovery status", false))
+		}
+	case agentsOnboardCleanupDoneMsg:
+		m.apmRunning = false
+		m.apmErr = msg.err
+		if msg.err != nil {
+			cmds = append(cmds, setStatus(&m, "✗ onboarding cleanup: "+msg.err.Error(), true))
+		} else if msg.preview.AlreadyClean {
+			m.apmOutput = "Onboarding cleanup already complete."
+		} else if !msg.confirmed {
+			m.apmOutput = fmt.Sprintf("Cleanup %d path(s): %s", msg.preview.Count, strings.Join(msg.preview.Paths, ", "))
+			m.agentsOnboardCleanupConfirm = true
+			cmds = append(cmds, setStatus(&m, "Confirm cleanup? y/N", false))
+		} else {
+			m.apmOutput = "Onboarding cleanup complete."
+			m.agentsOnboardOperation = ""
 		}
 	case tea.KeyPressMsg:
 		return m.handleKeyPressMsg(msg, cmds)

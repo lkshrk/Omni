@@ -16,18 +16,31 @@ APM state:
 MCP is host-global across enabled APM targets that support user-global MCP.
 Cursor and OpenCode are workspace-only and are rejected by global sync.
 
-Omni has no native agent import, adopt, resolve, skill store, plugin adapter,
-marketplace registry, or per-agent assignment configuration.
+Omni has no native agent adapter or parallel skill/plugin store. APM owns
+native discovery, adoption, conflict handling, deployment, audit, and recovery.
+
+## Existing-state onboarding
+
+`omni agents onboard` inventories legacy Omni v22/v23 declarations plus native
+Claude and Codex state and prints APM's redacted plan. Planning is read-only.
+Persist a reviewed plan with `--plan-json /absolute/path/plan.json`, then apply
+it with `omni agents onboard --apply --apply-plan /absolute/path/plan.json`.
+
+Apply holds Omni's config-root lock, asks the pinned APM binary to install and
+audit, commits Omni v24 fragments last, then finalizes APM's external-commit
+fence. Interrupted operations expose `status`, `resume`, and confirmed
+`cleanup` subcommands. Literal secrets, unsupported targets, unresolved
+conflicts, and target broadening block mutation.
 
 ## Patched APM Build
 
-Omni temporarily requires APM `0.28.0+omni.2`, built from the immutable
+Omni temporarily requires APM `0.28.0+omni.3`, built from the immutable
 `lkshrk/apm` commit
-[`ea3f74ae5547059aca214e7a395d09e874205dce`](https://github.com/lkshrk/apm/commit/ea3f74ae5547059aca214e7a395d09e874205dce).
+[`cfd1fc9f873e193f2cd5b834361ee092b546a828`](https://github.com/lkshrk/apm/commit/cfd1fc9f873e193f2cd5b834361ee092b546a828).
 Installers use this exact source specification:
 
 ```text
-git+https://github.com/lkshrk/apm.git@ea3f74ae5547059aca214e7a395d09e874205dce
+git+https://github.com/lkshrk/apm.git@cfd1fc9f873e193f2cd5b834361ee092b546a828
 ```
 
 The patch makes Hermes a stable explicit target, fixes global Antigravity MCP

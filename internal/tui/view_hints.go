@@ -636,7 +636,7 @@ func tabShortHelpBindings(m *Model) []key.Binding {
 		actions := []key.Binding{k.NewGroup, k.NewHost}
 		return footerBindings(k, actions, nil)
 	case viewSkills:
-		listActions := []key.Binding{agentsUpgradeAllBinding(), agentsSyncAllBinding(), agentsRefreshBinding()}
+		listActions := []key.Binding{agentsOnboardBinding(), agentsUpgradeAllBinding(), agentsSyncAllBinding(), agentsRefreshBinding()}
 		return footerBindings(k, listActions, nil)
 	default:
 		if m.listConfirm.action == listConfirmSyncAll {
@@ -691,6 +691,10 @@ func footerFilterBinding(k KeyMap, includeGroup bool) key.Binding {
 // Display only: handleAgentsGlobalActionKeyMsg handles U/S/R directly by key string.
 func agentsUpgradeAllBinding() key.Binding {
 	return key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "upgrade all"))
+}
+
+func agentsOnboardBinding() key.Binding {
+	return key.NewBinding(key.WithKeys("O"), key.WithHelp("O", "onboard"))
 }
 
 func agentsSyncAllBinding() key.Binding {
