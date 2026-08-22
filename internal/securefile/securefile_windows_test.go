@@ -3,11 +3,41 @@
 package securefile
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"golang.org/x/sys/windows"
 )
+
+func TestWindowsAtomicWriteCommitsAndCleansStagingFile(t *testing.T) {
+	root, err := NewRoot(filepath.Join(t.TempDir(), "private"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"first", "replacement"} {
+		if err := root.WriteFileAtomic("journal.json", []byte(want)); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(filepath.Join(root.Path(), "journal.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != want {
+			t.Fatalf("committed content = %q, want %q", got, want)
+		}
+		if err := root.Verify("journal.json"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	staging, err := filepath.Glob(filepath.Join(root.Path(), ".secure-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(staging) != 0 {
+		t.Fatalf("staging files remain after commit: %v", staging)
+	}
+}
 
 func TestVerifyDetectsWeakenedWindowsDACL(t *testing.T) {
 	root, err := NewRoot(filepath.Join(t.TempDir(), "private"))
