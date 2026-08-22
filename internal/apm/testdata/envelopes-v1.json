@@ -1,0 +1,53 @@
+{
+  "scan": {
+    "ok": true,
+    "kind": "import-plan",
+    "plan": {
+      "schema_version": 1,
+      "coordinator": "standalone",
+      "operation_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "plan_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "resolution_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "scope": "global",
+      "sources": ["claude", "codex"],
+      "candidate_set_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "inventory_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "items": [],
+      "summary": {},
+      "warnings": [],
+      "blockers": []
+    }
+  },
+  "apply": {
+    "ok": true,
+    "kind": "import-apply-result",
+    "result": {
+      "schema_version": 1,
+      "operation_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "coordinator": "omni-v24",
+      "state": "awaiting-external-commit",
+      "next_action": "external-commit-then-finalize",
+      "finalize_token_required": true
+    }
+  },
+  "status": {
+    "ok": true,
+    "kind": "import-status-result",
+    "result": {
+      "schema_version": 1,
+      "operation_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "coordinator": "standalone",
+      "state": "complete",
+      "next_action": "none",
+      "finalize_token_required": false
+    }
+  },
+  "error": {
+    "ok": false,
+    "kind": "import-error",
+    "error": {
+      "code": "protocol-incompatible",
+      "message": "candidate schema fields mismatch"
+    }
+  }
+}

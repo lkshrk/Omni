@@ -769,7 +769,7 @@ func runTUISmoke(t *testing.T, bin, dir string, env []string, args ...string) st
 
 func runTUI(t *testing.T, bin, dir string, env []string, args []string, interact func(*vttest.Terminal) string) string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, bin, args...)

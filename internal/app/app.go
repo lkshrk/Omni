@@ -31,6 +31,7 @@ import (
 type App struct {
 	ConfigPath string // full path to settings.json
 	CacheDir   string // where omni.db lives; derived from XDG_CACHE_HOME when empty
+	StateDir   string // durable private state; derived from XDG_STATE_HOME when empty
 	DBPath     string
 
 	db           *database.DB
@@ -38,8 +39,9 @@ type App struct {
 	fallbackExec executor.Executor
 	githubAPI    string
 	// Shared by every outbound HTTP caller here; tests inject one client for all of them.
-	httpClient *http.Client
-	testMode   bool
+	httpClient       *http.Client
+	testMode         bool
+	legacyOnboarding bool
 
 	// InitReadOnly marker: incidental writes like command traces are suppressed.
 	diagnosticMode bool
@@ -184,6 +186,12 @@ func (a *App) configDir() string {
 }
 
 func (a *App) Init(ctx context.Context) error {
+	if err := a.resolveStateDir(); err != nil {
+		return err
+	}
+	if err := a.detectOnboardingRecovery(ctx); err != nil {
+		return err
+	}
 	if a.CacheDir == "" {
 		cacheDir, err := config.DefaultCacheDir()
 		if err != nil {
@@ -193,10 +201,17 @@ func (a *App) Init(ctx context.Context) error {
 	}
 	a.DBPath = filepath.Join(a.CacheDir, "omni.db")
 
-	// Normalizing here made every read-only command rewrite settings.json before doing nothing.
-	a.backupConfigOnLaunch()
-	if err := a.repairCurrentHostEntry(); err != nil {
-		return fmt.Errorf("repairing current host entry: %w", err)
+	legacyOnboarding, detectErr := config.HasRemovedAgentConfig(a.ConfigPath)
+	if detectErr != nil {
+		return detectErr
+	}
+	a.legacyOnboarding = legacyOnboarding
+	// Legacy agent state must remain byte-identical until onboarding commits v24.
+	if !legacyOnboarding {
+		a.backupConfigOnLaunch()
+		if err := a.repairCurrentHostEntry(); err != nil {
+			return fmt.Errorf("repairing current host entry: %w", err)
+		}
 	}
 
 	db, err := database.OpenContext(ctx, a.DBPath)
@@ -220,6 +235,12 @@ func (a *App) Init(ctx context.Context) error {
 
 // InitReadOnly — For diagnostic commands that must report broken state without mutating it first.
 func (a *App) InitReadOnly(ctx context.Context) error {
+	if err := a.resolveStateDir(); err != nil {
+		return err
+	}
+	if err := a.detectOnboardingRecovery(ctx); err != nil {
+		return err
+	}
 	if a.CacheDir == "" {
 		cacheDir, err := config.DefaultCacheDir()
 		if err != nil {
@@ -241,6 +262,37 @@ func (a *App) InitReadOnly(ctx context.Context) error {
 		settings = a.effectiveSettings(cfg)
 	}
 	a.initProviderRegistry(settings)
+	return nil
+}
+
+// InitOnboardingReadOnly initializes only the APM execution surface. It does
+// not open the database, load/migrate config, or create cache/state paths.
+func (a *App) InitOnboardingReadOnly(_ context.Context) error {
+	a.diagnosticMode = true
+	if err := a.resolveStateDir(); err != nil {
+		return err
+	}
+	a.initProviderRegistry(config.Settings{})
+	return nil
+}
+
+func (a *App) resolveStateDir() error {
+	if a.StateDir != "" {
+		abs, err := filepath.Abs(a.StateDir)
+		if err != nil {
+			return fmt.Errorf("resolving state directory: %w", err)
+		}
+		a.StateDir = abs
+		return nil
+	}
+	stateDir, err := config.DefaultStateDir()
+	if err != nil {
+		return fmt.Errorf("resolving state directory: %w", err)
+	}
+	if !filepath.IsAbs(stateDir) {
+		return errors.New("resolved state directory is not absolute")
+	}
+	a.StateDir = stateDir
 	return nil
 }
 

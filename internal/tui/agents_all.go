@@ -1,9 +1,14 @@
 package tui
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/lkshrk/omni/internal/apm"
+	"github.com/lkshrk/omni/internal/app"
 )
 
 const agentsBusyStatus = "⚠ APM busy — wait for the running command to finish"
@@ -13,6 +18,24 @@ type apmCommandDoneMsg struct {
 	stdout  string
 	stderr  string
 	err     error
+}
+
+type agentsOnboardPlanDoneMsg struct {
+	result app.AgentsOnboardResult
+	err    error
+}
+type agentsOnboardApplyDoneMsg struct {
+	result app.AgentsOnboardResult
+	err    error
+}
+type agentsOnboardStatusDoneMsg struct {
+	result app.AgentsOnboardStatusResult
+	err    error
+}
+type agentsOnboardCleanupDoneMsg struct {
+	preview   app.AgentsOnboardCleanupPreview
+	confirmed bool
+	err       error
 }
 
 func (m *Model) agentsOpInFlight() bool { return m.apmRunning }
@@ -44,9 +67,216 @@ func (m *Model) doAgentsRefresh() []tea.Cmd {
 	return m.runAPM("apm deps list -g", "deps", "list", "-g")
 }
 
+func (m *Model) doAgentsOnboardPlan() []tea.Cmd {
+	if m.app == nil {
+		return nil
+	}
+	m.apmRunning, m.apmCommand, m.apmOutput, m.apmErr = true, "omni agents onboard (preview)", "", nil
+	a, ctx := m.app, m.ctx
+	return []tea.Cmd{m.spinner.Tick, func() tea.Msg {
+		result, err := a.AgentsOnboardPlan(ctx, app.AgentsOnboardOptions{})
+		return agentsOnboardPlanDoneMsg{result: result, err: err}
+	}}
+}
+
+func (m *Model) doAgentsOnboardApply() []tea.Cmd {
+	if m.app == nil || m.agentsOnboardPlan == nil || m.agentsOnboardPlan.Envelope.Plan == nil {
+		return nil
+	}
+	plan := *m.agentsOnboardPlan.Envelope.Plan
+	m.agentsOnboardConfirm, m.apmRunning, m.apmCommand = false, true, "omni agents onboard (apply)"
+	a, ctx := m.app, m.ctx
+	return []tea.Cmd{m.spinner.Tick, func() tea.Msg {
+		result, err := a.AgentsOnboardApplyReviewed(ctx, plan)
+		return agentsOnboardApplyDoneMsg{result: result, err: err}
+	}}
+}
+
+func onboardPlanSummary(result app.AgentsOnboardResult) string {
+	if result.Envelope.Plan == nil {
+		return "No onboarding plan returned."
+	}
+	plan := result.Envelope.Plan
+	text := fmt.Sprintf("Agent onboarding preview: %d item(s), %d blocker(s).", len(plan.Items), onboardBlockerCount(plan))
+	blocked := []string{}
+	for i := range plan.Items {
+		single := *plan
+		single.Items = []apm.ImportItem{plan.Items[i]}
+		if onboardBlockerCount(&single) > 0 {
+			blocked = append(blocked, plan.Items[i].Name)
+		}
+	}
+	if len(blocked) > 0 {
+		text += " Unresolved: " + strings.Join(blocked, ",")
+	}
+	return text
+}
+
+func (m *Model) currentOnboardItem() *apm.ImportItem {
+	if m.agentsOnboardPlan == nil || m.agentsOnboardPlan.Envelope.Plan == nil || len(m.agentsOnboardPlan.Envelope.Plan.Items) == 0 {
+		return nil
+	}
+	if m.agentsOnboardItem >= len(m.agentsOnboardPlan.Envelope.Plan.Items) {
+		m.agentsOnboardItem = 0
+	}
+	return &m.agentsOnboardPlan.Envelope.Plan.Items[m.agentsOnboardItem]
+}
+func resolveOnboardItem(item *apm.ImportItem, key string) {
+	if item == nil {
+		return
+	}
+	switch key {
+	case "c":
+		item.Resolution.Decision = "import"
+		item.Resolution.ApprovedTargets = []string{"codex"}
+	case "l":
+		item.Resolution.Decision = "import"
+		item.Resolution.ApprovedTargets = []string{"claude"}
+	case "b":
+		item.Resolution.Decision = "import"
+		item.Resolution.ApprovedTargets = []string{"claude", "codex"}
+	case "x":
+		item.Resolution.Decision = "exclude"
+	case "o":
+		item.Resolution.Decision = "select-origin"
+		if len(item.CandidateIDs) > 0 {
+			item.Resolution.SelectedOriginID = item.CandidateIDs[0]
+		}
+	case "E":
+		item.Resolution.Decision = "import"
+		for _, reason := range item.ReasonCodes {
+			if strings.HasPrefix(reason, "executable:") {
+				item.Resolution.ApprovedExecutables = append(item.Resolution.ApprovedExecutables, strings.TrimPrefix(reason, "executable:"))
+			}
+		}
+	case "m":
+		item.Resolution.Decision = "map-secret"
+		if item.Resolution.EnvBindings == nil {
+			item.Resolution.EnvBindings = map[string]string{}
+		}
+		for _, reason := range item.ReasonCodes {
+			if strings.HasPrefix(reason, "secret-field:") {
+				item.Resolution.EnvBindings[strings.TrimPrefix(reason, "secret-field:")] = "OMNI_" + strings.ToUpper(strings.ReplaceAll(item.Name, "-", "_")) + "_SECRET"
+			}
+		}
+	}
+}
+
+func (m *Model) doAgentsOnboardStatus(resume bool) []tea.Cmd {
+	if m.app == nil || m.agentsOnboardOperation == "" {
+		return []tea.Cmd{setStatus(m, "No recoverable onboarding operation.", true)}
+	}
+	m.apmRunning = true
+	a, ctx, op := m.app, m.ctx, m.agentsOnboardOperation
+	return []tea.Cmd{m.spinner.Tick, func() tea.Msg {
+		var result app.AgentsOnboardStatusResult
+		var err error
+		if resume {
+			result, err = a.AgentsOnboardResume(ctx, op)
+		} else {
+			result, err = a.AgentsOnboardStatus(ctx, op)
+		}
+		return agentsOnboardStatusDoneMsg{result: result, err: err}
+	}}
+}
+func (m *Model) doAgentsOnboardCleanup(confirm bool) []tea.Cmd {
+	if m.app == nil || m.agentsOnboardOperation == "" {
+		return []tea.Cmd{setStatus(m, "No onboarding operation to clean.", true)}
+	}
+	m.apmRunning = true
+	a, ctx, op := m.app, m.ctx, m.agentsOnboardOperation
+	return []tea.Cmd{m.spinner.Tick, func() tea.Msg {
+		preview, err := a.AgentsOnboardCleanup(ctx, op, confirm)
+		return agentsOnboardCleanupDoneMsg{preview: preview, confirmed: confirm, err: err}
+	}}
+}
+
+func onboardBlockerCount(plan *apm.ImportPlan) int {
+	count := 0
+	for _, item := range plan.Items {
+		switch item.Classification {
+		case "needs-choice":
+			conditional := slices.Contains(item.ReasonCodes, "conditional-group-host")
+			needsTargets := slices.Contains(item.ReasonCodes, "legacy-unscoped-targets")
+			if !(conditional && item.Resolution.Decision == "exclude") && (item.Resolution.Decision != "import" || needsTargets && len(item.Resolution.ApprovedTargets) == 0) {
+				count++
+			}
+		case "conflict":
+			if item.Resolution.Decision != "select-origin" || item.Resolution.SelectedOriginID == "" {
+				count++
+			}
+		case "secret-blocked":
+			if item.Resolution.Decision != "map-secret" || len(item.Resolution.EnvBindings) == 0 {
+				count++
+			}
+		case "unsupported":
+			if item.Resolution.Decision != "exclude" {
+				count++
+			}
+		}
+		if item.Classification == "excluded-changed" && item.Resolution.Decision != "exclude" {
+			count++
+		}
+		for _, reason := range item.ReasonCodes {
+			if strings.HasPrefix(reason, "executable:") && !slices.Contains(item.Resolution.ApprovedExecutables, strings.TrimPrefix(reason, "executable:")) {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 	key := msg.String()
-	if key != "U" && key != "S" && key != "R" && key != "e" {
+	if m.agentsOnboardCleanupConfirm {
+		if key == "y" || key == "Y" {
+			m.agentsOnboardCleanupConfirm = false
+			return true, m.doAgentsOnboardCleanup(true)
+		}
+		if key == "n" || key == "N" || key == "esc" {
+			m.agentsOnboardCleanupConfirm = false
+			return true, []tea.Cmd{setStatus(m, "Cleanup cancelled.", false)}
+		}
+		return true, nil
+	}
+	if m.agentsOnboardConfirm {
+		switch key {
+		case "y", "Y":
+			return true, m.doAgentsOnboardApply()
+		case "n", "N", "esc":
+			m.agentsOnboardConfirm = false
+			m.agentsOnboardPlan = nil
+			return true, []tea.Cmd{setStatus(m, "Agent onboarding cancelled.", false)}
+		}
+		return true, nil
+	}
+	if m.agentsOnboardPlan != nil {
+		items := m.agentsOnboardPlan.Envelope.Plan.Items
+		switch key {
+		case "j":
+			if len(items) > 0 {
+				m.agentsOnboardItem = (m.agentsOnboardItem + 1) % len(items)
+			}
+		case "k":
+			if len(items) > 0 {
+				m.agentsOnboardItem = (m.agentsOnboardItem - 1 + len(items)) % len(items)
+			}
+		case "c", "l", "b", "x", "o", "E", "m":
+			resolveOnboardItem(m.currentOnboardItem(), key)
+			if onboardBlockerCount(m.agentsOnboardPlan.Envelope.Plan) == 0 {
+				m.agentsOnboardConfirm = true
+				m.apmOutput = onboardPlanSummary(*m.agentsOnboardPlan)
+				return true, []tea.Cmd{setStatus(m, "Apply this onboarding plan? y/N", false)}
+			}
+		case "esc":
+			m.agentsOnboardPlan = nil
+		}
+		if m.agentsOnboardPlan != nil {
+			m.apmOutput = onboardPlanSummary(*m.agentsOnboardPlan)
+		}
+		return true, nil
+	}
+	if key != "U" && key != "S" && key != "R" && key != "O" && key != "T" && key != "V" && key != "X" && key != "e" {
 		return false, nil
 	}
 	if key == "e" {
@@ -56,6 +286,14 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea
 		return true, []tea.Cmd{setStatus(m, agentsBusyStatus, true)}
 	}
 	switch key {
+	case "O":
+		return true, m.doAgentsOnboardPlan()
+	case "T":
+		return true, m.doAgentsOnboardStatus(false)
+	case "V":
+		return true, m.doAgentsOnboardStatus(true)
+	case "X":
+		return true, m.doAgentsOnboardCleanup(false)
 	case "U":
 		return true, m.doAgentsUpdateAll()
 	case "S":

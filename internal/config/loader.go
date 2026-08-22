@@ -14,7 +14,7 @@ import (
 )
 
 // Each call gets its own temp name so concurrent callers for the same path do not collide.
-func atomicWrite(path string, data []byte) error {
+func atomicWrite(path string, data []byte) (retErr error) {
 	// Every launch re-normalizes the config; renaming an identical result would churn mtime and downstream dotfile sync.
 	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, data) {
 		return nil
@@ -27,6 +27,21 @@ func atomicWrite(path string, data []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
+	lock, err := AcquireWriteLock(path)
+	if err != nil {
+		return fmt.Errorf("creating temp file: acquire config lock: %w", err)
+	}
+	defer func() { retErr = errors.Join(retErr, lock.Close()) }()
+	return atomicWriteUnlocked(path, data)
+}
+
+func atomicWriteUnlocked(path string, data []byte) (retErr error) {
+	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, data) {
+		return nil
+	}
+	if err := testguard.RequireTempPath("config write", path); err != nil {
+		return err
+	}
 	writePath, err := resolveConfigWritePath(path)
 	if err != nil {
 		return err
@@ -34,7 +49,7 @@ func atomicWrite(path string, data []byte) error {
 	if err := testguard.RequireTempPath("config write target", writePath); err != nil {
 		return err
 	}
-	dir = filepath.Dir(writePath)
+	dir := filepath.Dir(writePath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
@@ -43,18 +58,25 @@ func atomicWrite(path string, data []byte) error {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
 	tmp := f.Name()
+	closed := false
+	defer func() {
+		if !closed {
+			retErr = errors.Join(retErr, f.Close())
+		}
+		if err := os.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
+			retErr = errors.Join(retErr, fmt.Errorf("removing config temp file: %w", err))
+		}
+	}()
 	_, werr := f.Write(data)
 	cerr := f.Close()
+	closed = true
 	if werr != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("writing temp file: %w", werr)
+		return errors.Join(fmt.Errorf("writing temp file: %w", werr), cerr)
 	}
 	if cerr != nil {
-		_ = os.Remove(tmp)
 		return fmt.Errorf("closing temp file: %w", cerr)
 	}
 	if err := os.Rename(tmp, writePath); err != nil {
-		_ = os.Remove(tmp)
 		return fmt.Errorf("renaming config file: %w", err)
 	}
 	return nil
@@ -142,6 +164,23 @@ func DefaultCacheDir() (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// DefaultStateDir resolves durable Omni state independently from the cache and
+// never falls back to the working directory.
+func DefaultStateDir() (string, error) {
+	if dir := os.Getenv("OMNI_STATE_DIR"); dir != "" {
+		return filepath.Abs(dir)
+	}
+	base := os.Getenv("XDG_STATE_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolving home directory: %w", err)
+		}
+		base = filepath.Join(home, ".local", "state")
+	}
+	return filepath.Abs(filepath.Join(base, "omni"))
 }
 
 // Load — Returns an empty RootConfig and no error when the file does not exist.
@@ -516,7 +555,16 @@ func groupBaseName(g *GroupConfig) string {
 }
 
 // Patch — Merges top-level keys only (a JSON null value deletes a key) and is include-blind, so keys owned by an $include fragment get duplicated into path — prefer WriteConfig or PatchRouted for real edits.
-func Patch(path string, patch interface{}) error {
+func Patch(path string, patch interface{}) (retErr error) {
+	lock, err := AcquireWriteLock(path)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, lock.Close()) }()
+	return patchUnlocked(path, patch)
+}
+
+func patchUnlocked(path string, patch interface{}) error {
 	patchData, err := json.Marshal(patch)
 	if err != nil {
 		return fmt.Errorf("encoding patch: %w", err)
@@ -525,7 +573,7 @@ func Patch(path string, patch interface{}) error {
 	if err := unmarshalJSONObject(patchData, &patchMap); err != nil {
 		return fmt.Errorf("parsing patch: %w", err)
 	}
-	return PatchRaw(path, patchMap)
+	return patchRawUnlocked(path, patchMap)
 }
 
 // PatchRouted — Routed form of Patch: each top-level key is written to the file that owns it across the $include chain, so fragments are not resurrected into the parent.
@@ -542,7 +590,16 @@ func PatchRouted(path string, patch interface{}) error {
 }
 
 // PatchRaw — Lower-level Patch taking an already-decoded key map; a JSON null value deletes that key.
-func PatchRaw(path string, patch map[string]json.RawMessage) error {
+func PatchRaw(path string, patch map[string]json.RawMessage) (retErr error) {
+	lock, err := AcquireWriteLock(path)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, lock.Close()) }()
+	return patchRawUnlocked(path, patch)
+}
+
+func patchRawUnlocked(path string, patch map[string]json.RawMessage) error {
 	if err := testguard.RequireTempPath("config patch", path); err != nil {
 		return err
 	}
@@ -602,7 +659,7 @@ func PatchRaw(path string, patch map[string]json.RawMessage) error {
 		}
 	}
 	buf.WriteString("\n}\n")
-	return atomicWrite(path, buf.Bytes())
+	return atomicWriteUnlocked(path, buf.Bytes())
 }
 
 // ToolSource — Included files merge after their parent, so the last matching definition is the effective one.
@@ -671,7 +728,12 @@ func toolSource(path, name string, stack *includePathStack) (string, bool, error
 }
 
 // PatchTool — Writes into the file that owns the tool, preserving sibling definitions and include layout.
-func PatchTool(path, name string, mutate func(*ToolSpec) error) error {
+func PatchTool(path, name string, mutate func(*ToolSpec) error) (retErr error) {
+	lock, err := AcquireWriteLock(path)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, lock.Close()) }()
 	source, err := ToolSource(path, name)
 	if err != nil {
 		return err
@@ -695,7 +757,7 @@ func PatchTool(path, name string, mutate func(*ToolSpec) error) error {
 		return err
 	}
 	tools[name] = spec
-	return Patch(source, struct {
+	return patchUnlocked(source, struct {
 		Tools map[string]ToolSpec `json:"tools"`
 	}{Tools: tools})
 }

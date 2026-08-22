@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://microsoft.github.io/apm/schemas/import-result-v1.json",
+  "title": "APM native import result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "operation_id", "coordinator", "state", "next_action", "finalize_token_required"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "operation_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "coordinator": {"enum": ["standalone", "omni-v24"]},
+    "state": {"enum": ["complete", "awaiting-external-commit", "recoverable-partial", "rolled-back"]},
+    "next_action": {"enum": ["none", "external-commit-then-finalize", "resume", "rollback"]},
+    "finalize_token_required": {"type": "boolean"}
+  }
+}

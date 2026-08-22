@@ -13,9 +13,8 @@ deployed agent files:
 - `~/.apm/marketplaces.json` — marketplace registry/cache.
 - APM target directories and agent configuration files under `$HOME`.
 
-Omni does not import, adopt, or maintain a parallel skill/plugin store. It does
-not assign agent resources through groups or host-specific fleet lists. Use APM
-commands or `omni agents sync` to change agent state.
+Omni does not maintain a parallel skill/plugin store. Existing-state onboarding
+converts only legacy Omni declarations; APM discovers and adopts native state.
 
 ## Omni state
 
@@ -23,13 +22,16 @@ Omni configuration remains in `settings.json` and optional `settings.d/*.json`
 fragments. SQLite state lives under the normal Omni data directory. Dotfiles
 remain owned by Omni and tools remain owned by their configured providers.
 
-Legacy `.skill-lock.json`, native plugin registries, and old Omni agent stores
-are not read or migrated. Remove them manually if they are no longer needed.
+Durable onboarding journals and private backups live under
+`$OMNI_STATE_DIR/onboarding/<operation-id>/`, or
+`$XDG_STATE_HOME/omni/onboarding/<operation-id>/` by default. They remain until
+an explicit confirmed cleanup after both Omni and APM are terminal.
 
 ## Environment variables
 
-`HOME`, `XDG_DATA_HOME`, and provider-specific environment variables control
-Omni paths and provider behavior. APM resolves its own runtime environment.
+`HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `OMNI_STATE_DIR`, and
+provider-specific environment variables control Omni paths and provider
+behavior. APM resolves its own runtime environment.
 
 ## Cache contents
 

@@ -22,6 +22,7 @@ func runAPM(state *rootState, cmd *cobra.Command, args ...string) error {
 func newAgentsCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{Use: "agents", Short: "Manage agent dependencies with APM"}
 	cmd.AddCommand(
+		newAgentsOnboardCmd(state),
 		newAPMAgentsSyncCmd(state),
 		newAPMAgentsAddCmd(state),
 		newAPMAgentsRemoveCmd(state),

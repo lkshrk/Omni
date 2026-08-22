@@ -469,10 +469,15 @@ type Model struct {
 	stowInstallPath        string
 	stowInstallVariant     dotsVariantRequest
 
-	apmRunning bool
-	apmCommand string
-	apmOutput  string
-	apmErr     error
+	apmRunning                  bool
+	apmCommand                  string
+	apmOutput                   string
+	apmErr                      error
+	agentsOnboardPlan           *app.AgentsOnboardResult
+	agentsOnboardConfirm        bool
+	agentsOnboardItem           int
+	agentsOnboardOperation      string
+	agentsOnboardCleanupConfirm bool
 
 	dangerConfirmRow int // settings row awaiting inline confirmation; -1 = none
 

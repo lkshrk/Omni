@@ -74,6 +74,10 @@ type directoryEnvironmentExecutor interface {
 	RunDirEnv(ctx context.Context, dir string, env []string, name string, args ...string) (stdout, stderr string, err error)
 }
 
+type directoryEnvironmentStdinExecutor interface {
+	RunDirEnvStdin(ctx context.Context, dir string, env []string, stdin []byte, name string, args ...string) (stdout, stderr string, err error)
+}
+
 // RunWithEnv overlays environment variables without mutating the process environment.
 func RunWithEnv(ctx context.Context, exec Executor, env []string, name string, args ...string) (string, string, error) {
 	if runner, ok := exec.(environmentExecutor); ok {
@@ -103,4 +107,13 @@ func RunInDirWithEnv(ctx context.Context, exec Executor, dir string, env []strin
 		}
 	}
 	return "", "", errors.New("executor does not support a working directory")
+}
+
+// RunInDirWithEnvAndStdin passes private input without placing it in argv or
+// environment. Callers must not fall back to a shell or command trace.
+func RunInDirWithEnvAndStdin(ctx context.Context, exec Executor, dir string, env []string, stdin []byte, name string, args ...string) (string, string, error) {
+	if runner, ok := exec.(directoryEnvironmentStdinExecutor); ok {
+		return runner.RunDirEnvStdin(ctx, dir, env, stdin, name, args...)
+	}
+	return "", "", errors.New("executor does not support private stdin")
 }

@@ -51,6 +51,20 @@ func (m *MatchMockExecutor) RunDirEnv(_ context.Context, dir string, env []strin
 	return m.run(name, args, env, dir)
 }
 
+func (m *MatchMockExecutor) RunDirEnvStdin(_ context.Context, dir string, env []string, stdin []byte, name string, args ...string) (string, string, error) {
+	return m.runStdin(name, args, env, dir, stdin)
+}
+
+func (m *MatchMockExecutor) runStdin(name string, args, env []string, dir string, stdin []byte) (string, string, error) {
+	stdout, stderr, err := m.run(name, args, env, dir)
+	m.mu.Lock()
+	if len(m.Calls) > 0 {
+		m.Calls[len(m.Calls)-1].Stdin = append([]byte(nil), stdin...)
+	}
+	m.mu.Unlock()
+	return stdout, stderr, err
+}
+
 func (m *MatchMockExecutor) run(name string, args, env []string, dir string) (string, string, error) {
 	key := name
 	if len(args) > 0 {
