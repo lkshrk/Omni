@@ -3,6 +3,7 @@
 package securefile
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -149,21 +150,30 @@ func rejectReparseAncestors(root, path string) error {
 }
 
 func secureWriteAtomic(path string, data []byte) (retErr error) {
-	f, err := os.CreateTemp(filepath.Dir(path), ".secure-*")
+	dir, name := filepath.Dir(path), filepath.Base(path)
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
 	}
-	tmp := f.Name()
+	defer func() { retErr = errors.Join(retErr, root.Close()) }()
+	staging := ".secure-" + rand.Text()
+	f, err := root.OpenFile(staging, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
 	closed := false
+	committed := false
 	defer func() {
 		if !closed {
 			retErr = errors.Join(retErr, f.Close())
 		}
-		if err := os.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
-			retErr = errors.Join(retErr, fmt.Errorf("remove private staging file: %w", err))
+		if !committed {
+			if err := root.Remove(staging); err != nil && !errors.Is(err, os.ErrNotExist) {
+				retErr = errors.Join(retErr, fmt.Errorf("remove private staging file: %w", err))
+			}
 		}
 	}()
-	if err = protectPath(tmp); err != nil {
+	if err = protectPath(filepath.Join(dir, staging)); err != nil {
 		return err
 	}
 	if _, err = f.Write(data); err != nil {
@@ -177,14 +187,23 @@ func secureWriteAtomic(path string, data []byte) (retErr error) {
 		return err
 	}
 	closed = true
-	// os.Rename uses the Go runtime's long-path-aware MoveFileEx wrapper.
-	// MOVEFILE_WRITE_THROUGH is intentionally omitted: on Windows Server 2025
-	// it can report success for a same-volume new destination before the name is
-	// observable, causing the following security verification to see no file.
-	if err := os.Rename(tmp, path); err != nil {
+	if err := root.Rename(staging, name); err != nil {
 		return err
 	}
-	return secureVerify(path)
+	committed = true
+	committedFile, err := root.Open(name)
+	if err != nil {
+		return fmt.Errorf("open committed private file: %w", err)
+	}
+	defer func() { retErr = errors.Join(retErr, committedFile.Close()) }()
+	info, err := committedFile.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("private path %q is not a regular file", path)
+	}
+	return verifyProtectedHandle(path, windows.Handle(committedFile.Fd()))
 }
 
 func secureVerify(path string) error {
@@ -210,29 +229,52 @@ func secureVerifyDir(path string) error {
 }
 
 func protectPath(path string) error {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
-	if err != nil {
-		return err
-	}
-	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
-	if err != nil {
-		return err
-	}
-	entries := []windows.EXPLICIT_ACCESS{
-		{AccessPermissions: windows.GENERIC_ALL, AccessMode: windows.GRANT_ACCESS, Trustee: windows.TRUSTEE{TrusteeForm: windows.TRUSTEE_IS_SID, TrusteeType: windows.TRUSTEE_IS_USER, TrusteeValue: windows.TrusteeValueFromSID(user.User.Sid)}},
-		{AccessPermissions: windows.GENERIC_ALL, AccessMode: windows.GRANT_ACCESS, Trustee: windows.TRUSTEE{TrusteeForm: windows.TRUSTEE_IS_SID, TrusteeType: windows.TRUSTEE_IS_WELL_KNOWN_GROUP, TrusteeValue: windows.TrusteeValueFromSID(system)}},
-	}
-	acl, err := windows.ACLFromEntries(entries, nil)
+	acl, err := protectedACL()
 	if err != nil {
 		return err
 	}
 	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil)
 }
 
+func protectedACL() (*windows.ACL, error) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return nil, err
+	}
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		return nil, err
+	}
+	entries := []windows.EXPLICIT_ACCESS{
+		{AccessPermissions: windows.GENERIC_ALL, AccessMode: windows.GRANT_ACCESS, Trustee: windows.TRUSTEE{TrusteeForm: windows.TRUSTEE_IS_SID, TrusteeType: windows.TRUSTEE_IS_USER, TrusteeValue: windows.TrusteeValueFromSID(user.User.Sid)}},
+		{AccessPermissions: windows.GENERIC_ALL, AccessMode: windows.GRANT_ACCESS, Trustee: windows.TRUSTEE{TrusteeForm: windows.TRUSTEE_IS_SID, TrusteeType: windows.TRUSTEE_IS_WELL_KNOWN_GROUP, TrusteeValue: windows.TrusteeValueFromSID(system)}},
+	}
+	return windows.ACLFromEntries(entries, nil)
+}
+
 func verifyProtected(path string) error {
 	descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION|windows.OWNER_SECURITY_INFORMATION)
 	if err != nil {
 		return err
+	}
+	return verifyProtectedDescriptor(path, descriptor)
+}
+
+func verifyProtectedHandle(path string, handle windows.Handle) error {
+	descriptor, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return err
+	}
+	return verifyProtectedDescriptor(path, descriptor)
+}
+
+func verifyProtectedDescriptor(path string, descriptor *windows.SECURITY_DESCRIPTOR) error {
+	control, _, err := descriptor.Control()
+	if err != nil {
+		return err
+	}
+	if control&windows.SE_DACL_PROTECTED == 0 {
+		return fmt.Errorf("private path %q has an inherited DACL", path)
 	}
 	dacl, _, err := descriptor.DACL()
 	if err != nil {
@@ -255,6 +297,9 @@ func verifyProtected(path string) error {
 		if err := windows.GetAce(dacl, i, &ace); err != nil {
 			return err
 		}
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Header.AceFlags != 0 {
+			return fmt.Errorf("private path %q has an unsafe ACE", path)
+		}
 		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
 		if user.User.Sid.Equals(sid) {
 			seenUser = true
@@ -263,7 +308,7 @@ func verifyProtected(path string) error {
 		} else {
 			return fmt.Errorf("private path %q grants an unexpected SID", path)
 		}
-		if ace.Mask&windows.GENERIC_ALL == 0 && ace.Mask&fileAllAccess != fileAllAccess {
+		if ace.Mask != windows.GENERIC_ALL && ace.Mask != fileAllAccess {
 			return fmt.Errorf("private path %q lacks full-control ACE", path)
 		}
 	}
