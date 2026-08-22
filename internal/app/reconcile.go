@@ -47,7 +47,6 @@ type ReconcileIssueSummary struct {
 	NvmFailures     int
 	SyncFailures    int
 	UpgradeFailures int
-	AgentFailures   int
 	DotsConflicts   int
 	DotsMissing     int
 }
@@ -95,9 +94,6 @@ func SummarizeReconcileIssues(result *ReconcileResult) ReconcileIssueSummary {
 	if result.UpgradeAll != nil {
 		summary.UpgradeFailures = len(result.UpgradeAll.Failures)
 	}
-	if result.Agents != nil {
-		summary.AgentFailures = len(result.Agents.Errors)
-	}
 	for _, entry := range result.DotsEntries {
 		switch entry.Health {
 		case HealthConflict:
@@ -110,7 +106,7 @@ func SummarizeReconcileIssues(result *ReconcileResult) ReconcileIssueSummary {
 }
 
 func (s ReconcileIssueSummary) Total() int {
-	return s.NvmFailures + s.SyncFailures + s.UpgradeFailures + s.AgentFailures +
+	return s.NvmFailures + s.SyncFailures + s.UpgradeFailures +
 		s.DotsConflicts + s.DotsMissing
 }
 
@@ -118,7 +114,7 @@ func (s ReconcileIssueSummary) HasIssues() bool {
 	return s.Total() > 0
 }
 
-// Reconcile — Sync tools, upgrade, sync agent resources, sync dotfiles, then back up dirty repo state.
+// Reconcile — Sync tools, upgrade, install the global APM workspace, sync dotfiles, then back up dirty repo state.
 func (a *App) Reconcile(ctx context.Context, opts ReconcileOptions) (*ReconcileResult, error) {
 	result := &ReconcileResult{}
 	var errs []error
@@ -206,13 +202,7 @@ func (a *App) Reconcile(ctx context.Context, opts ReconcileOptions) (*ReconcileR
 func (a *App) reconcileAgents(ctx context.Context, opts ReconcileOptions, result *ReconcileResult) error {
 	a.reconcileProgress(opts, "syncing agents...")
 	res, err := a.AgentsSyncAll(ctx, AgentsSyncAllOptions{Progress: opts.Progress})
-	if err != nil {
-		res.addError("apm", err.Error())
-	}
 	result.Agents = &res
-	if err == nil {
-		err = AgentsSyncAllFailure(res)
-	}
 	return err
 }
 

@@ -103,63 +103,6 @@ func toolFilterBarY(m Model) int {
 	return 2
 }
 
-// Must mirror what viewSkillsBody renders: same "  " x-offset, same shared line, same width budget.
-func agentsFilterHitZones(m Model) []toolFilterHitZone {
-	if m.mode != viewSkills {
-		return nil
-	}
-	if !m.skillsSectionEnabled() && !m.mcpSectionEnabled() && !m.pluginsSectionEnabled() {
-		return nil
-	}
-
-	pad := screenEdgeInset()
-	available := max(m.width-lipgloss.Width(pad), 1)
-	disabledChips := map[int]bool{
-		agentsChipSkills: !m.skillsSectionEnabled(),
-		agentsChipMcp:    !m.mcpSectionEnabled(),
-		agentsChipPlugin: !m.pluginsSectionEnabled(),
-	}
-
-	y := 2
-	if m.skillsSearchActive {
-		y = 3
-	}
-
-	x := lipgloss.Width("  ")
-	typeLabels := []string{"all", "skills", "mcp", "plugin"}
-	typeZones, used := pillHitZonesDim(agentsFilterType, typeLabels, m.skillTypeIdx, disabledChips, x, y, available)
-	zones := append([]toolFilterHitZone{}, typeZones...)
-
-	agentIDs := skillAgentIDs(m.skillsRows, m.enabledAgents)
-	if len(agentIDs) > 0 {
-		sepW := lipgloss.Width(pillBarSeparator)
-		remaining := available - used
-		if remaining > sepW {
-			agentZones, _ := pillHitZones(agentsFilterAgent, agentIDs, m.skillAgentIdx, x+used+sepW, y, remaining-sepW)
-			zones = append(zones, agentZones...)
-		}
-	}
-	return zones
-}
-
-// Unlike pillHitZones: labels are used verbatim (no "all" prepend) and a disabled index never yields a clickable zone.
-func pillHitZonesDim(kind toolFilterKind, labels []string, activeIdx int, disabled map[int]bool, start, y, maxW int) ([]toolFilterHitZone, int) {
-	zones := make([]toolFilterHitZone, 0, len(labels))
-	x := start
-	for i, label := range labels {
-		active := activeIdx == i && !disabled[i]
-		w := pillCellWidth(label, active, maxW-(x-start))
-		if w <= 0 {
-			break
-		}
-		if !disabled[i] {
-			zones = append(zones, toolFilterHitZone{kind: kind, index: i, start: x, end: x + w, y: y})
-		}
-		x += w
-	}
-	return zones, x - start
-}
-
 func pillHitZones(kind toolFilterKind, names []string, activeIdx, start, y, maxW int) ([]toolFilterHitZone, int) {
 	labels := make([]string, 0, len(names)+1)
 	labels = append(labels, "all")

@@ -282,11 +282,11 @@ func displayBoolPtr(value *bool) string {
 func newSettingsExtractCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "extract",
-		Short: "Extract agents, tools, groups, and dots into settings.d fragments",
+		Short: "Extract tools, groups, and dots into settings.d fragments",
 		Args:  cobra.NoArgs,
 		Long: `Extract decomposes settings.json into the canonical settings.d layout:
-agents.json (agents), tools.json (tools), groups.json (groups without dots),
-and dots.json (dot entries per group). The moved keys are removed from
+tools.json (tools), groups.json (groups without dots), and dots.json (dot entries
+per group). The moved keys are removed from
 settings.json and $include is updated. Duplicate definitions across the main
 file and fragments collapse to the effective merged value. Safe to re-run.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -304,7 +304,6 @@ file and fragments collapse to the effective merged value. Safe to re-run.`,
 				return nil
 			}
 			for _, fragment := range []string{
-				"settings.d/agents.json",
 				"settings.d/tools.json",
 				"settings.d/groups.json",
 				"settings.d/dots.json",

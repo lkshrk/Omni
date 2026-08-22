@@ -85,11 +85,6 @@ type hostSettingsProjection struct {
 	DotsDisabled      *bool                        `json:"dots_disabled,omitempty"`
 	DisabledProviders *[]string                    `json:"disabled_providers,omitempty"`
 	ProviderPriority  []string                     `json:"provider_priority,omitempty"`
-	AgentsDisabled    *bool                        `json:"agents_disabled,omitempty"`
-	SkillsDisabled    *bool                        `json:"skills_disabled,omitempty"`
-	McpDisabled       *bool                        `json:"mcp_disabled,omitempty"`
-	PluginsDisabled   *bool                        `json:"plugins_disabled,omitempty"`
-	AgentsUse         *[]string                    `json:"agents_use,omitempty"`
 	Providers         *[]ProviderEntry             `json:"providers,omitempty"`
 }
 
@@ -105,16 +100,9 @@ func projectHostSettings(in map[string]Settings) map[string]hostSettingsProjecti
 			DotsRepo:         s.DotsRepo,
 			ProviderPriority: s.ProviderPriority,
 			DotsDisabled:     s.DotsDisabled,
-			AgentsDisabled:   s.AgentsDisabled,
-			SkillsDisabled:   s.SkillsDisabled,
-			McpDisabled:      s.McpDisabled,
-			PluginsDisabled:  s.PluginsDisabled,
 		}
 		if s.DisabledProviders != nil {
 			p.DisabledProviders = &s.DisabledProviders
-		}
-		if s.AgentsUse != nil {
-			p.AgentsUse = &s.AgentsUse
 		}
 		if s.Providers != nil {
 			p.Providers = &s.Providers

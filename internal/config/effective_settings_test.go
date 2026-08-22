@@ -135,24 +135,6 @@ func TestEffectiveSettings_HostEntryAbsentDotsDisabled_GlobalPreserved(t *testin
 	}
 }
 
-func TestEffectiveSettings_AgentFeatureFlagsHostOverride(t *testing.T) {
-	tr := config.BoolPtr(true)
-	cfg := &config.RootConfig{
-		Settings: config.Settings{SkillsDisabled: config.BoolPtr(false)},
-		HostSettings: map[string]config.Settings{
-			"h1": {SkillsDisabled: tr, McpDisabled: tr, PluginsDisabled: tr},
-		},
-	}
-	s := cfg.EffectiveSettings("h1")
-	if !config.BoolVal(s.SkillsDisabled) || !config.BoolVal(s.McpDisabled) || !config.BoolVal(s.PluginsDisabled) {
-		t.Errorf("host overrides not applied: %+v", s)
-	}
-	other := cfg.EffectiveSettings("other")
-	if config.BoolVal(other.SkillsDisabled) || other.McpDisabled != nil || other.PluginsDisabled != nil {
-		t.Errorf("non-matching host must keep globals: %+v", other)
-	}
-}
-
 func TestEffectiveSettings_Mixed_HostProviderPriority_OverridesGlobal(t *testing.T) {
 	cfg := &config.RootConfig{
 		Settings: testSettingsWithProviderPriority("npm", "uv"),

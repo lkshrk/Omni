@@ -15,7 +15,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/lkshrk/omni/internal/agent"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
@@ -29,16 +28,6 @@ import (
 	"github.com/lkshrk/omni/internal/testguard"
 )
 
-const (
-	agentTargetsMcpOverride uint8 = 1 << iota
-	agentTargetsPluginOverride
-)
-
-type agentTargetOption struct {
-	capability uint8
-	option     agent.Option
-}
-
 type App struct {
 	ConfigPath string // full path to settings.json
 	CacheDir   string // where omni.db lives; derived from XDG_CACHE_HOME when empty
@@ -49,19 +38,14 @@ type App struct {
 	fallbackExec executor.Executor
 	githubAPI    string
 	// Shared by every outbound HTTP caller here; tests inject one client for all of them.
-	httpClient         *http.Client
-	testMode           bool
-	agentTargetOptions []agentTargetOption
-	agentTargets       *agent.Registry
-	// Ambient environment reads; injected so tests can prove an env passthrough without mutating the real process environment.
-	envLookup func(string) string
+	httpClient *http.Client
+	testMode   bool
 
 	// InitReadOnly marker: incidental writes like command traces are suppressed.
 	diagnosticMode bool
 
 	// Serialises read-modify-write cycles on settings.json; read-only loadConfig does not need it.
 	configMu sync.Mutex
-
 	// Guards the a.db pointer only; SQLite's own locking handles concurrent calls on the handle.
 	dbMu sync.RWMutex
 
@@ -73,23 +57,6 @@ type App struct {
 
 	// Built once in New; holds a back to App only through the narrow dotsHost seam.
 	dotSvc *dotsService
-}
-
-func (a *App) setAgentTargetOption(capability uint8, option agent.Option) {
-	for i := range a.agentTargetOptions {
-		if a.agentTargetOptions[i].capability != capability {
-			continue
-		}
-		if option == nil {
-			a.agentTargetOptions = slices.Delete(a.agentTargetOptions, i, i+1)
-		} else {
-			a.agentTargetOptions[i].option = option
-		}
-		return
-	}
-	if option != nil {
-		a.agentTargetOptions = append(a.agentTargetOptions, agentTargetOption{capability: capability, option: option})
-	}
 }
 
 func (a *App) requireSafeTestHomeForDots() error {
@@ -191,27 +158,12 @@ type UpgradeAllOptions struct {
 	Force          bool
 }
 
-// WithEnvLookup — Replaces ambient environment reads; tests use it instead of touching the process environment.
-func WithEnvLookup(lookup func(string) string) func(*App) {
-	return func(a *App) {
-		a.envLookup = lookup
-	}
-}
-
-func (a *App) lookupEnv(name string) string {
-	if a.envLookup == nil {
-		return os.Getenv(name)
-	}
-	return a.envLookup(name)
-}
-
 // New — Call Init or InitTestMode before any other method.
 func New(configPath string, opts ...func(*App)) *App {
 	a := &App{ConfigPath: configPath}
 	for _, opt := range opts {
 		opt(a)
 	}
-	a.initAgentTargets()
 	a.dotSvc = newDotsService(a)
 	return a
 }

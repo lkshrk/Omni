@@ -46,11 +46,6 @@ func printRenameNotice(alias *cobra.Command, canonical *cobra.Command, replaceme
 	fmt.Fprintf(alias.ErrOrStderr(), "note: %q renamed to %q\n", path, replacement)
 }
 
-// For an old spelling that kept its own behaviour instead of aliasing, so the replacement must be named explicitly.
-func deprecationNotice(cmd *cobra.Command, replacement string) {
-	fmt.Fprintf(cmd.ErrOrStderr(), "note: %q is deprecated; use %q\n", commandPath(cmd), replacement)
-}
-
 func commandPath(cmd *cobra.Command) string {
 	path := cmd.CommandPath()
 	return strings.TrimPrefix(path, "omni ")

@@ -39,11 +39,6 @@ type StartupSnapshot struct {
 	DotsWatchService       *DotsWatchService
 	DotsWatchServiceErr    error
 	DotsConfigured         bool
-	AgentsEnabled          bool
-	AgentsRows             *CachedAgentsRows
-	SkillsEnabled          bool
-	McpEnabled             bool
-	PluginsEnabled         bool
 	DotsSyncAvailability   DotsSyncAvailability
 	DotsHistory            []DotsHistoryEntry
 	DotsHistoryErr         error
@@ -51,9 +46,6 @@ type StartupSnapshot struct {
 	SetupProviders         []SetupProviderOption
 	EcosystemProviderNames []string
 	NvmManaged             map[string]bool
-	EnabledAgents          []string
-	// The raw manifest struct: the TUI derives lookup sets itself via AgentsIgnoreSet.
-	AgentsIgnore config.AgentsIgnore
 }
 
 type ToolScopeState struct {
@@ -159,14 +151,6 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 	discovered, _ := a.listDiscoveredFromConfig(ctx, cfg, ecosystemProviders)
 	stop()
 
-	// Deliberately not in the snapshot: it shells out to every agent CLI and held the first render hostage.
-	stop = profile.Start("app.startup.agents_rows_cache")
-	agentsRows, err := a.CachedAgentsRows(ctx)
-	stop()
-	if err != nil {
-		return nil, err
-	}
-
 	stop = profile.Start("app.startup.stow_installed")
 	stowInstalled := a.DotsStowInstalled(ctx)
 	stop()
@@ -205,19 +189,12 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 		DotsWatchService:       dotsWatchService,
 		DotsWatchServiceErr:    dotsWatchServiceErr,
 		DotsConfigured:         DotsConfiguredInSettings(settings),
-		AgentsEnabled:          a.AgentsEnabled(cfg),
-		AgentsRows:             agentsRows,
-		SkillsEnabled:          !config.BoolVal(settings.SkillsDisabled),
-		McpEnabled:             !config.BoolVal(settings.McpDisabled),
-		PluginsEnabled:         !config.BoolVal(settings.PluginsDisabled),
 		DotsSyncAvailability:   DotsSyncAvailabilityInSettings(settings),
 		DotsHistory:            dotsHistory,
 		DotsHistoryErr:         dotsHistoryErr,
 		DotsState:              dotsState,
 		SetupProviders:         setupProviders,
 		EcosystemProviderNames: ecosystemProviderNames,
-		EnabledAgents:          a.EnabledAgentIDs(cfg),
-		AgentsIgnore:           cfg.Agents.Ignore,
 	}, nil
 }
 

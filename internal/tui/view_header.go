@@ -38,8 +38,6 @@ func renderSetup(m Model) string {
 				"You can always change this later in Settings.",
 			},
 		})
-	case 4:
-		body = renderSetupAgentsStep(m)
 	case 5:
 		body = renderSetupPanel(m, setupPanel{
 			Lead: "Enable dotfile sync?",
@@ -156,8 +154,6 @@ func renderSetup(m Model) string {
 				[]hintItem{hintFromBindingDesc(m.keys.Confirm, "continue")},
 			),
 		})
-	case setupStepImportAdvisories:
-		body = renderSetupImportAdvisoriesStep(m)
 	case setupStepCreateConfig:
 		body = renderSetupPanel(m, setupPanel{
 			Lead: "Creating a new settings.json.",
@@ -171,70 +167,6 @@ func renderSetup(m Model) string {
 	}
 
 	return body
-}
-
-const setupImportAdvisoriesShown = 6
-
-func renderSetupImportAdvisoriesStep(m Model) string {
-	width := max(m.width-2, 12)
-	help := []string{"Review what the import changed before continuing.", ""}
-	shown := m.setupImportNotices
-	if len(shown) > setupImportAdvisoriesShown {
-		shown = shown[:setupImportAdvisoriesShown]
-	}
-	for _, advisory := range shown {
-		for i, line := range wrapText(advisory, width) {
-			prefix := "• "
-			if i > 0 {
-				prefix = "  "
-			}
-			help = append(help, prefix+line)
-		}
-	}
-	if rest := len(m.setupImportNotices) - len(shown); rest > 0 {
-		help = append(help, fmt.Sprintf("… and %d more", rest))
-	}
-
-	return renderSetupPanel(m, setupPanel{
-		Lead: fmt.Sprintf("Import finished with %d warning(s).", len(m.setupImportNotices)),
-		Help: help,
-		Footer: renderSetupFooter(m,
-			nil,
-			nil,
-			[]hintItem{hintFromBindingDesc(m.keys.Confirm, "acknowledge")},
-		),
-	})
-}
-
-// Gates the [i]/[s] footer until the async unmanaged diff finishes.
-func renderSetupAgentsStep(m Model) string {
-	names := make([]string, 0, len(m.setupAgentsList))
-	for _, a := range m.setupAgentsList {
-		names = append(names, a.Display)
-	}
-	help := []string{"Found agents: " + strings.Join(names, ", ")}
-
-	var footer string
-	if m.setupAgentsDiffLoading {
-		help = append(help, m.spinner.View()+" checking manifest…")
-	} else if m.setupAgentsDiffLoaded {
-		help = append(help, fmt.Sprintf("Not in manifest: %d skill packages · %d mcp servers · %d plugins",
-			m.setupAgentsUnmanagedSkills, m.setupAgentsUnmanagedMcp, m.setupAgentsUnmanagedPlugins))
-		if m.setupAgentsUnmanagedSkills > 0 {
-			help = append(help, "Importing adopts legacy CLI-managed skill installs.")
-		}
-		footer = renderSetupFooter(m,
-			[]hintItem{dangerRawHint("s", "skip")},
-			nil,
-			[]hintItem{dangerRawHint("i", "import all")},
-		)
-	}
-
-	return renderSetupPanel(m, setupPanel{
-		Lead:   "Bring existing agents state into the manifest?",
-		Help:   help,
-		Footer: footer,
-	})
 }
 
 type setupPanel struct {
@@ -416,8 +348,6 @@ func setupPopupTitle(m Model) string {
 		return logoMark + " Omni - Enable ecosystems"
 	case 3:
 		return logoMark + " Omni - Choose Node manager"
-	case 4:
-		return logoMark + " Omni - Agents onboarding"
 	case 5:
 		return logoMark + " Omni - Dotfile sync"
 	case 6:
@@ -432,8 +362,6 @@ func setupPopupTitle(m Model) string {
 		return logoMark + " Omni - Bootstrap host"
 	case setupStepCreateConfig:
 		return logoMark + " Omni - Create settings"
-	case setupStepImportAdvisories:
-		return logoMark + " Omni - Import warnings"
 	default:
 		return logoMark + " Omni"
 	}

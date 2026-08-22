@@ -11,29 +11,20 @@ import (
 	"github.com/lkshrk/omni/internal/dots"
 )
 
-func TestAgentConfigDotCandidateNames_DerivesFromCatalog(t *testing.T) {
+func TestIgnoredDotCandidateNamesIncludeAPMRuntimeDirs(t *testing.T) {
 	t.Parallel()
-	names := agentConfigDotCandidateNames(newAgentRegistry())
-	nameSet := make(map[string]struct{}, len(names))
-	for _, n := range names {
-		nameSet[n] = struct{}{}
-	}
-
-	if _, ok := nameSet["agents"]; !ok {
-		t.Fatalf("agentConfigDotCandidateNames() = %v, want it to include %q (from supportedAgents .config/agents entries)", names, "agents")
-	}
-	for _, want := range []string{"crush", "devin", "goose", "opencode"} {
-		if _, ok := nameSet[want]; !ok {
-			t.Fatalf("agentConfigDotCandidateNames() = %v, want it to include %q", names, want)
+	names := buildIgnoredDotCandidateNames()
+	for _, want := range []string{"agents", "crush", "devin", "goose", "opencode"} {
+		if _, ok := names[want]; !ok {
+			t.Fatalf("buildIgnoredDotCandidateNames() missing APM runtime dir %q", want)
 		}
 	}
 
-	for _, notWant := range []string{"claude", "codex", "grok", "agents-skill-lock", "gemini"} {
-		if _, ok := nameSet[notWant]; ok {
-			t.Fatalf("agentConfigDotCandidateNames() = %v, must not include home-level dir %q", names, notWant)
+	for _, notWant := range []string{"claude", "codex", "grok", "gemini"} {
+		if _, ok := names[notWant]; ok {
+			t.Fatalf("buildIgnoredDotCandidateNames() must not include home-level dir %q", notWant)
 		}
 	}
-
 }
 
 func TestRollbackDotsAdd_RemovesPartialTargetBeforeRestore(t *testing.T) {

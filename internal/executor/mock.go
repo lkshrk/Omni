@@ -9,6 +9,7 @@ type MockCall struct {
 	Name   string
 	Args   []string
 	Env    []string
+	Dir    string
 	Stdout string
 	Stderr string
 	Err    error
@@ -23,17 +24,25 @@ type MockExecutor struct {
 }
 
 func (m *MockExecutor) Run(_ context.Context, name string, args ...string) (string, string, error) {
-	return m.run(name, args, nil)
+	return m.run(name, args, nil, "")
 }
 
 func (m *MockExecutor) RunEnv(_ context.Context, env []string, name string, args ...string) (string, string, error) {
-	return m.run(name, args, env)
+	return m.run(name, args, env, "")
 }
 
-func (m *MockExecutor) run(name string, args, env []string) (string, string, error) {
+func (m *MockExecutor) RunDir(_ context.Context, dir, name string, args ...string) (string, string, error) {
+	return m.run(name, args, nil, dir)
+}
+
+func (m *MockExecutor) RunDirEnv(_ context.Context, dir string, env []string, name string, args ...string) (string, string, error) {
+	return m.run(name, args, env, dir)
+}
+
+func (m *MockExecutor) run(name string, args, env []string, dir string) (string, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.Calls = append(m.Calls, MockCall{Name: name, Args: args, Env: env})
+	m.Calls = append(m.Calls, MockCall{Name: name, Args: args, Env: env, Dir: dir})
 	if m.index < len(m.Responses) {
 		r := m.Responses[m.index]
 		m.index++

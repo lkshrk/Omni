@@ -327,12 +327,12 @@ func TestOptimizeIncludeChainEmptyBaseGroupIsSafe(t *testing.T) {
 
 func TestNormalizeForCompareOrderInsensitive(t *testing.T) {
 	a := &RootConfig{Groups: []*GroupConfig{
-		{Name: "b", Dots: []DotEntry{{Name: "y"}, {Name: "x"}}, Skills: []string{"s2", "s1"}},
+		{Name: "b", Dots: []DotEntry{{Name: "y"}, {Name: "x"}}},
 		{Name: "a"},
 	}}
 	b := &RootConfig{Groups: []*GroupConfig{
 		{Name: "a"},
-		{Name: "b", Dots: []DotEntry{{Name: "x"}, {Name: "y"}}, Skills: []string{"s1", "s2"}},
+		{Name: "b", Dots: []DotEntry{{Name: "x"}, {Name: "y"}}},
 	}}
 	na, err := normalizeForCompare(a)
 	if err != nil {

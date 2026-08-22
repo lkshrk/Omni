@@ -117,6 +117,37 @@ jobs:
           fi
           make test-unit TEST_PACKAGES="$packages"
 
+  apm-platform-contracts:
+    name: APM Platform Contracts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned APM
+        run: python -m pip install git+https://github.com/lkshrk/apm.git@ea3f74ae5547059aca214e7a395d09e874205dce
+
+      - name: Test portable APM target contracts
+        run: go test ./internal/app -run '^TestAPM(Target|User)'
+
+      - name: Test real stable-target MCP lifecycle
+        run: go test -tags=integration ./internal/apm -run '^TestGlobalMCPLifecycleForEveryStableTarget$' -count=1
+
   integration:
     name: Docker Integration Tests (${{ matrix.name }})
     runs-on: ubuntu-latest
@@ -137,6 +168,9 @@ jobs:
           - name: providers
             packages: ./internal/provider/...
             cache: provider-tests
+          - name: apm
+            packages: ./internal/apm/... ./internal/cli/...
+            cache: integration-apm
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -155,4 +189,5 @@ jobs:
             --cache-from type=gha,scope=integration-tests
             --cache-from type=gha,scope=integration-non-cli
             --cache-from type=gha,scope=provider-tests
+            --cache-from type=gha,scope=integration-apm
             --cache-to type=gha,scope=${{ matrix.cache }},mode=max

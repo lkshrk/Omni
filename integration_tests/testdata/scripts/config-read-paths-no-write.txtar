@@ -14,17 +14,9 @@ cmp settings.json settings.json.orig
 # A command that actually writes migrates the file on its way out.
 exec omni --config settings.json settings set auto_import true
 exec grep '"version"' settings.json
-stdout '"version": 22'
+stdout '"version": 24'
 
 -- settings.json --
-{"version":1,"agents":{"skills":[{"name":"demo","source":"./source","agents":["claude-code"]}]}}
-
--- source/skills/demo/SKILL.md --
----
-name: demo
-description: Read-path config write test.
----
-
-demo
+{"version":1,"settings":{}}
 
 -- home/.claude/.keep --

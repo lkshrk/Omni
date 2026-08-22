@@ -16,46 +16,6 @@ import (
 )
 
 // Skills (an agent-kind) may belong to any number of groups including several reusable ones; only dots cap reusable membership at one.
-func TestSelectGroupMembership_MultiSelectInvariant(t *testing.T) {
-	t.Parallel()
-	m := &Model{
-		groupNames:           []string{"web", "team"},
-		pickerMembershipKind: pickerMembershipSkill,
-		pickerMembershipName: "ripgrep",
-		skillsMemberships:    map[string][]string{"ripgrep": {}},
-		pickerGroups:         []string{"laptop", "web", "team"},
-	}
-
-	toggle := func(group string) {
-		idx := slices.Index(m.pickerGroups, group)
-		if idx < 0 {
-			t.Fatalf("group %q not in picker", group)
-		}
-		m.pickerCursor = idx
-		m.selectGroupMembership()
-	}
-	current := func() []string { return m.skillsMemberships["ripgrep"] }
-
-	toggle("laptop") // add host group
-	if !slices.Equal(current(), []string{"laptop"}) {
-		t.Fatalf("after +laptop = %v, want [laptop]", current())
-	}
-
-	toggle("web") // add reusable group alongside host group
-	if !slices.Equal(current(), []string{"laptop", "web"}) {
-		t.Fatalf("after +web = %v, want [laptop web]", current())
-	}
-
-	toggle("team") // free multi-select: second reusable joins, none evicted
-	if !slices.Equal(current(), []string{"laptop", "web", "team"}) {
-		t.Fatalf("after +team = %v, want [laptop web team] (no eviction for skills)", current())
-	}
-
-	toggle("laptop") // toggle host group off
-	if !slices.Equal(current(), []string{"web", "team"}) {
-		t.Fatalf("after -laptop = %v, want [web team]", current())
-	}
-}
 
 func TestRenderGroupMembershipPicker_MarksEveryMember(t *testing.T) {
 	t.Parallel()
@@ -140,96 +100,18 @@ func TestRenderGroupMembershipPicker_FooterLayoutAcrossThemesAndWidths(t *testin
 	}
 }
 
-func TestGroupMembershipPopupTitle_AllItemKinds(t *testing.T) {
-	t.Parallel()
-	for _, kind := range []string{
-		pickerMembershipTool,
-		pickerMembershipDot,
-		pickerMembershipSkill,
-		pickerMembershipMcp,
-		pickerMembershipPlugin,
-		pickerMembershipMarketplace,
-	} {
-		t.Run(kind, func(t *testing.T) {
-			m := baseModel(threeTools())
-			m.pickerMembershipKind = kind
-			m.pickerMembershipName = "item"
-			if got := groupMembershipPopupTitle(m); got != "Change Groups: item" {
-				t.Fatalf("groupMembershipPopupTitle() = %q, want %q", got, "Change Groups: item")
-			}
-		})
-	}
-}
-
 // Every item kind shares selectGroupMembership but stores drafts in per-kind maps; only "dot" caps reusable membership at one.
-func TestSelectGroupMembership_InvariantAcrossItemKinds(t *testing.T) {
-	t.Parallel()
-	kinds := []struct {
-		kind string
-		seed func(m *Model)
-		get  func(m *Model) []string
-		want []string
-	}{
-		{pickerMembershipDot,
-			func(m *Model) { m.dotMemberships = map[string][]string{"item": {}} },
-			func(m *Model) []string { return m.dotMemberships["item"] },
-			[]string{"laptop", "web"}},
-		{pickerMembershipMcp,
-			func(m *Model) { m.mcpMemberships = map[string][]string{"item": {}} },
-			func(m *Model) []string { return m.mcpMemberships["item"] },
-			[]string{"laptop", "web"}},
-		{pickerMembershipPlugin,
-			func(m *Model) { m.pluginMemberships = map[string][]string{"item": {}} },
-			func(m *Model) []string { return m.pluginMemberships["item"] },
-			[]string{"laptop", "web"}},
-		{pickerMembershipMarketplace,
-			func(m *Model) { m.marketplaceMemberships = map[string][]string{"item": {}} },
-			func(m *Model) []string { return m.marketplaceMemberships["item"] },
-			[]string{"laptop", "web"}},
-	}
-	for _, tc := range kinds {
-		t.Run(tc.kind, func(t *testing.T) {
-			m := &Model{
-				groupNames:           []string{"web"}, // reusable; "laptop" is a host group
-				pickerMembershipKind: tc.kind,
-				pickerMembershipName: "item",
-				pickerGroups:         []string{"laptop", "web"},
-			}
-			tc.seed(m)
-			m.pickerCursor = 0 // laptop (host)
-			m.selectGroupMembership()
-			m.pickerCursor = 1 // web (reusable)
-			m.selectGroupMembership()
-			if !slices.Equal(tc.get(m), tc.want) {
-				t.Fatalf("%s memberships = %v, want %v", tc.kind, tc.get(m), tc.want)
-			}
-		})
-	}
-}
 
 func membershipToggleTestModel(t *testing.T, kind string) *Model {
 	t.Helper()
 	m := baseModel(nil)
 	m.pickerMembershipKind = kind
-	switch kind {
-	case pickerMembershipTool:
-		m.pickerMembershipKey = "x"
-		m.toolMemberships = map[string][]string{"x": {}}
-	case pickerMembershipDot:
+	if kind == pickerMembershipDot {
 		m.pickerMembershipName = "x"
 		m.dotMemberships = map[string][]string{"x": {}}
-	case pickerMembershipSkill:
-		m.pickerMembershipName = "x"
-		m.skillsMemberships = map[string][]string{"x": {}}
-	case pickerMembershipMcp:
-		m.pickerMembershipName = "x"
-		m.mcpMemberships = map[string][]string{"x": {}}
-	case pickerMembershipPlugin:
-		m.pickerMembershipName = "x"
-		m.pluginMemberships = map[string][]string{"x": {}}
-	case pickerMembershipMarketplace:
-		m.pickerMembershipName = "x"
-		m.marketplaceMemberships = map[string][]string{"x": {}}
+	} else {
+		m.pickerMembershipKey = "x"
+		m.toolMemberships = map[string][]string{"x": {}}
 	}
 	return &m
 }
@@ -263,74 +145,6 @@ func TestSelectGroupMembership_DotEvictsSecondReusable(t *testing.T) {
 }
 
 // These drive the picker as a user would: seed the draft like the open* helpers, toggle via selectGroupMembership, then run the real save against a live app and on-disk config.
-
-func TestFlow_AgentsSkillMembership_FreeMultiToggleSavesBothGroups(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "laptop")
-	a := newScanPlanTestApp(t)
-	if err := a.CreateGroup("work"); err != nil {
-		t.Fatalf("CreateGroup(work): %v", err)
-	}
-	if err := a.CreateGroup("base"); err != nil {
-		t.Fatalf("CreateGroup(base): %v", err)
-	}
-	// Skill visibility is filtered by the host's active groups, so put both reusable groups on the active host or the refreshed row is not visible here.
-	if err := a.SetHostGroups("laptop", []string{"work", "base"}); err != nil {
-		t.Fatalf("SetHostGroups: %v", err)
-	}
-	const source = "github.com/foo/pkg"
-	if _, err := a.AdoptSkillPackage(source); err != nil {
-		t.Fatalf("AdoptSkillPackage: %v", err)
-	}
-
-	m := baseModel(nil)
-	m.app = a
-	m.ctx = context.Background()
-
-	// Mirrors openSkillGroupMembershipPicker: seed the draft with the item's current memberships and the picker's candidate group list.
-	m.pickerMembershipKind = pickerMembershipSkill
-	m.pickerMembershipName = source
-	m.pickerOriginalGroups = nil
-	m.skillsMemberships = map[string][]string{source: {}}
-	m.pickerGroups = []string{"work", "base"}
-
-	m.pickerCursor = 0
-	m.selectGroupMembership()
-	m.pickerCursor = 1
-	m.selectGroupMembership()
-
-	if got := m.skillsMemberships[source]; !slices.Equal(got, []string{"work", "base"}) {
-		t.Fatalf("draft memberships before save = %v, want [work base]", got)
-	}
-
-	var cmds []tea.Cmd
-	m.saveGroupMembershipPicker(&cmds)
-	if len(cmds) == 0 {
-		t.Fatal("save produced no command")
-	}
-	msg := runLastBatchCommand(t, tea.Batch(cmds...))
-	got, ok := msg.(skillsGroupsUpdatedMsg)
-	if !ok {
-		t.Fatalf("save command result = %T, want skillsGroupsUpdatedMsg", msg)
-	}
-	if got.err != nil {
-		t.Fatalf("save returned error: %v", got.err)
-	}
-	var row app.SkillPackageRow
-	for _, r := range got.rows {
-		if r.Source == source {
-			row = r
-		}
-	}
-	if row.Source == "" {
-		t.Fatalf("refreshed rows = %v, want a row for %q", got.rows, source)
-	}
-	if !slices.Equal(row.Groups, []string{"base", "work"}) && !slices.Equal(row.Groups, []string{"work", "base"}) {
-		t.Fatalf("persisted skill groups = %v, want both work and base", row.Groups)
-	}
-	if len(row.Groups) != 2 {
-		t.Fatalf("persisted skill groups = %v, want exactly 2 (free multi-select)", row.Groups)
-	}
-}
 
 func TestFlow_ToolsMembership_FreeMultiToggleSavesBothReusableGroups(t *testing.T) {
 	t.Parallel()

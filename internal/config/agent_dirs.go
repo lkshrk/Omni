@@ -1,7 +1,7 @@
 package config
 
-// A frozen v14 migration snapshot, not the live Agent Target catalog: ".agents" is narrowed to the skills store because sibling files are user-owned.
-var agentDotsManagedPaths = []string{
+// A frozen v14 migration snapshot, not the live APM target catalog. Only ".agents/skills" is APM-managed; sibling files remain user-owned dotfiles.
+var apmManagedDotPaths = []string{
 	".aider-desk",
 	".config/agents",
 	".gemini/antigravity",

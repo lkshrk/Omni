@@ -6,14 +6,14 @@ import (
 	"strings"
 )
 
-// Only ".agents/skills" is machine-managed under ".agents"; the lockfile beside it stays a trackable user dotfile.
-func isAgentConfigDotPath(path string) bool {
+// Only ".agents/skills" is APM-managed under ".agents"; sibling files remain trackable user dotfiles.
+func isAPMManagedDotPath(path string) bool {
 	trimmed := strings.TrimPrefix(path, "~/")
 	trimmed = strings.TrimPrefix(trimmed, "/")
 	if trimmed == "" {
 		return false
 	}
-	for _, dir := range agentDotsManagedPaths {
+	for _, dir := range apmManagedDotPaths {
 		if trimmed == dir || strings.HasPrefix(trimmed, dir+"/") {
 			return true
 		}
@@ -21,13 +21,13 @@ func isAgentConfigDotPath(path string) bool {
 	return false
 }
 
-func dropAgentConfigDots(dots []DotEntry) []DotEntry {
+func dropAPMManagedDots(dots []DotEntry) []DotEntry {
 	if len(dots) == 0 {
 		return dots
 	}
 	out := dots[:0:0]
 	for _, d := range dots {
-		if isAgentConfigDotPath(d.Path) {
+		if isAPMManagedDotPath(d.Path) {
 			continue
 		}
 		out = append(out, d)
@@ -41,7 +41,7 @@ func migrateConfigV13ToV14(cfg *RootConfig) error {
 		if g == nil {
 			continue
 		}
-		g.Dots = dropAgentConfigDots(g.Dots)
+		g.Dots = dropAPMManagedDots(g.Dots)
 	}
 	cfg.Version = 14
 	return nil
@@ -63,7 +63,7 @@ func migrateRawConfigV13ToV14(raw map[string]json.RawMessage) error {
 			if err := json.Unmarshal(dotsRaw, &dots); err != nil {
 				return fmt.Errorf("parsing groups[%d].dots: %w", i, err)
 			}
-			filtered, err := json.Marshal(dropAgentConfigDots(dots))
+			filtered, err := json.Marshal(dropAPMManagedDots(dots))
 			if err != nil {
 				return fmt.Errorf("encoding groups[%d].dots: %w", i, err)
 			}

@@ -28,9 +28,8 @@ func newSyncCmd(state *rootState) *cobra.Command {
 tools this host's groups list and are missing locally. Adopting an installed but
 undeclared tool runs the other way — see import.
 
-Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `. When agent
-features are enabled for this host, --all then imports unmanaged agent skill
-packages into the manifest and syncs agent skills, MCP servers, and plugins.`,
+Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `. It then
+installs the global APM workspace once.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
@@ -49,7 +48,7 @@ packages into the manifest and syncs agent skills, MCP servers, and plugins.`,
 			errOut := cmdErr(cmd)
 			if all {
 				if !dryRun {
-					ok, err := confirmAction(cmd, state, "Sync all: add discovered tools to config, install missing configured tools, import unmanaged agent skills, MCP servers and plugins, and sync agent skills, MCP servers, and plugins?")
+					ok, err := confirmAction(cmd, state, "Sync all: add discovered tools to config, install missing configured tools, and install the global APM workspace?")
 					if err != nil || !ok {
 						return err
 					}
@@ -80,11 +79,11 @@ packages into the manifest and syncs agent skills, MCP servers, and plugins.`,
 					fmt.Fprintln(out, "Dry-run — no changes made.")
 				}
 				fmt.Fprintf(out, "%s.\n", app.SyncAllSummaryText(result, "Sync all complete"))
-				agentsErr := runSyncAllAgentsLeg(cmd, state, dryRun)
+				apmErr := runSyncAllAPMLeg(cmd, state, dryRun)
 				if !dryRun && len(result.ClaimedNames) > 0 && !cmd.Flags().Changed("group") && stdinIsTerminal() {
 					promptReassignClaimedTools(state, result.ClaimedNames)
 				}
-				return errors.Join(syncAllToolFailure(result), agentsErr)
+				return errors.Join(syncAllToolFailure(result), apmErr)
 			}
 			opts := gosync.SyncOptions{
 				DryRun:      dryRun,
@@ -170,8 +169,6 @@ packages into the manifest and syncs agent skills, MCP servers, and plugins.`,
 	return cmd
 }
 
-// Drift and plugin conflicts are printed, never resolved, and a host with agent features off skips the leg rather than collecting three "disabled" warnings.
-// Mirrors the failure verdict the non---all branch reaches through SummarizeSyncResult; --all reported only the agents leg.
 func syncAllToolFailure(result *app.SyncAllResult) error {
 	if result == nil {
 		return nil
@@ -187,26 +184,17 @@ func syncAllToolFailure(result *app.SyncAllResult) error {
 	return nil
 }
 
-func runSyncAllAgentsLeg(cmd *cobra.Command, state *rootState, dryRun bool) error {
-	cfg, err := state.app.LoadConfig()
+func runSyncAllAPMLeg(cmd *cobra.Command, state *rootState, dryRun bool) error {
+	_, err := state.app.AgentsSyncAll(cmd.Context(), app.AgentsSyncAllOptions{
+		DryRun: dryRun,
+		Output: func(stdout, stderr string) {
+			fmt.Fprint(cmdOut(cmd), stdout)
+			fmt.Fprint(cmd.ErrOrStderr(), stderr)
+		},
+	})
 	if err != nil {
 		return err
 	}
-	if !state.app.AgentsEnabled(cfg) {
-		return nil
-	}
-	out := cmdOut(cmd)
-	res, err := state.app.AgentsSyncAll(cmd.Context(), app.AgentsSyncAllOptions{
-		DryRun: dryRun,
-		Progress: func(msg string) {
-			fmt.Fprintf(out, "  %s\n", msg)
-		},
-	})
-	// Printed even on a failed install: the reversal warnings describe what was undone on this host.
-	printAgentsSyncAllResult(out, res, dryRun)
-	if err != nil {
-		return errors.Join(err, agentErrsFailure(len(res.Errors)))
-	}
-	fmt.Fprintf(out, "Agents sync complete — %s.\n", app.AgentsSyncAllSummaryText(res))
-	return agentErrsFailure(len(res.Errors))
+	fmt.Fprintln(cmdOut(cmd), "APM sync complete.")
+	return nil
 }

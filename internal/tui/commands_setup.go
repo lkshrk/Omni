@@ -7,37 +7,6 @@ import (
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
 
-// No writes: report only legacy declarations eligible for the one-time APM migration.
-func (m *Model) doSetupAgentsDiff() tea.Cmd {
-	a := m.app
-	return func() tea.Msg {
-		cfg, err := a.LoadConfig()
-		if err != nil {
-			return setupAgentsDiffMsg{err: err}
-		}
-		return setupAgentsDiffMsg{
-			unmanagedSkills:  len(cfg.Agents.Packages),
-			unmanagedMcp:     len(cfg.Agents.McpServers),
-			unmanagedPlugins: len(cfg.Agents.Plugins),
-		}
-	}
-}
-
-// Installing config-declared packages contacts the network and writes agent files, which is why this runs only on explicit consent.
-func (m *Model) doSetupAgentsImportAll() tea.Cmd {
-	a, ctx := m.app, m.ctx
-	return func() tea.Msg {
-		result, err := a.AgentsSyncAll(ctx, app.AgentsSyncAllOptions{})
-		if err != nil {
-			return setupAgentsImportDoneMsg{err: err}
-		}
-		return setupAgentsImportDoneMsg{
-			skills:     result.InstalledPackages,
-			advisories: result.Warnings,
-		}
-	}
-}
-
 func (m *Model) doCreateConfig() tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {

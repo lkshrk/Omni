@@ -63,7 +63,7 @@ func buildWithID(id string) *schema {
 	installWithNames := stringsToAny(provider.BuiltinConcreteConfigNames())
 	installWithExamples := stringsToAny(exampleInstallWithNames())
 	systemPriority := stringsToAny(provider.BuiltinSystemProviderPriorityNames())
-	return &schema{
+	doc := &schema{
 		Schema:      schemaMetaURL,
 		ID:          id,
 		Title:       "omni settings",
@@ -138,7 +138,6 @@ func buildWithID(id string) *schema {
 				Type:        "array",
 				Items:       ref("#/$defs/GroupConfig"),
 			},
-			"agents": ref("#/$defs/AgentsConfig"),
 		},
 		Required:             []string{"version"},
 		AdditionalProperties: false,
@@ -226,26 +225,6 @@ func buildWithID(id string) *schema {
 						Description: "Dotfile entries managed by this group.",
 						Type:        "array",
 						Items:       ref("#/$defs/DotEntry"),
-					},
-					"skills": {
-						Description: "Skill package sources active on this group's hosts.",
-						Type:        "array",
-						Items:       &schema{Type: "string", MinLength: 1},
-					},
-					"mcp_servers": {
-						Description: "MCP server names active on this group's hosts.",
-						Type:        "array",
-						Items:       &schema{Type: "string", MinLength: 1},
-					},
-					"plugins": {
-						Description: "Plugin names active on this group's hosts.",
-						Type:        "array",
-						Items:       &schema{Type: "string", MinLength: 1},
-					},
-					"marketplaces": {
-						Description: "Marketplace names assigned to this group.",
-						Type:        "array",
-						Items:       &schema{Type: "string", MinLength: 1},
 					},
 				},
 				AdditionalProperties: false,
@@ -827,12 +806,6 @@ func buildWithID(id string) *schema {
 							"Authorization": "Bearer token",
 						}},
 					},
-					"agents": {
-						Description: "Target agent IDs for this server. Empty means all configured agents.",
-						Type:        "array",
-						Items:       &schema{Type: "string", MinLength: 1},
-						Examples:    []any{[]any{"claude-code", "codex"}},
-					},
 				},
 				AdditionalProperties: false,
 			},
@@ -926,6 +899,10 @@ func buildWithID(id string) *schema {
 			},
 		},
 	}
+	for _, name := range []string{"AgentsConfig", "AgentsIgnore", "ManifestSkill", "Marketplace", "McpServer", "Plugin", "SkillPackage"} {
+		delete(doc.Defs, name)
+	}
+	return doc
 }
 
 // Global settings and host_settings share config.Settings keys but use scope-specific descriptions.
@@ -999,43 +976,6 @@ func settingsProperties(host bool, ecosystemNames, systemPriority []any) map[str
 				"Whether dotfile sync is disabled on this host.",
 			),
 			Type: "boolean",
-		},
-		"agents_disabled": {
-			Description: scoped(
-				"Master switch: disable the agent skills/mcp/plugins features for this settings scope.",
-				"Master switch: whether the agent skills/mcp/plugins features are disabled on this host.",
-			),
-			Type: "boolean",
-		},
-		"skills_disabled": {
-			Description: scoped(
-				"Disable the agent skills feature for this settings scope.",
-				"Whether the agent skills feature is disabled on this host.",
-			),
-			Type: "boolean",
-		},
-		"mcp_disabled": {
-			Description: scoped(
-				"Disable the agent mcp feature for this settings scope.",
-				"Whether the agent mcp feature is disabled on this host.",
-			),
-			Type: "boolean",
-		},
-		"plugins_disabled": {
-			Description: scoped(
-				"Disable the agent plugins feature for this settings scope.",
-				"Whether the agent plugins feature is disabled on this host.",
-			),
-			Type: "boolean",
-		},
-		"agents_use": {
-			Description: scoped(
-				"Agent identifiers omni manages. Omit to manage every detected agent.",
-				"Agent identifiers managed on this host. Omit to inherit the global list; an explicit empty list disables all agents here.",
-			),
-			Type:     "array",
-			Items:    &schema{Type: "string", MinLength: 1},
-			Examples: []any{[]any{"claude-code", "codex"}},
 		},
 		"dots_git": ref("#/$defs/DotsGitConfig"),
 		"disabled_providers": {

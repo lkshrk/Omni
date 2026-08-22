@@ -37,7 +37,7 @@ const (
 	statusActionFixConfig
 	statusActionFixNvmManaged
 	statusActionOpenAgents
-	statusActionRestoreSkills
+	statusActionSyncAgents
 	statusActionUpgradeAgents
 )
 
@@ -775,7 +775,7 @@ func statusAgentsAttentionRow(m Model) statusListRow {
 	}
 	if counts.OutOfSync() == 0 {
 		icon, iconStyle := statusRowOKIcon(m)
-		if m.skillsRunning {
+		if m.apmRunning {
 			icon, iconStyle = statusRowWorkingIcon(m, true)
 		}
 		return statusListRow{
@@ -791,10 +791,7 @@ func statusAgentsAttentionRow(m Model) statusListRow {
 	icon, iconStyle := statusRowWarningIcon(m)
 	value := statusCountValue(m, counts.OutOfSync(), "issue", "issues", "in sync")
 	action := statusAction{kind: statusActionOpenAgents, desc: "open agents"}
-	if counts.SkillsMissing > 0 && !m.loading && !m.skillsRunning {
-		action = statusAction{kind: statusActionRestoreSkills, desc: "sync skills"}
-	}
-	if m.skillsRunning {
+	if m.apmRunning {
 		icon, iconStyle = statusRowWorkingIcon(m, true)
 	}
 	return statusListRow{

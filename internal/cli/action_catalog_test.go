@@ -81,9 +81,6 @@ func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 		{"settings", "reset-cache"},
 		{"settings", "migrate-host-overrides"},
 		{"agents", "sync"},
-		{"agents", "add"},
-		{"agents", "remove"},
-		{"agents", "update"},
 		{"dots", "sync"},
 		{"dots", "add"},
 		{"dots", "groups"},
@@ -250,7 +247,6 @@ func TestDeprecatedAliasesStayRunnable(t *testing.T) {
 		old   []string
 		flags []string
 	}{
-		{old: []string{"agents", "restore"}, flags: []string{"dry-run"}},
 		{old: []string{"tools", "delete"}, flags: []string{"provider", "purge"}},
 		{old: []string{"dots", "delete"}, flags: []string{"keep-local", "purge"}},
 	} {
@@ -406,28 +402,23 @@ func uncatalogedRunnableCLICommandAllowed(path []string) bool {
 		"dots list",
 		"dots status",
 		"dots variant list",
-		"agents skills sync",
-		"agents skills remove",
-		"agents skills group",
 		"agents add",
-		"agents find",
-		"agents import",
-		"agents mcp list",
-		"agents mcp add",
-		"agents mcp import",
-		"agents mcp remove",
-		"agents mcp resolve",
-		"agents mcp group",
-		"agents plugins list",
-		"agents plugins add",
-		"agents plugins remove",
-		"agents plugins sync",
-		"agents plugins import",
-		"agents plugins group",
-		"agents plugins marketplace list",
-		"agents plugins marketplace add",
-		"agents plugins marketplace remove",
-		"agents plugins marketplace group":
+		"agents remove",
+		"agents update",
+		"agents search",
+		"agents audit",
+		"agents targets",
+		"agents outdated",
+		"agents prune",
+		"agents deps list",
+		"agents deps why",
+		"agents deps info",
+		"agents marketplace list",
+		"agents marketplace add",
+		"agents marketplace browse",
+		"agents marketplace update",
+		"agents marketplace validate",
+		"agents marketplace remove":
 		return true
 	default:
 		return false

@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"strings"
 )
 
@@ -65,6 +66,14 @@ type environmentExecutor interface {
 	RunEnv(ctx context.Context, env []string, name string, args ...string) (stdout, stderr string, err error)
 }
 
+type directoryExecutor interface {
+	RunDir(ctx context.Context, dir, name string, args ...string) (stdout, stderr string, err error)
+}
+
+type directoryEnvironmentExecutor interface {
+	RunDirEnv(ctx context.Context, dir string, env []string, name string, args ...string) (stdout, stderr string, err error)
+}
+
 // RunWithEnv overlays environment variables without mutating the process environment.
 func RunWithEnv(ctx context.Context, exec Executor, env []string, name string, args ...string) (string, string, error) {
 	if runner, ok := exec.(environmentExecutor); ok {
@@ -81,4 +90,17 @@ func RunWithEnv(ctx context.Context, exec Executor, env []string, name string, a
 	fullArgs = append(fullArgs, name)
 	fullArgs = append(fullArgs, args...)
 	return exec.Run(ctx, "env", fullArgs...)
+}
+
+// RunInDirWithEnv executes without changing the process working directory.
+func RunInDirWithEnv(ctx context.Context, exec Executor, dir string, env []string, name string, args ...string) (string, string, error) {
+	if runner, ok := exec.(directoryEnvironmentExecutor); ok {
+		return runner.RunDirEnv(ctx, dir, env, name, args...)
+	}
+	if len(env) == 0 {
+		if runner, ok := exec.(directoryExecutor); ok {
+			return runner.RunDir(ctx, dir, name, args...)
+		}
+	}
+	return "", "", errors.New("executor does not support a working directory")
 }

@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	commandexec "github.com/lkshrk/omni/internal/executor"
@@ -23,7 +25,7 @@ var (
 	ErrUnsupportedScope = errors.New("APM operation does not support this scope")
 )
 
-const InstallHint = "install APM with 'uv tool install apm-cli' (or 'pip install apm-cli'), or run 'omni doctor --fix', and ensure apm is on PATH"
+const InstallHint = "run 'omni doctor --fix' and ensure apm is on PATH"
 
 type Result struct {
 	Stdout string
@@ -37,6 +39,19 @@ type Client struct {
 
 func New(exec commandexec.Executor, scope Scope) *Client {
 	return &Client{exec: exec, scope: scope}
+}
+
+// Run invokes APM without translating its output or maintaining a second state model.
+// Commands that operate on the global workspace run from ~/.apm so their behavior is
+// independent of omni's caller working directory.
+func (c *Client) Run(ctx context.Context, args ...string) (Result, error) {
+	if c == nil || c.exec == nil {
+		return Result{}, errors.New("APM client missing executor")
+	}
+	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
+		return Result{}, errors.New("APM command is required")
+	}
+	return c.runEnv(ctx, nil, normalizeArgs(args)...)
 }
 
 // Manifest surfaces for --only. MCP never goes through the `apm mcp` alias group, which exits 0 on failure.
@@ -126,16 +141,26 @@ func (c *Client) projectOnly(operation string) error {
 }
 
 func (c *Client) run(ctx context.Context, args ...string) (Result, error) {
-	return c.runEnv(ctx, nil, args...)
+	return c.Run(ctx, args...)
 }
 
 // scrub carries bare variable names, which the executor overlay reads as an unset rather than an assignment.
 func (c *Client) runEnv(ctx context.Context, scrub []string, args ...string) (Result, error) {
-	run := func() (string, string, error) { return c.exec.Run(ctx, "apm", args...) }
-	if len(scrub) > 0 {
-		run = func() (string, string, error) {
+	if c == nil || c.exec == nil {
+		return Result{}, errors.New("APM client missing executor")
+	}
+	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
+		return Result{}, errors.New("APM command is required")
+	}
+	run := func() (string, string, error) {
+		if !usesGlobalWorkspace(args) {
 			return commandexec.RunWithEnv(ctx, c.exec, scrub, "apm", args...)
 		}
+		dir, err := ensureGlobalWorkspaceDir()
+		if err != nil {
+			return "", "", err
+		}
+		return runInDir(ctx, c.exec, scrub, dir, "apm", args...)
 	}
 	stdout, stderr, err := run()
 	result := Result{Stdout: stdout, Stderr: stderr}
@@ -151,4 +176,59 @@ func (c *Client) runEnv(ctx context.Context, scrub []string, args ...string) (Re
 		command += " " + args[0]
 	}
 	return result, commandexec.WrapError(err, command+" failed", stdout, stderr)
+}
+
+func usesGlobalWorkspace(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "audit", "marketplace", "prune", "targets":
+		return true
+	case "deps", "install", "outdated", "uninstall", "update", "view":
+		return hasGlobalFlag(args[1:])
+	}
+	return false
+}
+
+func hasGlobalFlag(args []string) bool {
+	for _, arg := range args {
+		if arg == "-g" || arg == "--global" {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeArgs(args []string) []string {
+	normalized := append([]string(nil), args...)
+	if len(normalized) >= 3 && normalized[0] == "marketplace" && normalized[1] == "remove" {
+		for _, arg := range normalized[3:] {
+			if arg == "--yes" || arg == "-y" {
+				return normalized
+			}
+		}
+		normalized = append(normalized, "--yes")
+	}
+	return normalized
+}
+
+// GlobalWorkspaceDir resolves APM's authoritative global workspace without mutating it.
+func GlobalWorkspaceDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve APM workspace: %w", err)
+	}
+	return filepath.Join(home, ".apm"), nil
+}
+
+func ensureGlobalWorkspaceDir() (string, error) {
+	dir, err := GlobalWorkspaceDir()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create APM workspace: %w", err)
+	}
+	return dir, nil
 }

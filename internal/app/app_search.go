@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -599,7 +600,7 @@ func executableInstalledOnPath(binaryName string) bool {
 	if binaryName == "" {
 		return false
 	}
-	_, err := lookPath(binaryName)
+	_, err := exec.LookPath(binaryName)
 	return err == nil
 }
 

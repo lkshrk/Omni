@@ -617,6 +617,7 @@ func TestDoSaveFallbackEditor_PersistsStructuredRecipe(t *testing.T) {
 	fallback := cfg.Tools["rg"].Fallback
 	if fallback == nil {
 		t.Fatal("fallback missing from config")
+		return
 	}
 	if fallback.Source.Owner != "BurntSushi" || fallback.Source.Repo != "ripgrep" || fallback.Source.URL != "https://github.com/BurntSushi/ripgrep" {
 		t.Fatalf("source = %+v, want normalized GitHub source", fallback.Source)
@@ -1704,6 +1705,7 @@ func TestDoSetDotGroupMemberships_ExistingGroupJoinsHost(t *testing.T) {
 	hostGroup := findTestGroup(cfg, "laptop")
 	if hostGroup == nil {
 		t.Fatalf("host group missing: %#v", cfg.Groups)
+		return
 	}
 	if containsDotMembership(hostGroup.Dots, "nvim") {
 		t.Fatalf("host group still has nvim membership: %#v", hostGroup.Dots)
@@ -2594,6 +2596,7 @@ func TestDoDotsAdd_UsesMachineGroupWhenUnfiltered(t *testing.T) {
 	group := findTUITestGroup(cfg.Groups, "laptop")
 	if group == nil {
 		t.Fatalf("machine group laptop not created: %#v", cfg.Groups)
+		return
 	}
 	if len(group.Dots) != 1 || group.Dots[0].Name != "zed" {
 		t.Fatalf("machine group dots = %#v, want zed", group.Dots)

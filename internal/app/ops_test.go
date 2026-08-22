@@ -1250,9 +1250,8 @@ func TestReconcile_BacksUpDirtyDotsWithoutCommittingHead(t *testing.T) {
 	if err := os.WriteFile(tracked, []byte("dirty\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	disableAgents := true
 	if err := config.Save(cfgPath, &config.RootConfig{
-		Settings: config.Settings{DotsRepo: repo, AgentsDisabled: &disableAgents},
+		Settings: config.Settings{DotsRepo: repo},
 		Hosts:    map[string][]string{"testhost": {}},
 		Groups:   []*config.GroupConfig{{Name: "testhost", Special: "host"}},
 	}); err != nil {

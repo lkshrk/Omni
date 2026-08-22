@@ -159,8 +159,6 @@ func TestDurableTUIActionsAreCataloged(t *testing.T) {
 func TestPaletteActionCatalogCommandsExist(t *testing.T) {
 	m, _ := newDotsModelForCmds(t)
 	m.consolidateOptions = []app.EcosystemMigration{{Ecosystem: "node", Manager: "bun"}}
-	m.agentsEnabled = true
-	m.skillsEnabled = true
 	got := map[string]string{}
 	for _, cmd := range buildPalette(m) {
 		got[cmd.name] = cmd.desc

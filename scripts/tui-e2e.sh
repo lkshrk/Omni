@@ -38,16 +38,12 @@ up() {
 EOF
     cat > "$WORKDIR/seed/settings.json" <<'EOF'
 {
-  "version": 20,
+  "version": 24,
   "settings": {},
   "tools": {},
   "groups": [],
-  "hosts": {},
-  "agents": { "packages": [ { "source": "/seed/skills-src" } ] }
+  "hosts": {}
 }
-EOF
-    cat > "$WORKDIR/seed/skill-lock.json" <<'EOF'
-{"skills":{"legacy-one":{"source":"/seed/legacy-src","skillFolderHash":"deadbeef","installedAt":"2026-07-01T00:00:00Z"}}}
 EOF
 
     echo "building static omni…"
@@ -60,14 +56,12 @@ EOF
         chmod +x /usr/local/bin/omni &&
         apk add --no-cache busybox-extras git >/tmp/apk.log 2>&1 &&
         httpd -p 8080 -h /seed/catalog &&
-        mkdir -p /root/.claude /root/.codex /root/.agents/skills /root/.config/omni &&
+        mkdir -p /root/.claude /root/.codex /root/.config/omni &&
         cp /seed/settings.json /root/.config/omni/settings.json &&
-        cp /seed/skill-lock.json /root/.agents/.skill-lock.json &&
-        cp -r /seed/legacy-src/skills/legacy-one /root/.agents/skills/legacy-one &&
         for b in claude codex; do
             printf "#!/bin/sh\necho []\n" > /usr/local/bin/$b && chmod +x /usr/local/bin/$b
         done'
-    docker exec -e HOME=/root "$CONTAINER" omni agents skills sync >/dev/null 2>&1 || true
+    docker exec -e HOME=/root "$CONTAINER" omni agents sync --dry-run >/tmp/omni-agents-sync.log
     docker exec "$CONTAINER" sh -c '
         rm -rf /root/.codex/skills/beta && mkdir -p /root/.codex/skills/beta &&
         printf -- "---\nname: beta\ndescription: second demo skill\n---\n\nDRIFTED local edit\n" \

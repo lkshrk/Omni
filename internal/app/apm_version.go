@@ -4,19 +4,19 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/executor"
 )
 
-// Below this release the declarative surfaces omni generates are unsafe: failed service writes exited 0 before 0.27.0, and per-dependency targets only round-trip through an install cycle from 0.28.0.
-const apmVersionFloor = "0.28.0"
+// APM is contract-tested as an exact dependency; newer releases require rerunning that suite.
+const apmVersionPin = "0.28.0+omni.2"
+const apmPackagePin = "git+https://github.com/lkshrk/apm.git@ea3f74ae5547059aca214e7a395d09e874205dce"
 
 const apmVersionFixHint = "run 'omni doctor --fix' to upgrade apm-cli"
 
-var apmVersionPattern = regexp.MustCompile(`(?:^|[^\d.])(\d+)\.(\d+)(?:\.(\d+))?(?:[^\d.]|$)`)
+var apmVersionPattern = regexp.MustCompile(`(?:^|\s)(\d+\.\d+\.\d+(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?)(?:\s|$)`)
 
 // APMVersion reports the installed apm-cli version as a dotted triple.
 func (a *App) APMVersion(ctx context.Context) (string, error) {
@@ -37,44 +37,13 @@ func parseAPMVersion(output string) string {
 	if match == nil {
 		return ""
 	}
-	patch := match[3]
-	if patch == "" {
-		patch = "0"
-	}
-	return match[1] + "." + match[2] + "." + patch
+	return match[1]
 }
 
-func apmVersionBelowFloor(version string) bool {
-	return compareAPMVersions(version, apmVersionFloor) < 0
-}
+func apmVersionPinned(version string) bool { return version == apmVersionPin }
 
-func compareAPMVersions(left, right string) int {
-	leftParts, rightParts := strings.Split(left, "."), strings.Split(right, ".")
-	for i := range 3 {
-		l, r := apmVersionPart(leftParts, i), apmVersionPart(rightParts, i)
-		if l != r {
-			if l < r {
-				return -1
-			}
-			return 1
-		}
-	}
-	return 0
-}
-
-func apmVersionPart(parts []string, i int) int {
-	if i >= len(parts) {
-		return 0
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(parts[i]))
-	if err != nil {
-		return 0
-	}
-	return n
-}
-
-func (a *App) doctorAPMVersion(ctx context.Context, result *DoctorResult, cfg *config.RootConfig) {
-	if !a.AgentsEnabled(cfg) || !a.APMAvailable() {
+func (a *App) doctorAPMVersion(ctx context.Context, result *DoctorResult, _ *config.RootConfig) {
+	if !a.APMAvailable() {
 		return
 	}
 	version, err := a.APMVersion(ctx)
@@ -83,10 +52,21 @@ func (a *App) doctorAPMVersion(ctx context.Context, result *DoctorResult, cfg *c
 			"apm version could not be determined", err.Error(), apmVersionFixHint)
 		return
 	}
-	if apmVersionBelowFloor(version) {
+	if !apmVersionPinned(version) {
 		result.addCheck("apm-version", "APM version", DoctorStatusFail,
-			fmt.Sprintf("apm %s is older than the required %s", version, apmVersionFloor), apmVersionFixHint)
+			fmt.Sprintf("apm %s is unsupported; omni requires exactly %s", version, apmVersionPin), apmVersionFixHint)
 		return
 	}
-	result.addCheck("apm-version", "APM version", DoctorStatusOK, "apm "+version, "floor "+apmVersionFloor)
+	result.addCheck("apm-version", "APM version", DoctorStatusOK, "apm "+version, "pinned "+apmVersionPin)
+}
+
+func (a *App) requirePinnedAPM(ctx context.Context) error {
+	version, err := a.APMVersion(ctx)
+	if err != nil {
+		return err
+	}
+	if !apmVersionPinned(version) {
+		return fmt.Errorf("apm %s is unsupported; omni requires exactly %s: %s", version, apmVersionPin, apmVersionFixHint)
+	}
+	return nil
 }
