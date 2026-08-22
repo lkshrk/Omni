@@ -19,25 +19,18 @@ type APMInstallFixReport struct {
 }
 
 var apmInstallCommands = [][]string{
-	{"uv", "tool", "install", "apm-cli"},
-	{"pipx", "install", "apm-cli"},
-	{"pip3", "install", "--user", "apm-cli"},
+	{"uv", "tool", "install", apmPackagePin},
+	{"pipx", "install", apmPackagePin},
+	{"pip3", "install", "--user", apmPackagePin},
 }
 
 var apmUpgradeCommands = [][]string{
-	{"uv", "tool", "upgrade", "apm-cli"},
-	{"pipx", "upgrade", "apm-cli"},
-	{"pip3", "install", "--user", "--upgrade", "apm-cli"},
+	{"uv", "tool", "install", "--force", apmPackagePin},
+	{"pipx", "install", "--force", apmPackagePin},
+	{"pip3", "install", "--user", "--upgrade", "--force-reinstall", apmPackagePin},
 }
 
 func (a *App) FixMissingAPM(ctx context.Context, dryRun bool) (APMInstallFixReport, error) {
-	cfg, err := a.loadConfig()
-	if err != nil {
-		return APMInstallFixReport{}, err
-	}
-	if !a.AgentsEnabled(cfg) {
-		return APMInstallFixReport{AlreadyInstalled: true}, nil
-	}
 	if a.APMAvailable() {
 		return a.upgradeOutdatedAPM(ctx, dryRun)
 	}
@@ -63,13 +56,13 @@ func (a *App) FixMissingAPM(ctx context.Context, dryRun bool) (APMInstallFixRepo
 		report.NotOnPATH = !a.APMAvailable()
 		return report, nil
 	}
-	return APMInstallFixReport{}, errors.New("no supported installer found (uv, pipx, pip3); install apm-cli manually")
+	return APMInstallFixReport{}, fmt.Errorf("no supported installer found (uv, pipx, pip3); install pinned APM manually from %s", apmPackagePin)
 }
 
-// upgradeOutdatedAPM raises an installed apm below the version floor; an unreadable version is not evidence of an old one.
+// upgradeOutdatedAPM restores the exact contract-tested APM release.
 func (a *App) upgradeOutdatedAPM(ctx context.Context, dryRun bool) (APMInstallFixReport, error) {
 	version, err := a.APMVersion(ctx)
-	if err != nil || !apmVersionBelowFloor(version) {
+	if err == nil && apmVersionPinned(version) {
 		return APMInstallFixReport{AlreadyInstalled: true}, nil
 	}
 	var failures []error
@@ -92,6 +85,6 @@ func (a *App) upgradeOutdatedAPM(ctx context.Context, dryRun bool) (APMInstallFi
 	if len(failures) > 0 {
 		return APMInstallFixReport{}, errors.Join(failures...)
 	}
-	return APMInstallFixReport{}, fmt.Errorf("apm %s is older than %s and no supported upgrader (uv, pipx, pip3) is available",
-		version, apmVersionFloor)
+	return APMInstallFixReport{}, fmt.Errorf("apm %s does not match pinned %s and no supported installer (uv, pipx, pip3) is available; install pinned APM manually from %s",
+		version, apmVersionPin, apmPackagePin)
 }

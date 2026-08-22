@@ -151,7 +151,7 @@ func appendAgentsPaletteCommands(m Model, cmds []palCmd) []palCmd {
 
 // Refuses while an agents operation is in flight for the same reason the tab's own global actions do: a second bulk run would race the first.
 func (m *Model) runAgentsPaletteCommand(run func(*Model) []tea.Cmd) tea.Cmd {
-	if m.skillsRunning || m.skillAddRunning || m.mcpRunning || m.pluginRunning || m.marketplaceRunning {
+	if m.apmRunning {
 		return setStatus(m, "⚠ agents busy — wait for the running operation to finish", true)
 	}
 	var cmds []tea.Cmd

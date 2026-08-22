@@ -12,12 +12,8 @@ import (
 )
 
 const (
-	pickerMembershipTool        = "tool"
-	pickerMembershipDot         = "dot"
-	pickerMembershipSkill       = "skill"
-	pickerMembershipMcp         = "mcp"
-	pickerMembershipPlugin      = "plugin"
-	pickerMembershipMarketplace = "marketplace"
+	pickerMembershipTool = "tool"
+	pickerMembershipDot  = "dot"
 )
 
 func (m *Model) handleGroupPickerKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
@@ -66,21 +62,16 @@ func (m *Model) closeGroupPicker() {
 	m.pickerPurposeInstall = false
 	wasDotAdd := m.pickerPurposeDotAdd
 	wasReassign := m.pickerPurposeReassign
-	wasAgentsClaim := m.pickerClaimAgentsSet
 	m.pickerPurposeDotAdd = false
 	m.pickerPurposeReassign = false
 	m.pickerDotAddPath = ""
 	m.pickerDotAddRawPath = ""
 	m.pickerActionTool = app.ToolView{}
 	m.pickerActionToolSet = false
-	m.pickerClaimAgentsRow = agentsAllRow{}
-	m.pickerClaimAgentsSet = false
 	m.pickerMembershipKind = ""
 	switch {
 	case wasDotAdd:
 		m.mode = viewDots
-	case wasAgentsClaim:
-		m.mode = viewSkills
 	default:
 		m.mode = viewList
 	}
@@ -282,41 +273,11 @@ func (m *Model) closeGroupMembershipPicker() {
 	m.finishGroupMembershipPicker()
 }
 
-func (m *Model) skillPickerMemberships() []string {
-	if m.skillsMemberships == nil {
-		return nil
-	}
-	return m.skillsMemberships[m.pickerMembershipName]
-}
-
-func (m *Model) mcpPickerMemberships() []string {
-	if m.mcpMemberships == nil {
-		return nil
-	}
-	return m.mcpMemberships[m.pickerMembershipName]
-}
-
-func (m *Model) pluginPickerMemberships() []string {
-	if m.pluginMemberships == nil {
-		return nil
-	}
-	return m.pluginMemberships[m.pickerMembershipName]
-}
-
-func (m *Model) marketplacePickerMemberships() []string {
-	if m.marketplaceMemberships == nil {
-		return nil
-	}
-	return m.marketplaceMemberships[m.pickerMembershipName]
-}
-
 func (m *Model) finishGroupMembershipPicker() {
 	nextMode := viewList
 	switch m.pickerMembershipKind {
 	case pickerMembershipDot:
 		nextMode = viewDots
-	case pickerMembershipSkill, pickerMembershipMcp, pickerMembershipPlugin, pickerMembershipMarketplace:
-		nextMode = viewSkills
 	}
 	if m.pickerDotExtractParent != "" && m.pickerMembershipName != "" {
 		// Drop the phantom draft seeded for the pending child extract so a not-yet-created entry never lingers in the membership map.
@@ -346,38 +307,6 @@ func (m *Model) restoreGroupMembershipDraft() {
 			m.dotMemberships = make(map[string][]string)
 		}
 		m.dotMemberships[m.pickerMembershipName] = append([]string(nil), m.pickerOriginalGroups...)
-	case pickerMembershipSkill:
-		if m.pickerMembershipName == "" {
-			return
-		}
-		if m.skillsMemberships == nil {
-			m.skillsMemberships = make(map[string][]string)
-		}
-		m.skillsMemberships[m.pickerMembershipName] = append([]string(nil), m.pickerOriginalGroups...)
-	case pickerMembershipMcp:
-		if m.pickerMembershipName == "" {
-			return
-		}
-		if m.mcpMemberships == nil {
-			m.mcpMemberships = make(map[string][]string)
-		}
-		m.mcpMemberships[m.pickerMembershipName] = append([]string(nil), m.pickerOriginalGroups...)
-	case pickerMembershipPlugin:
-		if m.pickerMembershipName == "" {
-			return
-		}
-		if m.pluginMemberships == nil {
-			m.pluginMemberships = make(map[string][]string)
-		}
-		m.pluginMemberships[m.pickerMembershipName] = append([]string(nil), m.pickerOriginalGroups...)
-	case pickerMembershipMarketplace:
-		if m.pickerMembershipName == "" {
-			return
-		}
-		if m.marketplaceMemberships == nil {
-			m.marketplaceMemberships = make(map[string][]string)
-		}
-		m.marketplaceMemberships[m.pickerMembershipName] = append([]string(nil), m.pickerOriginalGroups...)
 	default:
 		if m.pickerMembershipKey == "" {
 			return
@@ -395,30 +324,6 @@ func (m *Model) selectedMembershipTarget() (name string, memberships []string, o
 			return "", nil, false
 		}
 		return m.pickerMembershipName, append([]string(nil), m.dotMemberships[m.pickerMembershipName]...), true
-	}
-	if m.pickerMembershipKind == pickerMembershipSkill {
-		if m.pickerMembershipName == "" {
-			return "", nil, false
-		}
-		return m.pickerMembershipName, append([]string(nil), m.skillPickerMemberships()...), true
-	}
-	if m.pickerMembershipKind == pickerMembershipMcp {
-		if m.pickerMembershipName == "" {
-			return "", nil, false
-		}
-		return m.pickerMembershipName, append([]string(nil), m.mcpPickerMemberships()...), true
-	}
-	if m.pickerMembershipKind == pickerMembershipPlugin {
-		if m.pickerMembershipName == "" {
-			return "", nil, false
-		}
-		return m.pickerMembershipName, append([]string(nil), m.pluginPickerMemberships()...), true
-	}
-	if m.pickerMembershipKind == pickerMembershipMarketplace {
-		if m.pickerMembershipName == "" {
-			return "", nil, false
-		}
-		return m.pickerMembershipName, append([]string(nil), m.marketplacePickerMemberships()...), true
 	}
 
 	key := m.pickerMembershipKey
@@ -448,34 +353,6 @@ func (m *Model) setSelectedMemberships(memberships []string) {
 			m.dotMemberships = make(map[string][]string)
 		}
 		m.dotMemberships[m.pickerMembershipName] = memberships
-		return
-	}
-	if m.pickerMembershipKind == pickerMembershipSkill {
-		if m.skillsMemberships == nil {
-			m.skillsMemberships = make(map[string][]string)
-		}
-		m.skillsMemberships[m.pickerMembershipName] = memberships
-		return
-	}
-	if m.pickerMembershipKind == pickerMembershipMcp {
-		if m.mcpMemberships == nil {
-			m.mcpMemberships = make(map[string][]string)
-		}
-		m.mcpMemberships[m.pickerMembershipName] = memberships
-		return
-	}
-	if m.pickerMembershipKind == pickerMembershipPlugin {
-		if m.pluginMemberships == nil {
-			m.pluginMemberships = make(map[string][]string)
-		}
-		m.pluginMemberships[m.pickerMembershipName] = memberships
-		return
-	}
-	if m.pickerMembershipKind == pickerMembershipMarketplace {
-		if m.marketplaceMemberships == nil {
-			m.marketplaceMemberships = make(map[string][]string)
-		}
-		m.marketplaceMemberships[m.pickerMembershipName] = memberships
 		return
 	}
 	if m.toolMemberships == nil {
@@ -609,14 +486,6 @@ func (m *Model) saveGroupMembershipPicker(cmds *[]tea.Cmd) {
 		}
 		m.beginDotsOperation("Updating groups for " + name + "…")
 		*cmds = append(*cmds, m.spinner.Tick, m.doSetDotGroupMemberships(name, m.pickerOriginalGroups, next, created, host))
-	case pickerMembershipSkill:
-		*cmds = append(*cmds, m.doSetSkillGroupMemberships(name, next, created, host))
-	case pickerMembershipMcp:
-		*cmds = append(*cmds, m.doSetMcpGroupMemberships(name, next))
-	case pickerMembershipPlugin:
-		*cmds = append(*cmds, m.doSetPluginGroupMemberships(name, next))
-	case pickerMembershipMarketplace:
-		*cmds = append(*cmds, m.doSetMarketplaceGroupMemberships(name, next))
 	default:
 		m.beginLoading(loadingOwnerLocalOp)
 		startOp(m, "Updating groups for "+name+"…")

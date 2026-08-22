@@ -5,7 +5,7 @@ exec omni --config settings.json hosts ensure testhost
 # After startup normalization the file version must be current (v8->v9 disabled_providers
 # expansion under test, then the remaining chain to CurrentVersion).
 exec grep '"version"' settings.json
-stdout '"version": 22'
+stdout '"version": 24'
 
 # Global disabled_providers: ["node"] → ["bun","pnpm","npm"]
 # The values are on separate lines in pretty-printed JSON; grep for each name.

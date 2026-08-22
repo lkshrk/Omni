@@ -18,7 +18,7 @@ func worstCaseDashboardModel(width int) Model {
 	m.width = width
 	m.height = 40
 	m.doctorRunning = true
-	m.skillsRunning = true
+	m.apmRunning = true
 	m.setSettings(config.Settings{DotsRepo: ""})
 	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: dots.StateSynced, Health: app.HealthOK}}
 	m.doctorResult = &app.DoctorResult{
@@ -74,7 +74,6 @@ func TestSetupViewNeverEmitsLinesWiderThanTerminal(t *testing.T) {
 				m.mode = viewSetup
 				m.setupBackgroundMode = background
 				m.setupStep = step
-				m.setupImportNotices = []string{strings.Repeat("mcp server \"linear-mcp-server\" sets header(s) Authorization to a resolved value ", 3)}
 				assertNoLineExceedsWidth(t, m.View().Content, width)
 			}
 		}

@@ -458,15 +458,11 @@ const groupPickerNewSentinel = "+ new group…"
 
 func renderGroupPicker(m Model) string {
 	p := m.palette
-	// Agents-tab claims target an orphan with no manifest entry, so no group is "current" and no tools-list selection is required.
-	group := ""
-	if !m.pickerClaimAgentsSet {
-		t, ok := m.groupPickerActionTool()
-		if !ok {
-			return p.styleHelp.Render("no tool selected")
-		}
-		group = m.toolGroups[toolKey(t.Name, t.Provider)]
+	t, ok := m.groupPickerActionTool()
+	if !ok {
+		return p.styleHelp.Render("no tool selected")
 	}
+	group := m.toolGroups[toolKey(t.Name, t.Provider)]
 	var sb strings.Builder
 	contentW := groupPickerContentWidth(m)
 

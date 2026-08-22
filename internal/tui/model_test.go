@@ -32,64 +32,24 @@ func baseModel(tools []*app.ToolView) Model {
 	si := textinput.New()
 	si.Placeholder = "~/dotfiles"
 	si.CharLimit = 256
-	mfn := textinput.New()
-	mfn.Placeholder = "server-name"
-	mfn.CharLimit = 64
-	mfc := textinput.New()
-	mfc.Placeholder = "npx -y @server/mcp"
-	mfc.CharLimit = 256
-	mfu := textinput.New()
-	mfu.Placeholder = "https://mcp.example.com"
-	mfu.CharLimit = 256
-	mfe := textinput.New()
-	mfe.Placeholder = "API_KEY,TOKEN"
-	mfe.CharLimit = 256
-	mfl := textinput.New()
-	mfl.Placeholder = "LOG_LEVEL=info"
-	mfl.CharLimit = 256
-	pfn := textinput.New()
-	pfn.Placeholder = "caveman"
-	pfn.CharLimit = 64
-	pfm := textinput.New()
-	pfm.Placeholder = "caveman"
-	pfm.CharLimit = 256
-	pfs := textinput.New()
-	pfs.Placeholder = "owner/repo or Git URL"
-	pfs.CharLimit = 512
-	pfa := textinput.New()
-	pfa.Placeholder = "claude-code,codex"
-	pfa.CharLimit = 256
 	m := Model{
-		keys:                  DefaultKeyMap(),
-		spinner:               spinner.New(),
-		filter:                fi,
-		commandInput:          ci,
-		settingsInput:         si,
-		mcpFormName:           mfn,
-		mcpFormCommand:        mfc,
-		mcpFormURL:            mfu,
-		mcpFormEnv:            mfe,
-		mcpFormEnvLit:         mfl,
-		pluginFormName:        pfn,
-		pluginFormMarketplace: pfm,
-		pluginFormSource:      pfs,
-		pluginFormAgents:      pfa,
-		agentsEnabled:         true,
-		skillsEnabled:         true,
-		mcpEnabled:            true,
-		pluginsEnabled:        true,
-		mode:                  viewList,
-		commandOrigin:         viewList,
-		allTools:              tools,
-		visibleTools:          tools,
-		dotsConfirmIdx:        -1,
-		dotsOverwriteIdx:      -1,
-		dotsLocalIdx:          -1,
-		dotsIgnoreIdx:         -1,
-		dotsVariantIdx:        -1,
-		dangerConfirmRow:      -1,
-		width:                 120,
-		height:                80, // realistic terminal size so scroll window doesn't clip test output
+		keys:             DefaultKeyMap(),
+		spinner:          spinner.New(),
+		filter:           fi,
+		commandInput:     ci,
+		settingsInput:    si,
+		mode:             viewList,
+		commandOrigin:    viewList,
+		allTools:         tools,
+		visibleTools:     tools,
+		dotsConfirmIdx:   -1,
+		dotsOverwriteIdx: -1,
+		dotsLocalIdx:     -1,
+		dotsIgnoreIdx:    -1,
+		dotsVariantIdx:   -1,
+		dangerConfirmRow: -1,
+		width:            120,
+		height:           80, // realistic terminal size so scroll window doesn't clip test output
 	}
 	m.applyFilter()
 	return m
@@ -2930,28 +2890,6 @@ func TestModel_ActionRendersBeforeWorkWhenBackgroundAnimationIsActive(t *testing
 	}
 }
 
-func TestSpinnerActivityActive_IncludesEveryAsyncActionFlag(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		set  func(*Model)
-	}{
-		{name: "settings save", set: func(m *Model) { m.settingsSaveRunning = true }},
-		{name: "dashboard reconcile", set: func(m *Model) { m.dashboardReconcileRunning = true }},
-		{name: "setup agents diff", set: func(m *Model) { m.setupAgentsDiffLoading = true }},
-		{name: "dots services refresh", set: func(m *Model) { m.dotsServicesRefreshing = true }},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := baseModel(nil)
-			tt.set(&m)
-			if !m.spinnerActivityActive() {
-				t.Fatal("async action flag did not activate the shared spinner lifecycle")
-			}
-		})
-	}
-}
-
 func TestModel_KeyU_UpgradeNoopWhenNotOutdated(t *testing.T) {
 	t.Parallel()
 	tools := []*app.ToolView{
@@ -3572,37 +3510,6 @@ func TestModel_SettleDoesNotRaceForeignWorkerClose(t *testing.T) {
 }
 
 // agentsProgressDoneMsg bumps progressGen and nils progressCh, so the later scan settle must close its own channel without touching the newer progressGen.
-func TestModel_AgentsDoneMidScan_SettleStaysCrashSafe(t *testing.T) {
-	t.Parallel()
-	m := baseModel(nil)
-	m.scanningProviders = map[string]bool{"brew": true}
-	scanCh, _ := m.beginProgressStream()
-	m.scanProgressCh = scanCh
-	agentsCh, agentsGen := m.beginProgressStream()
-	_ = agentsCh
-
-	// The agents op completes first, bumping progressGen and nilling progressCh, but must leave scanProgressCh alone.
-	m = drive(m, agentsProgressDoneMsg{gen: agentsGen})
-	if m.progressCh != nil {
-		t.Fatal("agents done should nil the shared progressCh")
-	}
-	if m.scanProgressCh != scanCh {
-		t.Fatal("agents done must not disturb the scan's own channel")
-	}
-	genAfterAgents := m.progressGen
-
-	// progressCh no longer equals scanProgressCh, so the settle must not bump progressGen again.
-	got := drive(m, providerScannedMsg{provider: "brew"})
-	if _, ok := <-scanCh; ok {
-		t.Fatal("scan channel not closed at settle")
-	}
-	if got.progressGen != genAfterAgents+1 {
-		t.Fatalf("progressGen = %d, want %d (settle claims one fresh stream, no extra bump)", got.progressGen, genAfterAgents+1)
-	}
-	if got.scanProgressCh != nil {
-		t.Fatal("settle should clear scanProgressCh")
-	}
-}
 
 // The automatic description refresh is a background task: it must not take over the shared status stream while another operation owns it.
 func TestStartDescriptionRefresh_DoesNotSupersedeActiveProgressStream(t *testing.T) {
@@ -5030,65 +4937,6 @@ func TestDangerZone_DangerOpDoneMsg(t *testing.T) {
 	})
 }
 
-func TestActivityLabel_Branches(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name string
-		m    Model
-		want string
-	}{
-		{"searching", Model{searching: true}, "Searching…"},
-		{"scanning", Model{scanningProviders: map[string]bool{"brew": true}, refreshToolTotal: 1}, "Refreshing tools… 0/1: brew"},
-		{"finding local tools", Model{providerSnapshotRefreshing: true}, "Finding local tools…"},
-		{"descriptions", Model{descRefreshing: true}, descriptionRefreshStatus},
-		{"dotsLoading", Model{dotsLoading: true}, "Loading dots…"},
-		{"doctorRunning", Model{doctorRunning: true}, "Running doctor…"},
-		{"mcpRunning", Model{mcpRunning: true}, "Working…"},
-		{"pluginRunning", Model{pluginRunning: true}, "Working…"},
-		{"default", Model{}, "Loading…"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := activityLabel(tc.m); got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestStatusbar_SpinnerVisibleWhenMCPOrPluginRunning(t *testing.T) {
-	t.Parallel()
-	t.Run("mcpRunning", func(t *testing.T) {
-		m := baseModel(nil)
-		m.mcpRunning = true
-		m.width = 80
-
-		out := renderFooterStatusLayer(m, 78)
-		spinnerView := m.spinner.View()
-		if !strings.Contains(out, spinnerView) {
-			t.Errorf("statusbar missing spinner when mcpRunning=true; got %q", out)
-		}
-		if !strings.Contains(out, "Working…") {
-			t.Errorf("statusbar missing 'Working…' text when mcpRunning=true; got %q", out)
-		}
-	})
-
-	t.Run("pluginRunning", func(t *testing.T) {
-		m := baseModel(nil)
-		m.pluginRunning = true
-		m.width = 80
-
-		out := renderFooterStatusLayer(m, 78)
-		spinnerView := m.spinner.View()
-		if !strings.Contains(out, spinnerView) {
-			t.Errorf("statusbar missing spinner when pluginRunning=true; got %q", out)
-		}
-		if !strings.Contains(out, "Working…") {
-			t.Errorf("statusbar missing 'Working…' text when pluginRunning=true; got %q", out)
-		}
-	})
-}
-
 func TestActivityLabel_ScanningUsesConcreteEcosystemLabel(t *testing.T) {
 	t.Parallel()
 	m := Model{
@@ -6010,30 +5858,6 @@ func TestCursorHidden_TabGlobalKeysKeepCursorHidden_ToolsTab(t *testing.T) {
 	}
 }
 
-func TestCursorHidden_TabGlobalKeysKeepCursorHidden_AgentsTab(t *testing.T) {
-	t.Parallel()
-	fixture := func() Model {
-		m := agentsAllModel(
-			[]app.SkillPackageRow{{Name: "caveman", Source: "o/caveman", Installed: true}},
-			nil, nil,
-		)
-		m.cursorHidden = true
-		return m
-	}
-
-	for _, k := range []rune{'S', 'U', 'R', 'C', '?', 'q'} {
-		got := drive(fixture(), pressRune(k))
-		if !got.cursorHidden {
-			t.Errorf("cursorHidden after %q = false, want true on the agents tab", string(k))
-		}
-	}
-
-	got := drive(fixture(), pressRune('U'))
-	if hasSelectedRowLine(got.viewSkillsBody()) {
-		t.Error("agents table should render no selected row after a tab-global key while hidden")
-	}
-}
-
 func TestCursorHidden_NavigationRevealsWithoutMoving_ToolsTab(t *testing.T) {
 	t.Parallel()
 	m := baseModel(threeTools())
@@ -6081,24 +5905,5 @@ func TestCursorHidden_TabGlobalKeys_DashboardReconcileAndDotsBulk(t *testing.T) 
 		if got := drive(dots, pressRune(k)); !got.cursorHidden {
 			t.Errorf("cursorHidden after %q on the dots tab = false, want true (bulk conflict resolve is tab-global)", string(k))
 		}
-	}
-}
-
-func TestCursorHidden_DotAddTabGlobalOnlyOnDotsTab(t *testing.T) {
-	t.Parallel()
-	dots := baseModel(nil)
-	dots.mode = viewDots
-	dots.cursorHidden = true
-	if got := drive(dots, pressRune('a')); !got.cursorHidden {
-		t.Error("cursorHidden after a on the dots tab = false, want true (dots add opens a path picker with no row context)")
-	}
-
-	agents := agentsAllModel(
-		[]app.SkillPackageRow{{Name: "caveman", Source: "o/caveman", Installed: true}},
-		nil, nil,
-	)
-	agents.cursorHidden = true
-	if got := drive(agents, pressRune('a')); got.cursorHidden {
-		t.Error("cursorHidden after a on the agents tab = true, want false (row-scoped keys still reveal)")
 	}
 }

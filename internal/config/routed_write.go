@@ -206,7 +206,7 @@ func renderFragmentRaw(raw map[string]json.RawMessage, patch map[string]json.Raw
 }
 
 // groupFieldNames are the GroupConfig fields routed independently per group.
-var groupFieldNames = []string{"taps", "tools", "dots", "skills", "mcp_servers", "plugins", "marketplaces", "description", "special"}
+var groupFieldNames = []string{"taps", "tools", "dots", "description", "special"}
 
 type groupsOwnership struct {
 	declared map[string]int            // group name -> last file declaring it
@@ -265,14 +265,6 @@ func groupFieldEmpty(group *GroupConfig, fieldName string) bool {
 		return len(group.Tools) == 0
 	case "dots":
 		return len(group.Dots) == 0
-	case "skills":
-		return len(group.Skills) == 0
-	case "mcp_servers":
-		return len(group.McpServers) == 0
-	case "plugins":
-		return len(group.Plugins) == 0
-	case "marketplaces":
-		return len(group.Marketplaces) == 0
 	case "description":
 		return strings.TrimSpace(group.Description) == ""
 	case "special":
@@ -289,14 +281,6 @@ func copyGroupField(dst, src *GroupConfig, fieldName string) {
 		dst.Tools = src.Tools
 	case "dots":
 		dst.Dots = src.Dots
-	case "skills":
-		dst.Skills = src.Skills
-	case "mcp_servers":
-		dst.McpServers = src.McpServers
-	case "plugins":
-		dst.Plugins = src.Plugins
-	case "marketplaces":
-		dst.Marketplaces = src.Marketplaces
 	case "description":
 		dst.Description = src.Description
 	case "special":

@@ -68,12 +68,7 @@ const (
 	SettingsMigrateHostOverrides   ID = "settings.migrate_host_overrides"
 	SettingsExtract                ID = "settings.extract"
 	SetupInit                      ID = "setup.init"
-	AgentsRestore                  ID = "agents.restore"
-	AgentsAdd                      ID = "agents.add"
-	AgentsRemove                   ID = "agents.remove"
-	AgentsUpdate                   ID = "agents.update"
-	AgentsSearch                   ID = "agents.search"
-	AgentsSyncAll                  ID = "agents.sync_all"
+	AgentsRestore                  ID = "agents.sync"
 	Doctor                         ID = "doctor"
 	DoctorFix                      ID = "doctor.fix"
 )
@@ -144,14 +139,14 @@ var Lifecycle = []Action{
 		Domain:             "lifecycle",
 		Scope:              ScopeGlobal,
 		Label:              "reconcile",
-		Description:        "Sync tools, upgrade tools, sync agent resources, sync dotfiles, and back up dotfile changes.",
-		LongDescription:    "Run the host lifecycle in one command: add discovered tools and install missing configured tools, upgrade outdated tools, claim unmanaged agent capabilities and sync skills, MCP servers and plugins, repair managed dotfile symlinks, and back up pending dotfile repository changes without changing the current branch.",
+		Description:        "Sync tools, upgrade tools, install the global APM workspace, sync dotfiles, and back up dotfile changes.",
+		LongDescription:    "Run the host lifecycle in one command: add discovered tools and install missing configured tools, upgrade outdated tools, run the global APM install, repair managed dotfile symlinks, and back up pending dotfile repository changes without changing the current branch.",
 		Mutates:            true,
 		RequiresConfirm:    true,
-		ConfirmDescription: "Reconcile this host: sync tools, upgrade tools, sync agent skills, MCP servers and plugins, sync dotfiles, and back up dotfile changes?",
+		ConfirmDescription: "Reconcile this host: sync tools, upgrade tools, install the global APM workspace, sync dotfiles, and back up dotfile changes?",
 		TUI:                &TUIBinding{KeyMapField: "Reconcile", DefaultKey: "A", Label: "reconcile all", Description: "Review and run all safe host lifecycle fixes.", ConfirmDescription: "reconcile all"},
 		CLI:                []CLIBinding{{Command: []string{"reconcile"}, Flags: []string{"--message", "--skip-privileged", "--force"}}},
-		Palette:            &PaletteBinding{Command: []string{"reconcile"}, Description: "sync, upgrade, sync agents, repair dotfiles, and back up changes"},
+		Palette:            &PaletteBinding{Command: []string{"reconcile"}, Description: "sync, upgrade, install APM, repair dotfiles, and back up changes"},
 		PaletteEligible:    true,
 	},
 }
@@ -987,7 +982,7 @@ var Setup = []Action{
 		Mutates:         true,
 		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "run bootstrap", Description: "Run the guided bootstrap flow."},
 		CLI: []CLIBinding{{Command: []string{"bootstrap"}, Flags: []string{
-			"--import", "--no-import", "--import-config", "--import-skills", "--no-import-skills",
+			"--import", "--no-import", "--import-config",
 		}}},
 	},
 }
@@ -1004,39 +999,6 @@ var Agents = []Action{
 		CLI:             []CLIBinding{{Command: []string{"agents", "sync"}, Flags: []string{"--dry-run", "--frozen"}}},
 		Palette:         &PaletteBinding{Command: []string{"agents", "sync"}, Description: "install the global APM manifest"},
 		PaletteEligible: true,
-	},
-	{
-		ID: AgentsAdd, Domain: "agents", Scope: ScopeGlobal, Label: "add agent package",
-		Description: "Add packages to the global APM manifest and install them.", LongDescription: "Delegate package resolution, manifest editing, lockfile updates, and deployment to APM.", Mutates: true,
-		CLIOnlyReason: "Package references are entered directly on the CLI; the TUI exposes global APM sync only.", CLI: []CLIBinding{{Command: []string{"agents", "add"}}},
-	},
-	{
-		ID: AgentsRemove, Domain: "agents", Scope: ScopeGlobal, Label: "remove agent package",
-		Description: "Remove packages through APM.", LongDescription: "Remove packages from APM's global manifest, lockfile, and deployed harness files.", Mutates: true,
-		CLIOnlyReason: "Package references are entered directly on the CLI; the TUI exposes global APM sync only.", CLI: []CLIBinding{{Command: []string{"agents", "remove"}}},
-	},
-	{
-		ID: AgentsUpdate, Domain: "agents", Scope: ScopeGlobal, Label: "update agent packages",
-		Description: "Update all or selected global APM dependencies.", LongDescription: "Ask APM to resolve newer allowed package refs and update its global lockfile and deployments.", Mutates: true,
-		CLIOnlyReason: "Selected dependency updates use APM package names on the CLI; the TUI exposes global APM sync only.", CLI: []CLIBinding{{Command: []string{"agents", "update"}, Flags: []string{"--dry-run"}}},
-	},
-	{
-		ID: AgentsSearch, Domain: "agents", Scope: ScopeGlobal, Label: "search agent packages",
-		Description: "Search a registered APM marketplace.", LongDescription: "Run APM marketplace search without changing agent state.",
-		CLIOnlyReason: "Marketplace query expressions are entered directly on the CLI.", CLI: []CLIBinding{{Command: []string{"agents", "search"}}},
-	},
-	{
-		ID:                 AgentsSyncAll,
-		Domain:             "agents",
-		Scope:              ScopeGlobal,
-		Label:              "sync all agents",
-		Description:        "Claim unmanaged skill packages into the manifest, then sync every agent resource.",
-		LongDescription:    "Add the skill packages another tool installed to the manifest, then sync skills, MCP servers, and plugins — the agents leg of `omni tools sync --all`. The claim phase adopts on-disk directories, so it is confirmed before it runs.",
-		Mutates:            true,
-		RequiresConfirm:    true,
-		ConfirmDescription: "Claim unmanaged skill packages and sync agent skills, MCP servers, and plugins?",
-		CLIOnlyReason:      "Compatibility action used by tools sync --all; APM is the implementation.",
-		CLI:                []CLIBinding{{Command: []string{"tools", "sync"}, Flags: []string{"--all"}}},
 	},
 }
 

@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lkshrk/omni/internal/agent"
 	"github.com/lkshrk/omni/internal/config"
 )
 
@@ -53,27 +52,26 @@ var wellKnownDotPaths = map[string]string{
 	"gnupg":            "~/.gnupg",
 }
 
-func buildIgnoredDotCandidateNames(registry *agent.Registry) map[string]struct{} {
-	names := map[string]struct{}{
+func buildIgnoredDotCandidateNames() map[string]struct{} {
+	return map[string]struct{}{
+		// APM 0.28 stable targets with runtime state directly under ~/.config.
+		// These names are dots safety exclusions, not an agent capability catalog.
+		"agents":            {},
 		"agents-skill-lock": {},
 		"cache":             {},
 		"caches":            {},
+		"crush":             {},
+		"devin":             {},
+		"goose":             {},
 		"local":             {},
 		"logs":              {},
 		"node_modules":      {},
+		"opencode":          {},
 		"skill-lock.json":   {},
 		"temp":              {},
 		"tmp":               {},
 		"trash":             {},
 	}
-	for _, name := range agentConfigDotCandidateNames(registry) {
-		names[name] = struct{}{}
-	}
-	return names
-}
-
-func agentConfigDotCandidateNames(registry *agent.Registry) []string {
-	return registry.ConfigDotCandidateNames()
 }
 
 var claudeDotIgnorePatterns = dotAllowlistIgnorePatterns(
@@ -106,11 +104,11 @@ var omniDotIgnorePatterns = dotAllowlistIgnorePatterns(
 )
 
 func DiscoverDotsEntries(repoPath string) ([]config.DotEntry, error) {
-	return discoverDotsEntries(repoPath, false, buildIgnoredDotCandidateNames(newAgentRegistry()))
+	return discoverDotsEntries(repoPath, false, buildIgnoredDotCandidateNames())
 }
 
 func (a *App) discoverDotsEntries(repoPath string, includeIgnored bool) ([]config.DotEntry, error) {
-	return discoverDotsEntries(repoPath, includeIgnored, buildIgnoredDotCandidateNames(a.agentRegistry()))
+	return discoverDotsEntries(repoPath, includeIgnored, buildIgnoredDotCandidateNames())
 }
 
 func (a *App) discoverDotsEntriesIncludingIgnored(repoPath string) ([]config.DotEntry, error) {

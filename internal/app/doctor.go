@@ -59,7 +59,6 @@ func (a *App) Doctor(ctx context.Context) (*DoctorResult, error) {
 		a.doctorDotsIgnorePatterns(result, cfg)
 		a.doctorAgents(ctx, result, cfg)
 		a.doctorAPMVersion(ctx, result, cfg)
-		a.doctorAPMOrphans(result, cfg)
 	}
 	result.Summary = doctorSummary(result.Checks)
 	return result, nil

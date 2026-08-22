@@ -10,7 +10,7 @@ import (
 )
 
 // Merge keeps the earlier definition of these, so a duplicate in a later file is the dead copy.
-var optimizeStringListKeys = []string{"taps", "tools", "skills", "mcp_servers", "plugins", "marketplaces"}
+var optimizeStringListKeys = []string{"taps", "tools"}
 
 // OptimizeRemoval — Key is the group list field ("dots", "tools", ...) or "group" when a whole name-only group shell was dropped.
 type OptimizeRemoval struct {
@@ -410,10 +410,6 @@ func normalizeForCompare(cfg *RootConfig) ([]byte, error) {
 		sort.SliceStable(g.Dots, func(i, j int) bool { return g.Dots[i].Name < g.Dots[j].Name })
 		sort.SliceStable(g.Tools, func(i, j int) bool { return g.Tools[i].Name < g.Tools[j].Name })
 		sort.Strings(g.Taps)
-		sort.Strings(g.Skills)
-		sort.Strings(g.McpServers)
-		sort.Strings(g.Plugins)
-		sort.Strings(g.Marketplaces)
 	}
 	return json.Marshal(&clone)
 }

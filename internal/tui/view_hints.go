@@ -299,23 +299,6 @@ func contextHintItems(m Model, ctx hintContext) []hintItem {
 		return []hintItem{
 			dangerHintFromBindingDesc(m.keys.Confirm, desc),
 		}
-	case hintCtxSettingsAgents:
-		enabled := m.agentsEnabled
-		switch m.settingsCursor {
-		case settingsRowSkillsEnabled:
-			enabled = m.skillsEnabled
-		case settingsRowMcpEnabled:
-			enabled = m.mcpEnabled
-		case settingsRowPluginsEnabled:
-			enabled = m.pluginsEnabled
-		}
-		desc := "disable"
-		if !enabled {
-			desc = "enable"
-		}
-		return []hintItem{
-			hintFromBindingDesc(m.keys.Confirm, desc),
-		}
 	case hintCtxSettingsDuration:
 		return []hintItem{
 			hintFromBindingDesc(m.keys.Confirm, "set"),
@@ -675,9 +658,6 @@ func rowConfirmationActive(m Model) bool {
 		m.hostDeleteConfirm ||
 		m.groupDeleteConfirm ||
 		m.dangerConfirmRow >= 0 ||
-		m.agentsDeleteConfirm ||
-		m.agentsIgnoreConfirm ||
-		m.pluginMarketplaceOfferConfirm ||
 		dotsConfirmationActive(m)
 }
 
@@ -706,27 +686,6 @@ func footerFilterBinding(k KeyMap, includeGroup bool) key.Binding {
 		keys = append(keys, k.GroupPrev.Keys()...)
 	}
 	return key.NewBinding(key.WithKeys(keys...), key.WithHelp(strings.Join(labels, ","), providerHelp.Desc))
-}
-
-// Constructed ad hoc rather than added to KeyMap because they are display-only — handleAgentsAllRowActionKeyMsg matches the raw key string directly.
-func agentsInstallBinding() key.Binding {
-	return key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "install"))
-}
-
-func agentsUpgradeBinding() key.Binding {
-	return key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "upgrade"))
-}
-
-func agentsGroupBinding() key.Binding {
-	return key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "group"))
-}
-
-func agentsIgnoreBinding() key.Binding {
-	return key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "ignore"))
-}
-
-func agentsDeleteBinding() key.Binding {
-	return key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
 }
 
 // Display only: handleAgentsGlobalActionKeyMsg handles U/S/R directly by key string.
@@ -810,8 +769,7 @@ func tabFullHelpBindings(m *Model) [][]key.Binding {
 	case viewSkills:
 		return [][]key.Binding{
 			common,
-			{agentsInstallBinding(), agentsUpgradeBinding(), agentsGroupBinding(), agentsIgnoreBinding(), agentsDeleteBinding(), k.AgentsUseManaged, k.AgentsUseLocal},
-			{footerFilterBinding(k, true)},
+			{agentsUpgradeAllBinding(), agentsSyncAllBinding(), agentsRefreshBinding()},
 		}
 	default:
 		return [][]key.Binding{
@@ -891,24 +849,6 @@ func activeConfirmationHelpItems(m Model) []hintItem {
 		return []hintItem{pressAgainHint(m.keys.Toggle.Help().Key, "copy groups")}
 	case m.groupDeleteConfirm:
 		return confirmActionItems(m.keys.Confirm, actions.MustTUIConfirmDescription(actions.GroupDelete), m.keys.Back)
-	case m.agentsDeleteConfirm:
-		label := "delete"
-		if m.agentsDeleteUninstall {
-			label = "uninstall"
-		}
-		return []hintItem{pressAgainHint(m.keys.Delete.Help().Key, label)}
-	case m.agentsSyncAllConfirm:
-		return []hintItem{pressAgainHint("S", "sync all")}
-	case m.agentsIgnoreConfirm:
-		label := "confirm ignore"
-		if m.agentsIgnoreName != "" {
-			if entry, ok := agentsAllEntryAt(m, m.agentsAllCursor); ok && entry.feature == m.agentsIgnoreFeature && entry.status == agentsStatusIgnored {
-				label = "confirm include"
-			}
-		}
-		return []hintItem{pressAgainHint(m.keys.Ignore.Help().Key, label)}
-	case m.pluginMarketplaceOfferConfirm:
-		return confirmActionItems(m.keys.Confirm, "claim marketplace "+m.pluginMarketplaceOfferMarket+" too", m.keys.Back)
 	default:
 		return nil
 	}
@@ -1039,13 +979,6 @@ func helpActionGroups(m Model) []helpGroup {
 		return []helpGroup{{items: items}}
 	case viewSkills:
 		return []helpGroup{
-			{title: "Row", items: []hintItem{
-				hintFromBinding(agentsInstallBinding()),
-				hintFromBinding(agentsUpgradeBinding()),
-				hintFromBinding(agentsGroupBinding()),
-				hintFromBinding(agentsIgnoreBinding()),
-				hintFromBinding(agentsDeleteBinding()),
-			}},
 			{title: "Bulk", items: []hintItem{
 				hintFromBinding(agentsUpgradeAllBinding()),
 				hintFromBinding(agentsSyncAllBinding()),

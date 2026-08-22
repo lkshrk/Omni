@@ -24,6 +24,7 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
+	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
 	textutil "github.com/lkshrk/omni/internal/text"
 )
@@ -433,6 +434,10 @@ func TestSyncAllFlag_ClaimsDiscoveredAndSyncs(t *testing.T) {
 	if err := a.InitTestMode(context.Background(), prov); err != nil {
 		t.Fatalf("InitTestMode: %v", err)
 	}
+	a.SetFallbackExecutor(&executor.MockExecutor{Responses: []executor.MockCall{
+		{Stdout: "APM CLI version " + cliTestPinnedAPMVersion + "\n"},
+		{},
+	}})
 	t.Cleanup(func() { _ = a.Close() })
 
 	cmd := newSyncCmd(&rootState{app: a, yes: true})
@@ -475,6 +480,10 @@ func TestSyncAllFlag_DryRunDoesNotWriteDBOrConfig(t *testing.T) {
 	if err := a.InitTestMode(context.Background(), prov); err != nil {
 		t.Fatalf("InitTestMode: %v", err)
 	}
+	a.SetFallbackExecutor(&executor.MockExecutor{Responses: []executor.MockCall{
+		{Stdout: "APM CLI version " + cliTestPinnedAPMVersion + "\n"},
+		{},
+	}})
 	t.Cleanup(func() { _ = a.Close() })
 
 	cmd := newSyncCmd(&rootState{app: a})
@@ -5035,29 +5044,6 @@ func TestDoctorFixOptimizerFailureStillCleansIgnorePatterns(t *testing.T) {
 	}
 	if want := []string{"*", "!/settings.json"}; !slices.Equal(dev.Dots[0].Ignore, want) {
 		t.Fatalf("ignore patterns = %v, want %v", dev.Dots[0].Ignore, want)
-	}
-}
-
-func TestReconcileConfirmTextNamesAgentScope(t *testing.T) {
-	cfgPath := filepath.Join(t.TempDir(), "settings.json")
-	cacheDir := t.TempDir()
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Hosts:  map[string][]string{"testhost": {}},
-		Groups: []*config.GroupConfig{{Name: "testhost", Special: "host"}},
-	})
-
-	output, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "reconcile")
-	if err != nil {
-		t.Fatalf("reconcile: %v\n%s", err, output)
-	}
-	if !strings.Contains(output, "Aborted.") {
-		t.Fatalf("reconcile without --yes should abort at the prompt:\n%s", output)
-	}
-	for _, want := range []string{"agent skills", "MCP servers and plugins"} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("reconcile confirm prompt missing %q:\n%s", want, output)
-		}
 	}
 }
 

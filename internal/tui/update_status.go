@@ -498,11 +498,11 @@ func (m *Model) handleStatusAction(action statusAction, cmds *[]tea.Cmd) {
 	case statusActionOpenAgents:
 		m.switchMainTab(viewSkills, cmds)
 	case statusActionUpgradeAgents:
-		if !m.skillsRunning && !m.pluginRunning && !m.marketplaceRunning && !m.mcpRunning {
+		if !m.apmRunning {
 			*cmds = append(*cmds, m.doAgentsUpdateAll()...)
 		}
-	case statusActionRestoreSkills:
-		if !m.loading && !m.skillsRunning {
+	case statusActionSyncAgents:
+		if !m.loading && !m.apmRunning {
 			*cmds = append(*cmds, m.doAgentsSyncAll()...)
 		}
 	}

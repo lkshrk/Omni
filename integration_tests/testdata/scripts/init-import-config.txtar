@@ -12,8 +12,8 @@ stdout 'Bootstrap complete'
 
 exec grep '"ripgrep"' settings.json
 stdout '"ripgrep"'
-exec grep '"version": 22' settings.json
-stdout '"version": 22'
+exec grep '"version": 24' settings.json
+stdout '"version": 24'
 exec grep '"testhost"' settings.json
 stdout '"testhost"'
 exec grep '"work"' settings.json
@@ -31,8 +31,8 @@ stdout 'Bootstrap complete'
 
 exec grep '"fd"' prompted-settings.json
 stdout '"fd"'
-exec grep '"version": 22' prompted-settings.json
-stdout '"version": 22'
+exec grep '"version": 24' prompted-settings.json
+stdout '"version": 24'
 exec grep '"testhost"' prompted-settings.json
 stdout '"testhost"'
 exec grep '"promptwork"' prompted-settings.json

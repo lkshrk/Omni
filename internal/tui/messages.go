@@ -41,103 +41,15 @@ type toolsLoadedMsg struct {
 	dotsWatchServiceErr    string
 	dotsConfigured         bool
 	dotsConfiguredKnown    bool
-	agentsEnabled          bool
-	skillsEnabled          bool
-	mcpEnabled             bool
-	pluginsEnabled         bool
-	agentsRows             *app.CachedAgentsRows
 	dotsSyncAvail          app.DotsSyncAvailability
 	dotsSyncAvailKnown     bool
 	setupProviders         []app.SetupProviderOption
 	ecosystemProviders     []string
-	enabledAgents          []string
-	agentsIgnore           app.AgentsIgnore
 }
 
 type nvmManagedLoadedMsg struct {
 	nvmManaged map[string]bool
 	err        error
-}
-
-type skillsManifestLoadedMsg struct {
-	rows      []app.SkillPackageRow
-	unmanaged []app.SkillPackageRow
-	err       error
-}
-
-type skillsGroupsUpdatedMsg struct {
-	rows []app.SkillPackageRow
-	err  error
-}
-
-type skillsUpdatedMsg struct {
-	updated bool
-	err     error
-}
-
-// Carries one error per feature: the sequence runs skills, mcp, and plugins as independently-tracked sub-steps.
-type agentsProgressDoneMsg struct {
-	gen            int
-	skills         bool
-	mcp            bool
-	plugin         bool
-	marketplace    bool
-	skillsErr      error
-	mcpErr         error
-	pluginErr      error
-	marketplaceErr error
-	// The per-feature errors above only carry failures; a run that skipped a drifted entry and installed everything else has nothing to say without this.
-	report *app.AgentsSyncAllResult
-}
-
-type agentsToggledMsg struct {
-	enabled bool
-	err     error
-}
-
-type skillsFeatureToggledMsg struct {
-	enabled bool
-	err     error
-}
-
-type mcpFeatureToggledMsg struct {
-	enabled bool
-	err     error
-}
-
-type pluginsFeatureToggledMsg struct {
-	enabled bool
-	err     error
-}
-
-type agentsUseSavedMsg struct {
-	ids []string
-	err error
-}
-
-type skillsRestoredMsg struct {
-	res app.RestoreSkillsResult
-	err error
-}
-
-type skillsImportedMsg struct {
-	diff app.ImportDiff
-	err  error
-}
-
-type skillsFoundMsg struct {
-	results []app.FindResult
-	err     error
-}
-
-type skillAddedMsg struct {
-	err     error
-	warning string
-}
-
-type skillAgentsSavedMsg struct {
-	rows []app.SkillPackageRow
-	err  error
 }
 
 type setupConfigImportDoneMsg struct {
@@ -363,23 +275,6 @@ type setupHostDoneMsg struct {
 	hostName string
 	info     *app.HostInfo
 	err      error
-}
-
-type setupAgentsDiffMsg struct {
-	unmanagedSkills  int
-	unmanagedMcp     int
-	unmanagedPlugins int
-	err              error
-}
-
-type setupAgentsImportDoneMsg struct {
-	skills  int
-	mcp     int
-	plugins int
-	// Servers omni declined to claim, and servers claimed while carrying a literal header value: an
-	// adopted header is copied verbatim into settings.json, so silence here hides a written secret.
-	advisories []string
-	err        error
 }
 
 type stowInstallDoneMsg struct {

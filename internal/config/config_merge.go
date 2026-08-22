@@ -19,7 +19,6 @@ func MergeRootConfig(dst, src *RootConfig) {
 	mergeGroups(dst, src.Groups)
 	mergeHosts(dst, src.Hosts)
 	mergeIgnore(&dst.Ignore, &src.Ignore)
-	mergeAgents(&dst.Agents, &src.Agents)
 }
 
 func mergeSettings(dst, src *Settings) {
@@ -56,21 +55,6 @@ func mergeSettings(dst, src *Settings) {
 	}
 	if src.DotsDisabled != nil {
 		dst.DotsDisabled = src.DotsDisabled
-	}
-	if src.AgentsDisabled != nil {
-		dst.AgentsDisabled = src.AgentsDisabled
-	}
-	if src.SkillsDisabled != nil {
-		dst.SkillsDisabled = src.SkillsDisabled
-	}
-	if src.McpDisabled != nil {
-		dst.McpDisabled = src.McpDisabled
-	}
-	if src.PluginsDisabled != nil {
-		dst.PluginsDisabled = src.PluginsDisabled
-	}
-	if src.AgentsUse != nil {
-		dst.AgentsUse = append([]string(nil), src.AgentsUse...)
 	}
 	if src.DotsGit.AutoCommit {
 		dst.DotsGit.AutoCommit = true
@@ -143,10 +127,6 @@ func mergeGroup(dst, src *GroupConfig) {
 	dst.Taps = appendUniqueStrings(dst.Taps, src.Taps...)
 	dst.Tools = appendUniqueToolEntries(dst.Tools, src.Tools)
 	dst.Dots = appendUniqueDotEntries(dst.Dots, src.Dots)
-	dst.Skills = appendUniqueStrings(dst.Skills, src.Skills...)
-	dst.McpServers = appendUniqueStrings(dst.McpServers, src.McpServers...)
-	dst.Plugins = appendUniqueStrings(dst.Plugins, src.Plugins...)
-	dst.Marketplaces = appendUniqueStrings(dst.Marketplaces, src.Marketplaces...)
 	if strings.TrimSpace(dst.Description) == "" {
 		dst.Description = src.Description
 	}
@@ -173,144 +153,6 @@ func mergeIgnore(dst, src *GlobalIgnore) {
 	}
 	dst.Tools = appendUniqueStrings(dst.Tools, src.Tools...)
 	dst.Dots = appendUniqueStrings(dst.Dots, src.Dots...)
-}
-
-func mergeAgents(dst, src *AgentsConfig) {
-	if dst == nil || src == nil {
-		return
-	}
-	dst.Packages = mergeSkillPackages(dst.Packages, src.Packages)
-	dst.McpServers = mergeMcpServers(dst.McpServers, src.McpServers)
-	dst.Marketplaces = mergeMarketplaces(dst.Marketplaces, src.Marketplaces)
-	dst.Plugins = mergePlugins(dst.Plugins, src.Plugins)
-	dst.Ignore.Skills = appendUniqueStrings(dst.Ignore.Skills, src.Ignore.Skills...)
-	dst.Ignore.McpServers = appendUniqueStrings(dst.Ignore.McpServers, src.Ignore.McpServers...)
-	dst.Ignore.Plugins = appendUniqueStrings(dst.Ignore.Plugins, src.Ignore.Plugins...)
-	dst.Ignore.Marketplaces = appendUniqueStrings(dst.Ignore.Marketplaces, src.Ignore.Marketplaces...)
-}
-
-func mergeSkillPackages(dst, src []SkillPackage) []SkillPackage {
-	if len(src) == 0 {
-		return dst
-	}
-	index := make(map[string]int, len(dst))
-	for i, pkg := range dst {
-		index[pkg.Source] = i
-	}
-	for _, pkg := range src {
-		if i, ok := index[pkg.Source]; ok {
-			if strings.TrimSpace(dst[i].Ref) == "" {
-				dst[i].Ref = pkg.Ref
-			}
-			// An omitted selector states no opinion, so it must not silently widen an inherited one to "all skills".
-			if len(pkg.Skills) > 0 {
-				if len(dst[i].Skills) == 0 {
-					dst[i].Skills = append([]string(nil), pkg.Skills...)
-				} else {
-					dst[i].Skills = appendUniqueStrings(dst[i].Skills, pkg.Skills...)
-				}
-			}
-			dst[i].Agents = appendUniqueStrings(dst[i].Agents, pkg.Agents...)
-			continue
-		}
-		dst = append(dst, pkg)
-		index[pkg.Source] = len(dst) - 1
-	}
-	return dst
-}
-
-func mergeMcpServers(dst, src []McpServer) []McpServer {
-	if len(src) == 0 {
-		return dst
-	}
-	index := make(map[string]int, len(dst))
-	for i, srv := range dst {
-		index[srv.Name] = i
-	}
-	for _, srv := range src {
-		if i, ok := index[srv.Name]; ok {
-			dst[i] = mergeMcpServer(dst[i], srv)
-			continue
-		}
-		dst = append(dst, srv)
-		index[srv.Name] = len(dst) - 1
-	}
-	return dst
-}
-
-func mergeMcpServer(dst, src McpServer) McpServer {
-	if strings.TrimSpace(dst.Transport) == "" {
-		dst.Transport = src.Transport
-	}
-	if strings.TrimSpace(dst.Command) == "" {
-		dst.Command = src.Command
-	}
-	if strings.TrimSpace(dst.URL) == "" {
-		dst.URL = src.URL
-	}
-	dst.Env = appendUniqueStrings(dst.Env, src.Env...)
-	if len(src.EnvLiteral) > 0 {
-		if dst.EnvLiteral == nil {
-			dst.EnvLiteral = make(map[string]string, len(src.EnvLiteral))
-		}
-		for key, value := range src.EnvLiteral {
-			dst.EnvLiteral[key] = value
-		}
-	}
-	if len(src.Headers) > 0 {
-		if dst.Headers == nil {
-			dst.Headers = make(map[string]string, len(src.Headers))
-		}
-		for key, value := range src.Headers {
-			dst.Headers[key] = value
-		}
-	}
-	dst.Agents = appendUniqueStrings(dst.Agents, src.Agents...)
-	return dst
-}
-
-func mergeMarketplaces(dst, src []Marketplace) []Marketplace {
-	if len(src) == 0 {
-		return dst
-	}
-	index := make(map[string]int, len(dst))
-	for i, mkt := range dst {
-		index[mkt.Name] = i
-	}
-	for _, mkt := range src {
-		if i, ok := index[mkt.Name]; ok {
-			if strings.TrimSpace(dst[i].Source) == "" {
-				dst[i].Source = mkt.Source
-			}
-			dst[i].Agents = appendUniqueStrings(dst[i].Agents, mkt.Agents...)
-			continue
-		}
-		dst = append(dst, mkt)
-		index[mkt.Name] = len(dst) - 1
-	}
-	return dst
-}
-
-func mergePlugins(dst, src []Plugin) []Plugin {
-	if len(src) == 0 {
-		return dst
-	}
-	index := make(map[string]int, len(dst))
-	for i, plugin := range dst {
-		index[plugin.Name] = i
-	}
-	for _, plugin := range src {
-		if i, ok := index[plugin.Name]; ok {
-			if strings.TrimSpace(dst[i].Marketplace) == "" {
-				dst[i].Marketplace = plugin.Marketplace
-			}
-			dst[i].Agents = appendUniqueStrings(dst[i].Agents, plugin.Agents...)
-			continue
-		}
-		dst = append(dst, plugin)
-		index[plugin.Name] = len(dst) - 1
-	}
-	return dst
 }
 
 func appendUniqueStrings(dst []string, values ...string) []string {

@@ -22,11 +22,6 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		return *m, tea.Batch(cmds...)
 	}
 
-	if m.agentsDriftPromptOpen {
-		cmds = append(cmds, m.handleAgentsDriftPromptKeyMsg(msg)...)
-		return *m, tea.Batch(cmds...)
-	}
-
 	if m.hostCreateStep != 0 {
 		cmds = append(cmds, m.handleHostCreateChoiceKeyMsg(msg)...)
 		return *m, tea.Batch(cmds...)
@@ -182,13 +177,7 @@ func (m *Model) focusedTextInputActive() bool {
 	case viewDots:
 		return m.dotsSearchActive && m.filter.Focused()
 	case viewSkills:
-		if m.skillsSearchActive && m.filter.Focused() {
-			return true
-		}
-		if m.pluginFormOpen {
-			return m.pluginFormName.Focused() || m.pluginFormMarketplace.Focused() || m.pluginFormSource.Focused() || m.pluginFormAgents.Focused()
-		}
-		return m.mcpFormOpen && (m.mcpFormName.Focused() || m.mcpFormCommand.Focused() || m.mcpFormURL.Focused() || m.mcpFormEnv.Focused() || m.mcpFormEnvLit.Focused())
+		return false
 	case viewCommand:
 		return m.commandInput.Focused()
 	case viewFallbackEditor:
@@ -208,7 +197,7 @@ func (m *Model) focusedTextInputActive() bool {
 }
 
 func (m *Model) handleTabKeyMsg(msg tea.KeyPressMsg, cmds *[]tea.Cmd) bool {
-	if m.focusedTextInputActive() || !key.Matches(msg, m.keys.Tab) || m.mode == viewSearch || m.mode == viewCommand || m.mode == viewGroupPicker || m.mode == viewGroupMembership || m.mode == viewGroupTools || m.mode == viewGroupDots || m.mode == viewIgnoreScope || m.mode == viewProviderScope || m.mode == viewAdminTerminal || m.hostRequired || m.mcpFormOpen || m.mcpAgentsPicker || m.skillAgentsPicker || m.pluginAgentsPicker || m.pluginFormOpen {
+	if m.focusedTextInputActive() || !key.Matches(msg, m.keys.Tab) || m.mode == viewSearch || m.mode == viewCommand || m.mode == viewGroupPicker || m.mode == viewGroupMembership || m.mode == viewGroupTools || m.mode == viewGroupDots || m.mode == viewIgnoreScope || m.mode == viewProviderScope || m.mode == viewAdminTerminal || m.hostRequired {
 		return false
 	}
 	tabs := mainTabs()
@@ -246,10 +235,6 @@ func (m *Model) switchMainTab(target viewMode, cmds *[]tea.Cmd) bool {
 	if target == viewDots && m.dotsConfigured() && !m.dotsLoaded && !m.dotsLoading && !m.dotsPreparing {
 		m.beginDotsOperation("Loading dots…")
 		*cmds = append(*cmds, m.spinner.Tick, m.doLoadDots())
-	}
-	if target == viewSkills {
-		m.skillTypeIdx = agentsChipAll
-		clampAgentsAllCursor(m)
 	}
 	if target == viewStatus && m.shouldAutoRunStatusDoctor() {
 		m.startDoctorRun("Running doctor…")

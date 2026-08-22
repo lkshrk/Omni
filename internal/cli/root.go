@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -215,6 +216,16 @@ func Execute() {
 		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		printProviderErrorAdvice(os.Stderr, err)
-		os.Exit(1)
+		os.Exit(commandExitCode(err))
 	}
+}
+
+func commandExitCode(err error) int {
+	var exitErr interface{ ExitCode() int }
+	if errors.As(err, &exitErr) {
+		if code := exitErr.ExitCode(); code > 0 && code < 256 {
+			return code
+		}
+	}
+	return 1
 }

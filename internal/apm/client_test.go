@@ -1,202 +1,173 @@
 package apm_test
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lkshrk/omni/internal/apm"
-	"github.com/lkshrk/omni/internal/executor"
+	commandexec "github.com/lkshrk/omni/internal/executor"
 )
 
-func TestClientCommands(t *testing.T) {
-	tests := []struct {
-		name  string
-		scope apm.Scope
-		run   func(*apm.Client) (apm.Result, error)
-		args  []string
-	}{
-		{"uninstall project", apm.Project, func(c *apm.Client) (apm.Result, error) { return c.Uninstall(context.Background(), "owner/pkg") }, []string{"uninstall", "owner/pkg"}},
-		{"uninstall global", apm.Global, func(c *apm.Client) (apm.Result, error) { return c.Uninstall(context.Background(), "owner/pkg") }, []string{"uninstall", "--global", "owner/pkg"}},
-		{"install only packages refreshing refs", apm.Global, func(c *apm.Client) (apm.Result, error) {
-			return c.InstallOnly(context.Background(), apm.SurfacePackages, []string{"claude"}, apm.InstallOptions{Update: true})
-		}, []string{"install", "-g", "--only", "apm", "--update", "--target", "claude"}},
-		{"install only mcp refreshing refs as a dry run", apm.Global, func(c *apm.Client) (apm.Result, error) {
-			return c.InstallOnly(context.Background(), apm.SurfaceMcp, []string{"codex"}, apm.InstallOptions{Update: true, DryRun: true})
-		}, []string{"install", "-g", "--only", "mcp", "--update", "--dry-run", "--target", "codex"}},
-		{"install only packages targeted", apm.Global, func(c *apm.Client) (apm.Result, error) {
-			return c.InstallOnly(context.Background(), apm.SurfacePackages, []string{"claude", "codex"}, apm.InstallOptions{})
-		}, []string{"install", "-g", "--only", "apm", "--target", "claude,codex"}},
-		{"install only mcp dry run no targets", apm.Global, func(c *apm.Client) (apm.Result, error) {
-			return c.InstallOnly(context.Background(), apm.SurfaceMcp, nil, apm.InstallOptions{DryRun: true})
-		}, []string{"install", "-g", "--only", "mcp", "--dry-run"}},
-		{"install only frozen replays a surface", apm.Global, func(c *apm.Client) (apm.Result, error) {
-			return c.InstallOnly(context.Background(), apm.SurfaceMcp, []string{"claude"}, apm.InstallOptions{Frozen: true})
-		}, []string{"install", "-g", "--frozen", "--only", "mcp", "--target", "claude"}},
-		{"search", apm.Project, func(c *apm.Client) (apm.Result, error) {
-			return c.Search(context.Background(), "security@skills")
-		}, []string{"search", "security@skills"}},
-		{"audit", apm.Project, func(c *apm.Client) (apm.Result, error) { return c.Audit(context.Background()) }, []string{"audit", "--ci", "--format", "json"}},
-		{"targets", apm.Project, func(c *apm.Client) (apm.Result, error) { return c.Targets(context.Background()) }, []string{"targets", "--json"}},
+func TestClientRunPreservesCommandResult(t *testing.T) {
+	mock := &commandexec.MockExecutor{Responses: []commandexec.MockCall{{Stdout: "out\n", Stderr: "warning\n"}}}
+	result, err := apm.New(mock, apm.Global).Run(t.Context(), "search", "security@skills")
+	if err != nil {
+		t.Fatal(err)
 	}
+	if result.Stdout != "out\n" || result.Stderr != "warning\n" {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(mock.Calls) != 1 || mock.Calls[0].Name != "apm" || !reflect.DeepEqual(mock.Calls[0].Args, []string{"search", "security@skills"}) {
+		t.Fatalf("calls = %#v", mock.Calls)
+	}
+}
 
+func TestClientRunRejectsEmptyCommand(t *testing.T) {
+	mock := &commandexec.MockExecutor{}
+	for _, args := range [][]string{nil, {""}, {"  "}} {
+		if _, err := apm.New(mock, apm.Global).Run(t.Context(), args...); err == nil {
+			t.Fatalf("Run(%q) succeeded", args)
+		}
+	}
+	if len(mock.Calls) != 0 {
+		t.Fatalf("calls = %d, want 0", len(mock.Calls))
+	}
+}
+
+func TestClientMarketplaceRemoveIsNonInteractive(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	mock := &commandexec.MockExecutor{Responses: []commandexec.MockCall{{}}}
+	if _, err := apm.New(mock, apm.Global).Run(t.Context(), "marketplace", "remove", "team"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"marketplace", "remove", "team", "--yes"}
+	got := mock.Calls[0].Args
+	if len(got) < len(want) || !reflect.DeepEqual(got[len(got)-len(want):], want) {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+}
+
+func TestClientNonzeroPreservesResultAndExitError(t *testing.T) {
+	sentinel := errors.New("exit status 7")
+	mock := &commandexec.MockExecutor{Responses: []commandexec.MockCall{{Stdout: "partial\n", Stderr: "failed\n", Err: sentinel}}}
+	result, err := apm.New(mock, apm.Global).Run(t.Context(), "outdated", "-g")
+	if result.Stdout != "partial\n" || result.Stderr != "failed\n" {
+		t.Fatalf("result = %#v", result)
+	}
+	if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "apm outdated failed") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestClientMapsMissingExecutable(t *testing.T) {
+	mock := &commandexec.MockExecutor{Responses: []commandexec.MockCall{{Err: &exec.Error{Name: "apm", Err: exec.ErrNotFound}}}}
+	_, err := apm.New(mock, apm.Global).Run(t.Context(), "search", "x")
+	if !errors.Is(err, apm.ErrNotInstalled) {
+		t.Fatalf("error = %v, want ErrNotInstalled", err)
+	}
+	if !strings.Contains(err.Error(), "omni doctor --fix") || strings.Contains(err.Error(), "install apm-cli") {
+		t.Fatalf("error = %q, want only the pinned doctor repair path", err)
+	}
+}
+
+func TestClientCommandWorkingDirectories(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is Unix-only")
+	}
+	home := t.TempDir()
+	bin := t.TempDir()
+	caller := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(caller); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(previous) })
+	script := filepath.Join(bin, "apm")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\npwd\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	global := filepath.Join(home, ".apm")
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"install short global", []string{"install", "-g"}, global},
+		{"install long global", []string{"install", "--global", "org/pkg"}, global},
+		{"update global", []string{"update", "-g", "--yes"}, global},
+		{"update long global", []string{"update", "--global", "--yes"}, global},
+		{"outdated short global", []string{"outdated", "-g"}, global},
+		{"outdated global", []string{"outdated", "--global"}, global},
+		{"uninstall global", []string{"uninstall", "-g", "org/pkg"}, global},
+		{"uninstall long global", []string{"uninstall", "--global", "org/pkg"}, global},
+		{"deps list global", []string{"deps", "list", "-g"}, global},
+		{"deps why global", []string{"deps", "why", "--global", "org/pkg"}, global},
+		{"view global", []string{"view", "--global", "org/pkg"}, global},
+		{"marketplace add", []string{"marketplace", "add", "team", "https://example.test"}, global},
+		{"marketplace list", []string{"marketplace", "list"}, global},
+		{"marketplace browse", []string{"marketplace", "browse", "team"}, global},
+		{"marketplace update", []string{"marketplace", "update", "team"}, global},
+		{"marketplace validate", []string{"marketplace", "validate", "team"}, global},
+		{"marketplace remove", []string{"marketplace", "remove", "team"}, global},
+		{"audit", []string{"audit", "--ci"}, global},
+		{"prune", []string{"prune"}, global},
+		{"targets", []string{"targets", "--json"}, global},
+		{"project install", []string{"install"}, caller},
+		{"project update", []string{"update"}, caller},
+		{"project outdated", []string{"outdated"}, caller},
+		{"project uninstall", []string{"uninstall", "org/pkg"}, caller},
+		{"project deps", []string{"deps", "list"}, caller},
+		{"project view", []string{"view", "org/pkg"}, caller},
+		{"search", []string{"search", "skill"}, caller},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mock := &executor.MockExecutor{Responses: []executor.MockCall{{Stdout: "out\n", Stderr: "warning\n"}}}
-			result, err := tt.run(apm.New(mock, tt.scope))
+			result, err := apm.New(commandexec.New(), apm.Global).Run(t.Context(), tt.args...)
 			if err != nil {
-				t.Fatalf("command: %v", err)
+				t.Fatal(err)
 			}
-			if result.Stdout != "out\n" || result.Stderr != "warning\n" {
-				t.Fatalf("result = %#v", result)
-			}
-			if len(mock.Calls) != 1 {
-				t.Fatalf("calls = %d, want 1", len(mock.Calls))
-			}
-			if mock.Calls[0].Name != "apm" || !reflect.DeepEqual(mock.Calls[0].Args, tt.args) {
-				t.Fatalf("call = %s %v, want apm %v", mock.Calls[0].Name, mock.Calls[0].Args, tt.args)
+			if got := strings.TrimSpace(result.Stdout); got != tt.want {
+				t.Fatalf("cwd = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestClientRejectsEmptyPackageLists(t *testing.T) {
-	for _, run := range []func(*apm.Client) error{
-		func(c *apm.Client) error { _, err := c.Uninstall(context.Background()); return err },
-		func(c *apm.Client) error {
-			_, err := c.InstallOnly(context.Background(), "", nil, apm.InstallOptions{})
-			return err
-		},
-	} {
-		mock := &executor.MockExecutor{}
-		err := run(apm.New(mock, apm.Project))
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		if len(mock.Calls) != 0 {
-			t.Fatalf("calls = %d, want 0", len(mock.Calls))
-		}
+func TestClientCancellationReachesAPM(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is Unix-only")
+	}
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	script := filepath.Join(bin, "apm")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := apm.New(commandexec.New(), apm.Global).Run(ctx, "search", "x")
+	if err == nil || ctx.Err() != context.DeadlineExceeded || time.Since(started) > time.Second {
+		t.Fatalf("error = %v, context = %v, elapsed = %s", err, ctx.Err(), time.Since(started))
 	}
 }
 
-func TestClientRejectsUnsupportedGlobalReadCommands(t *testing.T) {
-	tests := []func(*apm.Client) error{
-		func(c *apm.Client) error { _, err := c.Audit(context.Background()); return err },
-		func(c *apm.Client) error { _, err := c.Targets(context.Background()); return err },
-	}
-
-	for _, run := range tests {
-		mock := &executor.MockExecutor{}
-		err := run(apm.New(mock, apm.Global))
-		if !errors.Is(err, apm.ErrUnsupportedScope) {
-			t.Fatalf("error = %v, want ErrUnsupportedScope", err)
-		}
-		if len(mock.Calls) != 0 {
-			t.Fatalf("calls = %d, want 0", len(mock.Calls))
-		}
-	}
-}
-
-func TestInstallOnlyRejectsProjectScope(t *testing.T) {
-	for _, surface := range []string{apm.SurfacePackages, apm.SurfaceMcp} {
-		mock := &executor.MockExecutor{}
-		_, err := apm.New(mock, apm.Project).InstallOnly(context.Background(), surface, []string{"claude"}, apm.InstallOptions{})
-		if !errors.Is(err, apm.ErrUnsupportedScope) {
-			t.Fatalf("error = %v, want ErrUnsupportedScope", err)
-		}
-		if len(mock.Calls) != 0 {
-			t.Fatalf("calls = %d, want 0", len(mock.Calls))
-		}
-	}
-}
-
-func TestClientMapsMissingExecutable(t *testing.T) {
-	mock := &executor.MockExecutor{Responses: []executor.MockCall{{Err: &exec.Error{Name: "apm", Err: exec.ErrNotFound}}}}
-	_, err := apm.New(mock, apm.Global).InstallOnly(context.Background(), apm.SurfacePackages, nil, apm.InstallOptions{})
-	if !errors.Is(err, apm.ErrNotInstalled) {
-		t.Fatalf("error = %v, want ErrNotInstalled", err)
-	}
-	if !strings.Contains(err.Error(), "apm executable not found") {
-		t.Fatalf("unclear error: %v", err)
-	}
-}
-
-func TestClientMapsMissingExecutableFromPATH(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
-	_, err := apm.New(executor.New(), apm.Global).InstallOnly(t.Context(), apm.SurfacePackages, nil, apm.InstallOptions{})
-	if !errors.Is(err, apm.ErrNotInstalled) {
-		t.Fatalf("error = %v, want ErrNotInstalled", err)
-	}
-}
-
-// APM is a click CLI and reports most failures on stdout with an empty stderr.
-func TestClientNonzeroExitFallsBackToStdoutDetail(t *testing.T) {
-	sentinel := errors.New("exit status 1")
-	mock := &executor.MockExecutor{Responses: []executor.MockCall{{
-		Stdout: "No apm.yml found in ~/.apm/. Run 'apm install -g <org/repo>' to create one.\n",
-		Err:    sentinel,
-	}}}
-	_, err := apm.New(mock, apm.Global).InstallOnly(context.Background(), apm.SurfacePackages, nil, apm.InstallOptions{})
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("error does not wrap executor error: %v", err)
-	}
-	if got := err.Error(); !strings.Contains(got, "apm install failed") || !strings.Contains(got, "No apm.yml found") {
-		t.Fatalf("unclear error: %v", err)
-	}
-}
-
-func TestClientNonzeroExitTruncatesLongDetailToTail(t *testing.T) {
-	long := strings.Repeat("progress line\n", 500) + "final error: ref not found\n"
-	mock := &executor.MockExecutor{Responses: []executor.MockCall{{Stdout: long, Err: errors.New("exit status 1")}}}
-	_, err := apm.New(mock, apm.Global).InstallOnly(context.Background(), apm.SurfacePackages, nil, apm.InstallOptions{})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if got := err.Error(); !strings.Contains(got, "final error: ref not found") {
-		t.Fatalf("tail lost: %v", err)
-	}
-	if len(err.Error()) > 3000 {
-		t.Fatalf("error too long: %d bytes", len(err.Error()))
-	}
-}
-
-func TestClientNonzeroExitPreservesResultAndErrorDetail(t *testing.T) {
-	sentinel := errors.New("exit status 1")
-	mock := &executor.MockExecutor{Responses: []executor.MockCall{{
-		Stdout: "partial output\n",
-		Stderr: "  package not found\n",
-		Err:    sentinel,
-	}}}
-	result, err := apm.New(mock, apm.Global).InstallOnly(context.Background(), apm.SurfacePackages, nil, apm.InstallOptions{})
-	if result.Stdout != "partial output\n" || result.Stderr != "  package not found\n" {
-		t.Fatalf("result = %#v", result)
-	}
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("error does not wrap executor error: %v", err)
-	}
-	if got := err.Error(); !strings.Contains(got, "apm install failed") || !strings.Contains(got, "package not found") {
-		t.Fatalf("unclear error: %v", err)
-	}
-}
-
-// An `apm update` invocation always redeploys the MCP surface into every target of the run, and an install
-// without --only does the same, so no client method may build either.
-func TestClientNeverInvokesAnUnscopedDeploy(t *testing.T) {
-	source, err := os.ReadFile("client.go")
-	if err != nil {
-		t.Fatalf("reading client source: %v", err)
-	}
-	for _, forbidden := range []string{`"update"`, `"--yes"`} {
-		if bytes.Contains(source, []byte(forbidden)) {
-			t.Fatalf("client.go still builds an apm update invocation (%s)", forbidden)
-		}
-	}
-	if !bytes.Contains(source, []byte(`"--only", surface`)) {
-		t.Fatal("client.go no longer scopes its install to a single manifest surface")
+func TestLegacySurfaceInstallStillRejectsProjectScope(t *testing.T) {
+	_, err := apm.New(&commandexec.MockExecutor{}, apm.Project).InstallOnly(t.Context(), apm.SurfacePackages, nil, apm.InstallOptions{})
+	if !errors.Is(err, apm.ErrUnsupportedScope) {
+		t.Fatalf("error = %v, want ErrUnsupportedScope", err)
 	}
 }

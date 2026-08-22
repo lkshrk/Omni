@@ -35,7 +35,7 @@ func TestEveryOpCompleteProducerStampsItsGate(t *testing.T) {
 
 	for _, p := range producers {
 		t.Run(p.name, func(t *testing.T) {
-			m := setupImportModel(t)
+			m, _ := newDotsModelForCmds(t)
 			m.beginLoading(loadingOwnerLocalOp)
 			gen := m.loadingGen
 			if gen == 0 {

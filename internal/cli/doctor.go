@@ -37,7 +37,6 @@ func newDoctorCmd(state *rootState) *cobra.Command {
 				if fixResult.OptimizeErr == nil {
 					printOptimizeReport(out, fixResult.OptimizeReport, dryRun)
 				}
-				printSkillStoreFixReport(out, fixResult.SkillStore, dryRun)
 				if dryRun && fixResult.Err() == nil {
 					fmt.Fprintln(out, "dry run: no files were changed (ignore-pattern cleanup runs only on a real --fix)")
 				}
@@ -103,26 +102,6 @@ func printOptimizeReport(out io.Writer, report *config.OptimizeReport, dryRun bo
 		}
 		fmt.Fprintf(out, "%s %s duplicate %s from %s (group %q): %s\n",
 			verb, textutil.PluralCount(len(r.Names), "entry", "entries"), r.Key, r.File, r.Group, strings.Join(r.Names, ", "))
-	}
-}
-
-func printSkillStoreFixReport(out io.Writer, report app.SkillStoreFixReport, dryRun bool) {
-	removed, rebuilt := "removed", "rebuilt"
-	if dryRun {
-		removed, rebuilt = "would remove", "would rebuild"
-	}
-	// Each debris line already carries its own verb, since the action varies per item.
-	for _, line := range report.Debris {
-		fmt.Fprintln(out, line)
-	}
-	for _, path := range report.DanglingLinks {
-		fmt.Fprintf(out, "%s dangling skill link %s\n", removed, path)
-	}
-	for _, path := range report.OrphanedPackages {
-		fmt.Fprintf(out, "%s unreferenced skill package %s\n", removed, path)
-	}
-	for _, source := range report.RebuiltMetadata {
-		fmt.Fprintf(out, "%s local install metadata for %s\n", rebuilt, source)
 	}
 }
 

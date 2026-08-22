@@ -173,7 +173,6 @@ func load(path string, normalize bool) (*RootConfig, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	MigrateSkillPackages(&cfg)
 	if normalize {
 		Normalize(&cfg)
 	}
@@ -223,6 +222,10 @@ func missingMigrationError(version int) error {
 	return fmt.Errorf("missing config migration from version %d to %d", version, version+1)
 }
 
+func removedAgentConfigFieldError(path string) error {
+	return fmt.Errorf("config field %q was removed in v24; declare agent packages and runtime state in ~/.apm/apm.yml", path)
+}
+
 type configMigration struct {
 	from     int
 	to       int
@@ -253,6 +256,8 @@ var configMigrations = []configMigration{
 	{from: 19, to: 20, apply: migrateConfigV19ToV20, applyRaw: migrateRawConfigV19ToV20},
 	{from: 20, to: 21, apply: migrateConfigV20ToV21, applyRaw: migrateRawConfigV20ToV21},
 	{from: 21, to: 22, apply: migrateConfigV21ToV22, applyRaw: migrateRawConfigV21ToV22},
+	{from: 22, to: 23, apply: migrateConfigV22ToV23, applyRaw: migrateRawConfigV22ToV23},
+	{from: 23, to: 24, apply: migrateConfigV23ToV24, applyRaw: migrateRawConfigV23ToV24},
 }
 
 func configMigrationFrom(version int) (configMigration, bool) {
@@ -462,9 +467,6 @@ func Normalize(cfg *RootConfig) bool {
 			cfg.Hosts[host] = groups
 			changed = true
 		}
-	}
-	if ExpandGroupAgentRefs(cfg) {
-		changed = true
 	}
 	return changed
 }
@@ -803,11 +805,6 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 	out := *cfg
 	out.Include = nil
 	out.Settings = cloneSettings(cfg.Settings)
-	out.Agents.Packages = append([]SkillPackage(nil), cfg.Agents.Packages...)
-	for i := range out.Agents.Packages {
-		out.Agents.Packages[i].Skills = append([]string(nil), out.Agents.Packages[i].Skills...)
-		out.Agents.Packages[i].Agents = append([]string(nil), out.Agents.Packages[i].Agents...)
-	}
 	out.Groups = make([]*GroupConfig, 0, len(cfg.Groups))
 	for _, g := range cfg.Groups {
 		if g == nil {
@@ -818,7 +815,6 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 		gc.Taps = append([]string(nil), g.Taps...)
 		gc.Tools = append([]ToolEntry(nil), g.Tools...)
 		gc.Dots = append([]DotEntry(nil), g.Dots...)
-		gc.Skills = append([]string(nil), g.Skills...)
 		for i := range gc.Dots {
 			if gc.Dots[i].Hosts != nil {
 				hosts := make(map[string]DotVariant, len(gc.Dots[i].Hosts))
@@ -872,7 +868,6 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 func cloneSettings(settings Settings) Settings {
 	settings.DisabledProviders = cloneStringSlice(settings.DisabledProviders)
 	settings.ProviderPriority = cloneStringSlice(settings.ProviderPriority)
-	settings.AgentsUse = cloneStringSlice(settings.AgentsUse)
 	settings.ProviderUpdateQuarantine = cloneStringMap(settings.ProviderUpdateQuarantine)
 	if settings.Ecosystems != nil {
 		ecosystems := make(map[string]EcosystemSettings, len(settings.Ecosystems))
@@ -982,7 +977,7 @@ func migrateRawConfigV12ToV13(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// No-op: v15 only adds GroupConfig.Marketplaces, an omitempty field with no prior form to convert.
+// No-op: retained so old configs can still advance through the version chain.
 func migrateConfigV14ToV15(cfg *RootConfig) error {
 	cfg.Version = 15
 	return nil
@@ -993,7 +988,7 @@ func migrateRawConfigV14ToV15(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// No-op: v16 only adds AgentsIgnore.Marketplaces, an omitempty field with no prior form to convert.
+// No-op: retained so old configs can still advance through the version chain.
 func migrateConfigV15ToV16(cfg *RootConfig) error {
 	cfg.Version = 16
 	return nil
@@ -1026,7 +1021,7 @@ func migrateRawConfigV17ToV18(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// No-op: v19 adds optional McpServer headers for remote transports.
+// No-op: retained so old configs can still advance through the version chain.
 func migrateConfigV18ToV19(cfg *RootConfig) error {
 	cfg.Version = 19
 	return nil
@@ -1037,7 +1032,7 @@ func migrateRawConfigV18ToV19(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// No-op: v20 adds optional skill selectors to agents.packages; missing selectors keep the all-skills behavior.
+// No-op: retained so old configs can still advance through the version chain.
 func migrateConfigV19ToV20(cfg *RootConfig) error {
 	cfg.Version = 20
 	return nil
@@ -1048,7 +1043,7 @@ func migrateRawConfigV19ToV20(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// No-op: v21 lets plugins use a direct source instead of a marketplace.
+// No-op: retained so old configs can still advance through the version chain.
 func migrateConfigV20ToV21(cfg *RootConfig) error {
 	cfg.Version = 21
 	return nil
@@ -1067,6 +1062,30 @@ func migrateConfigV21ToV22(cfg *RootConfig) error {
 
 func migrateRawConfigV21ToV22(raw map[string]json.RawMessage) error {
 	raw["version"] = json.RawMessage(`22`)
+	return nil
+}
+
+// No-op: v24 rejects the removed agents section instead of rewriting it.
+func migrateConfigV22ToV23(cfg *RootConfig) error {
+	cfg.Version = 23
+	return nil
+}
+
+func migrateRawConfigV22ToV23(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`23`)
+	return nil
+}
+
+func migrateConfigV23ToV24(cfg *RootConfig) error {
+	cfg.Version = 24
+	return nil
+}
+
+func migrateRawConfigV23ToV24(raw map[string]json.RawMessage) error {
+	if err := validateRemovedAgentConfigFields(raw); err != nil {
+		return err
+	}
+	raw["version"] = json.RawMessage(`24`)
 	return nil
 }
 

@@ -69,11 +69,20 @@ func newImportApp(t *testing.T, providers ...provider.Provider) (*app.App, strin
 
 func newReconcileApp(t *testing.T, providers ...provider.Provider) (*app.App, string) {
 	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := filepath.Join(home, ".apm", "apm.yml")
+	if err := os.MkdirAll(filepath.Dir(manifest), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest, []byte("name: omni-test\nversion: 1.0.0\ndependencies:\n  apm: []\n  mcp: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
-	a := app.New(cfgPath,
-		app.WithMcpAdapters([]app.McpAdapter{}),
-		app.WithPluginAdapters([]app.PluginAdapter{}))
+	a := app.New(cfgPath)
 	if err := a.InitTestMode(context.Background(), providers...); err != nil {
 		t.Fatalf("InitTestMode: %v", err)
 	}
