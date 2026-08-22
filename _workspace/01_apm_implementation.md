@@ -31,6 +31,7 @@ Status: **producer complete; ready for test and review lanes**
 - Import install/audit is pinned to the global `~/.apm` workspace. The canonical MCP audit view now accepts an on-disk verified local `claude_skill` without `apm.yml`, matching the existing install classifier.
 - Reviewed MCP secret mappings retain each environment/header key, replace only its value with `${ENV_VAR}`, canonicalize legacy-only secret containers, and write self-defined servers directly to root `dependencies.mcp`. The import service runs native MCP reconciliation so target config plus lockfile ownership exist before audit; separate secured metadata records the imported candidate without creating a fake local MCP package.
 - Native plugin activation is captured before install as byte-exact secured backup content plus original mode. Verification/audit failure restores through a no-follow atomic filesystem capability, verifies bytes/hash/mode exactly, resets to `ownership-verified`, and remains idempotent across repeated resume.
+- Codex discovery, configuration, and user-scope primitive deployment share the same `CODEX_HOME` override, defaulting to `~/.codex`; package deployment no longer splits from the runtime’s configured state root.
 - Required Linux unit/transaction, macOS/Windows platform, clean-wheel smoke CI jobs wired into the merge gate.
 - CLI reference documentation.
 
@@ -97,6 +98,7 @@ Status: **producer complete; ready for test and review lanes**
 - Final MCP/import regression subset -> **91 passed, 4 Windows-only skipped**; direct manifest and lock assertions prove `env_literal`/blocked sentinels/literals do not survive apply. Ruff and diff-check -> **pass**.
 - Native MCP reconciliation/lockfile regression subset -> **67 passed**.
 - Final activation-restoration/importer subset -> **71 passed, 4 Windows-only skipped**; both post-retirement verification and audit failures restore exact compact bytes/mode and two resumes complete. Ruff and diff-check -> **pass**.
+- APM target/scope/Codex focused subset -> **192 passed**, including required custom-`CODEX_HOME` deployment; complete `tests/unit/integration` -> **1,959 passed**; Ruff/diff-check -> **pass**. The Omni tagged fixture’s prior `~/.codex` expectation was stale and is owned by the Omni lane.
 - Full unit command after CLI help repair -> **19,937 passed, 7 skipped, 21 xfailed, 99 subtests passed**.
 
 ## Remaining evidence / blockers

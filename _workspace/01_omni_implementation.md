@@ -64,6 +64,11 @@ Round-3 repairs complete locally: grouped conflict origin selection with durable
 - Native macOS repair:
   - SecureRoot canonicalizes an existing ancestor chain once (covering macOS `/var` -> `/private/var`) while still rejecting a symlink at the supplied root; all descendant I/O remains descriptor-relative/no-follow under the canonical capability.
   - Exact Linux race regressions and symlinked-parent regression PASS; Darwin amd64 securefile and Darwin arm64 app cross-compilation PASS; lint/vet/diff remain green.
+- Native Windows/reconcile repair:
+  - Windows atomic private-file replacement now uses Go's long-path-aware `os.Rename`/MoveFileEx wrapper without the problematic `MOVEFILE_WRITE_THROUGH` flag, then verifies destination existence and exact protected DACL before success.
+  - Platform regex is narrowed to `CommitLegacyFragments`, avoiding unrelated unsafe-HOME fragment tests.
+  - Reconcile test setup owns an isolated HOME with no ambient APM manifest; missing manifest remains a deterministic no-op even with `apm` absent from PATH.
+  - Exact clean-PATH reconcile tests PASS; Linux race, Windows securefile/app cross-compilation, lint, vet, actionlint, and diff check PASS.
 
 ## Protocol assumptions
 

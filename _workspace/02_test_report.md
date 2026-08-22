@@ -4,7 +4,7 @@ Status: PASS — all local and immutable-pin DinD gates green; Windows/macOS run
 
 ## Leader release gate
 
-- APM fork commit: `a3c89209d1da00ae4a1d1c64b0bb94e41e44e541` (`0.28.0+omni.3`), pushed to `lkshrk/apm`.
+- APM fork commit: `6a3bdd34e40024f2c58636dbb13951a7b33bfbcb` (`0.28.0+omni.3`), pushed to `lkshrk/apm`.
 - Omni source, Docker, CI, tests, and docs pin that exact commit/version.
 - Real DinD onboarding shard passed against the remote immutable commit:
   `TestAgentsOnboardRealPinnedAPM` and `TestTUIAgentsOnboardingPreviewConfirmAndApply` executed under `-race -trimpath`.

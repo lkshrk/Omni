@@ -140,13 +140,13 @@ jobs:
           python-version: '3.12'
 
       - name: Install pinned APM
-        run: python -m pip install git+https://github.com/lkshrk/apm.git@a3c89209d1da00ae4a1d1c64b0bb94e41e44e541
+        run: python -m pip install git+https://github.com/lkshrk/apm.git@6a3bdd34e40024f2c58636dbb13951a7b33bfbcb
 
       - name: Test portable APM target contracts
         run: go test ./internal/app -run '^TestAPM(Target|User)'
 
       - name: Test onboarding protocol and private-state contracts
-        run: go test ./internal/securefile ./internal/config ./internal/apm ./internal/app -run 'Onboard|ImportSchema|DefaultStateDir|RootPrivate|RootRejects|VerifyDetects|Fragment|DescriptorRelative|WriteConfigLocks|InitDetects'
+        run: go test ./internal/securefile ./internal/config ./internal/apm ./internal/app -run 'Onboard|ImportSchema|DefaultStateDir|RootPrivate|RootRejects|VerifyDetects|CommitLegacyFragments|DescriptorRelative|WriteConfigLocks|InitDetects'
 
       - name: Test real stable-target MCP lifecycle
         run: go test -tags=integration ./internal/apm -run '^TestGlobalMCPLifecycleForEveryStableTarget$' -count=1
@@ -162,7 +162,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Test onboarding coordinator, protocol, security, and CLI
-        run: go test -race -count=1 ./internal/securefile ./internal/config ./internal/executor ./internal/apm ./internal/app ./internal/cli ./internal/tui -run 'Onboard|Legacy|CommitLegacy|ImportSchema|DefaultStateDir|ActionCatalog|RootPrivate|RootRejects|APMCommand|Fragment|DescriptorRelative|WriteConfigLocks|InitDetects'
+        run: go test -race -count=1 ./internal/securefile ./internal/config ./internal/executor ./internal/apm ./internal/app ./internal/cli ./internal/tui -run 'Onboard|Legacy|CommitLegacyFragments|ImportSchema|DefaultStateDir|ActionCatalog|RootPrivate|RootRejects|APMCommand|DescriptorRelative|WriteConfigLocks|InitDetects'
 
   integration:
     name: Docker Integration Tests (${{ matrix.name }})

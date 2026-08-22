@@ -85,7 +85,7 @@ description: Offline APM integration fixture
 		t.Fatalf("skill was not deployed: %v", err)
 	}
 	for _, path := range []string{
-		filepath.Join(home, ".codex", "agents", "reviewer.toml"),
+		filepath.Join(codexHome, "agents", "reviewer.toml"),
 		filepath.Join(home, ".claude", "agents", "reviewer.md"),
 	} {
 		if _, err := os.Stat(path); err != nil {
