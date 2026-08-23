@@ -38,6 +38,7 @@ func TestAgentsOnboardLifecycleOnlyAPM(t *testing.T) {
 	defer func() { onboardingPinnedAPMCheck = originalCheck }()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("OMNI_HOSTNAME", "onboard-e2e")
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
