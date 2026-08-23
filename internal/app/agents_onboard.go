@@ -988,6 +988,11 @@ func validateReviewedOnboardPlan(plan OnboardPlan) error {
 	if plan.SchemaVersion != onboardSchemaVersion {
 		return errors.New("reviewed plan schema mismatch")
 	}
+	for _, item := range plan.Items {
+		if item.Dots != nil && item.Dots.Native && item.Resolution.Decision == "keep-in-dots" {
+			return fmt.Errorf("native item %s cannot be kept in dots", item.Name)
+		}
+	}
 	p, r, o := plan.PlanID, plan.ResolutionID, plan.OperationID
 	if err := bindOnboardPlan(&plan); err != nil {
 		return err
