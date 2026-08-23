@@ -27,6 +27,10 @@ Desktop.ini
 CLAUDE.md
 AGENTS.md
 GEMINI.md
+CONTEXT.md
+.ai-context/
+_workspace/
+docs/harness/
 .agents/
 .codex/
 .claudeignore
