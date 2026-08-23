@@ -137,11 +137,6 @@ func (a *App) buildAgentsOnboardPlan(ctx context.Context) (OnboardPlan, error) {
 	}
 	inv.Envelope.Candidates = append(inv.Envelope.Candidates, dotCandidates...)
 	inv.Envelope.SourcePreimages = append(inv.Envelope.SourcePreimages, dotPreimages...)
-	sort.Slice(inv.Envelope.Candidates, func(i, j int) bool { return inv.Envelope.Candidates[i].ID < inv.Envelope.Candidates[j].ID })
-	sort.Slice(inv.Envelope.SourcePreimages, func(i, j int) bool { return inv.Envelope.SourcePreimages[i].ID < inv.Envelope.SourcePreimages[j].ID })
-	inv.Envelope.CandidateSetID = canonicalDigest(map[string]any{"preimages": inv.Envelope.SourcePreimages, "candidates": inv.Envelope.Candidates})
-	rawPreimages, _ := json.Marshal(inv.Envelope.SourcePreimages)
-	inv.PreimageSet = digestBytes(rawPreimages)
 	client, err := a.onboardingClient(ctx)
 	if err != nil {
 		return OnboardPlan{}, err
@@ -151,15 +146,21 @@ func (a *App) buildAgentsOnboardPlan(ctx context.Context) (OnboardPlan, error) {
 		return OnboardPlan{}, err
 	}
 	var rows []struct {
-		Target string `json:"target"`
+		Target    string `json:"target"`
+		DeployDir string `json:"deploy_dir"`
+		Meta      bool   `json:"meta_target"`
 	}
 	if err := json.Unmarshal([]byte(targetResult.Stdout), &rows); err != nil {
 		return OnboardPlan{}, fmt.Errorf("decode APM targets: %w", err)
 	}
 	var targets []string
+	var deployDirs []string
 	for _, row := range rows {
-		if row.Target != "" {
+		if row.Target != "" && !row.Meta {
 			targets = append(targets, row.Target)
+		}
+		if row.DeployDir != "" {
+			deployDirs = append(deployDirs, row.DeployDir)
 		}
 	}
 	targets = sortedUnique(targets)
@@ -171,6 +172,23 @@ func (a *App) buildAgentsOnboardPlan(ctx context.Context) (OnboardPlan, error) {
 	if readErr != nil {
 		return OnboardPlan{}, readErr
 	}
+	markerPath, err := onboardCompletionMarkerPath()
+	if err != nil {
+		return OnboardPlan{}, err
+	}
+	if !regularOnboardFile(markerPath) && !onboardManifestHasOmniImports(existing) {
+		nativeCandidates, nativePreimages, err := extractNativeCandidates(sortedUnique(deployDirs), dotCandidates)
+		if err != nil {
+			return OnboardPlan{}, err
+		}
+		inv.Envelope.Candidates = append(inv.Envelope.Candidates, nativeCandidates...)
+		inv.Envelope.SourcePreimages = append(inv.Envelope.SourcePreimages, nativePreimages...)
+	}
+	sort.Slice(inv.Envelope.Candidates, func(i, j int) bool { return inv.Envelope.Candidates[i].ID < inv.Envelope.Candidates[j].ID })
+	sort.Slice(inv.Envelope.SourcePreimages, func(i, j int) bool { return inv.Envelope.SourcePreimages[i].ID < inv.Envelope.SourcePreimages[j].ID })
+	inv.Envelope.CandidateSetID = canonicalDigest(map[string]any{"preimages": inv.Envelope.SourcePreimages, "candidates": inv.Envelope.Candidates})
+	rawPreimages, _ := json.Marshal(inv.Envelope.SourcePreimages)
+	inv.PreimageSet = digestBytes(rawPreimages)
 	items := make([]OnboardItem, 0, len(inv.Envelope.Candidates))
 	for _, c := range inv.Envelope.Candidates {
 		item := OnboardItem{ID: c.ID, Kind: c.Kind, Name: c.Name, Source: c.SourceHandle, ProposedTargets: append([]string(nil), c.SourceTargets...), TargetOptions: targets, Payload: c.Payload, ContentFingerprint: c.ContentFingerprint, Dots: c.Dots, Resolution: OnboardResolution{EnvBindings: map[string]string{}, ApprovedTargets: append([]string(nil), c.SourceTargets...)}}
@@ -181,13 +199,21 @@ func (a *App) buildAgentsOnboardPlan(ctx context.Context) (OnboardPlan, error) {
 		}
 		if blocker, _ := payload["blocker"].(string); blocker != "" {
 			item.Blockers = append(item.Blockers, blocker)
-			item.Resolution.Decision = "keep-in-dots"
+			if c.Dots != nil && c.Dots.Native {
+				item.Resolution.Decision = "keep-unmanaged"
+			} else {
+				item.Resolution.Decision = "keep-in-dots"
+			}
 		}
 		if c.Kind == "unsupported" {
 			item.Blockers = append(item.Blockers, "unsupported")
 			item.Resolution.Decision = "keep-unmanaged"
 		}
-		if c.Dots != nil && item.Resolution.Decision == "" {
+		if c.Dots != nil && c.Dots.Native && item.Resolution.Decision == "" {
+			item.Resolution.Decision = "keep-unmanaged"
+			item.Blockers = append(item.Blockers, "target-resolution-required")
+		}
+		if c.Dots != nil && !c.Dots.Native && item.Resolution.Decision == "" {
 			item.Resolution.Decision = "keep-in-dots"
 		}
 		if c.Dots == nil && item.Resolution.Decision == "" {
@@ -210,6 +236,7 @@ func (a *App) buildAgentsOnboardPlan(ctx context.Context) (OnboardPlan, error) {
 	if err != nil {
 		return OnboardPlan{}, err
 	}
+	mergeBlockers = attachOnboardMergeBlockers(items, mergeBlockers)
 	plan := OnboardPlan{SchemaVersion: onboardSchemaVersion, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), CandidateSetID: inv.Envelope.CandidateSetID, PreimageSet: inv.PreimageSet, SourcePreimages: inv.Envelope.SourcePreimages, Items: items, Marketplaces: sortedMarketplaces(markets), ProposedManifest: string(proposed), Blockers: mergeBlockers}
 	for _, item := range items {
 		if item.Resolution.Decision != "keep-unmanaged" && item.Resolution.Decision != "keep-in-dots" {
@@ -221,6 +248,27 @@ func (a *App) buildAgentsOnboardPlan(ctx context.Context) (OnboardPlan, error) {
 		return OnboardPlan{}, err
 	}
 	return plan, nil
+}
+
+func attachOnboardMergeBlockers(items []OnboardItem, blockers []string) []string {
+	global := make([]string, 0, len(blockers))
+	for _, blocker := range blockers {
+		id, reason, ok := strings.Cut(blocker, ":")
+		if ok {
+			for i := range items {
+				if items[i].ID == id {
+					items[i].Blockers = append(items[i].Blockers, reason)
+					reason = ""
+					break
+				}
+			}
+			if reason == "" {
+				continue
+			}
+		}
+		global = append(global, blocker)
+	}
+	return global
 }
 
 func (a *App) AgentsOnboardApply(ctx context.Context, path string) (AgentsOnboardResult, error) {
@@ -396,6 +444,16 @@ func (a *App) continueOnboardOperation(ctx context.Context, root *securefile.Roo
 				continue
 			}
 			if journal.PendingMaterializeItem == item.ID {
+				if item.Dots.Native {
+					if _, err := os.Lstat(item.Dots.SourcePath); errors.Is(err, os.ErrNotExist) {
+						journal.MaterializedItems = append(journal.MaterializedItems, item.ID)
+						journal.PendingMaterializeItem = ""
+						if err := writeOnboardJournal(root, *journal); err != nil {
+							return err
+						}
+						continue
+					}
+				}
 				if err := verifyMaterializedOnboardItem(item, *journal); err == nil && onboardDotOwnershipReleased(a.ConfigPath, *item.Dots) {
 					journal.MaterializedItems = append(journal.MaterializedItems, item.ID)
 					journal.PendingMaterializeItem = ""
@@ -413,11 +471,17 @@ func (a *App) continueOnboardOperation(ctx context.Context, root *securefile.Roo
 			if err := writeOnboardJournal(root, *journal); err != nil {
 				return err
 			}
-			if err := onboardingDotMaterializer(ctx, a, *item.Dots); err != nil {
-				return &OnboardingRecoveryError{OperationID: plan.OperationID, OmniPhase: journal.Phase, Cause: err}
-			}
-			if err := verifyMaterializedOnboardItem(item, *journal); err != nil {
-				return &OnboardingRecoveryError{OperationID: plan.OperationID, OmniPhase: journal.Phase, Cause: fmt.Errorf("%s: %w", item.Name, err)}
+			if item.Dots.Native {
+				if err := removeOnboardNativeSource(*item.Dots); err != nil {
+					return &OnboardingRecoveryError{OperationID: plan.OperationID, OmniPhase: journal.Phase, Cause: err}
+				}
+			} else {
+				if err := onboardingDotMaterializer(ctx, a, *item.Dots); err != nil {
+					return &OnboardingRecoveryError{OperationID: plan.OperationID, OmniPhase: journal.Phase, Cause: err}
+				}
+				if err := verifyMaterializedOnboardItem(item, *journal); err != nil {
+					return &OnboardingRecoveryError{OperationID: plan.OperationID, OmniPhase: journal.Phase, Cause: fmt.Errorf("%s: %w", item.Name, err)}
+				}
 			}
 			if onboardingPhaseFailpoint != nil {
 				if err := onboardingPhaseFailpoint("after-materialize:" + item.ID); err != nil {
@@ -533,12 +597,27 @@ func (a *App) continueOnboardOperation(ctx context.Context, root *securefile.Roo
 		}
 	}
 	if journal.Phase == "v24-committed" {
+		markerPath, err := onboardCompletionMarkerPath()
+		if err != nil {
+			return err
+		}
+		if err := atomicWriteOnboardFile(markerPath, []byte(journal.OperationID+"\n"), 0o600); err != nil {
+			return err
+		}
 		return advance("complete")
 	}
 	if journal.Phase != "complete" {
 		return fmt.Errorf("unsupported onboarding journal phase %q", journal.Phase)
 	}
 	return nil
+}
+
+func onboardCompletionMarkerPath() (string, error) {
+	workspace, err := apm.GlobalWorkspaceDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(workspace, ".omni-onboarding-complete"), nil
 }
 
 func verifyOnboardMarketplacePreimage(j onboardJournal) error {
@@ -1084,6 +1163,17 @@ func writePlanAndJournal(root *securefile.Root, plan OnboardPlan, j *onboardJour
 	}
 	return writeOnboardJournal(root, *j)
 }
+
+func removeOnboardNativeSource(ref OnboardDotsRef) error {
+	rel, err := filepath.Rel(ref.OwnerRoot, ref.SourcePath)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || strings.ContainsRune(rel, os.PathSeparator) {
+		return errors.New("unsafe native onboarding source")
+	}
+	if err := validateOnboardSourceAncestors(ref.OwnerRoot, ref.SourcePath); err != nil {
+		return err
+	}
+	return os.RemoveAll(ref.SourcePath)
+}
 func stageOnboardDotPackages(root *securefile.Root, items []OnboardItem, j *onboardJournal) error {
 	for _, item := range items {
 		if item.Resolution.Decision != "move-to-apm" || item.Dots == nil {
@@ -1241,7 +1331,7 @@ func verifyMaterializedOnboardItem(item OnboardItem, j onboardJournal) error {
 
 func prepareOnboardTransformedTargets(plan OnboardPlan, journal onboardJournal) error {
 	for _, item := range plan.Items {
-		if item.Dots == nil || item.Resolution.Decision != "move-to-apm" || (item.Kind != "command" && item.Kind != "prompt") {
+		if item.Dots == nil || item.Dots.Native || item.Resolution.Decision != "move-to-apm" || (item.Kind != "command" && item.Kind != "prompt") {
 			continue
 		}
 		if _, err := os.Lstat(item.Dots.TargetPath); errors.Is(err, os.ErrNotExist) {

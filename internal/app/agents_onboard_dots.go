@@ -24,6 +24,85 @@ type OnboardDotsRef struct {
 	SourcePath           string `json:"source_path"`
 	OwnerRoot            string `json:"owner_root"`
 	OwnershipFingerprint string `json:"ownership_fingerprint"`
+	Native               bool   `json:"native,omitempty"`
+}
+
+func extractNativeCandidates(deployDirs []string, owned []OnboardCandidate) ([]OnboardCandidate, []OnboardSourcePreimage, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil, err
+	}
+	ownedPaths := make(map[string]bool, len(owned))
+	for _, candidate := range owned {
+		if candidate.Dots != nil {
+			ownedPaths[filepath.Clean(candidate.Dots.TargetPath)] = true
+		}
+	}
+	var candidates []OnboardCandidate
+	var preimages []OnboardSourcePreimage
+	seenRoots := map[string]bool{}
+	for _, deployDir := range deployDirs {
+		deployDir = filepath.Clean(filepath.FromSlash(deployDir))
+		if deployDir == "." || filepath.IsAbs(deployDir) || deployDir == ".." || strings.HasPrefix(deployDir, ".."+string(os.PathSeparator)) {
+			continue
+		}
+		root := filepath.Join(home, deployDir)
+		if seenRoots[root] {
+			continue
+		}
+		seenRoots[root] = true
+		if info, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return nil, nil, err
+		} else if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			continue
+		}
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if path == root {
+				return nil
+			}
+			kind, ok := apmResourceBoundary(root, path, entry)
+			if !ok {
+				return nil
+			}
+			if ownedPaths[filepath.Clean(path)] || entry.Type()&os.ModeSymlink != 0 {
+				if entry.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			fingerprint, scanErr := onboardTreeFingerprint(path, root)
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			preID := canonicalDigest(map[string]any{"path": path, "kind": "native"})[:24]
+			id := digest("omni-native-v1", kind, path, fingerprint)
+			payload := map[string]any{"path": path}
+			if scanErr != nil {
+				payload["blocker"] = "unsafe-unowned-symlink"
+				payload["detail"] = scanErr.Error()
+				fingerprint = digest("blocked", scanErr.Error())
+			}
+			raw, _ := json.Marshal(payload)
+			preimages = append(preimages, OnboardSourcePreimage{ID: preID, AbsolutePath: path, Kind: "native", Size: info.Size(), Mode: uint32(info.Mode().Perm()), ContentFingerprint: fingerprint})
+			candidates = append(candidates, OnboardCandidate{ID: id, Kind: kind, Name: entry.Name(), SourceHandle: "native:" + path, Payload: raw, ContentFingerprint: fingerprint, SourcePreimageIDs: []string{preID}, Dots: &OnboardDotsRef{TargetPath: path, SourcePath: path, OwnerRoot: filepath.Dir(path), OwnershipFingerprint: fingerprint, Native: true}})
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].ID < candidates[j].ID })
+	sort.Slice(preimages, func(i, j int) bool { return preimages[i].ID < preimages[j].ID })
+	return candidates, preimages, nil
 }
 
 func (a *App) extractDotsCandidates() ([]OnboardCandidate, []OnboardSourcePreimage, error) {

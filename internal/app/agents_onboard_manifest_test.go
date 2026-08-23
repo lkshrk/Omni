@@ -453,6 +453,107 @@ func TestBuildOnboardManifestPreservesReviewedTargetsForEveryLegacyDeploymentKin
 	}
 }
 
+func TestOnboardAPMEntryOmitsEmptyTargetSubset(t *testing.T) {
+	entry, err := onboardAPMEntry(OnboardItem{ID: strings.Repeat("d", 64), Kind: "skill", Dots: &OnboardDotsRef{Native: true}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := entry["targets"]; ok {
+		t.Fatalf("empty target subset emitted: %v", entry)
+	}
+}
+
+func TestExtractNativeCandidatesUsesAPMDeployRoots(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	skill := filepath.Join(home, ".agents", "skills", "custom")
+	if err := os.MkdirAll(skill, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("# custom\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".agents", "SKILL.md"), []byte("# root marker\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	candidates, preimages, err := extractNativeCandidates([]string{".agents", "../escape"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || len(preimages) != 1 || candidates[0].Name != "custom" || candidates[0].Kind != "skill" || candidates[0].Dots == nil || !candidates[0].Dots.Native || candidates[0].Dots.OwnerRoot != filepath.Dir(skill) {
+		t.Fatalf("candidates=%#v preimages=%#v", candidates, preimages)
+	}
+	owned := []OnboardCandidate{{Dots: &OnboardDotsRef{TargetPath: skill}}}
+	if candidates, _, err := extractNativeCandidates([]string{".agents"}, owned); err != nil || len(candidates) != 0 {
+		t.Fatalf("owned candidates=%#v err=%v", candidates, err)
+	}
+}
+
+func TestExtractNativeCandidatesBlocksUnsafeResourceAndKeepsSibling(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink setup requires Unix semantics")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	safe := filepath.Join(home, ".claude", "skills", "safe")
+	unsafe := filepath.Join(home, ".claude", "plugins", "unsafe")
+	for _, dir := range []string{safe, filepath.Join(unsafe, ".claude-plugin")} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(safe, "SKILL.md"), []byte("safe"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unsafe, ".claude-plugin", "plugin.json"), []byte(`{"name":"unsafe"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(home, filepath.Join(unsafe, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	candidates, _, err := extractNativeCandidates([]string{".claude"}, nil)
+	if err != nil || len(candidates) != 2 {
+		t.Fatalf("candidates=%#v err=%v", candidates, err)
+	}
+	blocked := false
+	for _, candidate := range candidates {
+		if candidate.Name == "unsafe" {
+			blocked = strings.Contains(string(candidate.Payload), "unsafe-unowned-symlink")
+		}
+	}
+	if !blocked {
+		t.Fatalf("unsafe plugin was not item-blocked: %#v", candidates)
+	}
+}
+
+func TestOnboardManifestHasOmniImports(t *testing.T) {
+	if !onboardManifestHasOmniImports([]byte("dependencies:\n  apm:\n    - path: /tmp/.apm/omni-imports/abc\n")) || onboardManifestHasOmniImports([]byte("dependencies:\n  apm:\n    - path: /tmp/custom\n")) {
+		t.Fatal("durable Omni ownership marker detection failed")
+	}
+}
+
+func TestRemoveOnboardNativeSourceOnlyRemovesReviewedChild(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "custom")
+	if err := os.MkdirAll(source, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "SKILL.md"), []byte("skill"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeOnboardNativeSource(OnboardDotsRef{OwnerRoot: root, SourcePath: source, Native: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(source); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("source still exists: %v", err)
+	}
+	if err := removeOnboardNativeSource(OnboardDotsRef{OwnerRoot: root, SourcePath: root, Native: true}); err == nil {
+		t.Fatal("owner root removal accepted")
+	}
+}
+
 func TestBuildOnboardManifestConflictingIdentityBlocks(t *testing.T) {
 	original := []byte("name: demo\nversion: 1.0.0\ndependencies:\n  apm:\n    - git: https://example.test/pkg.git\n      ref: old\n  mcp: []\n")
 	item := OnboardItem{ID: strings.Repeat("c", 64), Kind: "package", Name: "pkg", Payload: []byte(`{"source":"https://example.test/pkg.git","ref":"new"}`), Resolution: OnboardResolution{Decision: "migrate"}}
@@ -462,6 +563,32 @@ func TestBuildOnboardManifestConflictingIdentityBlocks(t *testing.T) {
 	}
 	if got != nil || len(blockers) != 1 || !strings.Contains(blockers[0], "dependency-conflict") {
 		t.Fatalf("got=%q blockers=%v", got, blockers)
+	}
+}
+
+func TestAttachOnboardMergeBlockersMakesItemConflictResolvable(t *testing.T) {
+	items := []OnboardItem{{ID: "one"}, {ID: "two"}}
+	global := attachOnboardMergeBlockers(items, []string{"two:dependency-conflict", "ambiguous-existing-dependencies"})
+	if !slices.Equal(items[1].Blockers, []string{"dependency-conflict"}) || !slices.Equal(global, []string{"ambiguous-existing-dependencies"}) {
+		t.Fatalf("items=%#v global=%v", items, global)
+	}
+}
+
+func TestManifestConflictAttachesToConflictingItemAndCanBeExcluded(t *testing.T) {
+	items := []OnboardItem{
+		{ID: "one", Kind: "package", Payload: []byte(`{"source":"https://example.test/pkg.git","ref":"one"}`), Resolution: OnboardResolution{Decision: "migrate"}},
+		{ID: "two", Kind: "package", Payload: []byte(`{"source":"https://example.test/pkg.git","ref":"two"}`), Resolution: OnboardResolution{Decision: "migrate"}},
+	}
+	_, _, blockers, err := buildOnboardManifest(nil, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if global := attachOnboardMergeBlockers(items, blockers); len(global) != 0 || len(items[0].Blockers) != 0 || !slices.Equal(items[1].Blockers, []string{"dependency-conflict"}) {
+		t.Fatalf("items=%#v blockers=%v global=%v", items, blockers, global)
+	}
+	items[1].Resolution.Decision = "keep-unmanaged"
+	if _, _, blockers, err := buildOnboardManifest(nil, items); err != nil || len(blockers) != 0 {
+		t.Fatalf("excluded conflict remains: blockers=%v err=%v", blockers, err)
 	}
 }
 
@@ -1043,6 +1170,75 @@ func TestAgentsOnboardApplyKeepInDotsDoesNotWriteDotsPaths(t *testing.T) {
 	}
 	if !maps.Equal(beforeTarget, snapshotOnboardTestTree(t, filepath.Join(home, ".agents"))) || !maps.Equal(beforeRepo, snapshotOnboardTestTree(t, repo)) {
 		t.Fatal("keep-in-dots apply mutated target or dots repo")
+	}
+}
+
+func TestOnboardCompletionMarkerSurvivesCleanupWithoutLocalImports(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	configPath := filepath.Join(home, ".config", "omni", "settings.json")
+	if err := config.Save(configPath, &config.RootConfig{Version: config.CurrentVersion}); err != nil {
+		t.Fatal(err)
+	}
+	native := filepath.Join(home, ".agents", "skills", "local")
+	if err := os.MkdirAll(native, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(native, "SKILL.md"), []byte("local"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := New(configPath)
+	a.StateDir = filepath.Join(home, ".local", "state", "omni")
+	if err := a.InitTestMode(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["agents"] = map[string]any{"skills": []any{map[string]any{"name": "remote", "source": "acme/remote", "agents": []string{"codex"}}}}
+	data, _ = json.Marshal(raw)
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mock := &availableMatchMock{executor.NewMatchMock(
+		executor.MatchRule{Pattern: "apm targets --json --all", Response: executor.MockCall{Stdout: `[{"target":"codex","deploy_dir":".codex"},{"target":"agent-skills","deploy_dir":".agents","meta_target":true}]`}},
+	).WithFallback(executor.MockCall{})}
+	a.SetFallbackExecutor(mock)
+	originalCheck := onboardingPinnedAPMCheck
+	onboardingPinnedAPMCheck = func(context.Context, *App) error { return nil }
+	t.Cleanup(func() { onboardingPinnedAPMCheck = originalCheck })
+	result, err := a.AgentsOnboardPlan(t.Context(), AgentsOnboardOptions{})
+	if err != nil || result.Envelope.Plan == nil || len(result.Envelope.Plan.Items) != 2 {
+		t.Fatalf("plan=%#v err=%v", result.Envelope.Plan, err)
+	}
+	for i := range result.Envelope.Plan.Items {
+		if result.Envelope.Plan.Items[i].Name == "local" {
+			result.Envelope.Plan.Items[i].Resolution.Decision = "keep-unmanaged"
+		}
+	}
+	applied, err := a.AgentsOnboardApplyReviewed(t.Context(), *result.Envelope.Plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.AgentsOnboardCleanup(t.Context(), applied.Envelope.OperationID, true); err != nil {
+		t.Fatal(err)
+	}
+	marker, err := onboardCompletionMarkerPath()
+	if err != nil || !regularOnboardFile(marker) {
+		t.Fatalf("completion marker=%q err=%v", marker, err)
+	}
+	second, err := a.AgentsOnboardPlan(t.Context(), AgentsOnboardOptions{})
+	if err != nil || second.Envelope.Plan == nil || len(second.Envelope.Plan.Items) != 0 {
+		t.Fatalf("post-cleanup plan=%#v err=%v", second.Envelope.Plan, err)
 	}
 }
 

@@ -177,6 +177,24 @@ func buildOnboardManifest(existing []byte, items []OnboardItem) ([]byte, []Onboa
 	return out.Bytes(), markets, nil, nil
 }
 
+func onboardManifestHasOmniImports(data []byte) bool {
+	var manifest struct {
+		Dependencies struct {
+			APM []any `yaml:"apm"`
+		} `yaml:"dependencies"`
+	}
+	if yaml.Unmarshal(data, &manifest) != nil {
+		return false
+	}
+	for _, raw := range manifest.Dependencies.APM {
+		path, _ := normalizeYAMLMap(raw)["path"].(string)
+		if filepath.Base(filepath.Dir(filepath.Clean(path))) == "omni-imports" {
+			return true
+		}
+	}
+	return false
+}
+
 func parseOnboardManifest(data []byte) (yaml.Node, []byte, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		data = []byte("name: omni-migrated\nversion: 1.0.0\ndependencies:\n  apm: []\n  mcp: []\n")
@@ -327,7 +345,11 @@ func onboardAPMEntry(item OnboardItem, payload map[string]any) (map[string]any, 
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"path": path, "targets": item.Resolution.ApprovedTargets}, nil
+		entry := map[string]any{"path": path}
+		if len(item.Resolution.ApprovedTargets) > 0 {
+			entry["targets"] = item.Resolution.ApprovedTargets
+		}
+		return entry, nil
 	}
 	if item.Kind == "plugin" {
 		if marketplace, _ := payload["marketplace"].(string); marketplace != "" {

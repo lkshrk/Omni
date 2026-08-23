@@ -120,6 +120,10 @@ func TestAgentsOnboardTargetSelectionPreservesDotsOwnership(t *testing.T) {
 	if item.Resolution.Decision != "" {
 		t.Fatalf("target selection invented dots ownership decision %q", item.Resolution.Decision)
 	}
+	native := app.OnboardItem{Dots: &app.OnboardDotsRef{Native: true}, Resolution: app.OnboardResolution{Decision: "keep-unmanaged"}}
+	if resolveOnboardItem(&native, "d") || native.Resolution.Decision != "keep-unmanaged" {
+		t.Fatalf("native item accepted keep-in-dots: %#v", native.Resolution)
+	}
 }
 
 func TestAPMCommandOutputPreservesStdoutAndStderr(t *testing.T) {
