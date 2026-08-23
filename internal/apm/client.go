@@ -172,7 +172,20 @@ func (c *Client) Targets(ctx context.Context) (Result, error) {
 
 // TargetsJSON returns the live APM target catalog. Target names stay opaque to Omni.
 func (c *Client) TargetsJSON(ctx context.Context) (Result, error) {
-	return c.run(ctx, "targets", "--json")
+	home, err := os.MkdirTemp("", "omni-apm-targets-")
+	if err != nil {
+		return Result{}, fmt.Errorf("create isolated APM home: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(home) }()
+
+	return c.runEnv(ctx, []string{
+		"APM_E2E_TESTS=1",
+		"HOME=" + home,
+		"USERPROFILE=" + home,
+		"XDG_CONFIG_HOME=" + filepath.Join(home, ".config"),
+		"XDG_CACHE_HOME=" + filepath.Join(home, ".cache"),
+		"XDG_STATE_HOME=" + filepath.Join(home, ".state"),
+	}, "targets", "--json", "--all")
 }
 
 func (c *Client) scoped(command string) []string {

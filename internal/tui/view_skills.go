@@ -19,14 +19,22 @@ func (m Model) viewSkillsBody() string {
 		p.styleHelp.Render(pad + "O onboard   T status   V resume   X cleanup   S sync   U update   R inspect   e logs"),
 	}
 	if item := m.currentOnboardItem(); item != nil {
-		lines = append(lines, "", p.styleTitle.Render(fmt.Sprintf("%s%d/%d %s (%s)", pad, m.agentsOnboardItem+1, len(m.agentsOnboardPlan.Envelope.Plan.Items), item.Name, item.Kind)), p.styleHelp.Render(pad+"j/k inspect  m map secret  M move to APM  d keep in dots  x keep unmanaged  Enter apply"))
+		actions := "j/k inspect  m map secret  M move to APM  d keep in dots  x keep unmanaged  Enter apply"
+		if item.Dots != nil && item.Dots.Native {
+			actions = "j/k inspect  M move to APM  x keep unmanaged  Enter apply"
+		}
+		lines = append(lines, "", p.styleTitle.Render(fmt.Sprintf("%s%d/%d %s (%s)", pad, m.agentsOnboardItem+1, len(m.agentsOnboardPlan.Envelope.Plan.Items), item.Name, item.Kind)), p.styleHelp.Render(pad+actions))
 		if choices := onboardTargetChoiceHelp(*item); choices != "" {
 			lines = append(lines, p.styleHelp.Render(pad+choices))
 		}
 		if len(item.Blockers) > 0 {
 			lines = append(lines, p.styleHelp.Render(pad+strings.Join(item.Blockers, ", ")))
 		}
-		lines = append(lines, p.styleHelp.Render(fmt.Sprintf("%sdecision=%s remaining=%d", pad, item.Resolution.Decision, onboardBlockerCount(m.agentsOnboardPlan.Envelope.Plan))))
+		decision := fmt.Sprintf("%sdecision=%s remaining=%d", pad, item.Resolution.Decision, onboardBlockerCount(m.agentsOnboardPlan.Envelope.Plan))
+		if len(item.Resolution.ApprovedTargets) > 0 {
+			decision += " targets=" + strings.Join(item.Resolution.ApprovedTargets, ",")
+		}
+		lines = append(lines, p.styleHelp.Render(decision))
 	}
 	if m.apmRunning {
 		lines = append(lines, "", p.styleStatus.Render(pad+"running "+m.apmCommand+"…"))

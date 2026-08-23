@@ -198,6 +198,36 @@ func TestAuditGlobalScrubsReviewedEnvironment(t *testing.T) {
 	}
 }
 
+func TestTargetsJSONUsesDisposableHome(t *testing.T) {
+	mock := &commandexec.MockExecutor{Responses: []commandexec.MockCall{{Stdout: `{"targets":[]}`}}}
+	result, err := apm.New(mock, apm.Global).TargetsJSON(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Stdout != `{"targets":[]}` || len(mock.Calls) != 1 {
+		t.Fatalf("result=%#v calls=%#v", result, mock.Calls)
+	}
+	call := mock.Calls[0]
+	if !reflect.DeepEqual(call.Args, []string{"targets", "--json", "--all"}) {
+		t.Fatalf("args=%v", call.Args)
+	}
+	env := make(map[string]string, len(call.Env))
+	for _, entry := range call.Env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			t.Fatalf("unexpected unset in environment: %q", entry)
+		}
+		env[key] = value
+	}
+	home := env["HOME"]
+	if env["APM_E2E_TESTS"] != "1" || home == "" || env["USERPROFILE"] != home || env["XDG_CONFIG_HOME"] != filepath.Join(home, ".config") || env["XDG_CACHE_HOME"] != filepath.Join(home, ".cache") || env["XDG_STATE_HOME"] != filepath.Join(home, ".state") {
+		t.Fatalf("environment=%v", env)
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("disposable home still exists: %v", err)
+	}
+}
+
 func TestDryRunOnlySupportsMCPSurfaceAndScrubsEnv(t *testing.T) {
 	mock := &commandexec.MockExecutor{Responses: []commandexec.MockCall{{}}}
 	client := apm.New(mock, apm.Global).AtProjectRoot(t.TempDir())

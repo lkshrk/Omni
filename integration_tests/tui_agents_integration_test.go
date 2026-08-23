@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -166,56 +167,93 @@ func TestTUIAgentsOnboardingPreviewConfirmAndApply(t *testing.T) {
 		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
 			return strings.Contains(text, "Agent onboarding preview") && !strings.Contains(text, "Apply this onboarding plan? y/N")
 		}, "TUI cancellation failed")
-		if _, err := os.Stat(filepath.Join(home, ".apm")); !os.IsNotExist(err) {
-			t.Fatalf("cancelled preview mutated APM state: %v", err)
+		for _, path := range []string{filepath.Join(home, ".apm"), filepath.Join(home, ".cache", "apm")} {
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("cancelled preview mutated APM state %s: %v", path, err)
+			}
 		}
 		writeTUIKeys(t, term, "O")
-		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool { return strings.Contains(text, "Agent onboarding preview") }, "TUI did not reopen onboarding")
+		const totalItems = 7
+		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
+			return strings.Contains(text, "1/7 ")
+		}, "TUI did not reopen onboarding")
 		for attempts := 0; attempts < 60; attempts++ {
 			text := currentScreenText(term)
 			if strings.Contains(text, "Apply this onboarding plan? y/N") {
 				break
 			}
-			currentName := ""
-			for _, name := range []string{"secret-api", "target-choice", "collision", "later", "tui-native", "durably-ignored"} {
-				if strings.Contains(text, " "+name+" (") {
-					currentName = name
+			if strings.Contains(text, "0 blocker(s)") {
+				writeTUIKeys(t, term, "\r")
+				continue
+			}
+			item := -1
+			for i := 1; i <= totalItems; i++ {
+				if strings.Contains(text, fmt.Sprintf("%d/%d ", i, totalItems)) {
+					item = i
+					break
+				}
+			}
+			detail := text
+			lines := strings.Split(text, "\n")
+			for i, line := range lines {
+				if item > 0 && strings.Contains(line, fmt.Sprintf("%d/%d ", item, totalItems)) {
+					detail = strings.Join(lines[i:min(i+6, len(lines))], "\n")
 					break
 				}
 			}
 			key := "j"
+			resolved := func(string) bool { return true }
 			switch {
-			case strings.Contains(text, "conditional-group-host"):
+			case strings.Contains(detail, "conditional-group-host"), strings.Contains(detail, "dependency-conflict"):
 				key = "x"
-			case strings.Contains(text, "legacy-unscoped-targets"):
+				resolved = func(next string) bool { return strings.Contains(next, "decision=keep-unmanaged") }
+			case strings.Contains(detail, "tui-native ("):
+				writeTUIKeys(t, term, "a")
+				waitForRequiredScreen(t, term, 3*time.Second, func(next string) bool {
+					return strings.Contains(next, "targets=claude,codex")
+				}, "TUI native target selection did not persist")
+				key = "M"
+				resolved = func(next string) bool { return strings.Contains(next, "decision=move-to-apm") }
+			case strings.Contains(detail, "target-choice ("), strings.Contains(detail, "legacy-unscoped-targets"), strings.Contains(detail, "target-resolution-required"):
 				key = "2"
-			case strings.Contains(text, "secret-field:"):
+				resolved = func(next string) bool { return !strings.Contains(next, "Unresolved: target-choice") }
+			case strings.Contains(detail, "secret-mapping-required"):
 				key = "m"
-			case strings.Contains(text, "executable:"):
+				resolved = func(next string) bool { return strings.Contains(next, "decision=map-secret") }
+			case strings.Contains(detail, "executable:"):
 				key = "E"
-			case strings.Contains(text, "non-equivalent-name-collision"):
-				key = "o"
+			case strings.Contains(detail, "unsupported"):
+				key = "x"
+				resolved = func(next string) bool { return strings.Contains(next, "decision=keep-unmanaged") }
 			}
 			if key != "j" {
 				writeTUIKeys(t, term, key)
-				waitForRequiredScreen(t, term, 3*time.Second, func(next string) bool { return next != text && strings.Contains(next, "decision=") }, "TUI resolution did not persist")
-			}
-			if strings.Contains(currentScreenText(term), "Apply this onboarding plan? y/N") {
-				break
+				waitForRequiredScreen(t, term, 3*time.Second, resolved, "TUI resolution did not persist")
 			}
 			writeTUIKeys(t, term, "j")
 			waitForRequiredScreen(t, term, 3*time.Second, func(next string) bool {
-				return currentName == "" || !strings.Contains(next, " "+currentName+" (") || strings.Contains(next, "Apply this onboarding plan? y/N")
+				return item < 0 || strings.Contains(next, fmt.Sprintf("%d/%d ", item%totalItems+1, totalItems))
 			}, "TUI item inspection did not advance")
 		}
 		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool { return strings.Contains(text, "Apply this onboarding plan? y/N") }, "TUI did not resolve all blockers")
 		writeTUIKeys(t, term, "y")
-		waitForRequiredScreen(t, term, 25*time.Second, func(text string) bool { return strings.Contains(text, "Agent onboarding complete.") }, "TUI did not complete onboarding")
+		applied := waitForRequiredScreen(t, term, 25*time.Second, func(text string) bool {
+			return strings.Contains(text, "Agent onboarding complete.") || strings.Contains(text, "apm audit failed")
+		}, "TUI did not complete onboarding")
+		if strings.Contains(applied, "apm audit failed") {
+			cmd := exec.Command(apmBin, "audit", "--ci", "--format", "json")
+			cmd.Dir = filepath.Join(home, ".apm")
+			cmd.Env = env
+			output, _ := cmd.CombinedOutput()
+			t.Fatalf("TUI onboarding audit failed:\n%s", output)
+		}
 		writeTUIKeys(t, term, "T")
-		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool { return strings.Contains(text, "Onboarding status: Omni=complete APM=complete") }, "TUI did not render joined status")
+		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool {
+			return strings.Contains(text, "Onboarding status: phase=complete state=complete")
+		}, "TUI did not render joined status")
 		writeTUIKeys(t, term, "X")
 		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool {
-			return strings.Contains(text, "Confirm cleanup? y/N") && strings.Contains(text, "Cleanup 2 path(s)")
+			return strings.Contains(text, "Confirm cleanup? y/N") && strings.Contains(text, "Cleanup 1 path(s)")
 		}, "TUI did not preview cleanup")
 		writeTUIKeys(t, term, "y")
 		return waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool { return strings.Contains(text, "Onboarding cleanup complete") }, "TUI did not complete cleanup")
@@ -223,11 +261,22 @@ func TestTUIAgentsOnboardingPreviewConfirmAndApply(t *testing.T) {
 	if strings.Contains(screen, "onboarding apply:") {
 		t.Fatalf("TUI onboarding failed:\n%s", screen)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".apm", "imported", "skill")); err != nil {
-		t.Fatalf("APM did not import TUI skill: %v", err)
+	manifest, manifestErr := os.ReadFile(filepath.Join(home, ".apm", "apm.yml"))
+	if entries, err := os.ReadDir(filepath.Join(home, ".apm", "omni-imports")); err != nil || len(entries) == 0 {
+		t.Fatalf("Omni did not create a durable APM package: %v\nmanifest error: %v\n%s", err, manifestErr, manifest)
 	}
-	if entries, err := os.ReadDir(filepath.Join(home, ".local", "state", "omni", "onboarding-cleanup")); err != nil || len(entries) == 0 {
-		t.Fatalf("default cleanup tombstone missing: %v", err)
+	if manifestErr != nil || !strings.Contains(string(manifest), "omni-imports") {
+		t.Fatalf("APM manifest does not reference the durable package: %v\n%s", manifestErr, manifest)
+	}
+	var afterCleanup struct {
+		Onboarding struct {
+			Plan struct {
+				Items []json.RawMessage `json:"items"`
+			} `json:"plan"`
+		} `json:"onboarding"`
+	}
+	if err := json.Unmarshal([]byte(runOmniOutput(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "agents", "onboard", "--json")), &afterCleanup); err != nil || len(afterCleanup.Onboarding.Plan.Items) != 0 {
+		t.Fatalf("post-cleanup onboarding rediscovered APM-owned state: items=%d err=%v", len(afterCleanup.Onboarding.Plan.Items), err)
 	}
 }
 

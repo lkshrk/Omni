@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -66,11 +67,26 @@ func newAPMVersionApp(t *testing.T, response executor.MockCall) (*App, *availExe
 }
 
 func TestDoctorAPMVersionAcceptsPin(t *testing.T) {
-	a, _ := newAPMVersionApp(t, executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version " + apmVersionPin + "\n"})
+	a, mock := newAPMVersionApp(t, executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version " + apmVersionPin + "\n"})
 	result := &DoctorResult{}
 	a.doctorAPMVersion(context.Background(), result, &config.RootConfig{})
 	if len(result.Checks) != 1 || result.Checks[0].Status != DoctorStatusOK {
 		t.Fatalf("checks = %+v", result.Checks)
+	}
+	env := make(map[string]string, len(mock.Calls[0].Env))
+	for _, entry := range mock.Calls[0].Env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			t.Fatalf("unexpected unset in environment: %q", entry)
+		}
+		env[key] = value
+	}
+	home := env["HOME"]
+	if env["APM_E2E_TESTS"] != "1" || home == "" || env["USERPROFILE"] != home || env["XDG_CONFIG_HOME"] != filepath.Join(home, ".config") || env["XDG_CACHE_HOME"] != filepath.Join(home, ".cache") || env["XDG_STATE_HOME"] != filepath.Join(home, ".state") {
+		t.Fatalf("environment=%v", env)
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("disposable home still exists: %v", err)
 	}
 }
 

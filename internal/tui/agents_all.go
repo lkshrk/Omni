@@ -108,6 +108,15 @@ func onboardPlanSummary(result app.AgentsOnboardResult) string {
 	if len(blocked) > 0 {
 		text += " Unresolved: " + strings.Join(blocked, ",")
 	}
+	for _, blocker := range plan.Blockers {
+		if !slices.ContainsFunc(plan.Items, func(item app.OnboardItem) bool { return slices.Contains(item.Blockers, blocker) }) {
+			reason := blocker
+			if _, suffix, ok := strings.Cut(blocker, ":"); ok {
+				reason = suffix
+			}
+			text += " Plan blocker: " + reason
+		}
+	}
 	return text
 }
 
@@ -153,7 +162,7 @@ func resolveOnboardItem(item *app.OnboardItem, key string) bool {
 	case "x":
 		item.Resolution.Decision = "keep-unmanaged"
 	case "d":
-		if item.Dots == nil {
+		if item.Dots == nil || item.Dots.Native {
 			return false
 		}
 		item.Resolution.Decision = "keep-in-dots"
