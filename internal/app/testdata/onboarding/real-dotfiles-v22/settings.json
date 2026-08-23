@@ -1,0 +1,10 @@
+{
+  "version": 22,
+  "$include": [
+    "settings.d/agents.json",
+    "settings.d/groups.json"
+  ],
+  "settings": {
+    "dots_repo": "preserve-this-unrelated-setting"
+  }
+}

@@ -5,9 +5,11 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -155,6 +157,89 @@ func TestAgentsOnboardRealPinnedAPM(t *testing.T) {
 	if strings.Contains(string(got), `"agents"`) || !strings.Contains(string(got), `"version": 24`) || !strings.Contains(string(got), `"dots_repo": "keep"`) {
 		t.Fatalf("config=%s", got)
 	}
+}
+
+func TestAgentsOnboardPlansSanitizedRealDotfilesWithPinnedAPM(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("APM_E2E_TESTS", "1")
+	t.Setenv("PATH", "/home/coder/apm/.venv/bin:"+os.Getenv("PATH"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
+	fixtureRoot := filepath.Join("testdata", "onboarding", "real-dotfiles-v22")
+	configRoot := filepath.Join(home, ".config", "omni")
+	for _, relative := range []string{"settings.json", filepath.Join("settings.d", "agents.json"), filepath.Join("settings.d", "groups.json")} {
+		data, err := os.ReadFile(filepath.Join(fixtureRoot, relative))
+		if err != nil {
+			t.Fatal(err)
+		}
+		destination := filepath.Join(configRoot, relative)
+		if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(destination, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := snapshotOnboardingTestTree(t, home)
+	a := New(filepath.Join(configRoot, "settings.json"))
+	a.StateDir = filepath.Join(home, ".local", "state", "omni")
+	if err := a.InitOnboardingReadOnly(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := a.AgentsOnboardPlan(context.Background(), AgentsOnboardOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Envelope.Plan == nil || len(preview.Envelope.Plan.Items) != 48 || len(preview.Envelope.Plan.Blockers) != 4 || !maps.Equal(preview.Envelope.Plan.Summary, map[string]int{"excluded": 16, "importable": 27, "needs-choice": 5}) {
+		t.Fatalf("unexpected real-world plan: %#v", preview.Envelope.Plan)
+	}
+	after := snapshotOnboardingTestTree(t, home)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("dry-run changed isolated HOME\nbefore=%#v\nafter=%#v", before, after)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".apm")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run created APM state: %v", err)
+	}
+	if _, err := os.Stat(a.StateDir); !os.IsNotExist(err) {
+		t.Fatalf("dry-run created Omni state: %v", err)
+	}
+}
+
+type onboardingTestTreeEntry struct {
+	Mode    os.FileMode
+	ModTime int64
+	Data    string
+}
+
+func snapshotOnboardingTestTree(t *testing.T, root string) map[string]onboardingTestTreeEntry {
+	t.Helper()
+	result := map[string]onboardingTestTreeEntry{}
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		entry := onboardingTestTreeEntry{Mode: info.Mode(), ModTime: info.ModTime().UnixNano()}
+		if info.Mode().IsRegular() {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			entry.Data = string(data)
+		}
+		result[relative] = entry
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return result
 }
 
 func createLegacySkillRepo(t *testing.T, path, body string) string {
