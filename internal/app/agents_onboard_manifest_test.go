@@ -1216,9 +1216,16 @@ func TestOnboardCompletionMarkerSurvivesCleanupWithoutLocalImports(t *testing.T)
 	originalCheck := onboardingPinnedAPMCheck
 	onboardingPinnedAPMCheck = func(context.Context, *App) error { return nil }
 	t.Cleanup(func() { onboardingPinnedAPMCheck = originalCheck })
-	result, err := a.AgentsOnboardPlan(t.Context(), AgentsOnboardOptions{})
+	planPath := filepath.Join(home, "reviewed-plan.json")
+	result, err := a.AgentsOnboardPlan(t.Context(), AgentsOnboardOptions{PlanJSON: planPath})
 	if err != nil || result.Envelope.Plan == nil || len(result.Envelope.Plan.Items) != 2 {
 		t.Fatalf("plan=%#v err=%v", result.Envelope.Plan, err)
+	}
+	if _, err := a.AgentsOnboardApplyResolved(t.Context(), planPath, AgentsOnboardResolutions{KeepInDots: map[string]bool{"local": true}}); err == nil || !strings.Contains(err.Error(), "cannot be kept in dots") {
+		t.Fatalf("native keep-in-dots error=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(a.StateDir, "onboarding")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected native decision created journal state: %v", err)
 	}
 	for i := range result.Envelope.Plan.Items {
 		if result.Envelope.Plan.Items[i].Name == "local" {
