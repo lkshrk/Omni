@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -317,6 +318,7 @@ func TestReadRegisteredOnboardMarketplaces(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("USERPROFILE", home)
 	path := filepath.Join(home, ".apm", "marketplaces.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
@@ -336,6 +338,7 @@ func TestReadRegisteredOnboardMarketplaces(t *testing.T) {
 func TestOnboardMarketplaceConflictAndManifestCASBlockBeforeMutation(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("USERPROFILE", home)
 	registry := filepath.Join(home, ".apm", "marketplaces.json")
 	if err := os.MkdirAll(filepath.Dir(registry), 0o700); err != nil {
@@ -551,6 +554,9 @@ func TestContinueOnboardOperationRejectsSourceDriftBeforeMaterialization(t *test
 		}},
 	} {
 		t.Run(mutate.name, func(t *testing.T) {
+			if mutate.name == "mode" && runtime.GOOS == "windows" {
+				t.Skip("Windows does not preserve POSIX mode drift")
+			}
 			source := t.TempDir()
 			for name, content := range map[string]string{"SKILL.md": "reviewed", "a": "a", "b": "b"} {
 				if err := os.WriteFile(filepath.Join(source, name), []byte(content), 0o600); err != nil {
@@ -824,7 +830,7 @@ func TestRestoreOnboardManifestPreservesExistingEmptyFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(data) != 0 || info.Mode().Perm() != 0o640 {
+	if len(data) != 0 || (runtime.GOOS != "windows" && info.Mode().Perm() != 0o640) {
 		t.Fatalf("data=%q mode=%o", data, info.Mode().Perm())
 	}
 }
@@ -1100,6 +1106,7 @@ func newOnboardDotsTestApp(t *testing.T, entry config.DotEntry) (*App, string, s
 	home := t.TempDir()
 	repo := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("OMNI_HOSTNAME", "onboard-test")
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
