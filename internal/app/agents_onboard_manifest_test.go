@@ -316,6 +316,7 @@ func TestContinueOnboardOperationScrubsAuditEnvironment(t *testing.T) {
 func TestReadRegisteredOnboardMarketplaces(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	path := filepath.Join(home, ".apm", "marketplaces.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
@@ -335,6 +336,7 @@ func TestReadRegisteredOnboardMarketplaces(t *testing.T) {
 func TestOnboardMarketplaceConflictAndManifestCASBlockBeforeMutation(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	registry := filepath.Join(home, ".apm", "marketplaces.json")
 	if err := os.MkdirAll(filepath.Dir(registry), 0o700); err != nil {
 		t.Fatal(err)
@@ -1017,6 +1019,9 @@ func TestAgentsOnboardApplyKeepInDotsDoesNotWriteDotsPaths(t *testing.T) {
 		executor.MatchRule{Pattern: "apm targets --json", Response: executor.MockCall{Stdout: `[{"target":"codex"}]`}},
 	).WithFallback(executor.MockCall{})
 	a.SetFallbackExecutor(mock)
+	originalCheck := onboardingPinnedAPMCheck
+	onboardingPinnedAPMCheck = func(context.Context, *App) error { return nil }
+	t.Cleanup(func() { onboardingPinnedAPMCheck = originalCheck })
 	beforeTarget, beforeRepo := snapshotOnboardTestTree(t, filepath.Join(home, ".agents")), snapshotOnboardTestTree(t, repo)
 	result, err := a.AgentsOnboardPlan(t.Context(), AgentsOnboardOptions{})
 	if err != nil {

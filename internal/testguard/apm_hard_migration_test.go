@@ -105,10 +105,12 @@ func TestAPMHardMigrationHasNoNativeLifecycleCode(t *testing.T) {
 func TestAPMHardMigrationHasNoDirectAgentRuntimeWrites(t *testing.T) {
 	root := repoRoot(t)
 	allowed := map[string]bool{
-		"internal/agent/registry.go":     true,
-		"internal/app/dots_discovery.go": true,
-		"internal/config/agent_dirs.go":  true,
-		"internal/config/migrate_v14.go": true,
+		"internal/agent/registry.go":              true,
+		"internal/app/agents_onboard_dots.go":     true,
+		"internal/app/agents_onboard_manifest.go": true,
+		"internal/app/dots_discovery.go":          true,
+		"internal/config/agent_dirs.go":           true,
+		"internal/config/migrate_v14.go":          true,
 	}
 	runtimeFragments := []string{
 		".agents", ".claude", ".codex", ".copilot", ".cursor", ".gemini",
