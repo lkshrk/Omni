@@ -188,7 +188,7 @@ func TestTUIAgentsOnboardingPreviewConfirmAndApply(t *testing.T) {
 			case strings.Contains(text, "conditional-group-host"):
 				key = "x"
 			case strings.Contains(text, "legacy-unscoped-targets"):
-				key = "c"
+				key = "2"
 			case strings.Contains(text, "secret-field:"):
 				key = "m"
 			case strings.Contains(text, "executable:"):
