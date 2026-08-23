@@ -33,7 +33,7 @@ func TestParseAPMVersion(t *testing.T) {
 }
 
 func TestAPMVersionPin(t *testing.T) {
-	if apmVersionPin != "0.28.0+omni.3" || apmPackagePin != "git+https://github.com/lkshrk/apm.git@0c5aa9650616f6561d0d1fbe9ed8c15a5c633311" {
+	if apmVersionPin != "0.28.0+omni.4" || apmPackagePin != "git+https://github.com/lkshrk/apm.git@9268ab1d608d73fb776a2543885e4bcbbe0f5737" {
 		t.Fatalf("unexpected APM pins: version=%q package=%q", apmVersionPin, apmPackagePin)
 	}
 	for _, tt := range []struct {
@@ -42,7 +42,7 @@ func TestAPMVersionPin(t *testing.T) {
 	}{
 		{"0.27.9", false},
 		{"0.28.0", false},
-		{"0.28.0+omni.3", true},
+		{"0.28.0+omni.4", true},
 		{"0.28.0+omni.2", false},
 		{"0.28.0+build.1", false},
 		{"0.28.1", false},
@@ -75,7 +75,7 @@ func TestDoctorAPMVersionAcceptsPin(t *testing.T) {
 }
 
 func TestDoctorAPMVersionRejectsMismatch(t *testing.T) {
-	for _, version := range []string{"0.27.3", "0.28.0", "0.28.0+omni.2", "0.29.0"} {
+	for _, version := range []string{"0.27.3", "0.28.0", "0.28.0+omni.3", "0.29.0"} {
 		a, _ := newAPMVersionApp(t, executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version " + version + "\n"})
 		result := &DoctorResult{}
 		a.doctorAPMVersion(context.Background(), result, &config.RootConfig{})

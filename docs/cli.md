@@ -56,7 +56,7 @@ first available installer (`uv tool install`, `pipx install`, then
 `pip3 install --user`). Until APM is installed, `omni agents sync` refuses to
 run when the config declares agent packages, and reports how to install APM.
 
-`omni doctor` requires the exact patched build `0.28.0+omni.3`; another version
+`omni doctor` requires the exact patched build `0.28.0+omni.4`; another version
 or an unparseable version fails the "APM version" check. `--fix` restores the
 required build from the immutable fork commit through the same installer
 preference. See [Patched APM Build](agents.md#patched-apm-build) for provenance
@@ -292,7 +292,7 @@ Common setting keys:
 
 | Command | Description |
 | --- | --- |
-| `omni agents onboard` | Print a read-only redacted plan for legacy Omni plus native Claude/Codex state. |
+| `omni agents onboard` | Print a read-only redacted plan for legacy Omni, native Claude/Codex state, and other detected clients that can be left unmanaged. |
 | `omni agents onboard --plan-json /abs/plan.json` | Persist a reviewable plan. |
 | `omni agents onboard --apply --apply-plan /abs/plan.json` | Revalidate and apply a reviewed plan. |
 | `omni agents onboard status --operation ID` | Join read-only Omni and APM recovery state. |
@@ -301,7 +301,8 @@ Common setting keys:
 
 Reviewed choices can be supplied without editing JSON by repeating
 `--approve-targets ITEM=claude,codex`, `--map-secret ITEM:/pointer=ENV_VAR`,
-`--approve-executable ITEM=relative/path`, and `--exclude ITEM`. These choices
+`--approve-executable ITEM=relative/path`, and `--exclude ITEM` (leave an item
+or unsupported client unmanaged). These choices
 are hashed into `resolution_id` and therefore change the operation ID.
 
 `--config`, `--cache-dir`, and `--state-dir` are global path overrides. Apply

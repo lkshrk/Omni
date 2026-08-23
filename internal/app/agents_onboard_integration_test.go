@@ -43,6 +43,13 @@ func TestAgentsOnboardRealPinnedAPM(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("# Native demo\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	cursorConfig := filepath.Join(home, ".cursor", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(cursorConfig), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cursorConfig, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	a := New(configPath)
 	a.StateDir = filepath.Join(home, ".local", "state", "omni")
@@ -69,6 +76,7 @@ func TestAgentsOnboardRealPinnedAPM(t *testing.T) {
 	if preview.Envelope.Plan == nil {
 		t.Fatal("missing plan")
 	}
+	sawUnmanagedCursor := false
 	for i := range preview.Envelope.Plan.Items {
 		item := &preview.Envelope.Plan.Items[i]
 		switch item.Classification {
@@ -85,7 +93,15 @@ func TestAgentsOnboardRealPinnedAPM(t *testing.T) {
 		case "secret-blocked":
 			item.Resolution.Decision = "map-secret"
 			item.Resolution.EnvBindings = map[string]string{"/env/TOKEN": "API_TOKEN"}
+		case "unsupported":
+			item.Resolution.Decision = "exclude"
+			if item.Name == "cursor" && slices.Contains(item.ReasonCodes, "native-import-decoder-unavailable") {
+				sawUnmanagedCursor = true
+			}
 		}
+	}
+	if !sawUnmanagedCursor {
+		t.Fatal("detected Cursor client was not offered as a leave-unmanaged choice")
 	}
 	if err := apm.BindImportPlanResolution(preview.Envelope.Plan); err != nil {
 		t.Fatal(err)
@@ -138,6 +154,10 @@ func TestAgentsOnboardRealPinnedAPM(t *testing.T) {
 		if !strings.Contains(text, "${API_TOKEN}") {
 			t.Fatalf("MCP placeholder missing from %s: %s", path, text)
 		}
+	}
+	exclusions, err := os.ReadFile(filepath.Join(home, ".apm", "import-exclusions.yml"))
+	if err != nil || !strings.Contains(string(exclusions), "name: cursor") {
+		t.Fatalf("Cursor leave-unmanaged decision was not persisted: err=%v content=%q", err, exclusions)
 	}
 	cleanupPreview, err := a.AgentsOnboardCleanup(context.Background(), result.Envelope.OperationID, false)
 	if err != nil {
