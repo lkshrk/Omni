@@ -4898,6 +4898,7 @@ func TestDotsServiceCommandsUseAppDefaultDurations(t *testing.T) {
 
 func TestDoctor_NoHostStillRuns(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
+	t.Setenv("PATH", t.TempDir())
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
@@ -4935,6 +4936,7 @@ func TestDoctor_InvalidConfigPrintsDiagnosticsAndFails(t *testing.T) {
 }
 
 func TestDoctorFixRemovesDuplicateDotDefinitions(t *testing.T) {
+	setPinnedAPMPath(t)
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")

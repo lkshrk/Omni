@@ -20,18 +20,35 @@ import (
 )
 
 type onboardJournal struct {
-	SchemaVersion  int               `json:"schema_version"`
-	OperationID    string            `json:"operation_id"`
-	PlanID         string            `json:"plan_id"`
-	ResolutionID   string            `json:"resolution_id"`
-	CandidateSetID string            `json:"candidate_set_id"`
-	PreimageSet    string            `json:"preimage_set"`
-	Scope          string            `json:"scope,omitempty"`
-	ProjectRoot    string            `json:"project_root,omitempty"`
-	Phase          string            `json:"phase"`
-	FinalizeToken  string            `json:"finalize_token"`
-	Documents      []journalDocument `json:"documents"`
-	UpdatedAt      time.Time         `json:"updated_at"`
+	SchemaVersion          int                  `json:"schema_version"`
+	OperationID            string               `json:"operation_id"`
+	PlanID                 string               `json:"plan_id"`
+	ResolutionID           string               `json:"resolution_id"`
+	CandidateSetID         string               `json:"candidate_set_id"`
+	PreimageSet            string               `json:"preimage_set"`
+	Phase                  string               `json:"phase"`
+	Documents              []journalDocument    `json:"documents"`
+	ManifestPath           string               `json:"manifest_path"`
+	ManifestData           string               `json:"manifest_data,omitempty"`
+	ManifestExisted        bool                 `json:"manifest_existed"`
+	ManifestMode           uint32               `json:"manifest_mode,omitempty"`
+	ManifestHash           string               `json:"manifest_hash,omitempty"`
+	ProposedManifestHash   string               `json:"proposed_manifest_hash,omitempty"`
+	MarketplaceData        string               `json:"marketplace_data,omitempty"`
+	MarketplaceExisted     bool                 `json:"marketplace_existed"`
+	MarketplaceHash        string               `json:"marketplace_hash,omitempty"`
+	Targets                []string             `json:"targets,omitempty"`
+	Marketplaces           []OnboardMarketplace `json:"marketplaces,omitempty"`
+	Packages               []journalPackage     `json:"packages,omitempty"`
+	MaterializedItems      []string             `json:"materialized_items,omitempty"`
+	PendingMaterializeItem string               `json:"pending_materialize_item,omitempty"`
+	UpdatedAt              time.Time            `json:"updated_at"`
+}
+
+type journalPackage struct {
+	ItemID     string `json:"item_id"`
+	StagedPath string `json:"staged_path"`
+	Hash       string `json:"hash"`
 }
 
 type journalDocument struct {
@@ -86,8 +103,8 @@ func readOnboardJournal(root *securefile.Root) (onboardJournal, error) {
 	if journal.SchemaVersion != 1 || !hexID(journal.OperationID, 32) || !hexID(journal.PlanID, 64) || !hexID(journal.ResolutionID, 64) || !hexID(journal.CandidateSetID, 64) {
 		return onboardJournal{}, errors.New("invalid onboarding journal identity")
 	}
-	if err := validateOnboardScope(journal.Scope, journal.ProjectRoot); err != nil {
-		return onboardJournal{}, err
+	if journal.Phase == "" || !filepath.IsAbs(journal.ManifestPath) {
+		return onboardJournal{}, errors.New("invalid onboarding journal state")
 	}
 	return journal, nil
 }

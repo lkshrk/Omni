@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/lkshrk/omni/internal/apm"
+	"github.com/lkshrk/omni/internal/app"
 )
 
 func (m Model) viewSkillsBody() string {
@@ -16,17 +16,25 @@ func (m Model) viewSkillsBody() string {
 		p.styleHelp.Render(pad + "Manifest: ~/.apm/apm.yml"),
 		p.styleHelp.Render(pad + "Lock:     ~/.apm/apm.lock.yaml"),
 		"",
-		p.styleHelp.Render(pad + "O onboard   P project   T status   V resume   X cleanup   S sync   U update   R inspect   e logs"),
+		p.styleHelp.Render(pad + "O onboard   T status   V resume   X cleanup   S sync   U update   R inspect   e logs"),
 	}
 	if item := m.currentOnboardItem(); item != nil {
-		lines = append(lines, "", p.styleTitle.Render(fmt.Sprintf("%s%d/%d %s (%s)", pad, m.agentsOnboardItem+1, len(m.agentsOnboardPlan.Envelope.Plan.Items), item.Name, item.Classification)), p.styleHelp.Render(pad+"j/k inspect  E executables  m map secrets  x leave unmanaged"))
+		actions := "j/k inspect  m map secret  M move to APM  d keep in dots  x keep unmanaged  Enter apply"
+		if item.Dots != nil && item.Dots.Native {
+			actions = "j/k inspect  M move to APM  x keep unmanaged  Enter apply"
+		}
+		lines = append(lines, "", p.styleTitle.Render(fmt.Sprintf("%s%d/%d %s (%s)", pad, m.agentsOnboardItem+1, len(m.agentsOnboardPlan.Envelope.Plan.Items), item.Name, item.Kind)), p.styleHelp.Render(pad+actions))
 		if choices := onboardTargetChoiceHelp(*item); choices != "" {
 			lines = append(lines, p.styleHelp.Render(pad+choices))
 		}
-		if len(item.ReasonCodes) > 0 {
-			lines = append(lines, p.styleHelp.Render(pad+strings.Join(item.ReasonCodes, ", ")))
+		if len(item.Blockers) > 0 {
+			lines = append(lines, p.styleHelp.Render(pad+strings.Join(item.Blockers, ", ")))
 		}
-		lines = append(lines, p.styleHelp.Render(fmt.Sprintf("%sdecision=%s remaining=%d", pad, item.Resolution.Decision, onboardBlockerCount(m.agentsOnboardPlan.Envelope.Plan))))
+		decision := fmt.Sprintf("%sdecision=%s remaining=%d", pad, item.Resolution.Decision, onboardBlockerCount(m.agentsOnboardPlan.Envelope.Plan))
+		if len(item.Resolution.ApprovedTargets) > 0 {
+			decision += " targets=" + strings.Join(item.Resolution.ApprovedTargets, ",")
+		}
+		lines = append(lines, p.styleHelp.Render(decision))
 	}
 	if m.apmRunning {
 		lines = append(lines, "", p.styleStatus.Render(pad+"running "+m.apmCommand+"…"))
@@ -45,8 +53,8 @@ func (m Model) viewSkillsBody() string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-func onboardTargetChoiceHelp(item apm.ImportItem) string {
-	options := item.TargetOptions()
+func onboardTargetChoiceHelp(item app.OnboardItem) string {
+	options := item.TargetOptions
 	choices := make([]string, 0, min(len(options), 9)+1)
 	for i, target := range options {
 		if i == 9 {

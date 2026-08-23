@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,7 +34,7 @@ func TestParseAPMVersion(t *testing.T) {
 }
 
 func TestAPMVersionPin(t *testing.T) {
-	if apmVersionPin != "0.28.0+omni.5" || apmPackagePin != "git+https://github.com/lkshrk/apm.git@3a0bd6e68485f32b7158a26074809bf3e9c9303b" {
+	if apmVersionPin != "0.28.0+omni.6" || apmPackagePin != "git+https://github.com/lkshrk/apm.git@44d9233646017610feb6b293ebebcbc259aa7c26" {
 		t.Fatalf("unexpected APM pins: version=%q package=%q", apmVersionPin, apmPackagePin)
 	}
 	for _, tt := range []struct {
@@ -42,7 +43,7 @@ func TestAPMVersionPin(t *testing.T) {
 	}{
 		{"0.27.9", false},
 		{"0.28.0", false},
-		{"0.28.0+omni.5", true},
+		{"0.28.0+omni.6", true},
 		{"0.28.0+omni.2", false},
 		{"0.28.0+build.1", false},
 		{"0.28.1", false},
@@ -66,11 +67,26 @@ func newAPMVersionApp(t *testing.T, response executor.MockCall) (*App, *availExe
 }
 
 func TestDoctorAPMVersionAcceptsPin(t *testing.T) {
-	a, _ := newAPMVersionApp(t, executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version " + apmVersionPin + "\n"})
+	a, mock := newAPMVersionApp(t, executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version " + apmVersionPin + "\n"})
 	result := &DoctorResult{}
 	a.doctorAPMVersion(context.Background(), result, &config.RootConfig{})
 	if len(result.Checks) != 1 || result.Checks[0].Status != DoctorStatusOK {
 		t.Fatalf("checks = %+v", result.Checks)
+	}
+	env := make(map[string]string, len(mock.Calls[0].Env))
+	for _, entry := range mock.Calls[0].Env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			t.Fatalf("unexpected unset in environment: %q", entry)
+		}
+		env[key] = value
+	}
+	home := env["HOME"]
+	if env["APM_E2E_TESTS"] != "1" || home == "" || env["USERPROFILE"] != home || env["XDG_CONFIG_HOME"] != filepath.Join(home, ".config") || env["XDG_CACHE_HOME"] != filepath.Join(home, ".cache") || env["XDG_STATE_HOME"] != filepath.Join(home, ".state") {
+		t.Fatalf("environment=%v", env)
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("disposable home still exists: %v", err)
 	}
 }
 

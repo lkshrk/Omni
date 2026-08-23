@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -124,7 +125,7 @@ func TestClientCommandWorkingDirectories(t *testing.T) {
 		{"marketplace remove", []string{"marketplace", "remove", "team"}, global},
 		{"audit", []string{"audit", "--ci"}, global},
 		{"prune", []string{"prune"}, global},
-		{"targets", []string{"targets", "--json"}, global},
+		{"targets", []string{"targets", "--json"}, caller},
 		{"project install", []string{"install"}, caller},
 		{"project update", []string{"update"}, caller},
 		{"project outdated", []string{"outdated"}, caller},
@@ -169,5 +170,72 @@ func TestLegacySurfaceInstallStillRejectsProjectScope(t *testing.T) {
 	_, err := apm.New(&commandexec.MockExecutor{}, apm.Project).InstallOnly(t.Context(), apm.SurfacePackages, nil, apm.InstallOptions{})
 	if !errors.Is(err, apm.ErrUnsupportedScope) {
 		t.Fatalf("error = %v, want ErrUnsupportedScope", err)
+	}
+}
+
+func TestDryRunOnlyUsesProjectScopeWithoutGlobalFlag(t *testing.T) {
+	mock := &commandexec.MockExecutor{Responses: []commandexec.MockCall{{}}}
+	client := apm.New(mock, apm.Global).AtProjectRoot(t.TempDir())
+	if _, err := client.DryRunOnly(t.Context(), apm.SurfacePackages, []string{"codex", "claude"}, []string{"TOKEN"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"install", "--dry-run", "--only", "apm", "--target", "codex,claude"}
+	if len(mock.Calls) != 1 || !reflect.DeepEqual(mock.Calls[0].Args, want) {
+		t.Fatalf("calls=%#v want=%v", mock.Calls, want)
+	}
+	if _, err := apm.New(mock, apm.Global).DryRunOnly(t.Context(), apm.SurfacePackages, nil, nil); !errors.Is(err, apm.ErrUnsupportedScope) {
+		t.Fatalf("global error=%v", err)
+	}
+}
+
+func TestAuditGlobalScrubsReviewedEnvironment(t *testing.T) {
+	mock := &commandexec.MockExecutor{Responses: []commandexec.MockCall{{}}}
+	if _, err := apm.New(mock, apm.Global).AuditGlobal(t.Context(), []string{"TOKEN"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(mock.Calls) != 1 || !reflect.DeepEqual(mock.Calls[0].Args, []string{"audit", "--ci", "--format", "json"}) || !slices.Contains(mock.Calls[0].Env, "TOKEN") {
+		t.Fatalf("calls=%#v", mock.Calls)
+	}
+}
+
+func TestTargetsJSONUsesDisposableHome(t *testing.T) {
+	mock := &commandexec.MockExecutor{Responses: []commandexec.MockCall{{Stdout: `{"targets":[]}`}}}
+	result, err := apm.New(mock, apm.Global).TargetsJSON(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Stdout != `{"targets":[]}` || len(mock.Calls) != 1 {
+		t.Fatalf("result=%#v calls=%#v", result, mock.Calls)
+	}
+	call := mock.Calls[0]
+	if !reflect.DeepEqual(call.Args, []string{"targets", "--json", "--all"}) {
+		t.Fatalf("args=%v", call.Args)
+	}
+	env := make(map[string]string, len(call.Env))
+	for _, entry := range call.Env {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			t.Fatalf("unexpected unset in environment: %q", entry)
+		}
+		env[key] = value
+	}
+	home := env["HOME"]
+	if env["APM_E2E_TESTS"] != "1" || home == "" || env["USERPROFILE"] != home || env["XDG_CONFIG_HOME"] != filepath.Join(home, ".config") || env["XDG_CACHE_HOME"] != filepath.Join(home, ".cache") || env["XDG_STATE_HOME"] != filepath.Join(home, ".state") {
+		t.Fatalf("environment=%v", env)
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("disposable home still exists: %v", err)
+	}
+}
+
+func TestDryRunOnlySupportsMCPSurfaceAndScrubsEnv(t *testing.T) {
+	mock := &commandexec.MockExecutor{Responses: []commandexec.MockCall{{}}}
+	client := apm.New(mock, apm.Global).AtProjectRoot(t.TempDir())
+	if _, err := client.DryRunOnly(t.Context(), apm.SurfaceMcp, []string{"codex"}, []string{"TOKEN"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"install", "--dry-run", "--only", "mcp", "--target", "codex"}
+	if len(mock.Calls) != 1 || !reflect.DeepEqual(mock.Calls[0].Args, want) || !reflect.DeepEqual(mock.Calls[0].Env, []string{"TOKEN"}) {
+		t.Fatalf("calls=%#v want args=%v env=[TOKEN]", mock.Calls, want)
 	}
 }

@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -11,8 +13,8 @@ import (
 )
 
 // APM is contract-tested as an exact dependency; newer releases require rerunning that suite.
-const apmVersionPin = "0.28.0+omni.5"
-const apmPackagePin = "git+https://github.com/lkshrk/apm.git@3a0bd6e68485f32b7158a26074809bf3e9c9303b"
+const apmVersionPin = "0.28.0+omni.6"
+const apmPackagePin = "git+https://github.com/lkshrk/apm.git@44d9233646017610feb6b293ebebcbc259aa7c26"
 
 const apmVersionFixHint = "run 'omni doctor --fix' to upgrade apm-cli"
 
@@ -20,7 +22,20 @@ var apmVersionPattern = regexp.MustCompile(`(?:^|\s)(\d+\.\d+\.\d+(?:\+[0-9A-Za-
 
 // APMVersion reports the installed apm-cli version as a dotted triple.
 func (a *App) APMVersion(ctx context.Context) (string, error) {
-	stdout, stderr, err := a.fallbackExecutor().Run(ctx, "apm", "--version")
+	home, err := os.MkdirTemp("", "omni-apm-version-")
+	if err != nil {
+		return "", fmt.Errorf("create isolated APM home: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(home) }()
+
+	stdout, stderr, err := executor.RunWithEnv(ctx, a.fallbackExecutor(), []string{
+		"APM_E2E_TESTS=1",
+		"HOME=" + home,
+		"USERPROFILE=" + home,
+		"XDG_CONFIG_HOME=" + filepath.Join(home, ".config"),
+		"XDG_CACHE_HOME=" + filepath.Join(home, ".cache"),
+		"XDG_STATE_HOME=" + filepath.Join(home, ".state"),
+	}, "apm", "--version")
 	if err != nil {
 		return "", executor.WrapError(err, "apm --version", stdout, stderr)
 	}

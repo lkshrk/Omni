@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	commandexec "github.com/lkshrk/omni/internal/executor"
@@ -119,6 +118,21 @@ func (c *Client) InstallOnly(ctx context.Context, surface string, targets []stri
 	return c.runEnv(ctx, opts.ScrubEnv, args...)
 }
 
+// DryRunOnly validates a staged project manifest without touching global APM state.
+func (c *Client) DryRunOnly(ctx context.Context, surface string, targets, scrubEnv []string) (Result, error) {
+	if c == nil || c.scope != Project {
+		return Result{}, fmt.Errorf("apm project dry-run: %w", ErrUnsupportedScope)
+	}
+	if strings.TrimSpace(surface) == "" {
+		return Result{}, errors.New("dry-run requires a manifest surface")
+	}
+	args := []string{"install", "--dry-run", "--only", surface}
+	if len(targets) > 0 {
+		args = append(args, "--target", strings.Join(targets, ","))
+	}
+	return c.runEnv(ctx, scrubEnv, args...)
+}
+
 func (c *Client) Uninstall(ctx context.Context, packages ...string) (Result, error) {
 	if len(packages) == 0 {
 		return Result{}, errors.New("uninstall requires at least one package")
@@ -140,11 +154,38 @@ func (c *Client) Audit(ctx context.Context) (Result, error) {
 	return c.run(ctx, "audit", "--ci", "--format", "json")
 }
 
+// AuditGlobal checks the authoritative global workspace without requiring an
+// importer-specific APM command.
+func (c *Client) AuditGlobal(ctx context.Context, scrubEnv []string) (Result, error) {
+	if c == nil || c.scope != Global {
+		return Result{}, fmt.Errorf("apm audit global: %w", ErrUnsupportedScope)
+	}
+	return c.runEnv(ctx, scrubEnv, "audit", "--ci", "--format", "json")
+}
+
 func (c *Client) Targets(ctx context.Context) (Result, error) {
 	if err := c.projectOnly("targets"); err != nil {
 		return Result{}, err
 	}
 	return c.run(ctx, "targets", "--json")
+}
+
+// TargetsJSON returns the live APM target catalog. Target names stay opaque to Omni.
+func (c *Client) TargetsJSON(ctx context.Context) (Result, error) {
+	home, err := os.MkdirTemp("", "omni-apm-targets-")
+	if err != nil {
+		return Result{}, fmt.Errorf("create isolated APM home: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(home) }()
+
+	return c.runEnv(ctx, []string{
+		"APM_E2E_TESTS=1",
+		"HOME=" + home,
+		"USERPROFILE=" + home,
+		"XDG_CONFIG_HOME=" + filepath.Join(home, ".config"),
+		"XDG_CACHE_HOME=" + filepath.Join(home, ".cache"),
+		"XDG_STATE_HOME=" + filepath.Join(home, ".state"),
+	}, "targets", "--json", "--all")
 }
 
 func (c *Client) scoped(command string) []string {
@@ -220,17 +261,7 @@ func usesGlobalWorkspace(args []string) bool {
 		return false
 	}
 	switch args[0] {
-	case "import":
-		if len(args) > 1 && slices.Contains([]string{"status", "resume", "finalize", "rollback", "cleanup", "exclusions"}, args[1]) {
-			return true
-		}
-		for _, arg := range args[1:] {
-			if arg == "--apply-plan" {
-				return true
-			}
-		}
-		return false
-	case "audit", "marketplace", "prune", "targets":
+	case "audit", "marketplace", "prune":
 		return true
 	case "deps", "install", "outdated", "uninstall", "update", "view":
 		return hasGlobalFlag(args[1:])
