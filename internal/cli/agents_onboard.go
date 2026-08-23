@@ -8,11 +8,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lkshrk/omni/internal/apm"
 	"github.com/lkshrk/omni/internal/app"
 )
 
 func newAgentsOnboardCmd(state *rootState) *cobra.Command {
-	var planJSON, applyPlan string
+	var planJSON, applyPlan, projectRoot string
 	var apply, outputJSON bool
 	var sources []string
 	var targetFlags, envFlags, executableFlags, excludeFlags []string
@@ -35,7 +36,7 @@ func newAgentsOnboardCmd(state *rootState) *cobra.Command {
 				}
 				return err
 			}
-			result, err := state.app.AgentsOnboardPlan(cmd.Context(), app.AgentsOnboardOptions{PlanJSON: planJSON, Sources: sources})
+			result, err := state.app.AgentsOnboardPlan(cmd.Context(), app.AgentsOnboardOptions{PlanJSON: planJSON, Sources: sources, ProjectRoot: projectRoot})
 			if err == nil || outputJSON {
 				printOnboardJSON(cmd, result)
 			}
@@ -43,15 +44,30 @@ func newAgentsOnboardCmd(state *rootState) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&planJSON, "plan-json", "", "Persist the reviewed plan to an absolute path")
+	cmd.Flags().StringVar(&projectRoot, "project-root", "", "Inventory project-native state from this workspace")
 	cmd.Flags().BoolVar(&apply, "apply", false, "Apply the reviewed plan")
 	cmd.Flags().StringVar(&applyPlan, "apply-plan", "", "Absolute reviewed plan path")
-	cmd.Flags().StringArrayVar(&sources, "from", nil, "Native source to inventory (repeatable: claude, codex)")
+	cmd.Flags().StringArrayVar(&sources, "from", nil, "APM import source to inventory (repeatable; omit for APM defaults)")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Print the Omni/APM result as JSON")
-	cmd.Flags().StringArrayVar(&targetFlags, "approve-targets", nil, "Resolve item targets as ITEM=claude,codex (repeatable)")
+	cmd.Flags().StringArrayVar(&targetFlags, "approve-targets", nil, "Resolve item targets as ITEM=target,target (repeatable)")
 	cmd.Flags().StringArrayVar(&envFlags, "map-secret", nil, "Map secret field as ITEM:/json/pointer=ENV_VAR (repeatable)")
 	cmd.Flags().StringArrayVar(&executableFlags, "approve-executable", nil, "Approve executable as ITEM=relative/path (repeatable)")
 	cmd.Flags().StringArrayVar(&excludeFlags, "exclude", nil, "Leave item or unsupported client unmanaged (durable, repeatable)")
-	cmd.AddCommand(newAgentsOnboardStatusCmd(state), newAgentsOnboardResumeCmd(state), newAgentsOnboardCleanupCmd(state))
+	cmd.AddCommand(newAgentsOnboardStatusCmd(state), newAgentsOnboardResumeCmd(state), newAgentsOnboardRollbackCmd(state), newAgentsOnboardCleanupCmd(state))
+	return cmd
+}
+
+func newAgentsOnboardRollbackCmd(state *rootState) *cobra.Command {
+	var operation string
+	cmd := &cobra.Command{Use: "rollback", Short: "Rollback an onboarding operation before APM installation", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		result, err := state.app.AgentsOnboardRollback(cmd.Context(), operation)
+		if err == nil {
+			printOnboardJSON(cmd, result)
+		}
+		return err
+	}}
+	cmd.Flags().StringVar(&operation, "operation", "", "Onboarding operation ID")
+	_ = cmd.MarkFlagRequired("operation")
 	return cmd
 }
 
@@ -64,7 +80,7 @@ func parseOnboardResolutions(targets, bindings, executables, exclusions []string
 		}
 		for _, target := range strings.Split(list, ",") {
 			target = strings.TrimSpace(target)
-			if target != "claude" && target != "codex" {
+			if !apm.ValidImportName(target) {
 				return out, fmt.Errorf("invalid target %q", target)
 			}
 			out.ApprovedTargets[item] = append(out.ApprovedTargets[item], target)

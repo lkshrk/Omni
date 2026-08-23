@@ -705,15 +705,15 @@ func requirePinnedAPM(t *testing.T) {
 	t.Helper()
 	path, err := exec.LookPath("apm")
 	if err != nil {
-		t.Fatalf("integration tests require apm 0.28.0+omni.4 on PATH: %v", err)
+		t.Fatalf("integration tests require apm 0.28.0+omni.5 on PATH: %v", err)
 	}
 	output, err := exec.Command(path, "--version").CombinedOutput()
 	if err != nil {
 		t.Fatalf("read APM version: %v\n%s", err, output)
 	}
 	fields := strings.Fields(string(output))
-	if len(fields) == 0 || fields[len(fields)-1] != "0.28.0+omni.4" {
-		t.Fatalf("integration tests require exactly apm 0.28.0+omni.4, got %q", strings.TrimSpace(string(output)))
+	if len(fields) == 0 || fields[len(fields)-1] != "0.28.0+omni.5" {
+		t.Fatalf("integration tests require exactly apm 0.28.0+omni.5, got %q", strings.TrimSpace(string(output)))
 	}
 }
 

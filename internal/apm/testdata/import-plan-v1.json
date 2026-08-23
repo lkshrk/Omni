@@ -4,14 +4,25 @@
   "title": "APM native import plan v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "coordinator", "operation_id", "plan_id", "resolution_id", "scope", "sources", "candidate_set_id", "inventory_fingerprint", "items", "summary", "warnings", "blockers"],
+  "required": ["schema_version", "coordinator", "operation_id", "plan_id", "resolution_id", "sources", "candidate_set_id", "inventory_fingerprint", "items", "summary", "warnings", "blockers"],
+  "allOf": [
+    {
+      "if": {"properties": {"scope": {"const": "project"}}, "required": ["scope"]},
+      "then": {"required": ["project_root"]}
+    },
+    {
+      "if": {"required": ["project_root"]},
+      "then": {"properties": {"scope": {"const": "project"}}, "required": ["scope"]}
+    }
+  ],
   "properties": {
     "schema_version": {"const": 1},
     "coordinator": {"enum": ["standalone", "omni-v24"]},
     "operation_id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
     "plan_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "resolution_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-    "scope": {"const": "global"},
+    "scope": {"enum": ["global", "project"]},
+    "project_root": {"type": "string", "minLength": 1},
     "sources": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
     "candidate_set_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "inventory_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},

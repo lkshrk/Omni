@@ -36,10 +36,21 @@ type Result struct {
 type Client struct {
 	exec  commandexec.Executor
 	scope Scope
+	dir   string
 }
 
 func New(exec commandexec.Executor, scope Scope) *Client {
 	return &Client{exec: exec, scope: scope}
+}
+
+// AtProjectRoot returns a project-scoped client whose commands run from root.
+func (c *Client) AtProjectRoot(root string) *Client {
+	if c == nil || root == "" {
+		return c
+	}
+	clone := *c
+	clone.scope, clone.dir = Project, root
+	return &clone
 }
 
 // Run invokes APM without translating its output or maintaining a second state model.
@@ -167,6 +178,12 @@ func (c *Client) runEnvStdin(ctx context.Context, scrub []string, stdin []byte, 
 		return Result{}, errors.New("APM command is required")
 	}
 	run := func() (string, string, error) {
+		if c.scope == Project && c.dir != "" {
+			if stdin != nil {
+				return commandexec.RunInDirWithEnvAndStdin(ctx, c.exec, c.dir, scrub, stdin, "apm", args...)
+			}
+			return runInDir(ctx, c.exec, scrub, c.dir, "apm", args...)
+		}
 		if !usesGlobalWorkspace(args) {
 			if stdin != nil {
 				return commandexec.RunInDirWithEnvAndStdin(ctx, c.exec, ".", scrub, stdin, "apm", args...)

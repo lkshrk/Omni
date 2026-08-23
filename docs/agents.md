@@ -21,29 +21,33 @@ native discovery, adoption, conflict handling, deployment, audit, and recovery.
 
 ## Existing-state onboarding
 
-`omni agents onboard` inventories legacy Omni v22/v23 declarations plus native
-Claude and Codex state and prints APM's redacted plan. Other detected client
-roots are shown as explicit “leave unmanaged” choices because APM cannot decode
-their native state yet. Planning is read-only.
+`omni agents onboard` inventories legacy Omni v22/v23 declarations plus every
+user-global native source in APM's current registry and prints APM's redacted plan. Use
+`--project-root /absolute/workspace` to inventory project-native state instead;
+APM derives every applicable client contained by that workspace. The reviewed
+plan records its canonical root. Planning is read-only. `--from` is an optional
+APM-owned source filter; Omni does not maintain a source or target registry.
 Persist a reviewed plan with `--plan-json /absolute/path/plan.json`, then apply
 it with `omni agents onboard --apply --apply-plan /absolute/path/plan.json`.
 
 Apply holds Omni's config-root lock, asks the pinned APM binary to install and
 audit, commits Omni v24 fragments last, then finalizes APM's external-commit
-fence. Interrupted operations expose `status`, `resume`, and confirmed
-`cleanup` subcommands. Literal secrets, unsupported targets, unresolved
+fence. Interrupted operations expose `status`, `resume`, pre-install
+`rollback`, and confirmed `cleanup` subcommands. Literal secrets, unsupported targets, unresolved
 conflicts, unreviewed clients, and target broadening block mutation. Choosing
 “leave unmanaged” persists a durable exclusion and continues supported imports.
+Global and project operations keep separate bound identities and journals, and
+project recovery runs from the reviewed workspace root.
 
 ## Patched APM Build
 
-Omni temporarily requires APM `0.28.0+omni.4`, built from the immutable
+Omni temporarily requires APM `0.28.0+omni.5`, built from the immutable
 `lkshrk/apm` commit
-[`9268ab1d608d73fb776a2543885e4bcbbe0f5737`](https://github.com/lkshrk/apm/commit/9268ab1d608d73fb776a2543885e4bcbbe0f5737).
+[`601784aec43527a63906b1bdd384618ae60f238d`](https://github.com/lkshrk/apm/commit/601784aec43527a63906b1bdd384618ae60f238d).
 Installers use this exact source specification:
 
 ```text
-git+https://github.com/lkshrk/apm.git@9268ab1d608d73fb776a2543885e4bcbbe0f5737
+git+https://github.com/lkshrk/apm.git@601784aec43527a63906b1bdd384618ae60f238d
 ```
 
 The patch makes Hermes a stable explicit target, fixes global Antigravity MCP

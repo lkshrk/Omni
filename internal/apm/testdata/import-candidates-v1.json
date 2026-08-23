@@ -4,12 +4,23 @@
   "title": "APM native import candidates v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "coordinator", "scope", "sources", "candidate_set_id", "source_preimages", "candidates"],
+  "required": ["schema_version", "coordinator", "sources", "candidate_set_id", "source_preimages", "candidates"],
+  "allOf": [
+    {
+      "if": {"properties": {"scope": {"const": "project"}}, "required": ["scope"]},
+      "then": {"required": ["project_root"]}
+    },
+    {
+      "if": {"required": ["project_root"]},
+      "then": {"properties": {"scope": {"const": "project"}}, "required": ["scope"]}
+    }
+  ],
   "properties": {
     "schema_version": {"const": 1},
     "coordinator": {"enum": ["standalone", "omni-v24"]},
-    "scope": {"const": "global"},
-    "sources": {"type": "array", "items": {"enum": ["claude", "codex", "omni-v24"]}, "uniqueItems": true},
+    "scope": {"enum": ["global", "project"]},
+    "project_root": {"type": "string", "minLength": 1},
+    "sources": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
     "candidate_set_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "source_preimages": {
       "type": "array",
@@ -39,7 +50,7 @@
           "name": {"type": "string", "minLength": 1},
           "root_id": {"type": "string", "minLength": 1},
           "source_handle": {"type": "string", "minLength": 1},
-          "source_target": {"type": "array", "items": {"enum": ["claude", "codex", "copilot", "cursor", "kiro", "opencode", "gemini", "grok-build", "antigravity", "windsurf", "openclaw", "hermes", "copilot-app"]}, "minItems": 1, "uniqueItems": true},
+          "source_target": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
           "provenance": {"enum": ["remote", "marketplace", "local-git", "local-only", "native-unmanaged", "unknown"]},
           "payload": {},
           "content_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},

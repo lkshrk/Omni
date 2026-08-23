@@ -1,12 +1,15 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,9 +22,10 @@ import (
 )
 
 type AgentsOnboardOptions struct {
-	PlanJSON  string
-	ApplyPlan string
-	Sources   []string
+	PlanJSON    string
+	ApplyPlan   string
+	Sources     []string
+	ProjectRoot string
 }
 type AgentsOnboardResolutions struct {
 	ApprovedTargets     map[string][]string
@@ -67,7 +71,6 @@ func (a *App) detectOnboardingRecovery(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("open onboarding recovery state: %w", err)
 	}
-	var client *apm.Client
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -81,15 +84,12 @@ func (a *App) detectOnboardingRecovery(ctx context.Context) error {
 			return fmt.Errorf("read onboarding operation %q: %w", entry.Name(), readErr)
 		}
 		recovery := &OnboardingRecoveryError{OperationID: journal.OperationID, OmniPhase: journal.Phase}
-		if client == nil {
-			var clientErr error
-			client, clientErr = a.onboardingClient(ctx)
-			if clientErr != nil {
-				recovery.Cause = clientErr
-				return recovery
-			}
+		client, clientErr := a.onboardingClient(ctx, journal.ProjectRoot)
+		if clientErr != nil {
+			recovery.Cause = clientErr
+			return recovery
 		}
-		status, _, statusErr := client.ImportStatus(ctx, journal.OperationID)
+		status, _, statusErr := client.ImportStatusAt(ctx, journal.OperationID, journal.ProjectRoot)
 		if statusErr == nil && journal.Phase == "complete" && (status.State == "complete" || status.State == "rolled-back") {
 			continue
 		}
@@ -99,20 +99,27 @@ func (a *App) detectOnboardingRecovery(ctx context.Context) error {
 	return nil
 }
 
-func (a *App) onboardingClient(ctx context.Context) (*apm.Client, error) {
+func (a *App) onboardingClient(ctx context.Context, projectRoot string) (*apm.Client, error) {
 	if !a.APMAvailable() {
 		return nil, errAPMNotInstalled()
 	}
 	if err := a.requirePinnedAPM(ctx); err != nil {
 		return nil, err
 	}
-	return a.APMClient(apm.Global), nil
+	return a.APMClient(apm.Global).AtProjectRoot(projectRoot), nil
 }
 
 func (a *App) AgentsOnboardPlan(ctx context.Context, opts AgentsOnboardOptions) (result AgentsOnboardResult, retErr error) {
-	inventory, err := ExtractLegacyCandidates(a.ConfigPath)
+	projectRoot, err := canonicalOnboardProjectRoot(opts.ProjectRoot)
 	if err != nil {
 		return AgentsOnboardResult{}, err
+	}
+	inventory := LegacyInventory{PreimageSet: projectPreimageSet(projectRoot), Pointers: map[string]string{}}
+	if projectRoot == "" {
+		inventory, err = ExtractLegacyCandidates(a.ConfigPath)
+		if err != nil {
+			return AgentsOnboardResult{}, err
+		}
 	}
 	temp, err := os.MkdirTemp("", "omni-onboard-plan-*")
 	if err != nil {
@@ -128,21 +135,20 @@ func (a *App) AgentsOnboardPlan(ctx context.Context, opts AgentsOnboardOptions) 
 		return AgentsOnboardResult{}, err
 	}
 	candidatePath := filepath.Join(root.Path(), "candidates.json")
-	data, err := json.MarshalIndent(inventory.Envelope, "", " ")
-	if err != nil {
-		return AgentsOnboardResult{}, fmt.Errorf("encode onboarding candidates: %w", err)
+	if projectRoot == "" {
+		data, marshalErr := json.MarshalIndent(inventory.Envelope, "", " ")
+		if marshalErr != nil {
+			return AgentsOnboardResult{}, fmt.Errorf("encode onboarding candidates: %w", marshalErr)
+		}
+		if err := root.WriteFileAtomic("candidates.json", append(data, '\n')); err != nil {
+			return AgentsOnboardResult{}, err
+		}
 	}
-	if err := root.WriteFileAtomic("candidates.json", append(data, '\n')); err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	client, err := a.onboardingClient(ctx)
+	client, err := a.onboardingClient(ctx, projectRoot)
 	if err != nil {
 		return AgentsOnboardResult{}, err
 	}
 	sources := opts.Sources
-	if len(sources) == 0 {
-		sources = []string{"claude", "codex"}
-	}
 	persist := opts.PlanJSON
 	if persist != "" {
 		persist, err = filepath.Abs(persist)
@@ -150,7 +156,7 @@ func (a *App) AgentsOnboardPlan(ctx context.Context, opts AgentsOnboardOptions) 
 			return AgentsOnboardResult{}, err
 		}
 	}
-	envelope, _, err := client.ImportPlan(ctx, apm.ImportRequest{CandidateFile: candidatePath, PreimageSet: inventory.PreimageSet, Sources: sources, PersistPlan: persist})
+	envelope, _, err := client.ImportPlan(ctx, apm.ImportRequest{CandidateFile: candidatePath, PreimageSet: inventory.PreimageSet, Sources: sources, PersistPlan: persist, ProjectRoot: projectRoot})
 	candidateSetID := inventory.Envelope.CandidateSetID
 	if envelope.Plan != nil {
 		candidateSetID = envelope.Plan.CandidateSetID
@@ -167,12 +173,16 @@ func (a *App) AgentsOnboardApply(ctx context.Context, planPath string) (result A
 	if err != nil {
 		return AgentsOnboardResult{}, err
 	}
-	inventory, err := ExtractLegacyCandidates(a.ConfigPath)
-	if err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	if err := validateDispositionGate(plan, inventory); err != nil {
-		return AgentsOnboardResult{}, err
+	projectRoot := plan.ProjectRoot
+	inventory := LegacyInventory{PreimageSet: projectPreimageSet(projectRoot), Pointers: map[string]string{}}
+	if projectRoot == "" {
+		inventory, err = ExtractLegacyCandidates(a.ConfigPath)
+		if err != nil {
+			return AgentsOnboardResult{}, err
+		}
+		if err := validateDispositionGate(plan, inventory); err != nil {
+			return AgentsOnboardResult{}, err
+		}
 	}
 	lock, err := config.AcquireWriteLock(a.ConfigPath)
 	if err != nil {
@@ -200,18 +210,20 @@ func (a *App) AgentsOnboardApply(ctx context.Context, planPath string) (result A
 	if err != nil {
 		return AgentsOnboardResult{}, err
 	}
-	candidateData, err := json.MarshalIndent(inventory.Envelope, "", " ")
-	if err != nil {
-		return AgentsOnboardResult{}, fmt.Errorf("encode onboarding candidates: %w", err)
+	if projectRoot == "" {
+		candidateData, marshalErr := json.MarshalIndent(inventory.Envelope, "", " ")
+		if marshalErr != nil {
+			return AgentsOnboardResult{}, fmt.Errorf("encode onboarding candidates: %w", marshalErr)
+		}
+		if err := validationRoot.WriteFileAtomic("candidates.json", append(candidateData, '\n')); err != nil {
+			return AgentsOnboardResult{}, err
+		}
 	}
-	if err := validationRoot.WriteFileAtomic("candidates.json", append(candidateData, '\n')); err != nil {
+	client, err := a.onboardingClient(ctx, projectRoot)
+	if err != nil {
 		return AgentsOnboardResult{}, err
 	}
-	client, err := a.onboardingClient(ctx)
-	if err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	fresh, _, err := client.ImportPlan(ctx, apm.ImportRequest{CandidateFile: filepath.Join(validationRoot.Path(), "candidates.json"), PreimageSet: inventory.PreimageSet, Sources: []string{"claude", "codex"}})
+	fresh, _, err := client.ImportPlan(ctx, apm.ImportRequest{CandidateFile: filepath.Join(validationRoot.Path(), "candidates.json"), PreimageSet: inventory.PreimageSet, Sources: nativeOnboardSources(plan.Sources), ProjectRoot: projectRoot})
 	if err != nil {
 		return AgentsOnboardResult{}, err
 	}
@@ -231,7 +243,7 @@ func (a *App) AgentsOnboardApply(ctx context.Context, planPath string) (result A
 		return AgentsOnboardResult{}, err
 	}
 	token := []byte(base64.RawURLEncoding.EncodeToString(randomToken))
-	journal := onboardJournal{SchemaVersion: 1, OperationID: plan.OperationID, PlanID: plan.PlanID, ResolutionID: plan.ResolutionID, CandidateSetID: plan.CandidateSetID, PreimageSet: inventory.PreimageSet, Phase: "planned", FinalizeToken: string(token), Documents: documents}
+	journal := onboardJournal{SchemaVersion: 1, OperationID: plan.OperationID, PlanID: plan.PlanID, ResolutionID: plan.ResolutionID, CandidateSetID: plan.CandidateSetID, PreimageSet: inventory.PreimageSet, Scope: plan.Scope, ProjectRoot: projectRoot, Phase: "planned", FinalizeToken: string(token), Documents: documents}
 	if err := writeOnboardJournal(opRoot, journal); err != nil {
 		return AgentsOnboardResult{}, err
 	}
@@ -245,7 +257,7 @@ func (a *App) AgentsOnboardApply(ctx context.Context, planPath string) (result A
 	if err := writeOnboardJournal(opRoot, journal); err != nil {
 		return AgentsOnboardResult{}, err
 	}
-	envelope, _, err := client.ImportApply(ctx, apm.ImportRequest{CandidateFile: filepath.Join(opRoot.Path(), "candidates.json"), PlanFile: filepath.Join(opRoot.Path(), "plan.json"), PreimageSet: inventory.PreimageSet, FinalizeToken: token})
+	envelope, _, err := client.ImportApply(ctx, apm.ImportRequest{CandidateFile: filepath.Join(opRoot.Path(), "candidates.json"), PlanFile: filepath.Join(opRoot.Path(), "plan.json"), PreimageSet: inventory.PreimageSet, FinalizeToken: token, ProjectRoot: projectRoot})
 	if err != nil {
 		return AgentsOnboardResult{Envelope: envelope, CandidateSetID: plan.CandidateSetID, PreimageSet: inventory.PreimageSet}, err
 	}
@@ -263,7 +275,7 @@ func (a *App) AgentsOnboardApply(ctx context.Context, planPath string) (result A
 	if err := writeOnboardJournal(opRoot, journal); err != nil {
 		return AgentsOnboardResult{}, err
 	}
-	final, _, err := client.ImportFinalize(ctx, apm.ImportRequest{OperationID: plan.OperationID, PreimageSet: inventory.PreimageSet, FinalizeToken: token})
+	final, _, err := client.ImportFinalize(ctx, apm.ImportRequest{OperationID: plan.OperationID, PreimageSet: inventory.PreimageSet, FinalizeToken: token, ProjectRoot: projectRoot})
 	if err != nil {
 		return AgentsOnboardResult{Envelope: final, CandidateSetID: plan.CandidateSetID, PreimageSet: inventory.PreimageSet}, err
 	}
@@ -312,6 +324,9 @@ func (a *App) AgentsOnboardApplyResolved(ctx context.Context, planPath string, r
 	if err != nil {
 		return AgentsOnboardResult{}, err
 	}
+	if err := validateApprovedTargetResolutions(plan, resolutions.ApprovedTargets); err != nil {
+		return AgentsOnboardResult{}, err
+	}
 	for i := range plan.Items {
 		item := &plan.Items[i]
 		if targets := lookupResolution(resolutions.ApprovedTargets, item.ID, item.Name); len(targets) > 0 {
@@ -334,6 +349,31 @@ func (a *App) AgentsOnboardApplyResolved(ctx context.Context, planPath string, r
 		return AgentsOnboardResult{}, err
 	}
 	return a.AgentsOnboardApplyReviewed(ctx, plan)
+}
+
+func validateApprovedTargetResolutions(plan apm.ImportPlan, resolutions map[string][]string) error {
+	for key, targets := range resolutions {
+		if len(targets) == 0 {
+			return fmt.Errorf("target resolution item %s has no targets", key)
+		}
+		matched := false
+		for _, item := range plan.Items {
+			if key != item.ID && key != item.Name {
+				continue
+			}
+			matched = true
+			allowed := item.TargetOptions()
+			for _, target := range targets {
+				if !apm.ValidImportName(target) || !slices.Contains(allowed, target) {
+					return fmt.Errorf("item %s does not allow target %s", item.Name, target)
+				}
+			}
+		}
+		if !matched {
+			return fmt.Errorf("target resolution item %s is not in the reviewed plan", key)
+		}
+	}
+	return nil
 }
 
 func sortedUnique(values []string) []string {
@@ -364,11 +404,11 @@ func (a *App) AgentsOnboardStatus(ctx context.Context, operationID string) (Agen
 	if err != nil {
 		return AgentsOnboardStatusResult{}, err
 	}
-	client, err := a.onboardingClient(ctx)
+	client, err := a.onboardingClient(ctx, journal.ProjectRoot)
 	if err != nil {
 		return AgentsOnboardStatusResult{}, err
 	}
-	envelope, _, err := client.ImportStatus(ctx, operationID)
+	envelope, _, err := client.ImportStatusAt(ctx, operationID, journal.ProjectRoot)
 	return AgentsOnboardStatusResult{OperationID: operationID, OmniPhase: journal.Phase, APM: envelope}, err
 }
 
@@ -402,12 +442,12 @@ func (a *App) AgentsOnboardResume(ctx context.Context, operationID string) (resu
 	if plan.OperationID != journal.OperationID || plan.PlanID != journal.PlanID || plan.ResolutionID != journal.ResolutionID || plan.CandidateSetID != journal.CandidateSetID {
 		return AgentsOnboardStatusResult{}, errors.New("onboarding journal/plan identity mismatch")
 	}
-	client, err := a.onboardingClient(ctx)
+	client, err := a.onboardingClient(ctx, journal.ProjectRoot)
 	if err != nil {
 		return AgentsOnboardStatusResult{}, err
 	}
 	if journal.Phase == "planned" || journal.Phase == "apm-applying" {
-		envelope, _, resumeErr := client.ImportResume(ctx, apm.ImportRequest{OperationID: operationID, CandidateFile: filepath.Join(opRoot.Path(), "candidates.json"), PlanFile: filepath.Join(opRoot.Path(), "plan.json"), PreimageSet: journal.PreimageSet, FinalizeToken: token})
+		envelope, _, resumeErr := client.ImportResume(ctx, apm.ImportRequest{OperationID: operationID, CandidateFile: filepath.Join(opRoot.Path(), "candidates.json"), PlanFile: filepath.Join(opRoot.Path(), "plan.json"), PreimageSet: journal.PreimageSet, FinalizeToken: token, ProjectRoot: journal.ProjectRoot})
 		if resumeErr != nil {
 			return AgentsOnboardStatusResult{OperationID: operationID, OmniPhase: journal.Phase, APM: envelope}, resumeErr
 		}
@@ -432,7 +472,7 @@ func (a *App) AgentsOnboardResume(ctx context.Context, operationID string) (resu
 		}
 	}
 	if journal.Phase == "v24-committed" {
-		envelope, _, err := client.ImportFinalize(ctx, apm.ImportRequest{OperationID: operationID, PreimageSet: journal.PreimageSet, FinalizeToken: token})
+		envelope, _, err := client.ImportFinalize(ctx, apm.ImportRequest{OperationID: operationID, PreimageSet: journal.PreimageSet, FinalizeToken: token, ProjectRoot: journal.ProjectRoot})
 		if err != nil {
 			return AgentsOnboardStatusResult{}, err
 		}
@@ -483,11 +523,11 @@ func (a *App) AgentsOnboardCleanup(ctx context.Context, operationID string, conf
 	if journal.Phase != "complete" {
 		return preview, errors.New("onboarding cleanup requires a complete operation")
 	}
-	client, err := a.onboardingClient(ctx)
+	client, err := a.onboardingClient(ctx, journal.ProjectRoot)
 	if err != nil {
 		return preview, err
 	}
-	status, _, err := client.ImportStatus(ctx, operationID)
+	status, _, err := client.ImportStatusAt(ctx, operationID, journal.ProjectRoot)
 	if err != nil {
 		return preview, err
 	}
@@ -497,7 +537,7 @@ func (a *App) AgentsOnboardCleanup(ctx context.Context, operationID string, conf
 	if !confirm {
 		return preview, nil
 	}
-	if _, _, err := client.ImportCleanup(ctx, operationID); err != nil {
+	if _, _, err := client.ImportCleanupAt(ctx, operationID, journal.ProjectRoot); err != nil {
 		return preview, err
 	}
 	data, marshalErr := json.Marshal(preview)
@@ -519,23 +559,127 @@ func readReviewedPlan(path string) (apm.ImportPlan, error) {
 		return apm.ImportPlan{}, err
 	}
 	var envelope apm.ImportEnvelope
-	if json.Unmarshal(data, &envelope) == nil && envelope.Plan != nil {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return apm.ImportPlan{}, err
+	}
+	if _, wrapped := probe["plan"]; wrapped {
+		if err := decodeOnboardJSON(data, &envelope); err != nil || envelope.Plan == nil {
+			return apm.ImportPlan{}, errors.New("reviewed plan envelope mismatch")
+		}
+		if err := apm.ValidateImportPlanProtocol(*envelope.Plan); err != nil {
+			return apm.ImportPlan{}, err
+		}
 		if err := apm.ValidateImportPlanBinding(*envelope.Plan); err != nil {
 			return apm.ImportPlan{}, err
 		}
 		return *envelope.Plan, nil
 	}
 	var plan apm.ImportPlan
-	if err := json.Unmarshal(data, &plan); err != nil {
+	if err := decodeOnboardJSON(data, &plan); err != nil {
 		return plan, err
 	}
-	if plan.SchemaVersion != apm.ImportSchemaVersion || plan.Coordinator != "omni-v24" {
-		return plan, errors.New("reviewed plan protocol mismatch")
+	if err := apm.ValidateImportPlanProtocol(plan); err != nil {
+		return plan, err
 	}
 	if err := apm.ValidateImportPlanBinding(plan); err != nil {
 		return plan, err
 	}
 	return plan, nil
+}
+
+func decodeOnboardJSON(data []byte, dst any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return errors.New("multiple JSON values")
+	}
+	return nil
+}
+
+func canonicalOnboardProjectRoot(root string) (string, error) {
+	if strings.TrimSpace(root) == "" {
+		return "", nil
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("resolve onboarding project root: %w", err)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil || !info.IsDir() {
+		return "", errors.New("onboarding project root must be a directory")
+	}
+	return filepath.Clean(resolved), nil
+}
+
+func validateOnboardScope(scope, projectRoot string) error {
+	if scope == "" || scope == "global" {
+		if projectRoot != "" {
+			return errors.New("global onboarding journal cannot declare a project root")
+		}
+		return nil
+	}
+	if scope != "project" {
+		return fmt.Errorf("unsupported onboarding scope %q", scope)
+	}
+	canonical, err := canonicalOnboardProjectRoot(projectRoot)
+	if err != nil || canonical != projectRoot {
+		return errors.New("project onboarding journal has a non-canonical project root")
+	}
+	return nil
+}
+
+func projectPreimageSet(projectRoot string) string {
+	sum := sha256.Sum256([]byte("omni-v24-project\x00" + projectRoot))
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func nativeOnboardSources(sources []string) []string {
+	out := make([]string, 0, len(sources))
+	for _, source := range sources {
+		if source != "omni-v24" {
+			out = append(out, source)
+		}
+	}
+	return out
+}
+
+func (a *App) AgentsOnboardRollback(ctx context.Context, operationID string) (AgentsOnboardStatusResult, error) {
+	stateRoot, err := securefile.OpenRoot(filepath.Join(a.StateDir, "onboarding"))
+	if err != nil {
+		return AgentsOnboardStatusResult{}, err
+	}
+	opRoot, err := stateRoot.OpenChild(operationID)
+	if err != nil {
+		return AgentsOnboardStatusResult{}, err
+	}
+	journal, err := readOnboardJournal(opRoot)
+	if err != nil {
+		return AgentsOnboardStatusResult{}, err
+	}
+	if journal.Phase == "apm-applied" || journal.Phase == "v24-committed" || journal.Phase == "complete" {
+		return AgentsOnboardStatusResult{}, errors.New("onboarding rollback is unavailable after APM installation")
+	}
+	client, err := a.onboardingClient(ctx, journal.ProjectRoot)
+	if err != nil {
+		return AgentsOnboardStatusResult{}, err
+	}
+	envelope, _, err := client.ImportRollback(ctx, operationID, journal.ProjectRoot)
+	if err != nil {
+		return AgentsOnboardStatusResult{OperationID: operationID, OmniPhase: journal.Phase, APM: envelope}, err
+	}
+	journal.Phase = "complete"
+	if err := writeOnboardJournal(opRoot, journal); err != nil {
+		return AgentsOnboardStatusResult{}, err
+	}
+	return AgentsOnboardStatusResult{OperationID: operationID, OmniPhase: journal.Phase, APM: envelope}, nil
 }
 
 func validateDispositionGate(plan apm.ImportPlan, inventory LegacyInventory) error {
@@ -575,9 +719,6 @@ func validateDispositionGate(plan apm.ImportPlan, inventory LegacyInventory) err
 			return fmt.Errorf("legacy item %s has no effective targets", item.Name)
 		}
 		for _, target := range effectiveTargets {
-			if target != "claude" && target != "codex" {
-				return fmt.Errorf("legacy item %s has invalid target %s", item.Name, target)
-			}
 			if len(item.ProposedTargets) > 0 && !slices.Contains(item.ProposedTargets, target) {
 				return fmt.Errorf("legacy item %s broadens to unreviewed target %s", item.Name, target)
 			}

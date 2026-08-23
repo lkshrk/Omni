@@ -40,6 +40,14 @@ func TestAgentsOnboardPreviewConfirmationJourney(t *testing.T) {
 	}
 }
 
+func TestAgentsOnboardProjectPreviewNamesReviewedRoot(t *testing.T) {
+	plan := &apm.ImportPlan{Scope: "project", ProjectRoot: "/workspace/demo", Items: []apm.ImportItem{}}
+	got := onboardPlanSummary(app.AgentsOnboardResult{Envelope: apm.ImportEnvelope{Plan: plan}})
+	if !strings.Contains(got, "/workspace/demo") {
+		t.Fatalf("summary=%q", got)
+	}
+}
+
 func TestAgentsOnboardBlockerAndRecoveryError(t *testing.T) {
 	m := baseModel(nil)
 	plan := &apm.ImportPlan{SchemaVersion: 1, Coordinator: "omni-v24", OperationID: "0123456789abcdef0123456789abcdef", Items: []apm.ImportItem{{ID: "secret", Name: "secret", Classification: "secret-blocked", ReasonCodes: []string{"secret-field:/env/TOKEN"}}}, Blockers: []json.RawMessage{json.RawMessage(`{"reason":"conflict"}`)}}
@@ -54,8 +62,8 @@ func TestAgentsOnboardBlockerAndRecoveryError(t *testing.T) {
 }
 
 func TestAgentsOnboardResolvesTargetsSecretsExecutablesAndExclusions(t *testing.T) {
-	plan := &apm.ImportPlan{Items: []apm.ImportItem{{ID: "target", Classification: "needs-choice"}, {ID: "secret", Name: "api", Classification: "secret-blocked", ReasonCodes: []string{"secret-field:/env/TOKEN"}}, {ID: "exec", Classification: "importable", ReasonCodes: []string{"executable:bin/run"}}, {ID: "unsupported", Name: "cursor", Classification: "unsupported", ReasonCodes: []string{"native-import-decoder-unavailable"}}, {ID: "conflict", Classification: "conflict", CandidateIDs: []string{"winner", "loser"}}, {ID: "conditional", Classification: "needs-choice", ReasonCodes: []string{"conditional-group-host"}}, {ID: "changed", Classification: "excluded-changed"}}}
-	resolveOnboardItem(&plan.Items[0], "c")
+	plan := &apm.ImportPlan{Items: []apm.ImportItem{{ID: "target", Classification: "needs-choice", CurrentTargets: []string{"future-agent"}, ProposedTargets: []string{"future-agent"}}, {ID: "secret", Name: "api", Classification: "secret-blocked", ReasonCodes: []string{"secret-field:/env/TOKEN"}}, {ID: "exec", Classification: "importable", ReasonCodes: []string{"executable:bin/run"}}, {ID: "unsupported", Name: "cursor", Classification: "unsupported", ReasonCodes: []string{"native-import-decoder-unavailable"}}, {ID: "conflict", Classification: "conflict", CandidateIDs: []string{"winner", "loser"}}, {ID: "conditional", Classification: "needs-choice", ReasonCodes: []string{"conditional-group-host"}}, {ID: "changed", Classification: "excluded-changed"}}}
+	resolveOnboardItem(&plan.Items[0], "1")
 	resolveOnboardItem(&plan.Items[1], "m")
 	resolveOnboardItem(&plan.Items[2], "E")
 	resolveOnboardItem(&plan.Items[3], "x")
@@ -70,6 +78,9 @@ func TestAgentsOnboardResolvesTargetsSecretsExecutablesAndExclusions(t *testing.
 	}
 	if plan.Items[3].Resolution.Decision != "exclude" {
 		t.Fatalf("unsupported client decision=%q", plan.Items[3].Resolution.Decision)
+	}
+	if plan.Items[0].Resolution.ApprovedTargets[0] != "future-agent" || !strings.Contains(onboardTargetChoiceHelp(plan.Items[0]), "1 future-agent") {
+		t.Fatalf("dynamic target choice=%#v", plan.Items[0].Resolution)
 	}
 }
 
