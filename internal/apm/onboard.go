@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -24,6 +25,7 @@ const (
 	ImportKindResume   = "import-resume-result"
 	ImportKindFinalize = "import-finalize-result"
 	ImportKindCleanup  = "import-cleanup-result"
+	ImportKindRollback = "import-rollback-result"
 	ImportKindError    = "import-error"
 )
 
@@ -54,7 +56,8 @@ type ImportCandidate struct {
 type CandidateEnvelope struct {
 	SchemaVersion   int               `json:"schema_version"`
 	Coordinator     string            `json:"coordinator"`
-	Scope           string            `json:"scope"`
+	Scope           string            `json:"scope,omitempty"`
+	ProjectRoot     string            `json:"project_root,omitempty"`
 	Sources         []string          `json:"sources"`
 	CandidateSetID  string            `json:"candidate_set_id"`
 	SourcePreimages []SourcePreimage  `json:"source_preimages"`
@@ -83,13 +86,25 @@ type ImportItem struct {
 	Resolution          ImportResolution `json:"resolution"`
 }
 
+func (i ImportItem) TargetOptions() []string {
+	options := make([]string, 0, len(i.CurrentTargets)+len(i.ProposedTargets))
+	for _, target := range append(append([]string(nil), i.CurrentTargets...), i.ProposedTargets...) {
+		if ValidImportName(target) {
+			options = append(options, target)
+		}
+	}
+	sort.Strings(options)
+	return slices.Compact(options)
+}
+
 type ImportPlan struct {
 	SchemaVersion        int               `json:"schema_version"`
 	Coordinator          string            `json:"coordinator"`
 	PlanID               string            `json:"plan_id"`
 	ResolutionID         string            `json:"resolution_id"`
 	OperationID          string            `json:"operation_id"`
-	Scope                string            `json:"scope"`
+	Scope                string            `json:"scope,omitempty"`
+	ProjectRoot          string            `json:"project_root,omitempty"`
 	Sources              []string          `json:"sources"`
 	CandidateSetID       string            `json:"candidate_set_id"`
 	InventoryFingerprint string            `json:"inventory_fingerprint"`
@@ -143,6 +158,9 @@ func BindImportPlanResolution(plan *ImportPlan) error {
 }
 
 func ValidateImportPlanBinding(plan ImportPlan) error {
+	if err := validateImportScope(plan.Scope, plan.ProjectRoot); err != nil {
+		return err
+	}
 	originalPlan, originalResolution, originalOperation := plan.PlanID, plan.ResolutionID, plan.OperationID
 	if err := BindImportPlanResolution(&plan); err != nil {
 		return err
@@ -151,6 +169,13 @@ func ValidateImportPlanBinding(plan ImportPlan) error {
 		return errors.New("import plan identity binding mismatch")
 	}
 	return nil
+}
+
+func ValidateImportPlanProtocol(plan ImportPlan) error {
+	if plan.SchemaVersion != ImportSchemaVersion || plan.Coordinator != "omni-v24" {
+		return errors.New("reviewed plan protocol mismatch")
+	}
+	return validateImportScope(plan.Scope, plan.ProjectRoot)
 }
 
 func planCanonicalMap(plan ImportPlan) (map[string]any, error) {
@@ -250,13 +275,17 @@ type ImportRequest struct {
 	FinalizeToken []byte
 	OperationID   string
 	PersistPlan   string
+	ProjectRoot   string
 }
 
 func (c *Client) ImportPlan(ctx context.Context, req ImportRequest) (ImportEnvelope, Result, error) {
 	if err := validateImportRequest(req, false); err != nil {
 		return ImportEnvelope{}, Result{}, err
 	}
-	args := []string{"import", "--global"}
+	args := []string{"import"}
+	if req.ProjectRoot == "" {
+		args = append(args, "--global")
+	}
 	for _, source := range req.Sources {
 		args = append(args, "--from", source)
 	}
@@ -264,15 +293,19 @@ func (c *Client) ImportPlan(ctx context.Context, req ImportRequest) (ImportEnvel
 	if req.PersistPlan != "" {
 		args = append(args, "--plan-json", req.PersistPlan)
 	}
-	return c.runImport(ctx, ImportKindPlan, nil, args...)
+	return c.AtProjectRoot(req.ProjectRoot).runImport(ctx, ImportKindPlan, nil, args...)
 }
 
 func (c *Client) ImportApply(ctx context.Context, req ImportRequest) (ImportEnvelope, Result, error) {
 	if err := validateImportRequest(req, true); err != nil {
 		return ImportEnvelope{}, Result{}, err
 	}
-	args := []string{"import", "--global", "--candidate-file", req.CandidateFile, "--apply-plan", req.PlanFile, "--coordinator", "omni-v24", "--omni-preimage-set", req.PreimageSet, "--token-stdin", "--format", "json"}
-	envelope, result, err := c.runImport(ctx, ImportKindApply, req.FinalizeToken, args...)
+	args := []string{"import"}
+	if req.ProjectRoot == "" {
+		args = append(args, "--global")
+	}
+	args = append(args, "--candidate-file", req.CandidateFile, "--apply-plan", req.PlanFile, "--coordinator", "omni-v24", "--omni-preimage-set", req.PreimageSet, "--token-stdin", "--format", "json")
+	envelope, result, err := c.AtProjectRoot(req.ProjectRoot).runImport(ctx, ImportKindApply, req.FinalizeToken, args...)
 	if err == nil && (envelope.State != "awaiting-external-commit" || envelope.NextAction != "external-commit-then-finalize" || !envelope.FinalizeTokenRequired) {
 		err = errors.New("APM apply did not enter the Omni external-commit fence")
 	}
@@ -280,10 +313,17 @@ func (c *Client) ImportApply(ctx context.Context, req ImportRequest) (ImportEnve
 }
 
 func (c *Client) ImportStatus(ctx context.Context, operationID string) (ImportEnvelope, Result, error) {
+	return c.ImportStatusAt(ctx, operationID, "")
+}
+
+func (c *Client) ImportStatusAt(ctx context.Context, operationID, projectRoot string) (ImportEnvelope, Result, error) {
 	if !validOperationID(operationID) {
 		return ImportEnvelope{}, Result{}, errors.New("invalid operation ID")
 	}
-	return c.runImport(ctx, ImportKindStatus, nil, "import", "status", "--operation", operationID, "--format", "json")
+	if err := validateRequestProjectRoot(projectRoot); err != nil {
+		return ImportEnvelope{}, Result{}, err
+	}
+	return c.AtProjectRoot(projectRoot).runImport(ctx, ImportKindStatus, nil, "import", "status", "--operation", operationID, "--format", "json")
 }
 
 func (c *Client) ImportResume(ctx context.Context, req ImportRequest) (ImportEnvelope, Result, error) {
@@ -293,21 +333,41 @@ func (c *Client) ImportResume(ctx context.Context, req ImportRequest) (ImportEnv
 	if !validOperationID(req.OperationID) {
 		return ImportEnvelope{}, Result{}, errors.New("invalid operation ID")
 	}
-	return c.runImport(ctx, ImportKindResume, req.FinalizeToken, "import", "resume", "--operation", req.OperationID, "--candidate-file", req.CandidateFile, "--apply-plan", req.PlanFile, "--coordinator", "omni-v24", "--omni-preimage-set", req.PreimageSet, "--token-stdin", "--format", "json")
+	return c.AtProjectRoot(req.ProjectRoot).runImport(ctx, ImportKindResume, req.FinalizeToken, "import", "resume", "--operation", req.OperationID, "--candidate-file", req.CandidateFile, "--apply-plan", req.PlanFile, "--coordinator", "omni-v24", "--omni-preimage-set", req.PreimageSet, "--token-stdin", "--format", "json")
 }
 
 func (c *Client) ImportFinalize(ctx context.Context, req ImportRequest) (ImportEnvelope, Result, error) {
 	if !validOperationID(req.OperationID) || strings.TrimSpace(req.PreimageSet) == "" || len(req.FinalizeToken) < 32 {
 		return ImportEnvelope{}, Result{}, errors.New("invalid finalize request")
 	}
-	return c.runImport(ctx, ImportKindFinalize, req.FinalizeToken, "import", "finalize", "--operation", req.OperationID, "--omni-preimage-set", req.PreimageSet, "--token-stdin", "--format", "json")
+	if err := validateRequestProjectRoot(req.ProjectRoot); err != nil {
+		return ImportEnvelope{}, Result{}, err
+	}
+	return c.AtProjectRoot(req.ProjectRoot).runImport(ctx, ImportKindFinalize, req.FinalizeToken, "import", "finalize", "--operation", req.OperationID, "--omni-preimage-set", req.PreimageSet, "--token-stdin", "--format", "json")
 }
 
 func (c *Client) ImportCleanup(ctx context.Context, operationID string) (ImportEnvelope, Result, error) {
+	return c.ImportCleanupAt(ctx, operationID, "")
+}
+
+func (c *Client) ImportCleanupAt(ctx context.Context, operationID, projectRoot string) (ImportEnvelope, Result, error) {
 	if !validOperationID(operationID) {
 		return ImportEnvelope{}, Result{}, errors.New("invalid operation ID")
 	}
-	return c.runImport(ctx, ImportKindCleanup, nil, "import", "cleanup", "--operation", operationID, "--confirm", "--format", "json")
+	if err := validateRequestProjectRoot(projectRoot); err != nil {
+		return ImportEnvelope{}, Result{}, err
+	}
+	return c.AtProjectRoot(projectRoot).runImport(ctx, ImportKindCleanup, nil, "import", "cleanup", "--operation", operationID, "--confirm", "--format", "json")
+}
+
+func (c *Client) ImportRollback(ctx context.Context, operationID, projectRoot string) (ImportEnvelope, Result, error) {
+	if !validOperationID(operationID) {
+		return ImportEnvelope{}, Result{}, errors.New("invalid operation ID")
+	}
+	if err := validateRequestProjectRoot(projectRoot); err != nil {
+		return ImportEnvelope{}, Result{}, err
+	}
+	return c.AtProjectRoot(projectRoot).runImport(ctx, ImportKindRollback, nil, "import", "rollback", "--operation", operationID, "--format", "json")
 }
 
 func (c *Client) runImport(ctx context.Context, expectedKind string, stdin []byte, args ...string) (ImportEnvelope, Result, error) {
@@ -355,7 +415,7 @@ func (c *Client) runImport(ctx context.Context, expectedKind string, stdin []byt
 		return envelope, result, errors.New("APM import result protocol mismatch")
 	}
 	if envelope.Plan != nil {
-		if envelope.Plan.SchemaVersion != ImportSchemaVersion || envelope.Plan.Coordinator != "omni-v24" || envelope.Plan.Scope != "global" || !validOperationID(envelope.Plan.OperationID) || !validHexID(envelope.Plan.PlanID, 64) || !validHexID(envelope.Plan.ResolutionID, 64) {
+		if envelope.Plan.SchemaVersion != ImportSchemaVersion || envelope.Plan.Coordinator != "omni-v24" || validateImportScope(envelope.Plan.Scope, envelope.Plan.ProjectRoot) != nil || !validOperationID(envelope.Plan.OperationID) || !validHexID(envelope.Plan.PlanID, 64) || !validHexID(envelope.Plan.ResolutionID, 64) {
 			return envelope, result, errors.New("APM import plan protocol mismatch")
 		}
 		for _, item := range envelope.Plan.Items {
@@ -393,6 +453,18 @@ func decodeImportFailure(result Result, runErr error) (ImportEnvelope, Result, e
 }
 
 func validateImportRequest(req ImportRequest, apply bool) error {
+	scope := "global"
+	if req.ProjectRoot != "" {
+		scope = "project"
+	}
+	if err := validateImportScope(scope, req.ProjectRoot); err != nil {
+		return err
+	}
+	for _, source := range req.Sources {
+		if !ValidImportName(source) {
+			return fmt.Errorf("invalid import source %q", source)
+		}
+	}
 	if !filepath.IsAbs(req.CandidateFile) {
 		return errors.New("candidate file must be absolute")
 	}
@@ -409,6 +481,51 @@ func validateImportRequest(req ImportRequest, apply bool) error {
 		return errors.New("256-bit finalize token is required")
 	}
 	return nil
+}
+
+// ValidImportName validates an opaque APM source/target name without copying APM's registry.
+func ValidImportName(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for i, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || i > 0 && (r == '-' || r == '_' || r == '.') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validateImportScope(scope, projectRoot string) error {
+	if scope == "" || scope == "global" {
+		if projectRoot != "" {
+			return errors.New("global import cannot declare a project root")
+		}
+		return nil
+	}
+	if scope != "project" {
+		return fmt.Errorf("unsupported import scope %q", scope)
+	}
+	if projectRoot == "" || !filepath.IsAbs(projectRoot) || filepath.Clean(projectRoot) != projectRoot {
+		return errors.New("project import requires a canonical absolute project_root")
+	}
+	resolved, err := filepath.EvalSymlinks(projectRoot)
+	if err != nil || resolved != projectRoot {
+		return errors.New("project import requires a canonical absolute project_root")
+	}
+	info, err := os.Stat(projectRoot)
+	if err != nil || !info.IsDir() {
+		return errors.New("project import requires a canonical absolute project_root")
+	}
+	return nil
+}
+
+func validateRequestProjectRoot(projectRoot string) error {
+	if projectRoot == "" {
+		return nil
+	}
+	return validateImportScope("project", projectRoot)
 }
 
 func validOperationID(id string) bool {

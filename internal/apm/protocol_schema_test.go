@@ -9,7 +9,7 @@ import (
 )
 
 func TestVendoredImportProtocolHashes(t *testing.T) {
-	expected := map[string]string{"testdata/import-candidates-v1.json": "bf71f5318e9a35a2b2b4c080a70b24a35febd40f2e95a3cf31e3c830aeb0d190", "testdata/import-plan-v1.json": "72cb19bb870db9f824f1f558104d31a440f78827b6a0829d89009d973d649901", "testdata/import-result-v1.json": "38d3c17a11c4c7375c67a6983b09bfac634128b21ffbb0eabe10771d63b0dc15", "testdata/import-envelope-v1.json": "0dd40f94af044a537157b9985a97d66e5d5f13e3947783c476436d06b7c7a4e0", "testdata/envelopes-v1.json": "c9f41d6e445835926ede647f5b48942c41b2f2421589aa1dbbc665626d123dbf"}
+	expected := map[string]string{"testdata/import-candidates-v1.json": "533578ddac74ab2eff8ce215d7a5efbc32594ab0a3056da9f192bf79320b2579", "testdata/import-plan-v1.json": "de220efc5d59f06fd81b413dc62915d3d4bb0bda115e13bfa634936a4e26f759", "testdata/import-result-v1.json": "38d3c17a11c4c7375c67a6983b09bfac634128b21ffbb0eabe10771d63b0dc15", "testdata/import-envelope-v1.json": "0dd40f94af044a537157b9985a97d66e5d5f13e3947783c476436d06b7c7a4e0", "testdata/envelopes-v1.json": "c9f41d6e445835926ede647f5b48942c41b2f2421589aa1dbbc665626d123dbf"}
 	for name, want := range expected {
 		data, err := protocolSchemas.ReadFile(name)
 		if err != nil {
@@ -42,6 +42,26 @@ func TestVendoredImportSchemasAreStrictV1(t *testing.T) {
 		version, _ := properties["schema_version"].(map[string]any)
 		if version["const"] != float64(1) {
 			t.Fatalf("%s schema version = %v", name, version["const"])
+		}
+	}
+}
+
+func TestVendoredCandidateSchemaLeavesAPMNamesExtensible(t *testing.T) {
+	data, err := protocolSchemas.ReadFile("testdata/import-candidates-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatal(err)
+	}
+	properties := schema["properties"].(map[string]any)
+	sourceItems := properties["sources"].(map[string]any)["items"].(map[string]any)
+	candidateItems := properties["candidates"].(map[string]any)["items"].(map[string]any)
+	targetItems := candidateItems["properties"].(map[string]any)["source_target"].(map[string]any)["items"].(map[string]any)
+	for name, item := range map[string]map[string]any{"source": sourceItems, "target": targetItems} {
+		if item["type"] != "string" || item["minLength"] != float64(1) || item["enum"] != nil {
+			t.Fatalf("%s names are not extensible: %#v", name, item)
 		}
 	}
 }

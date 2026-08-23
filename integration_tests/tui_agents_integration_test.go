@@ -160,17 +160,17 @@ func TestTUIAgentsOnboardingPreviewConfirmAndApply(t *testing.T) {
 		}, "TUI did not open Agents")
 		writeTUIKeys(t, term, "O")
 		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
-			return strings.Contains(text, "Agent onboarding preview:")
+			return strings.Contains(text, "Agent onboarding preview")
 		}, "TUI did not show onboarding plan")
 		writeTUIKeys(t, term, "esc")
 		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
-			return strings.Contains(text, "Agent onboarding preview:") && !strings.Contains(text, "Apply this onboarding plan? y/N")
+			return strings.Contains(text, "Agent onboarding preview") && !strings.Contains(text, "Apply this onboarding plan? y/N")
 		}, "TUI cancellation failed")
 		if _, err := os.Stat(filepath.Join(home, ".apm")); !os.IsNotExist(err) {
 			t.Fatalf("cancelled preview mutated APM state: %v", err)
 		}
 		writeTUIKeys(t, term, "O")
-		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool { return strings.Contains(text, "Agent onboarding preview:") }, "TUI did not reopen onboarding")
+		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool { return strings.Contains(text, "Agent onboarding preview") }, "TUI did not reopen onboarding")
 		for attempts := 0; attempts < 60; attempts++ {
 			text := currentScreenText(term)
 			if strings.Contains(text, "Apply this onboarding plan? y/N") {
@@ -188,7 +188,7 @@ func TestTUIAgentsOnboardingPreviewConfirmAndApply(t *testing.T) {
 			case strings.Contains(text, "conditional-group-host"):
 				key = "x"
 			case strings.Contains(text, "legacy-unscoped-targets"):
-				key = "c"
+				key = "2"
 			case strings.Contains(text, "secret-field:"):
 				key = "m"
 			case strings.Contains(text, "executable:"):
