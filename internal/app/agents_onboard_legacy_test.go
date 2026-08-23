@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkshrk/omni/internal/apm"
 	"github.com/lkshrk/omni/internal/executor"
 )
 
@@ -29,6 +30,29 @@ func TestInitOnboardingReadOnlyCreatesNothing(t *testing.T) {
 	for _, path := range []string{filepath.Dir(configPath), state, cache} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("read-only init created %s", path)
+		}
+	}
+}
+
+func TestReadReviewedPlanRejectsUnknownFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "plan.json")
+	data := `{"schema_version":1,"coordinator":"omni-v24","operation_id":"0123456789abcdef0123456789abcdef","plan_id":"` + strings.Repeat("a", 64) + `","resolution_id":"` + strings.Repeat("b", 64) + `","scope":"global","sources":[],"candidate_set_id":"` + strings.Repeat("c", 64) + `","inventory_fingerprint":"` + strings.Repeat("d", 64) + `","items":[],"summary":{},"warnings":[],"blockers":[],"unknown":true}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readReviewedPlan(path); err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestApprovedTargetsComeFromReviewedItem(t *testing.T) {
+	plan := apm.ImportPlan{Items: []apm.ImportItem{{ID: "item", Name: "demo", CurrentTargets: []string{"future-agent"}, ProposedTargets: []string{"future-agent", "next-agent"}}}}
+	if err := validateApprovedTargetResolutions(plan, map[string][]string{"item": {"future-agent"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, values := range []map[string][]string{{"item": {"codex"}}, {"missing": {"future-agent"}}} {
+		if err := validateApprovedTargetResolutions(plan, values); err == nil {
+			t.Fatalf("accepted %#v", values)
 		}
 	}
 }
@@ -56,7 +80,7 @@ func TestInitDetectsJoinedOnboardingRecoveryBeforeMutation(t *testing.T) {
 			if err := writeOnboardJournal(opRoot, journal); err != nil {
 				t.Fatal(err)
 			}
-			mock := &executor.MockExecutor{Responses: []executor.MockCall{{Stdout: "APM CLI version 0.28.0+omni.4\n"}, {Stdout: `{"ok":true,"kind":"import-status-result","result":{"schema_version":1,"operation_id":"0123456789abcdef0123456789abcdef","coordinator":"omni-v24","state":"awaiting-external-commit","next_action":"external-commit-then-finalize","finalize_token_required":true}}`}}}
+			mock := &executor.MockExecutor{Responses: []executor.MockCall{{Stdout: "APM CLI version 0.28.0+omni.5\n"}, {Stdout: `{"ok":true,"kind":"import-status-result","result":{"schema_version":1,"operation_id":"0123456789abcdef0123456789abcdef","coordinator":"omni-v24","state":"awaiting-external-commit","next_action":"external-commit-then-finalize","finalize_token_required":true}}`}}}
 			a := New(configPath)
 			a.StateDir = state
 			a.CacheDir = cache
