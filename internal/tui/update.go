@@ -350,20 +350,14 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		}
 		m.apmOutput = onboardPlanSummary(msg.result)
 		m.agentsOnboardPlan = &msg.result
-		m.agentsOnboardItem = 0
-		if msg.result.Envelope.Plan != nil && len(msg.result.Envelope.Plan.Items) == 0 && onboardBlockerCount(msg.result.Envelope.Plan) == 0 {
-			m.agentsOnboardConfirm = true
-			cmds = append(cmds, setStatus(&m, "Apply this onboarding plan? y/N", false))
-		} else if onboardBlockerCount(msg.result.Envelope.Plan) > 0 {
-			cmds = append(cmds, setStatus(&m, "Onboarding blockers must be resolved; press Enter to apply.", true))
-		} else {
-			cmds = append(cmds, setStatus(&m, "Review onboarding choices; press Enter to apply.", false))
-		}
+		m.beginAgentsOnboardReview()
+		cmds = append(cmds, setStatus(&m, "Review the remaining onboarding choices.", false))
 
 	case agentsOnboardApplyDoneMsg:
 		m.apmRunning = false
 		m.apmErr = msg.err
 		m.agentsOnboardPlan = nil
+		m.clearAgentsOnboardPrompt()
 		if msg.result.Envelope.OperationID != "" {
 			m.agentsOnboardOperation = msg.result.Envelope.OperationID
 		}

@@ -475,7 +475,8 @@ type Model struct {
 	apmErr                      error
 	agentsOnboardPlan           *app.AgentsOnboardResult
 	agentsOnboardConfirm        bool
-	agentsOnboardItem           int
+	agentsOnboardPrompt         *agentsOnboardPrompt
+	agentsOnboardReviewed       map[string]bool
 	agentsOnboardOperation      string
 	agentsOnboardCleanupConfirm bool
 

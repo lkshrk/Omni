@@ -80,6 +80,13 @@ func (m Model) viewString() string {
 		return placePopup(bg, m, renderFilePickerPopup(m), filePickerPopupFrame(m))
 	}
 
+	if m.agentsOnboardPrompt != nil {
+		bgModel := m
+		bgModel.agentsOnboardPrompt = nil
+		bgModel.agentsOnboardConfirm = false
+		return placePopup(bgModel.viewString(), m, renderAgentsOnboardPopup(m), agentsOnboardPopupFrame(m))
+	}
+
 	if m.err != nil && (!m.startupLoadErr || m.mode == viewStatus) {
 		quit := "Press q to quit."
 		if m.ctrlCConfirm {

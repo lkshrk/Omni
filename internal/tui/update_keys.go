@@ -7,6 +7,10 @@ import (
 )
 
 func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+	if handled, subCmds := m.handleAgentsOnboardPromptKeyMsg(msg); handled {
+		cmds = append(cmds, subCmds...)
+		return *m, tea.Batch(cmds...)
+	}
 	if handled, subCmds := m.handleFilePickerKeyMsg(msg); handled {
 		cmds = append(cmds, subCmds...)
 		return *m, tea.Batch(cmds...)
@@ -177,7 +181,7 @@ func (m *Model) focusedTextInputActive() bool {
 	case viewDots:
 		return m.dotsSearchActive && m.filter.Focused()
 	case viewSkills:
-		return false
+		return m.agentsOnboardPrompt != nil && m.agentsOnboardPrompt.kind == agentsPromptSecret && m.settingsInput.Focused()
 	case viewCommand:
 		return m.commandInput.Focused()
 	case viewFallbackEditor:

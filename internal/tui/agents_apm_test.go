@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -24,21 +25,172 @@ func runBatchCmd(cmd tea.Cmd) []tea.Msg {
 	return []tea.Msg{msg}
 }
 
-func TestAgentsOnboardPreviewConfirmationJourney(t *testing.T) {
+func TestAgentsOnboardDeterministicPlanSkipsReviewAndConfirmsApply(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
 	plan := &app.OnboardPlan{SchemaVersion: 1, OperationID: "0123456789abcdef0123456789abcdef", Items: []app.OnboardItem{{ID: "one", Resolution: app.OnboardResolution{Decision: "migrate"}}}}
 	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}}})
-	if got.agentsOnboardConfirm || got.agentsOnboardPlan == nil || !strings.Contains(got.apmOutput, "1 item(s), 0 blocker(s)") {
+	if !got.agentsOnboardConfirm || got.agentsOnboardPrompt == nil || got.agentsOnboardPrompt.kind != agentsPromptApply || got.agentsOnboardPlan == nil || !strings.Contains(got.apmOutput, "1 item(s), 0 blocker(s)") {
 		t.Fatalf("preview state: %#v", got.agentsOnboardPlan)
 	}
-	got = drive(got, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !got.agentsOnboardConfirm {
-		t.Fatal("reviewed plan did not request confirmation")
-	}
 	got = drive(got, tea.KeyPressMsg{Code: 'n'})
-	if got.agentsOnboardConfirm || got.agentsOnboardPlan != nil || !strings.Contains(got.statusMsg, "cancelled") {
-		t.Fatalf("cancel state: confirm=%v status=%q", got.agentsOnboardConfirm, got.statusMsg)
+	if got.agentsOnboardConfirm || got.agentsOnboardPrompt != nil || got.agentsOnboardPlan != nil || !strings.Contains(got.statusMsg, "cancelled") {
+		t.Fatalf("cancel state: confirm=%v prompt=%#v status=%q", got.agentsOnboardConfirm, got.agentsOnboardPrompt, got.statusMsg)
+	}
+}
+
+func TestAgentsOnboardDotsOwnershipUsesPopup(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSkills
+	plan := &app.OnboardPlan{Items: []app.OnboardItem{{
+		ID:         "skill:custom",
+		Name:       "custom",
+		Dots:       &app.OnboardDotsRef{},
+		Resolution: app.OnboardResolution{Decision: "keep-in-dots"},
+	}}}
+
+	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}}})
+	if got.agentsOnboardPrompt == nil || got.agentsOnboardPrompt.kind != agentsPromptOwnership {
+		t.Fatalf("prompt=%#v, want ownership popup", got.agentsOnboardPrompt)
+	}
+	if got.agentsOnboardPrompt.item != 0 {
+		t.Fatalf("prompt item=%d, want 0", got.agentsOnboardPrompt.item)
+	}
+}
+
+func TestAgentsOnboardOwnershipPopupRendersChoices(t *testing.T) {
+	m := baseModel(nil)
+	m.mode, m.width, m.height = viewSkills, 100, 30
+	plan := &app.OnboardPlan{Items: []app.OnboardItem{{
+		ID:         "skill:custom",
+		Name:       "custom",
+		Dots:       &app.OnboardDotsRef{},
+		Resolution: app.OnboardResolution{Decision: "keep-in-dots"},
+	}}}
+
+	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}}})
+	view := stripANSIEscapeSequences(got.View().Content)
+	for _, want := range []string{"Choose Ownership", "Move to APM", "Keep in dots"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("popup missing %q:\n%s", want, view)
+		}
+	}
+	for _, unwanted := range []string{"j/k inspect", "m map secret", "decision="} {
+		if strings.Contains(view, unwanted) {
+			t.Fatalf("popup contains legacy inline control %q:\n%s", unwanted, view)
+		}
+	}
+}
+
+func TestAgentsOnboardMissingTargetsUsesPopup(t *testing.T) {
+	m := baseModel(nil)
+	plan := &app.OnboardPlan{Items: []app.OnboardItem{{
+		ID:            "mcp:custom",
+		Name:          "custom",
+		TargetOptions: []string{"claude", "codex"},
+		Blockers:      []string{"target-resolution-required"},
+		Resolution:    app.OnboardResolution{Decision: "migrate"},
+	}}}
+
+	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}}})
+	if got.agentsOnboardPrompt == nil || got.agentsOnboardPrompt.kind != agentsPromptTargets {
+		t.Fatalf("prompt=%#v, want targets popup", got.agentsOnboardPrompt)
+	}
+}
+
+func TestAgentsOnboardPromptsOnlyForMissingChoicesInOrder(t *testing.T) {
+	m := baseModel(nil)
+	plan := &app.OnboardPlan{Items: []app.OnboardItem{
+		{
+			ID:            "skill:custom",
+			Name:          "custom",
+			Dots:          &app.OnboardDotsRef{},
+			TargetOptions: []string{"claude"},
+			Blockers:      []string{"target-resolution-required"},
+			Resolution:    app.OnboardResolution{Decision: "keep-in-dots"},
+		},
+		{
+			ID:         "mcp:api",
+			Name:       "api",
+			Payload:    []byte(`{"env":{"TOKEN":{"blocked":true}}}`),
+			Blockers:   []string{"secret-mapping-required"},
+			Resolution: app.OnboardResolution{Decision: "migrate"},
+		},
+	}}
+
+	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}}})
+	if got.agentsOnboardPrompt == nil || got.agentsOnboardPrompt.kind != agentsPromptOwnership {
+		t.Fatalf("first prompt=%#v, want ownership", got.agentsOnboardPrompt)
+	}
+	view := got.viewString()
+	if !strings.Contains(view, "Choose Ownership") || strings.Contains(view, "j/k inspect") || strings.Contains(view, "1/2 ") {
+		t.Fatalf("onboarding did not use the popup flow:\n%s", view)
+	}
+	got = drive(got, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got.agentsOnboardPrompt == nil || got.agentsOnboardPrompt.kind != agentsPromptTargets {
+		t.Fatalf("second prompt=%#v, want targets", got.agentsOnboardPrompt)
+	}
+	got = drive(got, tea.KeyPressMsg{Code: tea.KeySpace})
+	got = drive(got, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got.agentsOnboardPrompt == nil || got.agentsOnboardPrompt.kind != agentsPromptSecret {
+		t.Fatalf("third prompt=%#v, want secret", got.agentsOnboardPrompt)
+	}
+	got = drive(got, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got.agentsOnboardPrompt == nil || got.agentsOnboardPrompt.kind != agentsPromptApply {
+		t.Fatalf("final prompt=%#v, want apply", got.agentsOnboardPrompt)
+	}
+	items := got.agentsOnboardPlan.Envelope.Plan.Items
+	if items[0].Resolution.Decision != "move-to-apm" || !slices.Equal(items[0].Resolution.ApprovedTargets, []string{"claude"}) || items[1].Resolution.EnvBindings["TOKEN"] != "OMNI_API_TOKEN" {
+		t.Fatalf("resolutions=%#v", items)
+	}
+}
+
+func TestAgentsOnboardInvalidEnvironmentNameStaysInSecretPopup(t *testing.T) {
+	m := baseModel(nil)
+	plan := &app.OnboardPlan{Items: []app.OnboardItem{{
+		ID:         "mcp:api",
+		Name:       "api",
+		Payload:    []byte(`{"env":{"TOKEN":{"blocked":true}}}`),
+		Blockers:   []string{"secret-mapping-required"},
+		Resolution: app.OnboardResolution{Decision: "migrate"},
+	}}}
+	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}}})
+	got.settingsInput.SetValue("bad-name")
+
+	got = drive(got, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got.agentsOnboardPrompt == nil || got.agentsOnboardPrompt.kind != agentsPromptSecret {
+		t.Fatalf("prompt=%#v, want secret after invalid input", got.agentsOnboardPrompt)
+	}
+	if !got.statusIsErr || len(got.agentsOnboardPlan.Envelope.Plan.Items[0].Resolution.EnvBindings) != 0 {
+		t.Fatalf("statusIsErr=%v bindings=%v", got.statusIsErr, got.agentsOnboardPlan.Envelope.Plan.Items[0].Resolution.EnvBindings)
+	}
+}
+
+func TestAgentsOnboardSecretPopupMapsEveryMissingField(t *testing.T) {
+	m := baseModel(nil)
+	plan := &app.OnboardPlan{Items: []app.OnboardItem{{
+		ID: "mcp:api", Name: "api", Payload: []byte(`{"env":{"TOKEN":{"blocked":true}},"headers":{"Authorization":{"blocked":true}}}`),
+		Blockers: []string{"secret-mapping-required"}, Resolution: app.OnboardResolution{Decision: "migrate"},
+	}}}
+	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}}})
+	got = drive(got, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got.agentsOnboardPrompt == nil || got.agentsOnboardPrompt.kind != agentsPromptSecret {
+		t.Fatalf("second secret prompt=%#v", got.agentsOnboardPrompt)
+	}
+	got = drive(got, tea.KeyPressMsg{Code: tea.KeyEnter})
+	bindings := got.agentsOnboardPlan.Envelope.Plan.Items[0].Resolution.EnvBindings
+	if got.agentsOnboardPrompt == nil || got.agentsOnboardPrompt.kind != agentsPromptApply || bindings["TOKEN"] == "" || bindings["Authorization"] == "" {
+		t.Fatalf("prompt=%#v bindings=%v", got.agentsOnboardPrompt, bindings)
+	}
+}
+
+func TestAgentsOnboardGlobalBlockerNeverOffersApply(t *testing.T) {
+	m := baseModel(nil)
+	plan := &app.OnboardPlan{Items: []app.OnboardItem{{ID: "resolved", Resolution: app.OnboardResolution{Decision: "migrate"}}}, Blockers: []string{"ambiguous-existing-dependencies"}}
+	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}}})
+	got = drive(got, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if got.agentsOnboardPrompt == nil || got.agentsOnboardPrompt.kind != agentsPromptBlocked || got.agentsOnboardPrompt.item != -1 || got.agentsOnboardConfirm {
+		t.Fatalf("global blocker offered apply: prompt=%#v", got.agentsOnboardPrompt)
 	}
 }
 
@@ -50,79 +202,23 @@ func TestAgentsOnboardPreviewIsLocalMigration(t *testing.T) {
 	}
 }
 
-func TestAgentsOnboardBlockerAndRecoveryError(t *testing.T) {
+func TestAgentsOnboardSecretBlockerUsesPopup(t *testing.T) {
 	m := baseModel(nil)
-	plan := &app.OnboardPlan{SchemaVersion: 1, OperationID: "0123456789abcdef0123456789abcdef", Items: []app.OnboardItem{{ID: "secret", Name: "secret", Blockers: []string{"secret-mapping-required"}, Resolution: app.OnboardResolution{Decision: "migrate"}}}, Blockers: []string{"secret-mapping-required"}}
+	plan := &app.OnboardPlan{SchemaVersion: 1, OperationID: "0123456789abcdef0123456789abcdef", Items: []app.OnboardItem{{ID: "secret", Name: "secret", Payload: []byte(`{"env":{"TOKEN":{"blocked":true}}}`), Blockers: []string{"secret-mapping-required"}, Resolution: app.OnboardResolution{Decision: "migrate"}}}, Blockers: []string{"secret-mapping-required"}}
 	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}}})
-	if got.agentsOnboardConfirm || !got.statusIsErr || !strings.Contains(got.statusMsg, "blockers") {
-		t.Fatalf("blocker state: confirm=%v status=%q", got.agentsOnboardConfirm, got.statusMsg)
+	if got.agentsOnboardConfirm || got.agentsOnboardPrompt == nil || got.agentsOnboardPrompt.kind != agentsPromptSecret {
+		t.Fatalf("prompt=%#v, want secret popup", got.agentsOnboardPrompt)
 	}
-	got = drive(got, agentsOnboardApplyDoneMsg{err: errors.New("recoverable partial")})
+	if !got.settingsInput.Focused() {
+		t.Fatal("secret popup input is not focused")
+	}
+}
+
+func TestAgentsOnboardRecoveryErrorOffersResume(t *testing.T) {
+	m := baseModel(nil)
+	got := drive(m, agentsOnboardApplyDoneMsg{err: errors.New("recoverable partial")})
 	if !got.statusIsErr || !strings.Contains(got.statusMsg, "resume") {
 		t.Fatalf("recovery status=%q", got.statusMsg)
-	}
-}
-
-func TestAgentsOnboardResolvesLocalMigrationChoices(t *testing.T) {
-	dots := &app.OnboardDotsRef{}
-	plan := &app.OnboardPlan{Items: []app.OnboardItem{
-		{ID: "target", TargetOptions: []string{"future/agent"}, Blockers: []string{"target-resolution-required"}, Resolution: app.OnboardResolution{Decision: "migrate"}},
-		{ID: "secret", Name: "api", Payload: []byte(`{"env":{"TOKEN":{"blocked":true}}}`), Blockers: []string{"secret-mapping-required"}, Resolution: app.OnboardResolution{Decision: "migrate"}},
-		{ID: "unsupported", Name: "custom", Blockers: []string{"unsupported"}, Resolution: app.OnboardResolution{Decision: "migrate"}},
-		{ID: "move", Name: "move", Dots: dots, Resolution: app.OnboardResolution{Decision: "keep-in-dots"}},
-		{ID: "keep", Name: "keep", Dots: dots, Resolution: app.OnboardResolution{Decision: "move-to-apm"}},
-	}}
-	resolveOnboardItem(&plan.Items[0], "1")
-	resolveOnboardItem(&plan.Items[1], "m")
-	resolveOnboardItem(&plan.Items[2], "x")
-	resolveOnboardItem(&plan.Items[3], "M")
-	resolveOnboardItem(&plan.Items[4], "d")
-	if got := onboardBlockerCount(plan); got != 0 {
-		t.Fatalf("blockers=%d plan=%#v", got, plan)
-	}
-	if plan.Items[1].Resolution.EnvBindings["TOKEN"] != "OMNI_API_TOKEN" {
-		t.Fatalf("bindings=%v", plan.Items[1].Resolution.EnvBindings)
-	}
-	if plan.Items[2].Resolution.Decision != "keep-unmanaged" || plan.Items[3].Resolution.Decision != "move-to-apm" || plan.Items[4].Resolution.Decision != "keep-in-dots" {
-		t.Fatalf("decisions=%q,%q,%q", plan.Items[2].Resolution.Decision, plan.Items[3].Resolution.Decision, plan.Items[4].Resolution.Decision)
-	}
-	if plan.Items[0].Resolution.ApprovedTargets[0] != "future/agent" || !strings.Contains(onboardTargetChoiceHelp(plan.Items[0]), "1 future/agent") {
-		t.Fatalf("dynamic target choice=%#v", plan.Items[0].Resolution)
-	}
-}
-
-func TestAgentsOnboardTargetSelectionPreservesDotsOwnership(t *testing.T) {
-	dots := &app.OnboardDotsRef{}
-	for _, test := range []struct {
-		name string
-		keys []string
-		want []string
-	}{
-		{name: "move then target", keys: []string{"M", "1"}, want: []string{"claude"}},
-		{name: "target then move", keys: []string{"1", "M"}, want: []string{"claude"}},
-		{name: "move then all", keys: []string{"M", "a"}, want: []string{"claude", "codex"}},
-		{name: "all then move", keys: []string{"a", "M"}, want: []string{"claude", "codex"}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			item := app.OnboardItem{Dots: dots, TargetOptions: []string{"claude", "codex"}, Resolution: app.OnboardResolution{Decision: "keep-in-dots"}}
-			for _, key := range test.keys {
-				if !resolveOnboardItem(&item, key) {
-					t.Fatalf("key %q was not handled", key)
-				}
-			}
-			if item.Resolution.Decision != "move-to-apm" || strings.Join(item.Resolution.ApprovedTargets, ",") != strings.Join(test.want, ",") {
-				t.Fatalf("resolution=%#v", item.Resolution)
-			}
-		})
-	}
-	item := app.OnboardItem{Dots: dots, TargetOptions: []string{"codex"}}
-	resolveOnboardItem(&item, "1")
-	if item.Resolution.Decision != "" {
-		t.Fatalf("target selection invented dots ownership decision %q", item.Resolution.Decision)
-	}
-	native := app.OnboardItem{Dots: &app.OnboardDotsRef{Native: true}, Resolution: app.OnboardResolution{Decision: "keep-unmanaged"}}
-	if resolveOnboardItem(&native, "d") || native.Resolution.Decision != "keep-unmanaged" {
-		t.Fatalf("native item accepted keep-in-dots: %#v", native.Resolution)
 	}
 }
 

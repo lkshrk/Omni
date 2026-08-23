@@ -14,6 +14,24 @@ import (
 
 const agentsBusyStatus = "⚠ APM busy — wait for the running command to finish"
 
+type agentsOnboardPromptKind uint8
+
+const (
+	agentsPromptOwnership agentsOnboardPromptKind = iota + 1
+	agentsPromptTargets
+	agentsPromptSecret
+	agentsPromptBlocked
+	agentsPromptApply
+)
+
+type agentsOnboardPrompt struct {
+	kind         agentsOnboardPromptKind
+	item         int
+	cursor       int
+	secretFields []string
+	secret       int
+}
+
 type apmCommandDoneMsg struct {
 	command string
 	stdout  string
@@ -85,7 +103,8 @@ func (m *Model) doAgentsOnboardApply() []tea.Cmd {
 		return nil
 	}
 	plan := *m.agentsOnboardPlan.Envelope.Plan
-	m.agentsOnboardConfirm, m.apmRunning, m.apmCommand = false, true, "omni agents onboard (apply)"
+	m.clearAgentsOnboardPrompt()
+	m.apmRunning, m.apmCommand = true, "omni agents onboard (apply)"
 	a, ctx := m.app, m.ctx
 	return []tea.Cmd{m.spinner.Tick, func() tea.Msg {
 		result, err := a.AgentsOnboardApplyReviewed(ctx, plan)
@@ -120,69 +139,212 @@ func onboardPlanSummary(result app.AgentsOnboardResult) string {
 	return text
 }
 
-func (m *Model) currentOnboardItem() *app.OnboardItem {
-	if m.agentsOnboardPlan == nil || m.agentsOnboardPlan.Envelope.Plan == nil || len(m.agentsOnboardPlan.Envelope.Plan.Items) == 0 {
-		return nil
-	}
-	if m.agentsOnboardItem >= len(m.agentsOnboardPlan.Envelope.Plan.Items) {
-		m.agentsOnboardItem = 0
-	}
-	return &m.agentsOnboardPlan.Envelope.Plan.Items[m.agentsOnboardItem]
+func (m *Model) beginAgentsOnboardReview() {
+	m.agentsOnboardReviewed = map[string]bool{}
+	m.advanceAgentsOnboardPrompt()
 }
-func resolveOnboardItem(item *app.OnboardItem, key string) bool {
-	if item == nil {
-		return false
+
+func (m *Model) clearAgentsOnboardPrompt() {
+	m.agentsOnboardPrompt = nil
+	m.agentsOnboardConfirm = false
+	m.settingsInput.Blur()
+}
+
+func (m *Model) cancelAgentsOnboardReview() []tea.Cmd {
+	m.clearAgentsOnboardPrompt()
+	m.agentsOnboardPlan = nil
+	m.agentsOnboardReviewed = nil
+	return []tea.Cmd{setStatus(m, "Agent onboarding cancelled.", false)}
+}
+
+func onboardReviewKey(item app.OnboardItem, index int) string {
+	if item.ID != "" {
+		return item.ID
 	}
-	options := item.TargetOptions
-	if key == "a" && len(options) > 0 {
-		setOnboardTargetDecision(item, true)
-		item.Resolution.ApprovedTargets = append([]string(nil), options...)
-		return true
+	return fmt.Sprintf("#%d", index)
+}
+
+func onboardHasBlocker(item app.OnboardItem, match func(string) bool) bool {
+	return slices.ContainsFunc(item.Blockers, match)
+}
+
+func (m *Model) advanceAgentsOnboardPrompt() {
+	m.clearAgentsOnboardPrompt()
+	if m.agentsOnboardPlan == nil || m.agentsOnboardPlan.Envelope.Plan == nil {
+		return
 	}
-	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
-		index := int(key[0] - '1')
-		if index >= len(options) {
+	m.apmOutput = onboardPlanSummary(*m.agentsOnboardPlan)
+	plan := m.agentsOnboardPlan.Envelope.Plan
+	for _, blocker := range plan.Blockers {
+		if !slices.ContainsFunc(plan.Items, func(item app.OnboardItem) bool { return slices.Contains(item.Blockers, blocker) }) {
+			m.agentsOnboardPrompt = &agentsOnboardPrompt{kind: agentsPromptBlocked, item: -1}
+			return
+		}
+	}
+	for i := range plan.Items {
+		item := &plan.Items[i]
+		if item.Dots != nil && !m.agentsOnboardReviewed[onboardReviewKey(*item, i)] {
+			m.agentsOnboardPrompt = &agentsOnboardPrompt{kind: agentsPromptOwnership, item: i}
+			return
+		}
+		if item.Resolution.Decision == "keep-unmanaged" || item.Resolution.Decision == "keep-in-dots" {
+			continue
+		}
+		needsTargets := onboardHasBlocker(*item, func(blocker string) bool {
+			return blocker == "target-resolution-required" || strings.HasPrefix(blocker, "unknown-target:")
+		}) && !allOnboardTargetsAllowed(*item)
+		if needsTargets {
+			item.Resolution.ApprovedTargets = slices.DeleteFunc(item.Resolution.ApprovedTargets, func(target string) bool {
+				return !slices.Contains(item.TargetOptions, target)
+			})
+			kind := agentsPromptTargets
+			if len(item.TargetOptions) == 0 {
+				kind = agentsPromptBlocked
+			}
+			m.agentsOnboardPrompt = &agentsOnboardPrompt{kind: kind, item: i}
+			return
+		}
+		if onboardHasBlocker(*item, func(blocker string) bool { return blocker == "secret-mapping-required" }) {
+			fields := onboardSecretFields(item.Payload)
+			for fieldIndex, field := range fields {
+				if item.Resolution.EnvBindings[field] == "" {
+					m.agentsOnboardPrompt = &agentsOnboardPrompt{kind: agentsPromptSecret, item: i, secretFields: fields, secret: fieldIndex}
+					m.settingsInput.SetValue(onboardEnvName(item.Name + "_" + field))
+					m.settingsInput.CursorEnd()
+					m.settingsInput.Focus()
+					return
+				}
+			}
+			if len(fields) == 0 {
+				m.agentsOnboardPrompt = &agentsOnboardPrompt{kind: agentsPromptBlocked, item: i}
+				return
+			}
+		}
+		if onboardItemBlockerCount(*item) > 0 {
+			m.agentsOnboardPrompt = &agentsOnboardPrompt{kind: agentsPromptBlocked, item: i}
+			return
+		}
+	}
+	if onboardBlockerCount(plan) == 0 {
+		m.agentsOnboardConfirm = true
+		m.agentsOnboardPrompt = &agentsOnboardPrompt{kind: agentsPromptApply, item: -1}
+	}
+}
+
+func moveAgentsOnboardCursor(prompt *agentsOnboardPrompt, delta, count int) {
+	if prompt != nil && count > 0 {
+		prompt.cursor = (prompt.cursor + delta + count) % count
+	}
+}
+
+func validOnboardEnvName(value string) bool {
+	for i, r := range value {
+		if !(r == '_' || r >= 'A' && r <= 'Z' || i > 0 && r >= '0' && r <= '9') {
 			return false
 		}
-		target := options[index]
-		if slices.Contains(item.Resolution.ApprovedTargets, target) {
-			item.Resolution.ApprovedTargets = slices.DeleteFunc(item.Resolution.ApprovedTargets, func(value string) bool { return value == target })
-		} else {
-			item.Resolution.ApprovedTargets = append(item.Resolution.ApprovedTargets, target)
-			sort.Strings(item.Resolution.ApprovedTargets)
-		}
-		if len(item.Resolution.ApprovedTargets) == 0 {
-			setOnboardTargetDecision(item, false)
-		} else {
-			setOnboardTargetDecision(item, true)
-		}
-		return true
 	}
-	switch key {
-	case "x":
-		item.Resolution.Decision = "keep-unmanaged"
-	case "d":
-		if item.Dots == nil || item.Dots.Native {
-			return false
+	return value != ""
+}
+
+func (m *Model) handleAgentsOnboardPromptKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
+	prompt := m.agentsOnboardPrompt
+	if prompt == nil {
+		return false, nil
+	}
+	key := msg.String()
+	if key == "esc" || key == "n" && prompt.kind == agentsPromptApply {
+		return true, m.cancelAgentsOnboardReview()
+	}
+	if prompt.kind == agentsPromptSecret {
+		if key != "enter" {
+			var cmd tea.Cmd
+			m.settingsInput, cmd = m.settingsInput.Update(msg)
+			return true, []tea.Cmd{cmd}
 		}
-		item.Resolution.Decision = "keep-in-dots"
-	case "M":
-		if item.Dots == nil {
-			return false
+		value := strings.TrimSpace(m.settingsInput.Value())
+		if !validOnboardEnvName(value) {
+			return true, []tea.Cmd{setStatus(m, "Use an environment variable name containing only A-Z, 0-9, and _.", true)}
 		}
-		item.Resolution.Decision = "move-to-apm"
-	case "m":
-		item.Resolution.Decision = "map-secret"
+		item := &m.agentsOnboardPlan.Envelope.Plan.Items[prompt.item]
 		if item.Resolution.EnvBindings == nil {
 			item.Resolution.EnvBindings = map[string]string{}
 		}
-		for _, field := range onboardSecretFields(item.Payload) {
-			item.Resolution.EnvBindings[field] = onboardEnvName(item.Name + "_" + field)
-		}
-	default:
-		return false
+		item.Resolution.EnvBindings[prompt.secretFields[prompt.secret]] = value
+		m.advanceAgentsOnboardPrompt()
+		return true, nil
 	}
-	return true
+	count := 2
+	switch prompt.kind {
+	case agentsPromptTargets:
+		count = len(m.agentsOnboardPlan.Envelope.Plan.Items[prompt.item].TargetOptions)
+	case agentsPromptBlocked:
+		count = 1
+	}
+	switch key {
+	case "up", "k", "left", "h":
+		moveAgentsOnboardCursor(prompt, -1, count)
+		return true, nil
+	case "down", "j", "right", "l":
+		moveAgentsOnboardCursor(prompt, 1, count)
+		return true, nil
+	}
+	item := func() *app.OnboardItem {
+		if prompt.item < 0 {
+			return nil
+		}
+		return &m.agentsOnboardPlan.Envelope.Plan.Items[prompt.item]
+	}()
+	switch prompt.kind {
+	case agentsPromptTargets:
+		if key == "a" {
+			item.Resolution.ApprovedTargets = append([]string(nil), item.TargetOptions...)
+			setOnboardTargetDecision(item, true)
+			m.advanceAgentsOnboardPrompt()
+			return true, nil
+		}
+		if key == " " || key == "space" {
+			target := item.TargetOptions[prompt.cursor]
+			if slices.Contains(item.Resolution.ApprovedTargets, target) {
+				item.Resolution.ApprovedTargets = slices.DeleteFunc(item.Resolution.ApprovedTargets, func(value string) bool { return value == target })
+			} else {
+				item.Resolution.ApprovedTargets = append(item.Resolution.ApprovedTargets, target)
+				sort.Strings(item.Resolution.ApprovedTargets)
+			}
+			return true, nil
+		}
+		if key == "enter" {
+			if !allOnboardTargetsAllowed(*item) {
+				return true, []tea.Cmd{setStatus(m, "Select at least one target.", true)}
+			}
+			setOnboardTargetDecision(item, true)
+			m.advanceAgentsOnboardPrompt()
+		}
+	case agentsPromptOwnership:
+		if key == "enter" {
+			if prompt.cursor == 0 {
+				item.Resolution.Decision = "move-to-apm"
+			} else if item.Dots.Native {
+				item.Resolution.Decision = "keep-unmanaged"
+			} else {
+				item.Resolution.Decision = "keep-in-dots"
+			}
+			m.agentsOnboardReviewed[onboardReviewKey(*item, prompt.item)] = true
+			m.advanceAgentsOnboardPrompt()
+		}
+	case agentsPromptBlocked:
+		if prompt.item >= 0 && key == "enter" {
+			item.Resolution.Decision = "keep-unmanaged"
+			m.advanceAgentsOnboardPrompt()
+		}
+	case agentsPromptApply:
+		if key == "y" || key == "Y" || key == "enter" && prompt.cursor == 0 {
+			return true, m.doAgentsOnboardApply()
+		}
+		if key == "enter" {
+			return true, m.cancelAgentsOnboardReview()
+		}
+	}
+	return true, nil
 }
 
 func setOnboardTargetDecision(item *app.OnboardItem, selected bool) {
@@ -319,43 +481,6 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea
 		if key == "n" || key == "N" || key == "esc" {
 			m.agentsOnboardCleanupConfirm = false
 			return true, []tea.Cmd{setStatus(m, "Cleanup cancelled.", false)}
-		}
-		return true, nil
-	}
-	if m.agentsOnboardConfirm {
-		switch key {
-		case "y", "Y":
-			return true, m.doAgentsOnboardApply()
-		case "n", "N", "esc":
-			m.agentsOnboardConfirm = false
-			m.agentsOnboardPlan = nil
-			return true, []tea.Cmd{setStatus(m, "Agent onboarding cancelled.", false)}
-		}
-		return true, nil
-	}
-	if m.agentsOnboardPlan != nil {
-		items := m.agentsOnboardPlan.Envelope.Plan.Items
-		switch key {
-		case "j":
-			if len(items) > 0 {
-				m.agentsOnboardItem = (m.agentsOnboardItem + 1) % len(items)
-			}
-		case "k":
-			if len(items) > 0 {
-				m.agentsOnboardItem = (m.agentsOnboardItem - 1 + len(items)) % len(items)
-			}
-		case "esc":
-			m.agentsOnboardPlan = nil
-		case "enter":
-			if onboardBlockerCount(m.agentsOnboardPlan.Envelope.Plan) == 0 {
-				m.agentsOnboardConfirm = true
-				return true, []tea.Cmd{setStatus(m, "Apply this onboarding plan? y/N", false)}
-			}
-		default:
-			resolveOnboardItem(m.currentOnboardItem(), key)
-		}
-		if m.agentsOnboardPlan != nil {
-			m.apmOutput = onboardPlanSummary(*m.agentsOnboardPlan)
 		}
 		return true, nil
 	}
