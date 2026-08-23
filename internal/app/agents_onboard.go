@@ -95,9 +95,6 @@ func (a *App) detectOnboardingRecovery(context.Context) error {
 }
 
 func (a *App) onboardingClient(ctx context.Context) (*apm.Client, error) {
-	if !a.APMAvailable() {
-		return nil, errAPMNotInstalled()
-	}
 	if err := onboardingPinnedAPMCheck(ctx, a); err != nil {
 		return nil, err
 	}
