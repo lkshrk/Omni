@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -275,7 +276,21 @@ func onboardTreeFingerprint(path, ownerRoot string) (string, error) {
 }
 
 func onboardPathWithin(root, path string) bool {
-	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
+	canonical := func(value string) string {
+		value = filepath.Clean(value)
+		if absolute, err := filepath.Abs(value); err == nil {
+			value = absolute
+		}
+		if resolved, err := filepath.EvalSymlinks(value); err == nil {
+			value = resolved
+		}
+		value = filepath.Clean(value)
+		if runtime.GOOS == "windows" {
+			value = strings.ToLower(value)
+		}
+		return value
+	}
+	rel, err := filepath.Rel(canonical(root), canonical(path))
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
