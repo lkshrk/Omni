@@ -140,7 +140,7 @@ jobs:
           python-version: '3.14'
 
       - name: Install pinned APM
-        run: python -m pip install git+https://github.com/lkshrk/apm.git@9268ab1d608d73fb776a2543885e4bcbbe0f5737
+        run: python -m pip install git+https://github.com/lkshrk/apm.git@3a0bd6e68485f32b7158a26074809bf3e9c9303b
 
       - name: Test portable APM target contracts
         run: go test ./internal/app -run '^TestAPM(Target|User)'
@@ -188,7 +188,7 @@ jobs:
             packages: ./internal/apm/... ./internal/cli/...
             cache: integration-apm
           - name: onboarding
-            packages: -parallel=1 -run=TestAgentsOnboardRealPinnedAPM|TestTUIAgentsOnboarding ./internal/app/... ./integration_tests/...
+            packages: -parallel=1 -run=TestAgentsOnboardRealPinnedAPM|TestAgentsOnboardProjectRealLocalAPM|TestTUIAgentsOnboarding ./internal/app/... ./integration_tests/...
             cache: integration-onboarding
     steps:
       - uses: actions/checkout@v7.0.1

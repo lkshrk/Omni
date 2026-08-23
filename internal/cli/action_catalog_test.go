@@ -411,6 +411,7 @@ func uncatalogedRunnableCLICommandAllowed(path []string) bool {
 		"agents onboard",
 		"agents onboard status",
 		"agents onboard resume",
+		"agents onboard rollback",
 		"agents onboard cleanup",
 		"agents outdated",
 		"agents prune",

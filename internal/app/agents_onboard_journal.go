@@ -26,6 +26,8 @@ type onboardJournal struct {
 	ResolutionID   string            `json:"resolution_id"`
 	CandidateSetID string            `json:"candidate_set_id"`
 	PreimageSet    string            `json:"preimage_set"`
+	Scope          string            `json:"scope,omitempty"`
+	ProjectRoot    string            `json:"project_root,omitempty"`
 	Phase          string            `json:"phase"`
 	FinalizeToken  string            `json:"finalize_token"`
 	Documents      []journalDocument `json:"documents"`
@@ -83,6 +85,9 @@ func readOnboardJournal(root *securefile.Root) (onboardJournal, error) {
 	}
 	if journal.SchemaVersion != 1 || !hexID(journal.OperationID, 32) || !hexID(journal.PlanID, 64) || !hexID(journal.ResolutionID, 64) || !hexID(journal.CandidateSetID, 64) {
 		return onboardJournal{}, errors.New("invalid onboarding journal identity")
+	}
+	if err := validateOnboardScope(journal.Scope, journal.ProjectRoot); err != nil {
+		return onboardJournal{}, err
 	}
 	return journal, nil
 }

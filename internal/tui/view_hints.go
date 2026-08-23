@@ -636,7 +636,7 @@ func tabShortHelpBindings(m *Model) []key.Binding {
 		actions := []key.Binding{k.NewGroup, k.NewHost}
 		return footerBindings(k, actions, nil)
 	case viewSkills:
-		listActions := []key.Binding{agentsOnboardBinding(), agentsUpgradeAllBinding(), agentsSyncAllBinding(), agentsRefreshBinding()}
+		listActions := []key.Binding{agentsOnboardBinding(), agentsProjectOnboardBinding(), agentsUpgradeAllBinding(), agentsSyncAllBinding(), agentsRefreshBinding()}
 		return footerBindings(k, listActions, nil)
 	default:
 		if m.listConfirm.action == listConfirmSyncAll {
@@ -695,6 +695,10 @@ func agentsUpgradeAllBinding() key.Binding {
 
 func agentsOnboardBinding() key.Binding {
 	return key.NewBinding(key.WithKeys("O"), key.WithHelp("O", "onboard"))
+}
+
+func agentsProjectOnboardBinding() key.Binding {
+	return key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "project"))
 }
 
 func agentsSyncAllBinding() key.Binding {

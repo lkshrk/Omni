@@ -88,7 +88,7 @@ catalog entry. Its evidence is tracked here instead of inventing an action ID.
 
 | Workflow | App/protocol | CLI/model | Real integration | Remaining gate |
 | --- | --- | --- | --- | --- |
-| Existing agent-state onboarding | strict candidate/plan/result envelopes and fixed hashes, legacy includes/redaction/dispositions, conflict winner/loser binding, conditional authorized drop, locks, private journal, fragment CAS/resume/finalize | CLI target/secret/executable/exclusion flags plus TUI inspect/resolve/review/apply/status/resume/cleanup | `TestAgentsOnboardRealPinnedAPM`, `TestTUIAgentsOnboardingPreviewConfirmAndApply` | Immutable APM pin in DinD plus macOS/Windows platform jobs |
+| Existing agent-state onboarding | strict extensible candidate/plan/result envelopes and fixed hashes, APM-owned default sources, global/project root binding, legacy includes/redaction/dispositions, locks, separate private journals, fragment CAS/resume/finalize/rollback | Opaque CLI source names, per-item target validation, and TUI plan-derived target keys plus global/project recovery | `TestAgentsOnboardRealPinnedAPM`, `TestAgentsOnboardProjectRealLocalAPMIsolatedAndIdempotent`, `TestTUIAgentsOnboardingPreviewConfirmAndApply` | Immutable APM pin in DinD plus macOS/Windows platform jobs |
 
 ## Action-level coverage
 
