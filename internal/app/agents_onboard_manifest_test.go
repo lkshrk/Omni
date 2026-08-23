@@ -490,6 +490,49 @@ func TestExtractNativeCandidatesUsesAPMDeployRoots(t *testing.T) {
 	}
 }
 
+func TestExtractNativeCandidatesSkipsClientOwnedTrees(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	root := filepath.Join(home, ".codex")
+	writeResource := func(rel, marker string) string {
+		t.Helper()
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		markerPath := filepath.Join(path, filepath.FromSlash(marker))
+		if err := os.MkdirAll(filepath.Dir(markerPath), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(markerPath, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	wantSkill := writeResource("skills/custom", "SKILL.md")
+	wantPlugin := writeResource("plugins/custom", ".codex-plugin/plugin.json")
+	writeResource("skills/.system/internal", "SKILL.md")
+	writeResource(".tmp/generated", "SKILL.md")
+	writeResource("plugins/cache/cached", ".codex-plugin/plugin.json")
+	writeResource("plugins/marketplaces/catalog", ".codex-plugin/plugin.json")
+
+	candidates, preimages, err := extractNativeCandidates([]string{".codex"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 2 || len(preimages) != 2 {
+		t.Fatalf("candidates=%#v preimages=%#v", candidates, preimages)
+	}
+	want := map[string]string{"native:" + wantSkill: "skill", "native:" + wantPlugin: "plugin"}
+	for _, candidate := range candidates {
+		if want[candidate.SourceHandle] != candidate.Kind {
+			t.Fatalf("unexpected native candidate: %#v", candidate)
+		}
+		delete(want, candidate.SourceHandle)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing custom candidates: %v", want)
+	}
+}
+
 func TestExtractNativeCandidatesBlocksUnsafeResourceAndKeepsSibling(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink setup requires Unix semantics")

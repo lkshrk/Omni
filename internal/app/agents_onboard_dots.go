@@ -65,6 +65,9 @@ func extractNativeCandidates(deployDirs []string, owned []OnboardCandidate) ([]O
 			if path == root {
 				return nil
 			}
+			if nativeClientManagedSubtree(root, path, entry) {
+				return filepath.SkipDir
+			}
 			kind, ok := apmResourceBoundary(root, path, entry)
 			if !ok {
 				return nil
@@ -103,6 +106,24 @@ func extractNativeCandidates(deployDirs []string, owned []OnboardCandidate) ([]O
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].ID < candidates[j].ID })
 	sort.Slice(preimages, func(i, j int) bool { return preimages[i].ID < preimages[j].ID })
 	return candidates, preimages, nil
+}
+
+func nativeClientManagedSubtree(root, path string, entry fs.DirEntry) bool {
+	if !entry.IsDir() {
+		return false
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "." {
+		return false
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if parts[0] == ".tmp" || parts[0] == ".cache" {
+		return true
+	}
+	if len(parts) >= 2 && parts[0] == "skills" && parts[1] == ".system" {
+		return true
+	}
+	return len(parts) >= 2 && parts[0] == "plugins" && (parts[1] == "cache" || parts[1] == "marketplaces")
 }
 
 func (a *App) extractDotsCandidates() ([]OnboardCandidate, []OnboardSourcePreimage, error) {

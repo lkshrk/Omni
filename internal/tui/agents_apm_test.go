@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
 )
@@ -82,6 +83,89 @@ func TestAgentsOnboardOwnershipPopupRendersChoices(t *testing.T) {
 	}
 }
 
+func TestAgentsOnboardPopupIdentifiesFindingAndShowsDetails(t *testing.T) {
+	m := baseModel(nil)
+	m.mode, m.width, m.height = viewSkills, 100, 30
+	plan := &app.OnboardPlan{Items: []app.OnboardItem{{
+		ID:              "skill:custom",
+		Kind:            "skill",
+		Name:            "custom",
+		Source:          "/tmp/custom/SKILL.md",
+		ProposedTargets: []string{"claude"},
+		TargetOptions:   []string{"claude", "codex"},
+		Blockers:        []string{"target-resolution-required"},
+		Resolution:      app.OnboardResolution{Decision: "migrate"},
+	}}}
+
+	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}}})
+	view := strings.ToLower(stripANSIEscapeSequences(got.View().Content))
+	for _, want := range []string{"skill", "custom", "/tmp/custom/skill.md", "claude", "codex", "required"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("popup missing finding detail %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "target-resolution-required") {
+		t.Fatalf("popup exposes machine blocker instead of a human reason:\n%s", view)
+	}
+}
+
+func TestAgentsOnboardPopupRedactsSourceCredentials(t *testing.T) {
+	m := baseModel(nil)
+	m.mode, m.width, m.height = viewSkills, 100, 30
+	plan := &app.OnboardPlan{Items: []app.OnboardItem{{
+		ID: "mcp:api", Kind: "mcp", Name: "api", Payload: []byte(`{"url":"https://user:credential@example.test/api?token=credential","transport":"http"}`),
+		TargetOptions: []string{"codex"}, Blockers: []string{"target-resolution-required"}, Resolution: app.OnboardResolution{Decision: "migrate"},
+	}}}
+	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}}})
+	view := strings.ToLower(stripANSIEscapeSequences(got.View().Content))
+	if !strings.Contains(view, "https://example.test/api") || strings.Contains(view, "credential") || strings.Contains(view, "token=") {
+		t.Fatalf("popup leaked source credentials:\n%s", view)
+	}
+}
+
+func TestAgentsOnboardPopupKeepsIdentityAndSourceVisibleInConstrainedTerminal(t *testing.T) {
+	m := baseModel(nil)
+	m.mode, m.width, m.height = viewSkills, 52, 18
+	plan := &app.OnboardPlan{Items: []app.OnboardItem{{
+		ID: "skill:custom", Kind: "skill", Name: "custom", Source: "/tmp/custom/SKILL.md",
+		TargetOptions: []string{"codex"}, Blockers: []string{"target-resolution-required"}, Resolution: app.OnboardResolution{Decision: "migrate"},
+	}}}
+	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}}})
+	view := strings.ToLower(stripANSIEscapeSequences(got.View().Content))
+	for _, want := range []string{"review skill: custom", "/tmp/custom/skill.md", "install target"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("constrained popup hid %q:\n%s", want, view)
+		}
+	}
+	if got := lipgloss.Width(got.View().Content); got > m.width {
+		t.Fatalf("popup width=%d, terminal width=%d", got, m.width)
+	}
+}
+
+func TestAgentsOnboardKeepAllRemainingUnmanagedPreservesResolvedMigrations(t *testing.T) {
+	m := baseModel(nil)
+	plan := &app.OnboardPlan{Items: []app.OnboardItem{
+		{ID: "skill:resolved", Kind: "skill", Name: "resolved", Resolution: app.OnboardResolution{Decision: "migrate"}},
+		{ID: "skill:targets", Kind: "skill", Name: "targets", TargetOptions: []string{"codex"}, Blockers: []string{"target-resolution-required"}, Resolution: app.OnboardResolution{Decision: "migrate"}},
+		{ID: "mcp:secret", Kind: "mcp", Name: "secret", Payload: []byte(`{"env":{"TOKEN":{"blocked":true}}}`), Blockers: []string{"secret-mapping-required"}, Resolution: app.OnboardResolution{Decision: "migrate"}},
+	}}
+
+	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}}})
+	got = drive(got, tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+	items := got.agentsOnboardPlan.Envelope.Plan.Items
+	if items[0].Resolution.Decision != "migrate" {
+		t.Fatalf("resolved migration changed to %q", items[0].Resolution.Decision)
+	}
+	for _, item := range items[1:] {
+		if item.Resolution.Decision != "keep-unmanaged" {
+			t.Fatalf("unresolved %s decision=%q, want keep-unmanaged", item.ID, item.Resolution.Decision)
+		}
+	}
+	if got.agentsOnboardPrompt == nil || got.agentsOnboardPrompt.kind != agentsPromptApply {
+		t.Fatalf("prompt=%#v, want apply after bulk resolution", got.agentsOnboardPrompt)
+	}
+}
+
 func TestAgentsOnboardMissingTargetsUsesPopup(t *testing.T) {
 	m := baseModel(nil)
 	plan := &app.OnboardPlan{Items: []app.OnboardItem{{
@@ -123,7 +207,7 @@ func TestAgentsOnboardPromptsOnlyForMissingChoicesInOrder(t *testing.T) {
 		t.Fatalf("first prompt=%#v, want ownership", got.agentsOnboardPrompt)
 	}
 	view := got.viewString()
-	if !strings.Contains(view, "Choose Ownership") || strings.Contains(view, "j/k inspect") || strings.Contains(view, "1/2 ") {
+	if !strings.Contains(view, "Choose Ownership") || strings.Contains(view, "j/k inspect") {
 		t.Fatalf("onboarding did not use the popup flow:\n%s", view)
 	}
 	got = drive(got, tea.KeyPressMsg{Code: tea.KeyEnter})

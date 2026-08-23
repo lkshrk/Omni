@@ -124,10 +124,24 @@ func TestTUIAgentsOnboardingPreviewConfirmAndApply(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	builtinSkill := filepath.Join(home, ".codex", "skills", ".system", "builtin-system")
+	if err := os.MkdirAll(builtinSkill, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(builtinSkill, "SKILL.md"), []byte("# builtin\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	builtinPlugin := filepath.Join(home, ".claude", "plugins", "cache", "builtin-cache", ".claude-plugin")
+	if err := os.MkdirAll(builtinPlugin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(builtinPlugin, "plugin.json"), []byte(`{"name":"builtin-cache"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "hosts", "ensure", "testhost")
@@ -151,11 +165,17 @@ func TestTUIAgentsOnboardingPreviewConfirmAndApply(t *testing.T) {
 	if err := os.WriteFile(configPath, configData, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	preview := runOmniOutput(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "agents", "onboard", "--json")
+	for _, builtin := range []string{"builtin-system", "builtin-cache"} {
+		if strings.Contains(preview, builtin) {
+			t.Fatalf("native discovery included client-owned %s:\n%s", builtin, preview)
+		}
+	}
 
 	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
 		isOnboardPopup := func(text string) bool {
-			return strings.Contains(text, "Choose Ownership") || strings.Contains(text, "Choose Agent Targets") ||
-				strings.Contains(text, "Map Secret") || strings.Contains(text, "Cannot Migrate Automatically") ||
+			return strings.Contains(text, "Choose Ownership") || strings.Contains(text, "Install this ") ||
+				strings.Contains(text, "Environment variable for") || strings.Contains(text, "cannot be migrated automatically") ||
 				strings.Contains(text, "Apply Agent Onboarding")
 		}
 		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool { return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools") }, "TUI did not render")
@@ -165,7 +185,9 @@ func TestTUIAgentsOnboardingPreviewConfirmAndApply(t *testing.T) {
 		}, "TUI did not open Agents")
 		writeTUIKeys(t, term, "O")
 		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
-			return isOnboardPopup(text)
+			lower := strings.ToLower(text)
+			return isOnboardPopup(text) && strings.Contains(lower, "review ") && strings.Contains(lower, "source") &&
+				strings.Contains(lower, "ctrl+x") && strings.Contains(lower, "keep all remaining unmanaged")
 		}, "TUI did not show onboarding plan")
 		writeTUIKeys(t, term, "\x1b")
 		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
@@ -176,6 +198,16 @@ func TestTUIAgentsOnboardingPreviewConfirmAndApply(t *testing.T) {
 				t.Fatalf("cancelled preview mutated APM state %s: %v", path, err)
 			}
 		}
+		writeTUIKeys(t, term, "O")
+		waitForRequiredScreen(t, term, 8*time.Second, isOnboardPopup, "TUI did not reopen onboarding for bulk review")
+		writeTUIKeys(t, term, "\x18")
+		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
+			return strings.Contains(text, "Apply Agent Onboarding") && strings.Contains(text, "remain unmanaged")
+		}, "TUI bulk keep-unmanaged did not reach apply summary")
+		writeTUIKeys(t, term, "\x1b")
+		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
+			return strings.Contains(text, "Agent onboarding cancelled.") && !isOnboardPopup(text)
+		}, "TUI bulk review cancellation failed")
 		writeTUIKeys(t, term, "O")
 		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
 			return isOnboardPopup(text)
@@ -191,13 +223,13 @@ func TestTUIAgentsOnboardingPreviewConfirmAndApply(t *testing.T) {
 			case strings.Contains(text, "Choose Ownership"):
 				seen["ownership"] = true
 				writeTUIKeys(t, term, "\r")
-			case strings.Contains(text, "Choose Agent Targets"):
+			case strings.Contains(text, "Install this "):
 				seen["targets"] = true
 				writeTUIKeys(t, term, "a")
-			case strings.Contains(text, "Map Secret"):
+			case strings.Contains(text, "Environment variable for"):
 				seen["secret"] = true
 				writeTUIKeys(t, term, "\r")
-			case strings.Contains(text, "Cannot Migrate Automatically"):
+			case strings.Contains(text, "cannot be migrated automatically"):
 				seen["blocked"] = true
 				writeTUIKeys(t, term, "\r")
 			default:

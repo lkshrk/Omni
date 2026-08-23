@@ -168,6 +168,53 @@ func onboardHasBlocker(item app.OnboardItem, match func(string) bool) bool {
 	return slices.ContainsFunc(item.Blockers, match)
 }
 
+func onboardItemNeedsPrompt(item app.OnboardItem, ownershipReviewed bool) bool {
+	if item.Dots != nil && !ownershipReviewed {
+		return true
+	}
+	if item.Resolution.Decision == "keep-unmanaged" || item.Resolution.Decision == "keep-in-dots" {
+		return false
+	}
+	if onboardHasBlocker(item, func(blocker string) bool {
+		return blocker == "target-resolution-required" || strings.HasPrefix(blocker, "unknown-target:")
+	}) && !allOnboardTargetsAllowed(item) {
+		return true
+	}
+	if onboardHasBlocker(item, func(blocker string) bool { return blocker == "secret-mapping-required" }) {
+		fields := onboardSecretFields(item.Payload)
+		if len(fields) == 0 {
+			return true
+		}
+		for _, field := range fields {
+			if item.Resolution.EnvBindings[field] == "" {
+				return true
+			}
+		}
+	}
+	return onboardItemBlockerCount(item) > 0
+}
+
+func (m *Model) keepRemainingOnboardItemsUnmanaged() int {
+	if m.agentsOnboardPlan == nil || m.agentsOnboardPlan.Envelope.Plan == nil {
+		return 0
+	}
+	count := 0
+	for i := range m.agentsOnboardPlan.Envelope.Plan.Items {
+		item := &m.agentsOnboardPlan.Envelope.Plan.Items[i]
+		key := onboardReviewKey(*item, i)
+		if !onboardItemNeedsPrompt(*item, m.agentsOnboardReviewed[key]) {
+			continue
+		}
+		if item.Resolution.Decision != "keep-unmanaged" {
+			count++
+		}
+		item.Resolution.Decision = "keep-unmanaged"
+		m.agentsOnboardReviewed[key] = true
+	}
+	m.advanceAgentsOnboardPrompt()
+	return count
+}
+
 func (m *Model) advanceAgentsOnboardPrompt() {
 	m.clearAgentsOnboardPrompt()
 	if m.agentsOnboardPlan == nil || m.agentsOnboardPlan.Envelope.Plan == nil {
@@ -254,6 +301,10 @@ func (m *Model) handleAgentsOnboardPromptKeyMsg(msg tea.KeyPressMsg) (bool, []te
 	key := msg.String()
 	if key == "esc" || key == "n" && prompt.kind == agentsPromptApply {
 		return true, m.cancelAgentsOnboardReview()
+	}
+	if key == "ctrl+x" && prompt.item >= 0 && prompt.kind != agentsPromptApply {
+		count := m.keepRemainingOnboardItemsUnmanaged()
+		return true, []tea.Cmd{setStatus(m, fmt.Sprintf("Kept %d remaining finding(s) unmanaged.", count), false)}
 	}
 	if prompt.kind == agentsPromptSecret {
 		if key != "enter" {
