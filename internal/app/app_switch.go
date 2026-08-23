@@ -222,7 +222,7 @@ func (a *App) SwitchWithState(ctx context.Context, name, fromProvider, toProvide
 func (a *App) ApplyProviderSolutionWithState(ctx context.Context, name, fromProvider string, solution provider.ErrorSolution) (*ProviderRepairStateResult, error) {
 	target := solution.TargetProvider
 	if target == "" {
-		return nil, fmt.Errorf("missing target provider")
+		return nil, fmt.Errorf("provider solution for %q names no target provider", name)
 	}
 	return a.SwitchWithState(ctx, name, fromProvider, target)
 }

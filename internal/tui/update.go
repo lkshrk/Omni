@@ -6,8 +6,6 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/lkshrk/omni/internal/app"
 )
 
 func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
@@ -131,12 +129,6 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 
 	case setupBootstrapDoneMsg:
 		cmds = append(cmds, m.handleSetupBootstrapDoneMsg(msg)...)
-
-	case setupAgentsDiffMsg:
-		cmds = append(cmds, m.handleSetupAgentsDiffMsg(msg)...)
-
-	case setupAgentsImportDoneMsg:
-		cmds = append(cmds, m.handleSetupAgentsImportDoneMsg(msg)...)
 
 	case stowInstallDoneMsg:
 		cmds = append(cmds, m.handleStowInstallDoneMsg(msg)...)
@@ -338,596 +330,81 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			m.applyFilter()
 		}
 
-	case agentsIgnoreReloadedMsg:
-		if msg.err == nil {
-			m.agentsIgnore = msg.ignore
-			clampAgentsAllCursor(&m)
-		}
-
-	case agentsIgnoreToggledMsg:
-		m.clearAgentsOp()
+	case apmCommandDoneMsg:
+		m.apmRunning = false
+		m.apmCommand = msg.command
+		m.apmOutput = apmCommandOutput(msg.stdout, msg.stderr)
+		m.apmErr = msg.err
 		if msg.err != nil {
 			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
 		} else {
-			desc := "ignored"
-			if !msg.nowIgnored {
-				desc = "unignored"
-			}
-			cmds = append(cmds, setStatus(&m, "✓ "+msg.name+" "+desc, false), m.doReloadAgentsIgnore())
-		}
-		return m, tea.Batch(cmds...)
-
-	case skillsManifestLoadedMsg:
-		m.skillsRunning = false
-		m.skillAddRunning = false
-		m.clearAgentsOpFor(agentsSectionSkills)
-		// On error keep the seeded/previous rows visible instead of wiping the table with nil; the error surfaces via skillsErr.
-		if msg.err == nil {
-			m.skillsRows = msg.rows
-			m.skillsUnmanagedRows = msg.unmanaged
-			m.skillsRowsKnown = true
-		}
-		m.skillsErr = msg.err
-		m.skillsLoaded = true
-		if m.skillAgentIdx > len(skillAgentIDs(m.skillsRows, m.enabledAgents)) {
-			m.skillAgentIdx = 0
-		}
-		clampSkillsCursor(&m)
-		clampAgentsAllCursor(&m)
-	case skillsGroupsUpdatedMsg:
-		if msg.err != nil && !app.IsCatalogWarning(msg.err) {
-			m.skillsErr = msg.err
-		} else {
-			m.skillsRows = msg.rows
-			if m.skillAgentIdx > len(skillAgentIDs(m.skillsRows, m.enabledAgents)) {
-				m.skillAgentIdx = 0
-			}
-			clampSkillsCursor(&m)
-			clampAgentsAllCursor(&m)
+			cmds = append(cmds, setStatus(&m, "✓ "+msg.command, false))
 		}
 
-	case skillsRestoredMsg:
+	case agentsOnboardPlanDoneMsg:
+		m.apmRunning = false
+		m.apmErr = msg.err
 		if msg.err != nil {
-			m.skillsRunning = false
-			m.skillsErr = msg.err
-		} else {
-			r := msg.res
-			m.skillsResult = &r
-			m.skillsLoaded = false
-			cmds = append(cmds, setStatus(&m, app.RestoreSkillsSummaryText(r), false), m.loadSkillsManifestCmd())
+			cmds = append(cmds, setStatus(&m, "✗ onboarding preview: "+msg.err.Error(), true))
+			break
 		}
-		return m, tea.Batch(cmds...)
-
-	case skillsImportedMsg:
-		if msg.err != nil {
-			m.skillsRunning = false
-			m.skillsErr = msg.err
+		m.apmOutput = onboardPlanSummary(msg.result)
+		m.agentsOnboardPlan = &msg.result
+		m.agentsOnboardItem = 0
+		if msg.result.Envelope.Plan != nil && len(msg.result.Envelope.Plan.Items) == 0 && onboardBlockerCount(msg.result.Envelope.Plan) == 0 {
+			m.agentsOnboardConfirm = true
+			cmds = append(cmds, setStatus(&m, "Apply this onboarding plan? y/N", false))
+		} else if onboardBlockerCount(msg.result.Envelope.Plan) > 0 {
+			cmds = append(cmds, setStatus(&m, "Onboarding blockers must be resolved; press Enter to apply.", true))
 		} else {
-			d := msg.diff
-			m.skillsImport = &d
-			m.skillsLoaded = false
-			cmds = append(cmds, setStatus(&m, app.ImportDiffSummaryText(d), false), m.loadSkillsManifestCmd())
-			if w := skillWarningsText(d.Warnings); w != "" {
-				cmds = append(cmds, setStatus(&m, "⚠ "+w, true))
-			}
-		}
-		return m, tea.Batch(cmds...)
-
-	case skillsUpdatedMsg:
-		if msg.err != nil {
-			m.skillsRunning = false
-			m.clearAgentsOp()
-			m.skillsErr = msg.err
-			if msg.updated {
-				m.skillsLoaded = false
-				cmds = append(cmds, m.loadSkillsManifestCmd())
-			}
-		} else {
-			m.skillsLoaded = false
-			cmds = append(cmds, setStatus(&m, "✓ skills updated", false), m.loadSkillsManifestCmd())
-		}
-		return m, tea.Batch(cmds...)
-
-	case skillsFoundMsg:
-		m.skillAddRunning = false
-		m.searching = false
-		warning := app.IsCatalogWarning(msg.err)
-		if msg.err != nil && !warning {
-			m.skillsErr = msg.err
-			m.skillsSearchActive = false
-			m.filter.SetValue("")
-			m.filter.Blur()
-			clampSkillsCursor(&m)
-			clampAgentsAllCursor(&m)
-		} else {
-			m.skillsErr = nil
-			m.skillFindResults = msg.results
-			m.skillFindCursor = 0
-			clampSkillsCursor(&m)
-			clampAgentsAllCursor(&m)
-			status := fmt.Sprintf("found %d", len(msg.results))
-			if warning {
-				status += " (stale cache)"
-			}
-			cmds = append(cmds, setStatus(&m, status, false))
+			cmds = append(cmds, setStatus(&m, "Review onboarding choices; press Enter to apply.", false))
 		}
 
-	case skillAddedMsg:
-		m.searching = false
-		m.skillsSearchActive = false
-		m.skillFindResults = nil
-		m.filter.SetValue("")
-		m.filter.Blur()
-		clampSkillsCursor(&m)
-		clampAgentsAllCursor(&m)
-		if msg.err != nil {
-			m.skillAddRunning = false
-			m.clearAgentsOp()
-			m.skillsErr = msg.err
-		} else {
-			m.skillsLoaded = false
-			cmds = append(cmds, m.loadSkillsManifestCmd())
-		}
-		if msg.warning != "" {
-			cmds = append(cmds, setStatus(&m, "⚠ "+msg.warning, true))
-		}
-		return m, tea.Batch(cmds...)
-
-	case agentsBulkResolveDoneMsg:
-		m.skillsRunning = false
-		m.mcpRunning = false
-		m.pluginRunning = false
-		m.clearAgentsOp()
-		if msg.err != nil {
-			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
-			return m, tea.Batch(cmds...)
-		}
-		// The modal is gone and its lines are nil by now, so the status line is the only place a partial failure can still be reported.
-		if failed := len(msg.result.Errors); failed > 0 {
-			cmds = append(cmds, setStatus(&m, fmt.Sprintf("⚠ resolved %d, %d failed: %s", msg.result.Resolved(), failed, strings.Join(msg.result.Errors, "; ")), true))
-		} else {
-			cmds = append(cmds, setStatus(&m, fmt.Sprintf("✓ resolved %d", msg.result.Resolved()), false))
-		}
-		m.skillsLoaded = false
-		cmds = append(cmds, m.loadSkillsManifestCmd(), m.doLoadMcpRows(), m.doLoadPluginRows())
-		return m, tea.Batch(cmds...)
-
-	case skillDriftResolvedMsg:
-		if len(msg.res.Warnings) > 0 {
-			cmds = append(cmds, setStatus(&m, "⚠ "+strings.Join(msg.res.Warnings, "; "), true))
+	case agentsOnboardApplyDoneMsg:
+		m.apmRunning = false
+		m.apmErr = msg.err
+		m.agentsOnboardPlan = nil
+		if msg.result.Envelope.OperationID != "" {
+			m.agentsOnboardOperation = msg.result.Envelope.OperationID
 		}
 		if msg.err != nil {
-			m.skillsRunning = false
-			m.clearAgentsOp()
-			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
-		} else {
-			m.skillsLoaded = false
-			cmds = append(cmds, m.loadSkillsManifestCmd())
+			cmds = append(cmds, setStatus(&m, "✗ onboarding apply: "+msg.err.Error()+" — run omni agents onboard resume", true))
+			break
 		}
-		return m, tea.Batch(cmds...)
-
-	case skillRemovedMsg:
-		if msg.err != nil {
-			m.skillsRunning = false
-			m.clearAgentsOp()
-			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
-		} else {
-			m.skillsLoaded = false
-			cmds = append(cmds, m.loadSkillsManifestCmd())
-		}
-		return m, tea.Batch(cmds...)
-
-	case agentsToggledMsg:
-		if msg.err != nil {
-			m.skillsErr = msg.err
-		} else {
-			m.agentsEnabled = msg.enabled
-			m.skillsErr = nil
-			if m.agentsEnabled {
-				m.skillsLoaded = false
-				cmds = append(cmds, m.loadSkillsManifestCmd())
-			}
-		}
-		return m, tea.Batch(cmds...)
-
-	case skillsFeatureToggledMsg:
-		if msg.err != nil {
-			m.skillsErr = msg.err
-		} else {
-			m.skillsEnabled = msg.enabled
-			m.skillsErr = nil
-			if msg.enabled && m.agentsEnabled {
-				m.skillsLoaded = false
-				cmds = append(cmds, m.loadSkillsManifestCmd())
-			}
-		}
-		return m, tea.Batch(cmds...)
-
-	case mcpFeatureToggledMsg:
-		if msg.err != nil {
-			m.mcpErr = msg.err
-		} else {
-			m.mcpEnabled = msg.enabled
-			m.mcpErr = nil
-			if msg.enabled && m.agentsEnabled {
-				m.mcpLoaded = false
-				m.mcpRunning = true
-				cmds = append(cmds, m.spinner.Tick, m.doLoadMcpRows())
-			}
-		}
-		return m, tea.Batch(cmds...)
-
-	case pluginsFeatureToggledMsg:
-		if msg.err != nil {
-			m.pluginErr = msg.err
-		} else {
-			m.pluginsEnabled = msg.enabled
-			m.pluginErr = nil
-			if msg.enabled && m.agentsEnabled {
-				m.pluginLoaded = false
-				m.pluginRunning = true
-				cmds = append(cmds, m.spinner.Tick, m.doLoadPluginRows())
-				m.marketplaceLoaded = false
-				m.marketplaceRunning = true
-				cmds = append(cmds, m.spinner.Tick, m.doLoadMarketplaceRows())
-			}
-		}
-		return m, tea.Batch(cmds...)
-
-	case agentsUseSavedMsg:
-		if msg.err != nil {
-			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
-		} else {
-			m.settings.AgentsUse = msg.ids
-			cmds = append(cmds, setStatus(&m, "✓ agents saved", false))
-		}
-		return m, tea.Batch(cmds...)
-
-	case skillAgentsSavedMsg:
-		if msg.err != nil {
-			m.skillsErr = msg.err
-		} else {
-			m.skillsRows = msg.rows
-			if m.skillAgentIdx > len(skillAgentIDs(m.skillsRows, m.enabledAgents)) {
-				m.skillAgentIdx = 0
-			}
-			clampSkillsCursor(&m)
-			clampAgentsAllCursor(&m)
-			cmds = append(cmds, setStatus(&m, "✓ agents updated", false))
-		}
-		return m, tea.Batch(cmds...)
-
-	case mcpRowsMsg:
-		m.mcpRunning = false
-		m.clearAgentsOpFor(agentsSectionMcp)
-		if msg.err == nil {
-			m.mcpRows = msg.rows
-			m.mcpUnmanaged = msg.unmanaged
-			m.mcpRowsKnown = true
-		}
-		m.mcpErr = msg.err
-		clampMcpCursor(&m)
-		clampAgentsAllCursor(&m)
-
-	case mcpRestoreDoneMsg:
-		if msg.err != nil {
-			m.mcpRunning = false
-			m.mcpErr = msg.err
-		} else {
-			m.mcpErr = nil
-			cmds = append(cmds, m.doLoadMcpRows())
-		}
-		return m, tea.Batch(cmds...)
-
-	case mcpRemoveDoneMsg:
-		if msg.err != nil {
-			m.mcpRunning = false
-			m.clearAgentsOp()
-			m.mcpErr = msg.err
-		} else {
-			m.mcpErr = nil
-			cmds = append(cmds, m.doLoadMcpRows())
-		}
-		return m, tea.Batch(cmds...)
-
-	case mcpImportAdoptDoneMsg:
-		if msg.err != nil {
-			m.mcpRunning = false
-			m.clearAgentsOp()
-			m.mcpErr = msg.err
-			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
-		} else {
-			m.mcpErr = nil
-			cmds = append(cmds, m.doLoadMcpRows())
-		}
-		return m, tea.Batch(cmds...)
-
-	case mcpDriftResolvedMsg:
-		if len(msg.warnings) > 0 {
-			cmds = append(cmds, setStatus(&m, "⚠ "+strings.Join(msg.warnings, "; "), true))
+		m.apmOutput = "Agent onboarding complete."
+		cmds = append(cmds, setStatus(&m, "✓ Agent onboarding complete.", false))
+	case agentsOnboardStatusDoneMsg:
+		m.apmRunning = false
+		m.apmErr = msg.err
+		if msg.result.OperationID != "" {
+			m.agentsOnboardOperation = msg.result.OperationID
 		}
 		if msg.err != nil {
-			m.mcpRunning = false
-			m.clearAgentsOp()
-			m.mcpErr = msg.err
-			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
+			cmds = append(cmds, setStatus(&m, "✗ onboarding recovery: "+msg.err.Error(), true))
 		} else {
-			m.mcpErr = nil
-			cmds = append(cmds, m.doLoadMcpRows())
+			m.apmOutput = fmt.Sprintf("Onboarding status: phase=%s state=%s", msg.result.OmniPhase, msg.result.APM.State)
+			cmds = append(cmds, setStatus(&m, "✓ onboarding recovery status", false))
 		}
-		return m, tea.Batch(cmds...)
-
-	case mcpAgentsSavedMsg:
+	case agentsOnboardCleanupDoneMsg:
+		m.apmRunning = false
+		m.apmErr = msg.err
 		if msg.err != nil {
-			m.mcpRunning = false
-			m.clearAgentsOp()
-			m.mcpErr = msg.err
+			cmds = append(cmds, setStatus(&m, "✗ onboarding cleanup: "+msg.err.Error(), true))
+		} else if msg.preview.AlreadyClean {
+			m.apmOutput = "Onboarding cleanup already complete."
+		} else if !msg.confirmed {
+			m.apmOutput = fmt.Sprintf("Cleanup %d path(s): %s", msg.preview.Count, strings.Join(msg.preview.Paths, ", "))
+			m.agentsOnboardCleanupConfirm = true
+			cmds = append(cmds, setStatus(&m, "Confirm cleanup? y/N", false))
 		} else {
-			m.mcpErr = nil
-			cmds = append(cmds, m.doLoadMcpRows())
+			m.apmOutput = "Onboarding cleanup complete."
+			m.agentsOnboardOperation = ""
 		}
-		return m, tea.Batch(cmds...)
-
-	case mcpGroupsSavedMsg:
-		if msg.err != nil {
-			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
-		} else {
-			cmds = append(cmds, m.doLoadMcpRows())
-		}
-		return m, tea.Batch(cmds...)
-
-	case pluginRowsMsg:
-		m.pluginRunning = false
-		m.clearAgentsOpFor(agentsSectionPlugins)
-		if msg.err == nil {
-			m.pluginRows = msg.rows
-			m.pluginUnmanaged = msg.unmanaged
-			m.pluginRowsKnown = true
-		}
-		m.pluginErr = msg.err
-		clampPluginCursor(&m)
-		clampAgentsAllCursor(&m)
-
-	case pluginRestoreDoneMsg:
-		// The running flag stays set until the reloaded rows land (pluginRowsMsg); clearing it here would show the stale pre-op row without its spinner, which reads as a failed operation.
-		if msg.err != nil {
-			m.pluginRunning = false
-			m.pluginErr = msg.err
-		} else {
-			m.pluginErr = nil
-			cmds = append(cmds, m.doLoadPluginRows(), m.doLoadMarketplaceRows())
-		}
-		return m, tea.Batch(cmds...)
-
-	case pluginRemoveDoneMsg:
-		if msg.err != nil {
-			m.pluginRunning = false
-			m.clearAgentsOp()
-			m.pluginErr = msg.err
-			// The manifest delete may have succeeded even when an adapter errored — reload so the removed row does not linger as stale.
-			cmds = append(cmds, m.doLoadPluginRows())
-		} else {
-			m.pluginErr = nil
-			cmds = append(cmds, m.doLoadPluginRows())
-		}
-		if msg.warning != "" {
-			cmds = append(cmds, setStatus(&m, "⚠ "+msg.warning, true))
-		}
-		return m, tea.Batch(cmds...)
-
-	case pluginImportAdoptDoneMsg:
-		if msg.err != nil {
-			m.pluginRunning = false
-			m.clearAgentsOp()
-			m.pluginErr = msg.err
-			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
-		} else {
-			m.pluginErr = nil
-			cmds = append(cmds, m.doLoadPluginRows())
-			if msg.reloadMarketplaces {
-				cmds = append(cmds, m.doLoadMarketplaceRows())
-			}
-		}
-		return m, tea.Batch(cmds...)
-
-	case pluginDriftResolvedMsg:
-		if len(msg.warnings) > 0 {
-			cmds = append(cmds, setStatus(&m, "⚠ "+strings.Join(msg.warnings, "; "), true))
-		}
-		if msg.err != nil {
-			m.pluginRunning = false
-			m.clearAgentsOp()
-			m.pluginErr = msg.err
-			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
-		} else {
-			m.pluginErr = nil
-			cmds = append(cmds, m.doLoadPluginRows())
-		}
-		return m, tea.Batch(cmds...)
-
-	case pluginNeedsMarketplaceMsg:
-		// Loading stays true (set by runAgentsClaimGroupPickerAction) until the user answers the offer, so the spinner keeps showing on the row.
-		cmds = append(cmds, m.armPluginMarketplaceOffer(msg))
-		return m, tea.Batch(cmds...)
-
-	case pluginAgentsSavedMsg:
-		if msg.err != nil {
-			m.pluginRunning = false
-			m.clearAgentsOp()
-			m.pluginErr = msg.err
-		} else {
-			m.pluginErr = nil
-			// Installing a plugin also installs its marketplace when the adapter lacked it (App.SetPluginAgents to ensureMarketplace), so marketplaces must reload too.
-			cmds = append(cmds, m.doLoadPluginRows(), m.doLoadMarketplaceRows())
-		}
-		return m, tea.Batch(cmds...)
-
-	case pluginGroupsSavedMsg:
-		if msg.err != nil {
-			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
-		} else {
-			cmds = append(cmds, m.doLoadPluginRows())
-		}
-		return m, tea.Batch(cmds...)
-
-	case pluginUpdateDoneMsg:
-		if msg.err != nil {
-			m.pluginRunning = false
-			m.clearAgentsOp()
-			m.pluginErr = msg.err
-		} else {
-			m.pluginErr = nil
-			cmds = append(cmds, m.doLoadPluginRows())
-		}
-		return m, tea.Batch(cmds...)
-
-	case marketplaceRowsMsg:
-		m.marketplaceRunning = false
-		m.clearAgentsOpFor(agentsSectionMarketplaces)
-		if msg.err == nil {
-			m.marketplaceRows = msg.rows
-			m.marketplaceUnmanaged = msg.unmanaged
-			m.marketplaceRowsKnown = true
-		}
-		m.marketplaceErr = msg.err
-		clampMarketplaceCursor(&m)
-		clampAgentsAllCursor(&m)
-
-	case marketplaceRemoveDoneMsg:
-		if msg.err != nil {
-			m.marketplaceRunning = false
-			m.clearAgentsOp()
-			m.marketplaceErr = msg.err
-		} else {
-			m.marketplaceErr = nil
-			cmds = append(cmds, m.doLoadMarketplaceRows())
-		}
-		return m, tea.Batch(cmds...)
-
-	case marketplaceImportAdoptDoneMsg:
-		if msg.err != nil {
-			m.marketplaceRunning = false
-			m.clearAgentsOp()
-			m.marketplaceErr = msg.err
-			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
-		} else {
-			m.marketplaceErr = nil
-			cmds = append(cmds, m.doLoadMarketplaceRows())
-		}
-		return m, tea.Batch(cmds...)
-
-	case marketplaceGroupsSavedMsg:
-		if msg.err != nil {
-			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
-		} else {
-			cmds = append(cmds, m.doLoadMarketplaceRows())
-		}
-		return m, tea.Batch(cmds...)
-
-	case agentsProgressDoneMsg:
-		if msg.gen != m.progressGen {
-			return m, tea.Batch(cmds...)
-		}
-		m.progressGen++
-		m.progressText = ""
-		m.progressCh = nil
-		if msg.report != nil {
-			m.openAgentsDriftPrompt(msg.report.Drift)
-		}
-		// Each section's running flag stays set until its reloaded rows land, so completed rows keep their spinner instead of flashing the stale pre-op state.
-		if msg.skills {
-			m.skillsErr = msg.skillsErr
-			if msg.skillsErr == nil {
-				m.skillsLoaded = false
-				cmds = append(cmds, m.loadSkillsManifestCmd())
-			} else {
-				m.skillsRunning = false
-			}
-		}
-		if msg.mcp {
-			m.mcpErr = msg.mcpErr
-			if msg.mcpErr == nil {
-				cmds = append(cmds, m.doLoadMcpRows())
-			} else {
-				m.mcpRunning = false
-			}
-		}
-		if msg.plugin {
-			m.pluginErr = msg.pluginErr
-			if msg.pluginErr == nil {
-				cmds = append(cmds, m.doLoadPluginRows())
-			} else {
-				m.pluginRunning = false
-			}
-		}
-		if msg.marketplace {
-			m.marketplaceErr = msg.marketplaceErr
-			if msg.marketplaceErr == nil {
-				cmds = append(cmds, m.doLoadMarketplaceRows())
-			} else {
-				m.marketplaceRunning = false
-			}
-		}
-		// A plugin update refreshes marketplaces internally (App.UpdatePlugins), so reload them here too even though msg.marketplace is false, or UpdatedAt stays stale until the next manual refresh.
-		if msg.plugin && !msg.marketplace && msg.pluginErr == nil && m.marketplacesSectionEnabled() {
-			cmds = append(cmds, m.doLoadMarketplaceRows())
-		}
-		if err := firstAgentsProgressError(msg); err != nil {
-			cmds = append(cmds, setStatus(&m, "✗ "+err.Error(), true))
-		} else if msg.report != nil {
-			cmds = append(cmds, setStatus(&m, "✓ "+app.AgentsSyncAllSummaryText(*msg.report), false))
-		}
-		if m.dashboardReconcileCurrent == dashboardReconcilePlanSyncAgents {
-			m.continueDashboardReconcile(dashboardReconcilePlanSyncAgents, firstAgentsProgressError(msg), &cmds)
-		}
-		return m, tea.Batch(cmds...)
-
-	case mcpAddDoneMsg:
-		if msg.err != nil {
-			m.mcpRunning = false
-			if m.mcpFormOpen {
-				m.mcpFormErr = msg.err
-			} else {
-				cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
-			}
-		} else {
-			m.mcpFormOpen = false
-			m.mcpFormErr = nil
-			m.resetMcpForm()
-			cmds = append(cmds, m.doLoadMcpRows())
-		}
-		return m, tea.Batch(cmds...)
-
-	case pluginAddDoneMsg:
-		if msg.err != nil {
-			m.pluginRunning = false
-			if m.pluginFormOpen {
-				m.pluginFormErr = msg.err
-			} else {
-				cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
-			}
-		} else {
-			m.pluginFormOpen = false
-			m.pluginFormErr = nil
-			m.resetPluginForm()
-			cmds = append(cmds, m.doLoadPluginRows())
-		}
-		return m, tea.Batch(cmds...)
-
 	case tea.KeyPressMsg:
 		return m.handleKeyPressMsg(msg, cmds)
 	}
 
 	return m, tea.Batch(cmds...)
-}
-
-func firstAgentsProgressError(msg agentsProgressDoneMsg) error {
-	for _, err := range []error{msg.skillsErr, msg.mcpErr, msg.pluginErr, msg.marketplaceErr} {
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (m *Model) handleMouseClickMsg(msg tea.MouseClickMsg, cmds *[]tea.Cmd) bool {
@@ -936,9 +413,6 @@ func (m *Model) handleMouseClickMsg(msg tea.MouseClickMsg, cmds *[]tea.Cmd) bool
 		return false
 	}
 	if m.handleToolFilterClick(mouse.X, mouse.Y) {
-		return true
-	}
-	if m.handleAgentsFilterClick(mouse.X, mouse.Y) {
 		return true
 	}
 	if !m.mainTabsClickable() {
@@ -968,24 +442,6 @@ func (m *Model) handleToolFilterClick(x, y int) bool {
 	m.applyFilter()
 	m.cursor = 0
 	m.clearListConfirmation()
-	return true
-}
-
-func (m *Model) handleAgentsFilterClick(x, y int) bool {
-	if m.mode != viewSkills {
-		return false
-	}
-	zone, ok := matchHitZone(agentsFilterHitZones, *m, x, y)
-	if !ok {
-		return false
-	}
-	switch zone.kind {
-	case agentsFilterType:
-		m.setAgentsChip(zone.index)
-	case agentsFilterAgent:
-		m.skillAgentIdx = zone.index
-		clampSkillsCursor(m)
-	}
 	return true
 }
 
@@ -1071,22 +527,6 @@ func (m *Model) scrollBy(delta int) {
 		m.scopeCursor = clampIndex(m.scopeCursor+delta, len(m.scopeOptions))
 	case viewSetup:
 		m.scrollSetupBy(delta)
-	case viewSkills:
-		m.scrollSkillsTabBy(delta)
-	}
-}
-
-// Routes to the same cursor-move logic the active chip's key handler uses, so wheel and keyboard navigation stay in lockstep.
-func (m *Model) scrollSkillsTabBy(delta int) {
-	switch m.skillTypeIdx {
-	case agentsChipAll:
-		agentsAllCursorMove(m, delta)
-	case agentsChipSkills:
-		m.agentsChipMoveRow(agentsSectionSkills, delta)
-	case agentsChipMcp:
-		m.agentsChipMoveRow(agentsSectionMcp, delta)
-	case agentsChipPlugin:
-		m.agentsChipMoveRow(agentsSectionPlugins, delta)
 	}
 }
 

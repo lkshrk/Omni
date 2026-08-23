@@ -1,7 +1,0 @@
-# Native update dry-run reports one semantic refresh action per package.
-exec omni --config settings.json agents skills upgrade --dry-run
-stdout '^install vercel-labs/agent-skills skills frontend-design for targets codex$'
-stdout '^install o/r skills tdd for targets codex$'
-
--- settings.json --
-{"version":20,"settings":{"agents_use":["codex"]},"agents":{"packages":[{"source":"vercel-labs/agent-skills","skills":["frontend-design"]},{"source":"o/r","skills":["tdd"]}]}}

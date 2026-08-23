@@ -7,136 +7,11 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-func TestStatusAgentsOutOfSyncBreakdown(t *testing.T) {
-	t.Parallel()
-	if got := statusAgentsOutOfSyncBreakdown(agentsDashCounts{}); got != "" {
-		t.Errorf("breakdown of zero counts = %q, want empty", got)
-	}
-
-	got := statusAgentsOutOfSyncBreakdown(agentsDashCounts{
-		SkillsMissing:         1,
-		SkillsUnmanaged:       2,
-		McpMissing:            3,
-		McpUnmanaged:          4,
-		PluginsMissing:        5,
-		PluginsUnmanaged:      6,
-		MarketplacesMissing:   7,
-		MarketplacesUnmanaged: 8,
-	})
-	for _, want := range []string{
-		"1 skill missing", "2 skills unmanaged",
-		"3 mcp missing", "4 mcp unmanaged",
-		"5 plugins missing", "6 plugins unmanaged",
-		"7 marketplaces missing", "8 marketplaces unmanaged",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("breakdown = %q, want it to contain %q", got, want)
-		}
-	}
-}
-
 // Everything is installed and linked, so the only problem is one skill package behind its source and nothing is out of sync.
-func agentsOutdatedDashboardModel() Model {
-	m := agentsAllModel([]app.SkillPackageRow{
-		{
-			Name:           "sk-current",
-			Source:         "o/sk-current",
-			Installed:      true,
-			PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled},
-		},
-		{
-			Name:           "sk-behind",
-			Source:         "o/sk-behind",
-			Installed:      true,
-			Outdated:       app.SkillOutdatedBehind,
-			PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled},
-		},
-	}, nil, nil)
-	m.mode = viewStatus
-	return m
-}
 
 // Outdated is disjoint from out-of-sync, so the Agents row keeps saying "in sync" and only the Agent Updates row reports the pending upgrade.
-func TestDashboardAgentUpdatesRow_OutdatedOnly(t *testing.T) {
-	t.Parallel()
-	m := agentsOutdatedDashboardModel()
-
-	counts := statusAgentsCounts(m)
-	if counts.Outdated() != 1 {
-		t.Fatalf("Outdated() = %d, want 1", counts.Outdated())
-	}
-	if counts.OutOfSync() != 0 {
-		t.Fatalf("OutOfSync() = %d, want 0 — an outdated package is still in sync", counts.OutOfSync())
-	}
-
-	row := statusAgentUpdatesAttentionRow(m)
-	if !row.needsAttention {
-		t.Fatalf("Agent Updates row = %#v, want it to need attention", row)
-	}
-	if !strings.Contains(stripANSIEscapeSequences(row.value), "1 upgrade") {
-		t.Errorf("Agent Updates value = %q, want the pending upgrade count", stripANSIEscapeSequences(row.value))
-	}
-	if !strings.Contains(row.summary, "sk-behind") {
-		t.Errorf("Agent Updates summary = %q, want the outdated package named", row.summary)
-	}
-	if row.action.kind != statusActionUpgradeAgents {
-		t.Errorf("Agent Updates action = %v, want statusActionUpgradeAgents", row.action.kind)
-	}
-
-	if agents := statusAgentsAttentionRow(m); agents.needsAttention {
-		t.Errorf("Agents sync row = %#v, want it healthy: outdated is not an out-of-sync issue", agents)
-	}
-
-	out := stripANSIEscapeSequences(renderStatus(m))
-	if !strings.Contains(out, "Agent Updates") {
-		t.Errorf("dashboard render missing the Agent Updates row, got:\n%s", out)
-	}
-	if !strings.Contains(out, "1 upgrade available") {
-		t.Errorf("dashboard Agents data line missing the upgrade count, got:\n%s", out)
-	}
-}
-
-func TestDashboardAgentUpdatesRow_OKWhenNothingOutdated(t *testing.T) {
-	t.Parallel()
-	m := agentsAllModel([]app.SkillPackageRow{
-		{
-			Name:           "sk-current",
-			Source:         "o/sk-current",
-			Installed:      true,
-			PerAgentStatus: map[string]app.SkillStatus{"claude": app.SkillStatusInstalled},
-		},
-	}, nil, nil)
-	m.mode = viewStatus
-
-	row := statusAgentUpdatesAttentionRow(m)
-	if row.needsAttention {
-		t.Fatalf("Agent Updates row = %#v, want it healthy", row)
-	}
-	if row.icon != iconInstalled {
-		t.Errorf("healthy Agent Updates icon = %q, want %q", row.icon, iconInstalled)
-	}
-	if row.action.kind != statusActionNone {
-		t.Errorf("healthy Agent Updates action = %v, want none", row.action.kind)
-	}
-
-	if got := stripANSIEscapeSequences(renderStatus(m)); strings.Contains(got, "upgrade available") {
-		t.Errorf("dashboard claims an upgrade with nothing outdated, got:\n%s", got)
-	}
-}
 
 // Disabled agents already say so once on the Agents row.
-func TestDashboardAgentUpdatesRow_AbsentWhenAgentsDisabled(t *testing.T) {
-	t.Parallel()
-	m := agentsAllModel(nil, nil, nil)
-	m.agentsEnabled = false
-	m.mode = viewStatus
-
-	for _, row := range statusAttentionRows(m, statusToolCounts(m)) {
-		if row.label == "Agent Updates" {
-			t.Fatalf("Agent Updates row present with agents disabled: %#v", row)
-		}
-	}
-}
 
 func TestStatusUpgradeSummary(t *testing.T) {
 	t.Parallel()
@@ -191,6 +66,20 @@ func TestStatusDashboardUpgradeActionable(t *testing.T) {
 	outdated := baseModel(oneInstalledOutdated())
 	if !statusDashboardUpgradeActionable(outdated) {
 		t.Error("an installed outdated tool should make the upgrade step actionable")
+	}
+}
+
+func TestAgentDashboardUsesOnlyAPMWorkspaceStatus(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.apmOutput = "workspace healthy"
+
+	if got := statusAgentsCounts(m); got.OutOfSync() != 0 || got.Outdated() != 0 {
+		t.Fatalf("agent counts = %#v, want no native lifecycle counters", got)
+	}
+	details := statusAgentsOverviewDetails(m, agentsDashboardViewFor(m))
+	if len(details) != 1 || !strings.Contains(details[0], "workspace healthy") {
+		t.Fatalf("agent details = %#v, want APM workspace output", details)
 	}
 }
 

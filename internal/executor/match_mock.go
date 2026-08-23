@@ -36,14 +36,36 @@ func (m *MatchMockExecutor) AddRule(rule MatchRule) {
 }
 
 func (m *MatchMockExecutor) Run(_ context.Context, name string, args ...string) (string, string, error) {
-	return m.run(name, args, nil)
+	return m.run(name, args, nil, "")
 }
 
 func (m *MatchMockExecutor) RunEnv(_ context.Context, env []string, name string, args ...string) (string, string, error) {
-	return m.run(name, args, env)
+	return m.run(name, args, env, "")
 }
 
-func (m *MatchMockExecutor) run(name string, args, env []string) (string, string, error) {
+func (m *MatchMockExecutor) RunDir(_ context.Context, dir, name string, args ...string) (string, string, error) {
+	return m.run(name, args, nil, dir)
+}
+
+func (m *MatchMockExecutor) RunDirEnv(_ context.Context, dir string, env []string, name string, args ...string) (string, string, error) {
+	return m.run(name, args, env, dir)
+}
+
+func (m *MatchMockExecutor) RunDirEnvStdin(_ context.Context, dir string, env []string, stdin []byte, name string, args ...string) (string, string, error) {
+	return m.runStdin(name, args, env, dir, stdin)
+}
+
+func (m *MatchMockExecutor) runStdin(name string, args, env []string, dir string, stdin []byte) (string, string, error) {
+	stdout, stderr, err := m.run(name, args, env, dir)
+	m.mu.Lock()
+	if len(m.Calls) > 0 {
+		m.Calls[len(m.Calls)-1].Stdin = append([]byte(nil), stdin...)
+	}
+	m.mu.Unlock()
+	return stdout, stderr, err
+}
+
+func (m *MatchMockExecutor) run(name string, args, env []string, dir string) (string, string, error) {
 	key := name
 	if len(args) > 0 {
 		key = name + " " + strings.Join(args, " ")
@@ -51,7 +73,7 @@ func (m *MatchMockExecutor) run(name string, args, env []string) (string, string
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.Calls = append(m.Calls, MockCall{Name: name, Args: args, Env: env})
+	m.Calls = append(m.Calls, MockCall{Name: name, Args: args, Env: env, Dir: dir})
 
 	for _, rule := range m.rules {
 		if strings.HasPrefix(key, rule.Pattern) {

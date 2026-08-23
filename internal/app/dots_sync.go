@@ -16,7 +16,7 @@ func (a *App) DotsSync(opts dots.SyncOptions) ([]dots.Op, error) {
 func (a *App) DotsSyncContext(ctx context.Context, opts dots.SyncOptions) (ops []dots.Op, err error) {
 	pf, err := a.dotService().preflight()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dots sync: %w", err)
 	}
 	defer func() {
 		historyCtx := ctx
@@ -46,7 +46,7 @@ func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOpti
 	}
 	pf, err := a.dotService().preflight()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dots sync: %w", err)
 	}
 	defer func() {
 		historyCtx := ctx

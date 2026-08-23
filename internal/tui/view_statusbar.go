@@ -31,9 +31,6 @@ func renderStatusBar(m Model) string {
 			desc = "reconcile all"
 		}
 		legend = renderPressAgainActionHint(p, "", m.keys.SyncAll.Help().Key, desc)
-	} else if m.agentsSyncAllConfirm {
-		// The agents tab arms its own flag rather than listConfirm; S is global, so the footer is the only place the armed state is announced.
-		legend = renderPressAgainActionHint(p, "", "S", "sync all")
 	}
 
 	contentW := screenContentWidth(m.width)
@@ -53,8 +50,7 @@ func renderStatusBar(m Model) string {
 }
 
 func footerConfirmationPromptActive(m Model) bool {
-	return m.ctrlCConfirm || m.confirmQuit || m.listConfirm.action == listConfirmSyncAll ||
-		m.agentsSyncAllConfirm
+	return m.ctrlCConfirm || m.confirmQuit || m.listConfirm.action == listConfirmSyncAll
 }
 
 func footerStatusOverlapsLegend(status, legend string, contentW int) bool {
@@ -125,10 +121,8 @@ func activityLabel(m Model) string {
 	switch {
 	case m.searching:
 		return "Searching…"
-	case m.skillAddRunning:
-		return "Adding skill…"
-	case m.skillsRunning, m.mcpRunning, m.pluginRunning, m.marketplaceRunning:
-		return "Working…"
+	case m.apmRunning:
+		return "Running APM…"
 	case len(m.scanningProviders) > 0:
 		return m.toolRefreshStatus(m.refreshToolDone, m.refreshToolTotal)
 	case m.providerSnapshotRefreshing || m.discoveryRefreshing:

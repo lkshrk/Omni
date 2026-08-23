@@ -2,7 +2,6 @@ package dnf
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/lkshrk/omni/internal/executor"
@@ -71,9 +70,9 @@ func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, s
 }
 
 func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool, error) {
-	stdout, _, err := p.exec.Run(ctx, "dnf", "repoquery", "--userinstalled", "--queryformat", "%{name}\t%{evr}\n")
+	stdout, stderr, err := p.exec.Run(ctx, "dnf", "repoquery", "--userinstalled", "--queryformat", "%{name}\t%{evr}\n")
 	if err != nil {
-		return nil, fmt.Errorf("dnf repoquery --userinstalled: %w", err)
+		return nil, executor.WrapError(err, "dnf repoquery --userinstalled", stdout, stderr)
 	}
 	var tools []provider.InstalledTool
 	for _, line := range strings.Split(stdout, "\n") {

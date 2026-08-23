@@ -25,18 +25,34 @@ func New() *RealExecutor {
 }
 
 func (r *RealExecutor) Run(ctx context.Context, name string, args ...string) (string, string, error) {
-	return r.run(ctx, nil, name, args...)
+	return r.run(ctx, nil, "", nil, name, args...)
 }
 
 func (r *RealExecutor) RunEnv(ctx context.Context, overlay []string, name string, args ...string) (string, string, error) {
-	return r.run(ctx, overlay, name, args...)
+	return r.run(ctx, overlay, "", nil, name, args...)
 }
 
-func (r *RealExecutor) run(ctx context.Context, overlay []string, name string, args ...string) (string, string, error) {
+func (r *RealExecutor) RunDir(ctx context.Context, dir, name string, args ...string) (string, string, error) {
+	return r.run(ctx, nil, dir, nil, name, args...)
+}
+
+func (r *RealExecutor) RunDirEnv(ctx context.Context, dir string, overlay []string, name string, args ...string) (string, string, error) {
+	return r.run(ctx, overlay, dir, nil, name, args...)
+}
+
+func (r *RealExecutor) RunDirEnvStdin(ctx context.Context, dir string, overlay []string, stdin []byte, name string, args ...string) (string, string, error) {
+	return r.run(ctx, overlay, dir, stdin, name, args...)
+}
+
+func (r *RealExecutor) run(ctx context.Context, overlay []string, dir string, stdin []byte, name string, args ...string) (string, string, error) {
 	resolved, env := resolveCommandWithEnv(name, overlay)
 
 	cmd := exec.CommandContext(ctx, resolved, args...)
+	cmd.Dir = dir
 	cmd.Env = env
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
 	// Wait blocks on pipe-copy goroutines, so a grandchild holding a pipe open can outlive cancellation.
 	cmd.WaitDelay = waitDelay
 	var stdout, stderr bytes.Buffer

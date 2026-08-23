@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -32,9 +31,8 @@ var setupActivationOptions = []setupActivationOption{
 }
 
 const (
-	setupStepCreateConfig     = 11
-	setupStepImportAdvisories = 12
-	setupStepMax              = setupStepImportAdvisories
+	setupStepCreateConfig = 11
+	setupStepMax          = setupStepCreateConfig
 )
 
 func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
@@ -72,12 +70,6 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	if msg.noHost && !m.setupComplete {
 		// Keep the background list as the pre-onboarding snapshot; fresh scans and reloads run only after onboarding exits.
 		m.setSettings(msg.settings)
-		m.agentsEnabled = msg.agentsEnabled
-		m.skillsEnabled = msg.skillsEnabled
-		m.mcpEnabled = msg.mcpEnabled
-		m.pluginsEnabled = msg.pluginsEnabled
-		m.enabledAgents = msg.enabledAgents
-		m.agentsIgnore = msg.agentsIgnore
 		if msg.dotsConfiguredKnown {
 			m.dotsConfiguredCached = msg.dotsConfigured
 		}
@@ -121,32 +113,6 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	m.discoveredTools = msg.discovered
 	m.rebuildDiscoveredKeys()
 	m.setSettings(msg.settings)
-	m.agentsEnabled = msg.agentsEnabled
-	m.skillsEnabled = msg.skillsEnabled
-	m.mcpEnabled = msg.mcpEnabled
-	m.pluginsEnabled = msg.pluginsEnabled
-	m.enabledAgents = msg.enabledAgents
-	m.agentsIgnore = msg.agentsIgnore
-	m.seedAgentsRowsFromCache(msg.agentsRows)
-	if m.skillsSectionEnabled() && !m.skillsLoaded {
-		m.skillsLoaded = true
-		cmds = append(cmds, m.loadSkillsManifestCmd())
-	}
-	if m.mcpSectionEnabled() && !m.mcpLoaded {
-		m.mcpLoaded = true
-		m.mcpRunning = true
-		cmds = append(cmds, m.spinner.Tick, m.doLoadMcpRows())
-	}
-	if m.pluginsSectionEnabled() && !m.pluginLoaded {
-		m.pluginLoaded = true
-		m.pluginRunning = true
-		cmds = append(cmds, m.spinner.Tick, m.doLoadPluginRows())
-	}
-	if m.marketplacesSectionEnabled() && !m.marketplaceLoaded {
-		m.marketplaceLoaded = true
-		m.marketplaceRunning = true
-		cmds = append(cmds, m.spinner.Tick, m.doLoadMarketplaceRows())
-	}
 	if msg.dotsConfiguredKnown {
 		m.dotsConfiguredCached = msg.dotsConfigured
 	}
@@ -369,47 +335,7 @@ func (m *Model) handleSetupBootstrapDoneMsg(msg setupBootstrapDoneMsg) []tea.Cmd
 	return cmds
 }
 
-func (m *Model) handleSetupAgentsDiffMsg(msg setupAgentsDiffMsg) []tea.Cmd {
-	m.setupAgentsDiffLoading = false
-	if msg.err != nil {
-		return []tea.Cmd{setStatus(m, "✗ "+msg.err.Error(), true)}
-	}
-	m.setupAgentsDiffLoaded = true
-	m.setupAgentsUnmanagedSkills = msg.unmanagedSkills
-	m.setupAgentsUnmanagedMcp = msg.unmanagedMcp
-	m.setupAgentsUnmanagedPlugins = msg.unmanagedPlugins
-	return nil
-}
-
-func (m *Model) handleSetupAgentsImportDoneMsg(msg setupAgentsImportDoneMsg) []tea.Cmd {
-	var cmds []tea.Cmd
-
-	m.loading = false
-	if msg.err != nil {
-		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
-		return cmds
-	}
-	total := msg.skills + msg.mcp + msg.plugins
-	if total > 0 {
-		cmds = append(cmds, setStatus(m, fmt.Sprintf("✓ imported %d skills · %d mcp servers · %d plugins", msg.skills, msg.mcp, msg.plugins), false))
-	} else {
-		cmds = append(cmds, setStatus(m, "✓ nothing to import", false))
-	}
-	if len(msg.advisories) > 0 {
-		m.startSetupImportAdvisories(msg.advisories)
-		return cmds
-	}
-	m.startSetupGroupSelection(&cmds)
-	return cmds
-}
-
 // Keep credential-adoption disclosure on a dedicated step because status truncation and reloads can hide it.
-func (m *Model) startSetupImportAdvisories(advisories []string) {
-	m.loading = false
-	m.setupImportNotices = advisories
-	m.setupStep = setupStepImportAdvisories
-}
-
 func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	var cmds []tea.Cmd
 
@@ -457,19 +383,6 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			}
 		case key.Matches(msg, m.keys.Confirm):
 			m.confirmSetupProviders(&cmds)
-		}
-	case 4: // Agents onboarding.
-		if m.setupAgentsDiffLoading {
-			break
-		}
-		switch {
-		case strings.EqualFold(msg.String(), "i"):
-			m.beginLoading(loadingOwnerLocalOp)
-			startOp(m, "Importing agents state…")
-			cmds = append(cmds, m.spinner.Tick, m.doSetupAgentsImportAll())
-		case strings.EqualFold(msg.String(), "s") || key.Matches(msg, m.keys.Back):
-			cmds = append(cmds, setStatus(m, "✓ agents onboarding skipped", false))
-			m.startSetupGroupSelection(&cmds)
 		}
 	case 5: // Enable dotfile sync.
 		switch {
@@ -588,11 +501,6 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		case key.Matches(msg, m.keys.Back):
 			cmds = append(cmds, setStatus(m, "✓ bootstrap skipped", false))
 			m.finishSetupWithReload(&cmds)
-		}
-	case setupStepImportAdvisories:
-		if key.Matches(msg, m.keys.Confirm) || key.Matches(msg, m.keys.Back) {
-			m.setupImportNotices = nil
-			m.startSetupGroupSelection(&cmds)
 		}
 	}
 
@@ -778,28 +686,8 @@ func (m *Model) startSetupGroupSelection(cmds *[]tea.Cmd) {
 	m.initSetupGroupDraft()
 }
 
-// Skips straight to group selection when agents are disabled for this host or no supported agent CLI is detected.
 func (m *Model) startSetupAgentsStep(cmds *[]tea.Cmd) {
-	if !m.agentsEnabled {
-		m.startSetupGroupSelection(cmds)
-		return
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		m.startSetupGroupSelection(cmds)
-		return
-	}
-	agents := app.InstalledAgents(home)
-	if len(agents) == 0 {
-		m.startSetupGroupSelection(cmds)
-		return
-	}
-	m.loading = false
-	m.setupStep = 4
-	m.setupAgentsList = agents
-	m.setupAgentsDiffLoading = true
-	m.setupAgentsDiffLoaded = false
-	*cmds = append(*cmds, m.spinner.Tick, m.doSetupAgentsDiff())
+	m.startSetupGroupSelection(cmds)
 }
 
 func (m *Model) initSetupGroupDraft() {
@@ -819,7 +707,6 @@ func (m *Model) finishSetupWithReload(cmds *[]tea.Cmd) {
 	m.mode = targetMode
 	m.setupBackgroundMode = targetMode
 	m.setupStep = 0
-	m.setupImportNotices = nil
 	m.setupCopyHostIdx = 0
 	m.setupGroupIdx = 0
 	m.setupGroupDraft = nil

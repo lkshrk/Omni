@@ -84,9 +84,9 @@ func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, s
 
 func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool, error) {
 	world := apkWorldPackages()
-	stdout, _, err := p.exec.Run(ctx, "apk", "info", "-v")
+	stdout, stderr, err := p.exec.Run(ctx, "apk", "info", "-v")
 	if err != nil {
-		return nil, fmt.Errorf("apk info -v: %w", err)
+		return nil, executor.WrapError(err, "apk info -v", stdout, stderr)
 	}
 	var tools []provider.InstalledTool
 	for _, line := range strings.Split(stdout, "\n") {
@@ -108,9 +108,9 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 // InstalledMap returns explicitly requested apk packages as lowercase-name→version.
 func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) {
 	world := apkWorldPackages()
-	stdout, _, err := p.exec.Run(ctx, "apk", "info", "-v")
+	stdout, stderr, err := p.exec.Run(ctx, "apk", "info", "-v")
 	if err != nil {
-		return nil, fmt.Errorf("apk info -v: %w", err)
+		return nil, executor.WrapError(err, "apk info -v", stdout, stderr)
 	}
 	m := make(map[string]string)
 	for _, line := range strings.Split(stdout, "\n") {
@@ -173,9 +173,9 @@ func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map
 		args = append(args, pkg)
 		pkgSet[pkg] = struct{}{}
 	}
-	stdout, _, err := p.exec.Run(ctx, "apk", args...)
+	stdout, stderr, err := p.exec.Run(ctx, "apk", args...)
 	if err != nil {
-		return nil, fmt.Errorf("apk info -d: %w", err)
+		return nil, executor.WrapError(err, "apk info -d", stdout, stderr)
 	}
 	return parseAPKBulkDescriptions(stdout, pkgSet), nil
 }
@@ -215,9 +215,9 @@ func parseAPKBulkDescriptions(output string, pkgSet map[string]struct{}) map[str
 
 // Describe fetches a one-line description via `apk info -d`.
 func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, error) {
-	stdout, _, err := p.exec.Run(ctx, "apk", "info", "-d", tool.EffectivePackage())
+	stdout, stderr, err := p.exec.Run(ctx, "apk", "info", "-d", tool.EffectivePackage())
 	if err != nil {
-		return "", fmt.Errorf("apk info -d %s: %w", tool.EffectivePackage(), err)
+		return "", executor.WrapError(err, fmt.Sprintf("apk info -d %s", tool.EffectivePackage()), stdout, stderr)
 	}
 	return parseAPKDescription(stdout), nil
 }

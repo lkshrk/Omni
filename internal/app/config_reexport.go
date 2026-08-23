@@ -11,10 +11,6 @@ type (
 	FallbackSource   = config.FallbackSource
 	FallbackRecipe   = config.FallbackRecipe
 	FallbackCommands = config.FallbackCommands
-	McpServer        = config.McpServer
-	Marketplace      = config.Marketplace
-	Plugin           = config.Plugin
-	AgentsIgnore     = config.AgentsIgnore
 	OptimizeReport   = config.OptimizeReport
 )
 

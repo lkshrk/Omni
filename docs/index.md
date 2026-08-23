@@ -1,7 +1,9 @@
 # Omni
 
-Omni keeps development tools, dotfiles, and AI-agent resources in sync across
-machines from one portable JSON config.
+Omni keeps tools and dotfiles portable across machines through its JSON config.
+AI-agent packages, skills, MCP servers, plugins, and marketplaces live in
+Microsoft APM; Omni provides shared CLI/TUI workflows and a reviewed one-time
+migration.
 
 It manages logical tools such as `ripgrep`, `typescript`, and `black`, then
 installs them with the right package manager for the current machine. It also
@@ -21,8 +23,8 @@ syncs dotfiles through a Git-backed GNU Stow repo.
   host-specific variants, Git commit/push flows, and optional native services.
 - **Hosts and groups**: per-machine activation of reusable tool and dotfile
   groups.
-- **Agent resources**: skills, MCP servers, plugins, and marketplaces across
-  supported agent CLIs.
+- **Agent packages**: APM-backed skills, MCP servers, plugins, lockfiles, and
+  deployment across supported harnesses.
 - **Health**: dashboard checks, `doctor`, `reconcile`, cache refreshes, and
   repair actions.
 - **Two surfaces**: the interactive TUI and a scriptable CLI share the same app
@@ -63,7 +65,7 @@ omni reconcile
 | Manage tools | [Tools](tools.md) |
 | Manage dotfiles | [Dotfiles](dotfiles.md) |
 | Manage agent skills, MCP servers, and plugins | [Agents](agents.md) |
-| Move off the old skills CLI | [Upgrading From CLI-Managed Skills](migrating-skills.md) |
+| Migrate existing agent state into APM | [Agent Migration](migrating-skills.md) |
 | Use the terminal UI | [TUI](tui.md) |
 | Script Omni | [CLI Reference](cli.md) and [Command Matrix](command-matrix.md) |
 | Follow operational procedures | [Runbooks](runbooks.md) |

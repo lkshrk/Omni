@@ -1,6 +1,6 @@
 # Test Matrix
 
-This matrix tracks the 11 actual program flows and the 79 user-visible actions
+This matrix tracks the 11 actual program flows and the 67 user-visible actions
 in `internal/actions/catalog.go`. It separates cheap model/render checks from
 real-terminal journeys so `TUI: yes` does not imply an expensive binary test for
 every action.
@@ -48,7 +48,7 @@ both cheaper and sufficient.
 | TS-06 | UNKNOWN | Dotfile lifecycle | Classification, path validation, and config mutation branches | Adopt/discover/sync/status/extract/variant/unignore/delete filesystem journeys | covered: discovered sync and ignored-candidate include persist state | GNU Stow remains in the integration environment |
 | TS-07 | UNKNOWN | Dotfile safety and services | Conflict detection, nested ignores, rollback, and service-state branches | Conflict resolution, pull/commit/push, reminder, watch, and data-preservation journeys | covered: destructive resolution is cancelled, then confirmed with backup/symlink filesystem proof | Platform service checks only where host isolation is available |
 | TS-08 | UNKNOWN | Hosts, groups, settings, and migration | Migration and unrelated-config preservation | Mutations persist across reload; lint/extract/migration flows | covered: host-group assignment and a setting toggle persist through config reload | n/a |
-| TS-09 | UNKNOWN | Agents, skills, MCP, plugins, and marketplaces | Adapter parsing, identity, status, and feature-gate contracts | Add/import/group/remove/sync/upgrade for each resource family | covered: fake-Claude plugin install persists adapter and config state; real-Git fixture covers versionless PATH-outdated; skill outdated detection covered per source type (local dir, Git branch, pinned tag, well-known index) with a request-counting stub for the recheck cadence | Fake agent CLIs, real local Git fixture, and a local HTTP index stub; no network |
+| TS-09 | UNKNOWN | Agents, skills, MCP, plugins, marketplaces, and onboarding | Thin-wrapper routing, legacy/dots/native candidate extraction, per-item blockers, private journals, completion-marker idempotence, fragment CAS/recovery, exact patched-build validation, and target/deploy-root parsing | Real patched APM package, preview/apply/audit/cleanup/no-op onboarding, and host-global MCP lifecycle | covered: Agents-tab cancellation proves preview no-write; reviewed apply resolves targets, secrets, ownership, and conflicts, then verifies durable APM state and post-cleanup no-op | Immutable pinned APM exercises normal lifecycle contracts; local fixtures, no external test traffic |
 | TS-10 | UNKNOWN | TUI shell and parity | Reducer branches, layout, key routing, modal, progress, and error state | n/a | covered: `x/vttest` current-screen checks exercise resize, help/search, cancel/confirm, async failure/recovery, nested PTY, and clean quit | n/a |
 | TS-11 | UNKNOWN | Provider families | Install/query/upgrade/uninstall parsing and command contracts | Routing through fake executors | n/a: provider permutations do not become safer through the TUI | Tagged Docker package-manager lane |
 
@@ -66,7 +66,7 @@ one unless it proves a new interaction contract.
 | TUI-03 Tool mutation | Edit fallback -> install with fake provider -> progress -> persisted state -> cancel then confirm delete | Durable fallback save and fake-Brew lifecycle tests | covered |
 | TUI-04 Reconcile recovery | Open plan -> run failure -> retain error -> retry -> durable success | Injected fake-Brew failure/retry plus dot-ignore reconcile | covered |
 | TUI-05 Dot safety | Discover/sync candidate -> conflict -> cancel -> confirm resolution; verify config and filesystem | Candidate include/sync and conflict backup/symlink tests | covered |
-| TUI-06 Agents mutation | Render/filter -> install missing plugin; verify adapter/config state and versionless PATH-outdated classification | Fake-Claude install and real-Git PATH-outdated tests | covered |
+| TUI-06 Agents mutation | Open Agents -> cancel/reopen -> inspect and resolve targets, secrets, dots/native ownership, conflicts, and unmanaged items -> review/apply -> local status -> preview/confirm cleanup; verify manifest, lock, durable package, completion marker, runtime state, and post-cleanup no-op | `TestTUIAgentsTabSyncsMCPThroughRealAPM`, `TestTUIAgentsOnboardingPreviewConfirmAndApply` | covered |
 | TUI-07 Groups/settings | Assign current host group -> toggle one setting -> reload config -> verify persistence | `TestTUIAssignsHostGroupAndPersistsSetting` | covered |
 | TUI-08 Admin terminal | Run fake privileged command -> exchange input/output -> observe completion/dismissal without corrupting the parent UI | Real nested PTY plus component-level nonzero-exit coverage | covered |
 
@@ -80,6 +80,15 @@ one unless it proves a new interaction contract.
 - Target two seconds per transition and ten seconds per journey, but measure before enforcing a suite budget.
 - Assert semantic text/cells and durable state. Use full-screen goldens only when layout itself is the behavior.
 - On failure retain the current screen, command/fake-executor log, config, and DB diagnostics.
+
+## Non-action workflow coverage
+
+Onboarding is a coordinated CLI/TUI workflow, not an `internal/actions`
+catalog entry. Its evidence is tracked here instead of inventing an action ID.
+
+| Workflow | App/protocol | CLI/model | Real integration | Remaining gate |
+| --- | --- | --- | --- | --- |
+| Existing agent-state onboarding | local candidate/plan/result envelopes and fixed hashes, legacy includes, active dots discovery/materialization, redaction, locks, private journals, manifest merge, and fragment CAS/resume/rollback | Per-item target validation plus migrate/map-secret/move-to-apm/keep-in-dots/keep-unmanaged choices in CLI and TUI | Local fixture and pinned-APM onboarding integration plus `TestAgentsOnboardPreviewConfirmationJourney` | Immutable lifecycle-only APM pin in DinD plus macOS/Windows platform jobs |
 
 ## Action-level coverage
 
@@ -153,18 +162,6 @@ real-terminal test; the eight-journey budget above owns that layer.
 | `settings.migrate_host_overrides` | yes | n/a | n/a | n/a | CLI-only config migration |
 | `settings.extract` | yes | n/a | n/a | n/a | CLI-only config layout migration |
 | `setup.init` | yes | yes | yes | yes | CLI command is `bootstrap`; `init` remains an alias |
-| `agents.restore` | yes | yes | yes | yes | CLI command is `agents sync`; `restore` remains a deprecated alias |
-| `agents.sync_all` | yes | yes | yes | yes | - |
-| `agents.skills_import` | yes | yes | yes | yes | - |
-| `agents.skills_update` | yes | yes | yes | yes | CLI command is `agents skills upgrade`; `update` remains a deprecated alias |
-| `agents.skills_resolve_use_managed` | yes | yes | yes | yes | - |
-| `agents.skills_resolve_use_local` | yes | yes | yes | yes | - |
-| `agents.mcp_resolve_use_managed` | yes | yes | yes | yes | - |
-| `agents.mcp_resolve_use_local` | yes | yes | yes | yes | - |
-| `agents.plugins_resolve_use_managed` | yes | yes | yes | yes | - |
-| `agents.plugins_resolve_use_local` | yes | yes | yes | yes | - |
-| `agents.resolve_all_use_managed` | yes | yes | yes | yes | - |
-| `agents.resolve_all_use_local` | yes | yes | yes | yes | - |
-| `agents.skills_status` | yes | yes | yes | n/a | Read-only CLI view; the TUI shows the same state in the agents rows. |
+| `agents.sync` | yes | yes | yes | yes | Single APM-backed lifecycle; dry-run and frozen replay covered |
 | `doctor` | yes | yes | yes | yes | - |
 | `doctor.fix` | yes | yes | yes | yes | Covers include-chain dedupe, dry-run, catalog routing, TUI execution, and doctor refresh. |

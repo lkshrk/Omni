@@ -33,22 +33,22 @@ func Summaries(ctx context.Context, exec executor.Executor, tools []provider.Too
 	for _, tool := range tools {
 		args = append(args, tool.EffectivePackage())
 	}
-	stdout, _, err := exec.Run(ctx, "rpm", args...)
+	stdout, stderr, err := exec.Run(ctx, "rpm", args...)
 	summaries := ParseSummaryLines(stdout)
 	if err != nil && len(summaries) == 0 && !isRPMMissOutput(stdout) {
-		return nil, fmt.Errorf("rpm summaries: %w", err)
+		return nil, executor.WrapError(err, "rpm summaries", stdout, stderr)
 	}
 	return summaries, nil
 }
 
 func Summary(ctx context.Context, exec executor.Executor, pkg string) (string, error) {
-	stdout, _, err := exec.Run(ctx, "rpm", "-q", "--queryformat", "%{SUMMARY}", pkg)
+	stdout, stderr, err := exec.Run(ctx, "rpm", "-q", "--queryformat", "%{SUMMARY}", pkg)
 	desc := strings.TrimSpace(stdout)
 	if err != nil {
 		if isRPMMissOutput(desc) {
 			return "", nil
 		}
-		return "", fmt.Errorf("rpm summary %s: %w", pkg, err)
+		return "", executor.WrapError(err, fmt.Sprintf("rpm summary %s", pkg), stdout, stderr)
 	}
 	if isRPMMissOutput(desc) {
 		return "", nil

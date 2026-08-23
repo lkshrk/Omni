@@ -278,12 +278,12 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	stdout, _, err := p.exec.Run(ctx, m.binary, m.listGlobal...)
+	stdout, stderr, err := p.exec.Run(ctx, m.binary, m.listGlobal...)
 	if err != nil {
 		if m.emptyExitNonZero && isEmptyGlobalListError(err) {
 			return map[string]string{}, nil // empty global dir; nothing installed
 		}
-		return nil, fmt.Errorf("%s: %w", cmdStr(m.binary, m.listGlobal), err)
+		return nil, executor.WrapError(err, cmdStr(m.binary, m.listGlobal), stdout, stderr)
 	}
 	result := make(map[string]string)
 	for _, line := range strings.Split(stdout, "\n") {
@@ -309,12 +309,12 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 		if _, _, err := p.exec.Run(ctx, m.binary, "--version"); err != nil {
 			return nil // not available
 		}
-		stdout, _, err := p.exec.Run(ctx, m.binary, m.listGlobal...)
+		stdout, stderr, err := p.exec.Run(ctx, m.binary, m.listGlobal...)
 		if err != nil {
 			if m.emptyExitNonZero && isEmptyGlobalListError(err) {
 				return nil // empty global dir; nothing to attribute
 			}
-			return fmt.Errorf("%s: %w", cmdStr(m.binary, m.listGlobal), err)
+			return executor.WrapError(err, cmdStr(m.binary, m.listGlobal), stdout, stderr)
 		}
 		for _, line := range strings.Split(stdout, "\n") {
 			name, ver := parseListLine(line)

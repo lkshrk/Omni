@@ -14,7 +14,12 @@ import (
 var ErrSkipSave = errors.New("config: skip save")
 
 // WriteConfig — The single safe seam for editing settings in place: only changed top-level keys are written, each routed to its owning fragment with stale copies nulled so removed entries cannot resurrect on the next load.
-func WriteConfig(path string, load func() (*RootConfig, error), providers *ProviderValidation, mutate func(*RootConfig) error) error {
+func WriteConfig(path string, load func() (*RootConfig, error), providers *ProviderValidation, mutate func(*RootConfig) error) (retErr error) {
+	lock, err := AcquireWriteLock(path)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, lock.Close()) }()
 	cfg, err := load()
 	if err != nil {
 		return err
@@ -63,7 +68,7 @@ func WriteConfig(path string, load func() (*RootConfig, error), providers *Provi
 			return fmt.Errorf("creating config directory: %w", err)
 		}
 	}
-	return PatchRawRouted(path, diff)
+	return patchRawRoutedUnlocked(path, diff)
 }
 
 // Fallback-pathed and warn-level errors are advisory and must not block a write; `omni doctor` reports the full set.
@@ -85,11 +90,6 @@ type hostSettingsProjection struct {
 	DotsDisabled      *bool                        `json:"dots_disabled,omitempty"`
 	DisabledProviders *[]string                    `json:"disabled_providers,omitempty"`
 	ProviderPriority  []string                     `json:"provider_priority,omitempty"`
-	AgentsDisabled    *bool                        `json:"agents_disabled,omitempty"`
-	SkillsDisabled    *bool                        `json:"skills_disabled,omitempty"`
-	McpDisabled       *bool                        `json:"mcp_disabled,omitempty"`
-	PluginsDisabled   *bool                        `json:"plugins_disabled,omitempty"`
-	AgentsUse         *[]string                    `json:"agents_use,omitempty"`
 	Providers         *[]ProviderEntry             `json:"providers,omitempty"`
 }
 
@@ -105,16 +105,9 @@ func projectHostSettings(in map[string]Settings) map[string]hostSettingsProjecti
 			DotsRepo:         s.DotsRepo,
 			ProviderPriority: s.ProviderPriority,
 			DotsDisabled:     s.DotsDisabled,
-			AgentsDisabled:   s.AgentsDisabled,
-			SkillsDisabled:   s.SkillsDisabled,
-			McpDisabled:      s.McpDisabled,
-			PluginsDisabled:  s.PluginsDisabled,
 		}
 		if s.DisabledProviders != nil {
 			p.DisabledProviders = &s.DisabledProviders
-		}
-		if s.AgentsUse != nil {
-			p.AgentsUse = &s.AgentsUse
 		}
 		if s.Providers != nil {
 			p.Providers = &s.Providers

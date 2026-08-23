@@ -1,773 +1,398 @@
 package tui
 
 import (
-	"errors"
+	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
 )
 
-const (
-	agentsChipAll = iota
-	agentsChipSkills
-	agentsChipMcp
-	agentsChipPlugin
-	agentsChipMarketplace
-)
+const agentsBusyStatus = "⚠ APM busy — wait for the running command to finish"
 
-type agentsSection int
-
-const (
-	agentsSectionSkills agentsSection = iota
-	agentsSectionMcp
-	agentsSectionPlugins
-	agentsSectionMarketplaces
-)
-
-type agentsAllRow struct {
-	feature  agentsSection
-	localIdx int
-	agentID  string
-	status   agentsRowStatus
-	mark     agentsSyncMark
-	sortName string
-	// Kept beside status: status names only one condition and drift outranks an update, so a drifted package's pending upgrade would otherwise be invisible.
-	outdated bool
-	// Manufactured for an ignore-list entry with no live row; carries no valid localIdx, so every consumer must check this flag before touching localIdx. Renders name-only, supports only unignore ('x').
-	synthetic bool
+type apmCommandDoneMsg struct {
+	command string
+	stdout  string
+	stderr  string
+	err     error
 }
 
-func skillExpandAgents(r app.SkillPackageRow, enabledAgents []string) []string {
-	if len(r.Agents) > 0 {
-		return r.Agents
-	}
-	return enabledAgents
+type agentsOnboardPlanDoneMsg struct {
+	result app.AgentsOnboardResult
+	err    error
+}
+type agentsOnboardApplyDoneMsg struct {
+	result app.AgentsOnboardResult
+	err    error
+}
+type agentsOnboardStatusDoneMsg struct {
+	result app.AgentsOnboardStatusResult
+	err    error
+}
+type agentsOnboardCleanupDoneMsg struct {
+	preview   app.AgentsOnboardCleanupPreview
+	confirmed bool
+	err       error
 }
 
-// Multiple rows share a localIdx (one per agent); key dispatch routes by feature+localIdx and never depends on which agent row triggered it, so it is unaffected.
-func agentsAllRowsList(m Model) []agentsAllRow {
-	var out []agentsAllRow
-	skillsIgnore, mcpIgnore, pluginIgnore, marketplaceIgnore := agentsIgnoreSets(m.agentsIgnore)
-	agentFilterID := ""
-	if agentFilterIDs := skillAgentIDs(m.skillsRows, m.enabledAgents); m.skillAgentIdx > 0 && m.skillAgentIdx <= len(agentFilterIDs) {
-		agentFilterID = agentFilterIDs[m.skillAgentIdx-1]
-	}
+func (m *Model) agentsOpInFlight() bool { return m.apmRunning }
 
-	if m.skillsSectionEnabled() {
-		rows, findStart, unmanagedStart := skillsVisibleRows(m)
-		seen := make(map[string]bool, len(rows))
-		for i, r := range rows {
-			seen[r.Name] = true
-			switch {
-			case unmanagedStart >= 0 && i >= unmanagedStart && skillsIgnore[r.Name]:
-				out = append(out, agentsAllRow{feature: agentsSectionSkills, localIdx: i, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: r.Name})
-			case unmanagedStart >= 0 && i >= unmanagedStart:
-				out = append(out, agentsAllRow{feature: agentsSectionSkills, localIdx: i, status: agentsStatusOutOfSync, mark: agentsMarkOrphan, sortName: r.Name})
-			case findStart >= 0 && i >= findStart && skillsIgnore[r.Name]:
-				out = append(out, agentsAllRow{feature: agentsSectionSkills, localIdx: i, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: r.Name})
-			case findStart >= 0 && i >= findStart:
-				out = append(out, agentsAllRow{feature: agentsSectionSkills, localIdx: i, status: agentsStatusAvailable, mark: agentsMarkNone, sortName: r.Name})
-			case skillsIgnore[r.Name] && !r.ShadowedByPlugin:
-				out = append(out, agentsAllRow{feature: agentsSectionSkills, localIdx: i, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: r.Name})
-			default:
-				drifted := len(skillDriftedAgents(r, m.enabledAgents)) > 0
-				packageShadowed := len(skillShadowedAgents(r, m.enabledAgents)) > 0 &&
-					len(skillMissingAgents(r, m.enabledAgents)) == 0
-				// A drifted package is still installed and its upgrade real; a missing one has nothing to upgrade.
-				outdated := skillRowOutdated(r) && !r.ShadowedByPlugin && !packageShadowed && (r.Installed || drifted)
-				status, mark := skillPackageRowStatus(
-					r.Installed, r.ShadowedByPlugin, packageShadowed, drifted, outdated)
-				out = append(out, agentsAllRow{
-					feature: agentsSectionSkills, localIdx: i,
-					status: status, mark: mark, sortName: r.Name, outdated: outdated,
-				})
-			}
-		}
-		out = append(out, agentsOrphanedIgnoreRows(agentsSectionSkills, skillsIgnore, seen)...)
+func (m *Model) runAPM(command string, args ...string) []tea.Cmd {
+	if m.app == nil {
+		return nil
 	}
-
-	if m.mcpSectionEnabled() {
-		seen := make(map[string]bool, len(m.mcpRows))
-		for i, row := range m.mcpRows {
-			seen[row.Name] = true
-			if mcpIgnore[row.Name] && !row.ShadowedByPlugin {
-				out = append(out, agentsAllRow{feature: agentsSectionMcp, localIdx: i, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: row.Name})
-				continue
-			}
-			for _, agentID := range skillExpandAgents(app.SkillPackageRow{Agents: row.Agents}, m.enabledAgents) {
-				if agentFilterID != "" && agentID != agentFilterID {
-					continue
-				}
-				st, ok := row.PerAgentStatus[agentID]
-				if !ok || st == app.McpStatusAgentUnavailable {
-					continue
-				}
-				status, mark := mcpAgentRowStatus(st)
-				out = append(out, agentsAllRow{feature: agentsSectionMcp, localIdx: i, agentID: agentID, status: status, mark: mark, sortName: row.Name})
-			}
-		}
-		unmanagedFlat := mcpUnmanagedFlat(m.mcpUnmanaged)
-		for i, e := range unmanagedFlat {
-			seen[e.srv.Name] = true
-			if agentFilterID != "" && e.agentID != agentFilterID {
-				continue
-			}
-			status, mark := agentsStatusOutOfSync, agentsMarkOrphan
-			if mcpIgnore[e.srv.Name] {
-				status, mark = agentsStatusIgnored, agentsMarkNone
-			}
-			out = append(out, agentsAllRow{
-				feature:  agentsSectionMcp,
-				localIdx: len(m.mcpRows) + i,
-				agentID:  e.agentID,
-				status:   status,
-				mark:     mark,
-				sortName: e.srv.Name,
-			})
-		}
-		out = append(out, agentsOrphanedIgnoreRows(agentsSectionMcp, mcpIgnore, seen)...)
-	}
-
-	if m.pluginsSectionEnabled() {
-		seen := make(map[string]bool, len(m.pluginRows))
-		for i, row := range m.pluginRows {
-			seen[row.Name] = true
-			if pluginIgnore[row.Name] {
-				out = append(out, agentsAllRow{feature: agentsSectionPlugins, localIdx: i, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: row.Name})
-				continue
-			}
-			for _, agentID := range skillExpandAgents(app.SkillPackageRow{Agents: row.Agents}, m.enabledAgents) {
-				if agentFilterID != "" && agentID != agentFilterID {
-					continue
-				}
-				st, ok := row.PerAgentStatus[agentID]
-				if !ok || st == app.PluginStatusAgentUnavailable {
-					continue
-				}
-				status, mark := pluginAgentRowStatus(row, agentID)
-				out = append(out, agentsAllRow{
-					feature: agentsSectionPlugins, localIdx: i, agentID: agentID,
-					status: status, mark: mark, sortName: row.Name, outdated: row.Outdated(),
-				})
-			}
-		}
-		unmanagedFlat := pluginUnmanagedFlat(m.pluginUnmanaged)
-		for i, e := range unmanagedFlat {
-			seen[e.plugin.Name] = true
-			if agentFilterID != "" && e.agentID != agentFilterID {
-				continue
-			}
-			status, mark := agentsStatusOutOfSync, agentsMarkOrphan
-			if pluginIgnore[e.plugin.Name] {
-				status, mark = agentsStatusIgnored, agentsMarkNone
-			}
-			out = append(out, agentsAllRow{
-				feature:  agentsSectionPlugins,
-				localIdx: len(m.pluginRows) + i,
-				agentID:  e.agentID,
-				status:   status,
-				mark:     mark,
-				sortName: e.plugin.Name,
-			})
-		}
-		out = append(out, agentsOrphanedIgnoreRows(agentsSectionPlugins, pluginIgnore, seen)...)
-	}
-
-	if m.marketplacesSectionEnabled() {
-		seen := make(map[string]bool, len(m.marketplaceRows))
-		for i, row := range m.marketplaceRows {
-			seen[row.Name] = true
-			if marketplaceIgnore[row.Name] {
-				out = append(out, agentsAllRow{feature: agentsSectionMarketplaces, localIdx: i, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: row.Name})
-				continue
-			}
-			for _, agentID := range skillExpandAgents(app.SkillPackageRow{Agents: row.Agents}, m.enabledAgents) {
-				if agentFilterID != "" && agentID != agentFilterID {
-					continue
-				}
-				st, ok := row.PerAgentStatus[agentID]
-				if !ok || st == app.PluginStatusAgentUnavailable {
-					continue
-				}
-				status, mark := marketplaceAgentRowStatus(st)
-				out = append(out, agentsAllRow{feature: agentsSectionMarketplaces, localIdx: i, agentID: agentID, status: status, mark: mark, sortName: row.Name})
-			}
-		}
-		unmanagedFlat := marketplaceUnmanagedFlat(m.marketplaceUnmanaged)
-		for i, e := range unmanagedFlat {
-			seen[e.marketplace.Name] = true
-			if agentFilterID != "" && e.agentID != agentFilterID {
-				continue
-			}
-			status, mark := agentsStatusOutOfSync, agentsMarkOrphan
-			if marketplaceIgnore[e.marketplace.Name] {
-				status, mark = agentsStatusIgnored, agentsMarkNone
-			}
-			out = append(out, agentsAllRow{
-				feature:  agentsSectionMarketplaces,
-				localIdx: len(m.marketplaceRows) + i,
-				agentID:  e.agentID,
-				status:   status,
-				mark:     mark,
-				sortName: e.marketplace.Name,
-			})
-		}
-		out = append(out, agentsOrphanedIgnoreRows(agentsSectionMarketplaces, marketplaceIgnore, seen)...)
-	}
-
-	if q := agentsFilterQuery(m); q != "" {
-		kept := out[:0]
-		for _, e := range out {
-			// Skills rows were already matched on source+name by skillsVisibleRows; every other section only has a name.
-			if e.feature != agentsSectionSkills && !strings.Contains(strings.ToLower(e.sortName), q) {
-				continue
-			}
-			kept = append(kept, e)
-		}
-		out = kept
-	}
-
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].status != out[j].status {
-			return out[i].status < out[j].status
-		}
-		if out[i].feature != out[j].feature {
-			return out[i].feature < out[j].feature
-		}
-		if lowerI, lowerJ := strings.ToLower(out[i].sortName), strings.ToLower(out[j].sortName); lowerI != lowerJ {
-			return lowerI < lowerJ
-		}
-		return out[i].agentID < out[j].agentID
-	})
-	return out
+	m.apmRunning = true
+	m.apmCommand = command
+	m.apmOutput = ""
+	m.apmErr = nil
+	a, ctx := m.app, m.ctx
+	return []tea.Cmd{m.spinner.Tick, func() tea.Msg {
+		result, err := a.RunAPM(ctx, args...)
+		return apmCommandDoneMsg{command: command, stdout: result.Stdout, stderr: result.Stderr, err: err}
+	}}
 }
 
-// Without this an ignore-list entry matching no live row stays invisible, with no way to unignore it from the UI.
-func agentsOrphanedIgnoreRows(feature agentsSection, ignore, seen map[string]bool) []agentsAllRow {
-	var out []agentsAllRow
-	for name := range ignore {
-		if seen[name] {
-			continue
+func (m *Model) doAgentsSyncAll() []tea.Cmd {
+	return m.runAPM("apm install -g", "install", "-g")
+}
+
+func (m *Model) doAgentsUpdateAll() []tea.Cmd {
+	return m.runAPM("apm update -g --yes", "update", "-g", "--yes")
+}
+
+func (m *Model) doAgentsRefresh() []tea.Cmd {
+	return m.runAPM("apm deps list -g", "deps", "list", "-g")
+}
+
+func (m *Model) doAgentsOnboardPlan() []tea.Cmd {
+	if m.app == nil {
+		return nil
+	}
+	m.apmRunning, m.apmCommand, m.apmOutput, m.apmErr = true, "omni agents onboard (preview)", "", nil
+	a, ctx := m.app, m.ctx
+	return []tea.Cmd{m.spinner.Tick, func() tea.Msg {
+		result, err := a.AgentsOnboardPlan(ctx, app.AgentsOnboardOptions{})
+		return agentsOnboardPlanDoneMsg{result: result, err: err}
+	}}
+}
+
+func (m *Model) doAgentsOnboardApply() []tea.Cmd {
+	if m.app == nil || m.agentsOnboardPlan == nil || m.agentsOnboardPlan.Envelope.Plan == nil {
+		return nil
+	}
+	plan := *m.agentsOnboardPlan.Envelope.Plan
+	m.agentsOnboardConfirm, m.apmRunning, m.apmCommand = false, true, "omni agents onboard (apply)"
+	a, ctx := m.app, m.ctx
+	return []tea.Cmd{m.spinner.Tick, func() tea.Msg {
+		result, err := a.AgentsOnboardApplyReviewed(ctx, plan)
+		return agentsOnboardApplyDoneMsg{result: result, err: err}
+	}}
+}
+
+func onboardPlanSummary(result app.AgentsOnboardResult) string {
+	if result.Envelope.Plan == nil {
+		return "No onboarding plan returned."
+	}
+	plan := result.Envelope.Plan
+	text := fmt.Sprintf("Agent onboarding preview: %d item(s), %d blocker(s).", len(plan.Items), onboardBlockerCount(plan))
+	blocked := []string{}
+	for i := range plan.Items {
+		if onboardItemBlockerCount(plan.Items[i]) > 0 {
+			blocked = append(blocked, plan.Items[i].Name)
 		}
-		out = append(out, agentsAllRow{feature: feature, localIdx: -1, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: name, synthetic: true})
 	}
-	return out
+	if len(blocked) > 0 {
+		text += " Unresolved: " + strings.Join(blocked, ",")
+	}
+	for _, blocker := range plan.Blockers {
+		if !slices.ContainsFunc(plan.Items, func(item app.OnboardItem) bool { return slices.Contains(item.Blockers, blocker) }) {
+			reason := blocker
+			if _, suffix, ok := strings.Cut(blocker, ":"); ok {
+				reason = suffix
+			}
+			text += " Plan blocker: " + reason
+		}
+	}
+	return text
 }
 
-func agentsAllEntryAt(m Model, cursor int) (agentsAllRow, bool) {
-	rows := agentsAllRowsList(m)
-	if cursor < 0 || cursor >= len(rows) {
-		return agentsAllRow{}, false
+func (m *Model) currentOnboardItem() *app.OnboardItem {
+	if m.agentsOnboardPlan == nil || m.agentsOnboardPlan.Envelope.Plan == nil || len(m.agentsOnboardPlan.Envelope.Plan.Items) == 0 {
+		return nil
 	}
-	return rows[cursor], true
+	if m.agentsOnboardItem >= len(m.agentsOnboardPlan.Envelope.Plan.Items) {
+		m.agentsOnboardItem = 0
+	}
+	return &m.agentsOnboardPlan.Envelope.Plan.Items[m.agentsOnboardItem]
 }
-
-func agentsChipEnabled(m Model, chip int) bool {
-	switch chip {
-	case agentsChipSkills:
-		return m.skillsSectionEnabled()
-	case agentsChipMcp:
-		return m.mcpSectionEnabled()
-	case agentsChipPlugin:
-		return m.pluginsSectionEnabled()
-	case agentsChipMarketplace:
-		return m.marketplacesSectionEnabled()
-	default:
+func resolveOnboardItem(item *app.OnboardItem, key string) bool {
+	if item == nil {
+		return false
+	}
+	options := item.TargetOptions
+	if key == "a" && len(options) > 0 {
+		setOnboardTargetDecision(item, true)
+		item.Resolution.ApprovedTargets = append([]string(nil), options...)
 		return true
 	}
-}
-
-func (m *Model) agentsChipMove(delta int) {
-	for next := m.skillTypeIdx + delta; next >= agentsChipAll && next <= agentsChipMarketplace; next += delta {
-		if agentsChipEnabled(*m, next) {
-			m.setAgentsChip(next)
-			return
+	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
+		index := int(key[0] - '1')
+		if index >= len(options) {
+			return false
 		}
-	}
-}
-
-// Same per-agent-row flatten renderAgentsGroupedTab renders, so navigation and rendering always agree on row identity.
-func agentsFilteredRowsList(m Model, feature agentsSection) []agentsAllRow {
-	var out []agentsAllRow
-	for _, e := range agentsAllRowsList(m) {
-		if e.feature == feature {
-			out = append(out, e)
+		target := options[index]
+		if slices.Contains(item.Resolution.ApprovedTargets, target) {
+			item.Resolution.ApprovedTargets = slices.DeleteFunc(item.Resolution.ApprovedTargets, func(value string) bool { return value == target })
+		} else {
+			item.Resolution.ApprovedTargets = append(item.Resolution.ApprovedTargets, target)
+			sort.Strings(item.Resolution.ApprovedTargets)
 		}
+		if len(item.Resolution.ApprovedTargets) == 0 {
+			setOnboardTargetDecision(item, false)
+		} else {
+			setOnboardTargetDecision(item, true)
+		}
+		return true
 	}
-	return out
-}
-
-// Pairs with agentsFeatureCursor's localIdx so a specific rendered row can be pinned when an item expands into multiple per-agent rows.
-func agentsFeatureCursorAgentID(m Model, feature agentsSection) string {
-	switch feature {
-	case agentsSectionMcp:
-		return m.mcpCursorAgentID
-	case agentsSectionPlugins:
-		return m.pluginCursorAgentID
-	case agentsSectionMarketplaces:
-		return m.marketplaceCursorAgentID
+	switch key {
+	case "x":
+		item.Resolution.Decision = "keep-unmanaged"
+	case "d":
+		if item.Dots == nil || item.Dots.Native {
+			return false
+		}
+		item.Resolution.Decision = "keep-in-dots"
+	case "M":
+		if item.Dots == nil {
+			return false
+		}
+		item.Resolution.Decision = "move-to-apm"
+	case "m":
+		item.Resolution.Decision = "map-secret"
+		if item.Resolution.EnvBindings == nil {
+			item.Resolution.EnvBindings = map[string]string{}
+		}
+		for _, field := range onboardSecretFields(item.Payload) {
+			item.Resolution.EnvBindings[field] = onboardEnvName(item.Name + "_" + field)
+		}
 	default:
-		return ""
+		return false
 	}
+	return true
 }
 
-// -1 when nothing matches (e.g. skills, which never carries an agentID, or a stale position after the row set changed).
-func agentsChipRowPosition(rows []agentsAllRow, localIdx int, agentID string) int {
-	for i, e := range rows {
-		if e.localIdx == localIdx && e.agentID == agentID {
-			return i
-		}
-	}
-	return -1
-}
-
-// When the cursor doesn't resolve to a row in the current flatten, lands on row 0 rather than applying delta from an undefined position.
-func (m *Model) agentsChipMoveRow(feature agentsSection, delta int) {
-	rows := agentsFilteredRowsList(*m, feature)
-	n := len(rows)
-	if n == 0 {
+func setOnboardTargetDecision(item *app.OnboardItem, selected bool) {
+	if item.Dots != nil {
 		return
 	}
-	pos := agentsChipRowPosition(rows, agentsFeatureCursor(*m, feature), agentsFeatureCursorAgentID(*m, feature))
-	if pos < 0 {
-		pos = 0
+	if selected {
+		item.Resolution.Decision = "migrate"
 	} else {
-		pos = cursorMove(pos, delta, n, true)
-	}
-	landed := rows[pos]
-	switch feature {
-	case agentsSectionSkills:
-		m.skillsCursor = landed.localIdx
-	case agentsSectionMcp:
-		m.mcpCursor = landed.localIdx
-		m.mcpCursorAgentID = landed.agentID
-	case agentsSectionPlugins:
-		m.pluginCursor = landed.localIdx
-		m.pluginCursorAgentID = landed.agentID
-	case agentsSectionMarketplaces:
-		m.marketplaceCursor = landed.localIdx
-		m.marketplaceCursorAgentID = landed.agentID
+		item.Resolution.Decision = ""
 	}
 }
 
-// ok=false for the "all" chip, which has no single section.
-func agentsChipSection(chip int) (agentsSection, bool) {
-	switch chip {
-	case agentsChipSkills:
-		return agentsSectionSkills, true
-	case agentsChipMcp:
-		return agentsSectionMcp, true
-	case agentsChipPlugin:
-		return agentsSectionPlugins, true
-	case agentsChipMarketplace:
-		return agentsSectionMarketplaces, true
-	default:
-		return agentsSection(0), false
+func onboardEnvName(value string) string {
+	var out strings.Builder
+	out.WriteString("OMNI_")
+	for _, r := range strings.ToUpper(value) {
+		if r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' {
+			out.WriteRune(r)
+		} else {
+			out.WriteByte('_')
+		}
 	}
+	return out.String()
 }
 
-// Syncs the destination cursor from the source's so a row stays selected across chip switches instead of resetting.
-func (m *Model) setAgentsChip(next int) {
-	from := m.skillTypeIdx
-	m.skillTypeIdx = next
-
-	if from == agentsChipAll && next != agentsChipAll {
-		if toSection, ok := agentsChipSection(next); ok {
-			if entry, ok := agentsAllEntryAt(*m, m.agentsAllCursor); ok && entry.feature == toSection {
-				switch next {
-				case agentsChipSkills:
-					m.skillsCursor = entry.localIdx
-					if !entry.synthetic {
-						clampSkillsCursor(m)
-					}
-				case agentsChipMcp:
-					m.mcpCursor = entry.localIdx
-					m.mcpCursorAgentID = entry.agentID
-				case agentsChipPlugin:
-					m.pluginCursor = entry.localIdx
-					m.pluginCursorAgentID = entry.agentID
-				case agentsChipMarketplace:
-					m.marketplaceCursor = entry.localIdx
-					m.marketplaceCursorAgentID = entry.agentID
-				}
-				return
+func onboardSecretFields(payload json.RawMessage) []string {
+	var object map[string]any
+	if json.Unmarshal(payload, &object) != nil {
+		return nil
+	}
+	var fields []string
+	for _, key := range []string{"env", "headers"} {
+		values, _ := object[key].(map[string]any)
+		for field, raw := range values {
+			blocked, _ := raw.(map[string]any)
+			if blocked["blocked"] != nil {
+				fields = append(fields, field)
 			}
 		}
-		m.resetAgentsChipCursor()
-		return
 	}
+	sort.Strings(fields)
+	return fields
+}
 
-	if next == agentsChipAll && from != agentsChipAll {
-		if fromSection, ok := agentsChipSection(from); ok {
-			fromCursor := agentsFeatureCursor(*m, fromSection)
-			fromAgentID := agentsFeatureCursorAgentID(*m, fromSection)
-			for i, e := range agentsAllRowsList(*m) {
-				if e.feature == fromSection && e.localIdx == fromCursor && e.agentID == fromAgentID {
-					m.agentsAllCursor = i
-					return
-				}
+func (m *Model) doAgentsOnboardStatus(resume bool) []tea.Cmd {
+	if m.app == nil || m.agentsOnboardOperation == "" {
+		return []tea.Cmd{setStatus(m, "No recoverable onboarding operation.", true)}
+	}
+	m.apmRunning = true
+	a, ctx, op := m.app, m.ctx, m.agentsOnboardOperation
+	return []tea.Cmd{m.spinner.Tick, func() tea.Msg {
+		var result app.AgentsOnboardStatusResult
+		var err error
+		if resume {
+			result, err = a.AgentsOnboardResume(ctx, op)
+		} else {
+			result, err = a.AgentsOnboardStatus(ctx, op)
+		}
+		return agentsOnboardStatusDoneMsg{result: result, err: err}
+	}}
+}
+func (m *Model) doAgentsOnboardCleanup(confirm bool) []tea.Cmd {
+	if m.app == nil || m.agentsOnboardOperation == "" {
+		return []tea.Cmd{setStatus(m, "No onboarding operation to clean.", true)}
+	}
+	m.apmRunning = true
+	a, ctx, op := m.app, m.ctx, m.agentsOnboardOperation
+	return []tea.Cmd{m.spinner.Tick, func() tea.Msg {
+		preview, err := a.AgentsOnboardCleanup(ctx, op, confirm)
+		return agentsOnboardCleanupDoneMsg{preview: preview, confirmed: confirm, err: err}
+	}}
+}
+
+func onboardBlockerCount(plan *app.OnboardPlan) int {
+	if plan == nil {
+		return 0
+	}
+	count := 0
+	itemBlockers := map[string]bool{}
+	for _, item := range plan.Items {
+		for _, blocker := range item.Blockers {
+			itemBlockers[blocker] = true
+		}
+		count += onboardItemBlockerCount(item)
+	}
+	for _, blocker := range plan.Blockers {
+		if !itemBlockers[blocker] {
+			count++
+		}
+	}
+	return count
+}
+
+func onboardItemBlockerCount(item app.OnboardItem) int {
+	count := 0
+	for _, blocker := range item.Blockers {
+		if item.Resolution.Decision == "keep-unmanaged" || item.Resolution.Decision == "keep-in-dots" {
+			continue
+		}
+		if blocker == "target-resolution-required" && len(item.Resolution.ApprovedTargets) > 0 {
+			continue
+		}
+		if strings.HasPrefix(blocker, "unknown-target:") && allOnboardTargetsAllowed(item) {
+			continue
+		}
+		if blocker == "secret-mapping-required" && len(item.Resolution.EnvBindings) > 0 {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func allOnboardTargetsAllowed(item app.OnboardItem) bool {
+	if len(item.Resolution.ApprovedTargets) == 0 {
+		return false
+	}
+	for _, target := range item.Resolution.ApprovedTargets {
+		if !slices.Contains(item.TargetOptions, target) {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
+	key := msg.String()
+	if m.agentsOnboardCleanupConfirm {
+		if key == "y" || key == "Y" {
+			m.agentsOnboardCleanupConfirm = false
+			return true, m.doAgentsOnboardCleanup(true)
+		}
+		if key == "n" || key == "N" || key == "esc" {
+			m.agentsOnboardCleanupConfirm = false
+			return true, []tea.Cmd{setStatus(m, "Cleanup cancelled.", false)}
+		}
+		return true, nil
+	}
+	if m.agentsOnboardConfirm {
+		switch key {
+		case "y", "Y":
+			return true, m.doAgentsOnboardApply()
+		case "n", "N", "esc":
+			m.agentsOnboardConfirm = false
+			m.agentsOnboardPlan = nil
+			return true, []tea.Cmd{setStatus(m, "Agent onboarding cancelled.", false)}
+		}
+		return true, nil
+	}
+	if m.agentsOnboardPlan != nil {
+		items := m.agentsOnboardPlan.Envelope.Plan.Items
+		switch key {
+		case "j":
+			if len(items) > 0 {
+				m.agentsOnboardItem = (m.agentsOnboardItem + 1) % len(items)
 			}
+		case "k":
+			if len(items) > 0 {
+				m.agentsOnboardItem = (m.agentsOnboardItem - 1 + len(items)) % len(items)
+			}
+		case "esc":
+			m.agentsOnboardPlan = nil
+		case "enter":
+			if onboardBlockerCount(m.agentsOnboardPlan.Envelope.Plan) == 0 {
+				m.agentsOnboardConfirm = true
+				return true, []tea.Cmd{setStatus(m, "Apply this onboarding plan? y/N", false)}
+			}
+		default:
+			resolveOnboardItem(m.currentOnboardItem(), key)
 		}
-		clampAgentsAllCursor(m)
-		return
-	}
-
-	m.resetAgentsChipCursor()
-}
-
-func (m *Model) agentFilterMove(delta int) {
-	if delta < 0 {
-		if m.skillAgentIdx > 0 {
-			m.skillAgentIdx--
-			clampSkillsCursor(m)
+		if m.agentsOnboardPlan != nil {
+			m.apmOutput = onboardPlanSummary(*m.agentsOnboardPlan)
 		}
-		return
+		return true, nil
 	}
-	agentIDs := skillAgentIDs(m.skillsRows, m.enabledAgents)
-	if m.skillAgentIdx < len(agentIDs) {
-		m.skillAgentIdx++
-		clampSkillsCursor(m)
-	}
-}
-
-func (m *Model) resetAgentsChipCursor() {
-	switch m.skillTypeIdx {
-	case agentsChipAll:
-		clampAgentsAllCursor(m)
-	case agentsChipSkills:
-		clampSkillsCursor(m)
-	case agentsChipMcp:
-		m.mcpCursor = 0
-		m.mcpCursorAgentID = ""
-		m.agentsChipMoveRow(agentsSectionMcp, 0)
-	case agentsChipPlugin:
-		m.pluginCursor = 0
-		m.pluginCursorAgentID = ""
-		m.agentsChipMoveRow(agentsSectionPlugins, 0)
-	case agentsChipMarketplace:
-		m.marketplaceCursor = 0
-		m.marketplaceCursorAgentID = ""
-		m.agentsChipMoveRow(agentsSectionMarketplaces, 0)
-	}
-}
-
-func agentsAllCursorMove(m *Model, delta int) {
-	m.agentsAllCursor = cursorMove(m.agentsAllCursor, delta, len(agentsAllRowsList(*m)), true)
-}
-
-func clampAgentsAllCursor(m *Model) {
-	total := len(agentsAllRowsList(*m))
-	if m.agentsAllCursor >= total {
-		m.agentsAllCursor = total - 1
-	}
-	if m.agentsAllCursor < 0 {
-		m.agentsAllCursor = 0
-	}
-}
-
-const agentsBusyStatus = "⚠ agents busy — wait for the running operation to finish"
-
-func (m *Model) agentsOpInFlight() bool {
-	return m.skillsRunning || m.skillAddRunning || m.mcpRunning || m.pluginRunning || m.marketplaceRunning
-}
-
-// Runs before per-chip dispatch so the bulk keys work from any chip; guarded against re-trigger while an equivalent op is in flight and against firing mid-confirm.
-func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (handled bool, cmds []tea.Cmd) {
-	if m.agentsDeleteConfirm || m.agentsIgnoreConfirm || m.agentsResolveConfirm || m.mcpDeleteConfirm || m.pluginDeleteConfirm || m.marketplaceDeleteConfirm {
+	if key != "U" && key != "S" && key != "R" && key != "O" && key != "T" && key != "V" && key != "X" && key != "e" {
 		return false, nil
 	}
-	if m.agentsSyncAllConfirm {
-		m.cancelConfirmationTimeout()
-		m.agentsSyncAllConfirm = false
-		if msg.String() == "S" && !m.agentsOpInFlight() {
-			return true, m.doAgentsSyncAll()
-		}
+	if key == "e" {
+		return true, []tea.Cmd{m.openTraceLog()}
 	}
-	switch msg.String() {
-	case "U", "S", "R":
-		if m.agentsOpInFlight() {
-			return true, []tea.Cmd{setStatus(m, agentsBusyStatus, true)}
-		}
-	case "e":
-		// Falls through regardless of an in-flight bulk op: the trace log is a read-only view of past output.
-	default:
-		return false, nil
+	if m.agentsOpInFlight() {
+		return true, []tea.Cmd{setStatus(m, agentsBusyStatus, true)}
 	}
-	switch msg.String() {
+	switch key {
+	case "O":
+		return true, m.doAgentsOnboardPlan()
+	case "T":
+		return true, m.doAgentsOnboardStatus(false)
+	case "V":
+		return true, m.doAgentsOnboardStatus(true)
+	case "X":
+		return true, m.doAgentsOnboardCleanup(false)
 	case "U":
 		return true, m.doAgentsUpdateAll()
 	case "S":
-		m.agentsSyncAllConfirm = true
-		return true, []tea.Cmd{m.armConfirmationTimeout()}
-	case "e":
-		return true, []tea.Cmd{m.openTraceLog()}
+		return true, m.doAgentsSyncAll()
 	default:
-		return true, m.doAgentsRefreshAll()
+		return true, m.doAgentsRefresh()
 	}
 }
 
-// Marketplaces must refresh before outdated plugins are computed: LatestVersion/LatestSha come from the marketplace's local clone, so cached rows cannot know about an update until it is pulled.
-func (m *Model) doAgentsUpdateAll() []tea.Cmd {
-	runSkills := m.skillsSectionEnabled() && len(m.skillsRows) > 0
-	runPlugins := m.pluginsSectionEnabled()
-	runMarketplaces := m.marketplacesSectionEnabled()
-	runMcp := m.mcpSectionEnabled()
-	if !runSkills && !runPlugins && !runMarketplaces && !runMcp {
-		return nil
+func apmCommandOutput(stdout, stderr string) string {
+	parts := make([]string, 0, 2)
+	if stdout = strings.TrimSpace(stdout); stdout != "" {
+		parts = append(parts, stdout)
 	}
-	if runSkills {
-		m.skillsRunning = true
-		m.skillsErr = nil
+	if stderr = strings.TrimSpace(stderr); stderr != "" {
+		parts = append(parts, stderr)
 	}
-	if runPlugins {
-		m.pluginRunning = true
-		m.pluginErr = nil
-	}
-	if runMarketplaces {
-		m.marketplaceRunning = true
-		m.marketplaceErr = nil
-	}
-	if runMcp {
-		m.mcpRunning = true
-		m.mcpErr = nil
-	}
-	ch, gen := m.beginProgressStream()
-	a, ctx := m.app, m.ctx
-	work := func() tea.Msg {
-		defer close(ch)
-		done := agentsProgressDoneMsg{gen: gen, skills: runSkills, mcp: runMcp, plugin: runPlugins, marketplace: runMarketplaces}
-		if runSkills {
-			sendProgress(ch, gen, "updating skills…")
-			_, _, err := a.UpdateSkills(ctx, app.UpdateSkillsOptions{})
-			done.skillsErr = err
-		}
-		if runPlugins || runMarketplaces {
-			sendProgress(ch, gen, "updating marketplaces…")
-			res, err := a.UpdateMarketplaces(ctx)
-			mErr := combinePluginErrors(err, res.Errors)
-			if runMarketplaces {
-				done.marketplaceErr = mErr
-			} else {
-				done.pluginErr = mErr
-			}
-		}
-		if runPlugins && done.pluginErr == nil {
-			rows, _, err := a.PluginRows(ctx)
-			if err != nil {
-				done.pluginErr = err
-			} else {
-				var outdated []string
-				for _, row := range rows {
-					if row.Outdated() {
-						outdated = append(outdated, row.Name)
-					}
-				}
-				if len(outdated) > 0 {
-					res, err := a.UpdatePluginsPreRefreshed(ctx, outdated, func(name string) {
-						sendProgress(ch, gen, "updating plugin "+name+"…")
-					})
-					done.pluginErr = combinePluginErrors(err, res.Errors)
-				}
-			}
-		}
-		if runPlugins && done.pluginErr == nil {
-			sendProgress(ch, gen, "installing missing plugins…")
-			res, err := a.RestorePluginsPreRefreshed(ctx, app.RestorePluginOptions{})
-			done.pluginErr = combinePluginErrors(err, res.Errors)
-		}
-		if runMcp {
-			sendProgress(ch, gen, "installing missing mcp servers…")
-			res, err := a.RestoreMcpServers(ctx, app.RestoreMcpOptions{})
-			done.mcpErr = combineMcpErrors(err, res.Errors)
-		}
-		return done
-	}
-	return []tea.Cmd{m.spinner.Tick, work, waitForProgress(ch, gen)}
-}
-
-func skillWarningsText(warnings []string) string {
-	return strings.Join(warnings, "; ")
-}
-
-// RestoreSkills only reports per-package failures via res.Failed, so a nil err alone does not mean every package installed.
-func combineSkillErrors(err error, res app.RestoreSkillsResult) error {
-	all := make([]error, 0, len(res.Failed)+1)
-	if err != nil {
-		all = append(all, err)
-	}
-	for _, f := range res.Failed {
-		all = append(all, fmt.Errorf("%s: %s", f.Name, f.Message))
-	}
-	return errors.Join(all...)
-}
-
-// The claim step adopts on-disk directories, so the action is confirmed before it runs (see handleAgentsGlobalActionKeyMsg).
-func (m *Model) doAgentsSyncAll() []tea.Cmd {
-	return m.doAgentsComposedRun(true)
-}
-
-func (m *Model) doAgentsRestoreAll() []tea.Cmd {
-	return m.doAgentsComposedRun(false)
-}
-
-func (m *Model) doAgentsComposedRun(claim bool) []tea.Cmd {
-	runSkills := m.skillsSectionEnabled()
-	runMcp := m.mcpSectionEnabled()
-	runPlugins := m.pluginsSectionEnabled()
-	if !runSkills && !runMcp && !runPlugins {
-		return nil
-	}
-	if runSkills {
-		m.skillsRunning = true
-		m.skillsErr = nil
-		m.skillsResult = nil
-	}
-	if runMcp {
-		m.mcpRunning = true
-		m.mcpErr = nil
-	}
-	if runPlugins {
-		m.pluginRunning = true
-		m.pluginErr = nil
-	}
-	ch, gen := m.beginProgressStream()
-	a, ctx := m.app, m.ctx
-	work := func() tea.Msg {
-		defer close(ch)
-		done := agentsProgressDoneMsg{gen: gen, skills: runSkills, mcp: runMcp, plugin: runPlugins}
-		report, err := a.AgentsSyncAll(ctx, app.AgentsSyncAllOptions{
-			ImportUnmanaged: claim,
-			Progress: func(text string) {
-				sendProgress(ch, gen, text)
-			},
-		})
-		if err != nil {
-			if runSkills {
-				done.skillsErr = err
-			}
-			if runMcp {
-				done.mcpErr = err
-			}
-			if runPlugins {
-				done.pluginErr = err
-			}
-		} else {
-			for _, featureErr := range report.Errors {
-				switch featureErr.Feature {
-				case app.AgentsFeatureImport, app.AgentsFeatureSkills:
-					done.skillsErr = errors.Join(done.skillsErr, featureErr)
-				case app.AgentsFeatureMcp:
-					done.mcpErr = errors.Join(done.mcpErr, featureErr)
-				case app.AgentsFeaturePlugins:
-					done.pluginErr = errors.Join(done.pluginErr, featureErr)
-				}
-			}
-		}
-		done.report = &report
-		return done
-	}
-	return []tea.Cmd{m.spinner.Tick, work, waitForProgress(ch, gen)}
-}
-
-func (m *Model) doAgentsRefreshAll() []tea.Cmd {
-	var cmds []tea.Cmd
-	if m.skillsSectionEnabled() {
-		m.skillsLoaded = true
-		cmds = append(cmds, m.loadSkillsManifest(true))
-	}
-	if m.mcpSectionEnabled() {
-		m.mcpRunning = true
-		cmds = append(cmds, m.spinner.Tick, m.doLoadMcpRows())
-	}
-	if m.pluginsSectionEnabled() {
-		m.pluginRunning = true
-		cmds = append(cmds, m.spinner.Tick, m.doLoadPluginRows())
-	}
-	if m.marketplacesSectionEnabled() {
-		m.marketplaceRunning = true
-		cmds = append(cmds, m.spinner.Tick, m.doLoadMarketplaceRows())
-	}
-	return cmds
-}
-
-// Other keys route to the section under the cursor with that section's cursor synced first, so mutating actions work uniformly across the stacked view.
-func (m *Model) handleAgentsAllKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
-	if m.agentsDeleteConfirm {
-		return m.handleAgentsDeleteConfirmKeyMsg(msg)
-	}
-	if m.agentsIgnoreConfirm {
-		return m.handleAgentsIgnoreConfirmKeyMsg(msg)
-	}
-	if m.agentsResolveConfirm {
-		return m.handleAgentsResolveConfirmKeyMsg(msg)
-	}
-	if m.pluginMarketplaceOfferConfirm {
-		return m.handlePluginMarketplaceOfferConfirmKeyMsg(msg)
-	}
-	switch msg.String() {
-	case "up", "k":
-		agentsAllCursorMove(m, -1)
-		return nil
-	case "down", "j":
-		agentsAllCursorMove(m, 1)
-		return nil
-	case "left", "h":
-		m.agentsChipMove(-1)
-		return nil
-	case "right":
-		m.agentsChipMove(1)
-		return nil
-	case "l":
-		// A drifted skills row spends 'l' on use-local (dots' mnemonic); "right" still switches chips there.
-		if entry, ok := agentsAllEntryAt(*m, m.agentsAllCursor); !ok || !agentsResolveEligible(entry) {
-			m.agentsChipMove(1)
-			return nil
-		}
-	case "{":
-		m.agentFilterMove(-1)
-		clampAgentsAllCursor(m)
-		return nil
-	case "}":
-		m.agentFilterMove(1)
-		clampAgentsAllCursor(m)
-		return nil
-	case "/":
-		m.openAgentsSearch()
-		return []tea.Cmd{textinput.Blink}
-	}
-	if handled, cmds := m.handleAgentsAllRowActionKeyMsg(msg); handled {
-		clampAgentsAllCursor(m)
-		return cmds
-	}
-
-	entry, ok := agentsAllEntryAt(*m, m.agentsAllCursor)
-	if !ok {
-		return nil
-	}
-	var cmds []tea.Cmd
-	switch entry.feature {
-	case agentsSectionSkills:
-		m.skillsCursor = entry.localIdx
-		cmds = m.handleSkillsKeyMsg(msg)
-	case agentsSectionMcp:
-		m.mcpCursor = entry.localIdx
-		m.mcpCursorAgentID = entry.agentID
-		cmds = m.handleMcpKeyMsg(msg)
-	case agentsSectionPlugins:
-		m.pluginCursor = entry.localIdx
-		m.pluginCursorAgentID = entry.agentID
-		cmds = m.handlePluginKeyMsg(msg)
-	case agentsSectionMarketplaces:
-		m.marketplaceCursor = entry.localIdx
-		m.marketplaceCursorAgentID = entry.agentID
-		cmds = m.handleMarketplaceKeyMsg(msg)
-	}
-	// load-bearing: delegated handlers ([/] filter, removals) clamp only their section cursor
-	clampAgentsAllCursor(m)
-	return cmds
+	return strings.Join(parts, "\n")
 }

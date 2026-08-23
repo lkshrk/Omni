@@ -14,7 +14,7 @@ import (
 )
 
 // Each call gets its own temp name so concurrent callers for the same path do not collide.
-func atomicWrite(path string, data []byte) error {
+func atomicWrite(path string, data []byte) (retErr error) {
 	// Every launch re-normalizes the config; renaming an identical result would churn mtime and downstream dotfile sync.
 	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, data) {
 		return nil
@@ -27,6 +27,21 @@ func atomicWrite(path string, data []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
+	lock, err := AcquireWriteLock(path)
+	if err != nil {
+		return fmt.Errorf("creating temp file: acquire config lock: %w", err)
+	}
+	defer func() { retErr = errors.Join(retErr, lock.Close()) }()
+	return atomicWriteUnlocked(path, data)
+}
+
+func atomicWriteUnlocked(path string, data []byte) (retErr error) {
+	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, data) {
+		return nil
+	}
+	if err := testguard.RequireTempPath("config write", path); err != nil {
+		return err
+	}
 	writePath, err := resolveConfigWritePath(path)
 	if err != nil {
 		return err
@@ -34,7 +49,7 @@ func atomicWrite(path string, data []byte) error {
 	if err := testguard.RequireTempPath("config write target", writePath); err != nil {
 		return err
 	}
-	dir = filepath.Dir(writePath)
+	dir := filepath.Dir(writePath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
@@ -43,18 +58,25 @@ func atomicWrite(path string, data []byte) error {
 		return fmt.Errorf("creating temp file: %w", err)
 	}
 	tmp := f.Name()
+	closed := false
+	defer func() {
+		if !closed {
+			retErr = errors.Join(retErr, f.Close())
+		}
+		if err := os.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
+			retErr = errors.Join(retErr, fmt.Errorf("removing config temp file: %w", err))
+		}
+	}()
 	_, werr := f.Write(data)
 	cerr := f.Close()
+	closed = true
 	if werr != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("writing temp file: %w", werr)
+		return errors.Join(fmt.Errorf("writing temp file: %w", werr), cerr)
 	}
 	if cerr != nil {
-		_ = os.Remove(tmp)
 		return fmt.Errorf("closing temp file: %w", cerr)
 	}
 	if err := os.Rename(tmp, writePath); err != nil {
-		_ = os.Remove(tmp)
 		return fmt.Errorf("renaming config file: %w", err)
 	}
 	return nil
@@ -144,6 +166,23 @@ func DefaultCacheDir() (string, error) {
 	return path, nil
 }
 
+// DefaultStateDir resolves durable Omni state independently from the cache and
+// never falls back to the working directory.
+func DefaultStateDir() (string, error) {
+	if dir := os.Getenv("OMNI_STATE_DIR"); dir != "" {
+		return filepath.Abs(dir)
+	}
+	base := os.Getenv("XDG_STATE_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolving home directory: %w", err)
+		}
+		base = filepath.Join(home, ".local", "state")
+	}
+	return filepath.Abs(filepath.Join(base, "omni"))
+}
+
 // Load — Returns an empty RootConfig and no error when the file does not exist.
 func Load(path string) (*RootConfig, error) {
 	cfg, _, err := load(path, true)
@@ -164,7 +203,7 @@ func load(path string, normalize bool) (*RootConfig, bool, error) {
 
 	var cfg RootConfig
 	if err := unmarshalJSONObject(data, &cfg); err != nil {
-		return nil, false, fmt.Errorf("parsing config file: %w", err)
+		return nil, false, fmt.Errorf("parsing config file %q: %w", path, err)
 	}
 	if err := loadIncludes(path, &cfg); err != nil {
 		return nil, false, err
@@ -173,7 +212,6 @@ func load(path string, normalize bool) (*RootConfig, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	MigrateSkillPackages(&cfg)
 	if normalize {
 		Normalize(&cfg)
 	}
@@ -223,6 +261,10 @@ func missingMigrationError(version int) error {
 	return fmt.Errorf("missing config migration from version %d to %d", version, version+1)
 }
 
+func removedAgentConfigFieldError(path string) error {
+	return fmt.Errorf("config field %q was removed in v24; declare agent packages and runtime state in ~/.apm/apm.yml", path)
+}
+
 type configMigration struct {
 	from     int
 	to       int
@@ -253,6 +295,8 @@ var configMigrations = []configMigration{
 	{from: 19, to: 20, apply: migrateConfigV19ToV20, applyRaw: migrateRawConfigV19ToV20},
 	{from: 20, to: 21, apply: migrateConfigV20ToV21, applyRaw: migrateRawConfigV20ToV21},
 	{from: 21, to: 22, apply: migrateConfigV21ToV22, applyRaw: migrateRawConfigV21ToV22},
+	{from: 22, to: 23, apply: migrateConfigV22ToV23, applyRaw: migrateRawConfigV22ToV23},
+	{from: 23, to: 24, apply: migrateConfigV23ToV24, applyRaw: migrateRawConfigV23ToV24},
 }
 
 func configMigrationFrom(version int) (configMigration, bool) {
@@ -463,9 +507,6 @@ func Normalize(cfg *RootConfig) bool {
 			changed = true
 		}
 	}
-	if ExpandGroupAgentRefs(cfg) {
-		changed = true
-	}
 	return changed
 }
 
@@ -514,7 +555,16 @@ func groupBaseName(g *GroupConfig) string {
 }
 
 // Patch — Merges top-level keys only (a JSON null value deletes a key) and is include-blind, so keys owned by an $include fragment get duplicated into path — prefer WriteConfig or PatchRouted for real edits.
-func Patch(path string, patch interface{}) error {
+func Patch(path string, patch interface{}) (retErr error) {
+	lock, err := AcquireWriteLock(path)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, lock.Close()) }()
+	return patchUnlocked(path, patch)
+}
+
+func patchUnlocked(path string, patch interface{}) error {
 	patchData, err := json.Marshal(patch)
 	if err != nil {
 		return fmt.Errorf("encoding patch: %w", err)
@@ -523,7 +573,7 @@ func Patch(path string, patch interface{}) error {
 	if err := unmarshalJSONObject(patchData, &patchMap); err != nil {
 		return fmt.Errorf("parsing patch: %w", err)
 	}
-	return PatchRaw(path, patchMap)
+	return patchRawUnlocked(path, patchMap)
 }
 
 // PatchRouted — Routed form of Patch: each top-level key is written to the file that owns it across the $include chain, so fragments are not resurrected into the parent.
@@ -540,7 +590,16 @@ func PatchRouted(path string, patch interface{}) error {
 }
 
 // PatchRaw — Lower-level Patch taking an already-decoded key map; a JSON null value deletes that key.
-func PatchRaw(path string, patch map[string]json.RawMessage) error {
+func PatchRaw(path string, patch map[string]json.RawMessage) (retErr error) {
+	lock, err := AcquireWriteLock(path)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, lock.Close()) }()
+	return patchRawUnlocked(path, patch)
+}
+
+func patchRawUnlocked(path string, patch map[string]json.RawMessage) error {
 	if err := testguard.RequireTempPath("config patch", path); err != nil {
 		return err
 	}
@@ -549,7 +608,7 @@ func PatchRaw(path string, patch map[string]json.RawMessage) error {
 	if data, err := os.ReadFile(path); err == nil {
 		exists = true
 		if err := unmarshalJSONObject(data, &raw); err != nil {
-			return fmt.Errorf("parsing existing config: %w", err)
+			return fmt.Errorf("parsing existing config %q: %w", path, err)
 		}
 		if err := migrateRawVersion(raw); err != nil {
 			return err
@@ -600,7 +659,7 @@ func PatchRaw(path string, patch map[string]json.RawMessage) error {
 		}
 	}
 	buf.WriteString("\n}\n")
-	return atomicWrite(path, buf.Bytes())
+	return atomicWriteUnlocked(path, buf.Bytes())
 }
 
 // ToolSource — Included files merge after their parent, so the last matching definition is the effective one.
@@ -631,7 +690,7 @@ func toolSource(path, name string, stack *includePathStack) (string, bool, error
 	}
 	var raw map[string]json.RawMessage
 	if err := unmarshalJSONObject(data, &raw); err != nil {
-		return "", false, fmt.Errorf("parsing config file: %w", err)
+		return "", false, fmt.Errorf("parsing config file %q: %w", path, err)
 	}
 
 	var source string
@@ -669,7 +728,12 @@ func toolSource(path, name string, stack *includePathStack) (string, bool, error
 }
 
 // PatchTool — Writes into the file that owns the tool, preserving sibling definitions and include layout.
-func PatchTool(path, name string, mutate func(*ToolSpec) error) error {
+func PatchTool(path, name string, mutate func(*ToolSpec) error) (retErr error) {
+	lock, err := AcquireWriteLock(path)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, lock.Close()) }()
 	source, err := ToolSource(path, name)
 	if err != nil {
 		return err
@@ -680,7 +744,7 @@ func PatchTool(path, name string, mutate func(*ToolSpec) error) error {
 	}
 	var raw map[string]json.RawMessage
 	if err := unmarshalJSONObject(data, &raw); err != nil {
-		return fmt.Errorf("parsing config file: %w", err)
+		return fmt.Errorf("parsing config file %q: %w", source, err)
 	}
 	tools := make(map[string]ToolSpec)
 	if toolsRaw := raw["tools"]; len(toolsRaw) > 0 {
@@ -693,7 +757,7 @@ func PatchTool(path, name string, mutate func(*ToolSpec) error) error {
 		return err
 	}
 	tools[name] = spec
-	return Patch(source, struct {
+	return patchUnlocked(source, struct {
 		Tools map[string]ToolSpec `json:"tools"`
 	}{Tools: tools})
 }
@@ -803,11 +867,6 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 	out := *cfg
 	out.Include = nil
 	out.Settings = cloneSettings(cfg.Settings)
-	out.Agents.Packages = append([]SkillPackage(nil), cfg.Agents.Packages...)
-	for i := range out.Agents.Packages {
-		out.Agents.Packages[i].Skills = append([]string(nil), out.Agents.Packages[i].Skills...)
-		out.Agents.Packages[i].Agents = append([]string(nil), out.Agents.Packages[i].Agents...)
-	}
 	out.Groups = make([]*GroupConfig, 0, len(cfg.Groups))
 	for _, g := range cfg.Groups {
 		if g == nil {
@@ -818,7 +877,6 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 		gc.Taps = append([]string(nil), g.Taps...)
 		gc.Tools = append([]ToolEntry(nil), g.Tools...)
 		gc.Dots = append([]DotEntry(nil), g.Dots...)
-		gc.Skills = append([]string(nil), g.Skills...)
 		for i := range gc.Dots {
 			if gc.Dots[i].Hosts != nil {
 				hosts := make(map[string]DotVariant, len(gc.Dots[i].Hosts))
@@ -872,7 +930,6 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 func cloneSettings(settings Settings) Settings {
 	settings.DisabledProviders = cloneStringSlice(settings.DisabledProviders)
 	settings.ProviderPriority = cloneStringSlice(settings.ProviderPriority)
-	settings.AgentsUse = cloneStringSlice(settings.AgentsUse)
 	settings.ProviderUpdateQuarantine = cloneStringMap(settings.ProviderUpdateQuarantine)
 	if settings.Ecosystems != nil {
 		ecosystems := make(map[string]EcosystemSettings, len(settings.Ecosystems))
@@ -982,7 +1039,7 @@ func migrateRawConfigV12ToV13(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// No-op: v15 only adds GroupConfig.Marketplaces, an omitempty field with no prior form to convert.
+// No-op: retained so old configs can still advance through the version chain.
 func migrateConfigV14ToV15(cfg *RootConfig) error {
 	cfg.Version = 15
 	return nil
@@ -993,7 +1050,7 @@ func migrateRawConfigV14ToV15(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// No-op: v16 only adds AgentsIgnore.Marketplaces, an omitempty field with no prior form to convert.
+// No-op: retained so old configs can still advance through the version chain.
 func migrateConfigV15ToV16(cfg *RootConfig) error {
 	cfg.Version = 16
 	return nil
@@ -1026,7 +1083,7 @@ func migrateRawConfigV17ToV18(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// No-op: v19 adds optional McpServer headers for remote transports.
+// No-op: retained so old configs can still advance through the version chain.
 func migrateConfigV18ToV19(cfg *RootConfig) error {
 	cfg.Version = 19
 	return nil
@@ -1037,7 +1094,7 @@ func migrateRawConfigV18ToV19(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// No-op: v20 adds optional skill selectors to agents.packages; missing selectors keep the all-skills behavior.
+// No-op: retained so old configs can still advance through the version chain.
 func migrateConfigV19ToV20(cfg *RootConfig) error {
 	cfg.Version = 20
 	return nil
@@ -1048,7 +1105,7 @@ func migrateRawConfigV19ToV20(raw map[string]json.RawMessage) error {
 	return nil
 }
 
-// No-op: v21 lets plugins use a direct source instead of a marketplace.
+// No-op: retained so old configs can still advance through the version chain.
 func migrateConfigV20ToV21(cfg *RootConfig) error {
 	cfg.Version = 21
 	return nil
@@ -1067,6 +1124,30 @@ func migrateConfigV21ToV22(cfg *RootConfig) error {
 
 func migrateRawConfigV21ToV22(raw map[string]json.RawMessage) error {
 	raw["version"] = json.RawMessage(`22`)
+	return nil
+}
+
+// No-op: v24 rejects the removed agents section instead of rewriting it.
+func migrateConfigV22ToV23(cfg *RootConfig) error {
+	cfg.Version = 23
+	return nil
+}
+
+func migrateRawConfigV22ToV23(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`23`)
+	return nil
+}
+
+func migrateConfigV23ToV24(cfg *RootConfig) error {
+	cfg.Version = 24
+	return nil
+}
+
+func migrateRawConfigV23ToV24(raw map[string]json.RawMessage) error {
+	if err := validateRemovedAgentConfigFields(raw); err != nil {
+		return err
+	}
+	raw["version"] = json.RawMessage(`24`)
 	return nil
 }
 

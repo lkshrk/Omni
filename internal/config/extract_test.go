@@ -15,9 +15,6 @@ const monolithicSettings = `{
   "version": 17,
   "settings": { "auto_import": true, "dots_repo": "/tmp/repo" },
   "hosts": { "laptop": ["core"] },
-  "agents": {
-    "packages": [{ "source": "acme/skills" }]
-  },
   "tools": {
     "jq": { "providers": [{ "provider": "brew", "package": "jq" }] }
   },
@@ -33,6 +30,47 @@ const monolithicSettings = `{
     { "name": "laptop", "special": "host" }
   ]
 }`
+
+func rawKeys(t *testing.T, path string) map[string]json.RawMessage {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]json.RawMessage
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func writeRoutedFixture(t *testing.T, dir string, files map[string]string) string {
+	t.Helper()
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return filepath.Join(dir, "settings.json")
+}
+
+func mergedGroupsPatch(t *testing.T, path string, mutate func(*config.RootConfig)) map[string]json.RawMessage {
+	t.Helper()
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutate(cfg)
+	groups, err := json.Marshal(cfg.Groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]json.RawMessage{"groups": groups}
+}
 
 func TestExtractIncludeFragments_DecomposesMonolithicConfig(t *testing.T) {
 	dir := t.TempDir()
@@ -54,7 +92,7 @@ func TestExtractIncludeFragments_DecomposesMonolithicConfig(t *testing.T) {
 	}
 
 	mainRaw := rawKeys(t, mainPath)
-	for _, key := range []string{"agents", "tools", "groups"} {
+	for _, key := range []string{"tools", "groups"} {
 		if _, ok := mainRaw[key]; ok {
 			t.Fatalf("main still contains %q after extract", key)
 		}
@@ -106,7 +144,6 @@ func TestExtractIncludeFragments_Idempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	fragmentPaths := []string{
-		filepath.Join(dir, "settings.d", "agents.json"),
 		filepath.Join(dir, "settings.d", "tools.json"),
 		filepath.Join(dir, "settings.d", "groups.json"),
 		filepath.Join(dir, "settings.d", "dots.json"),

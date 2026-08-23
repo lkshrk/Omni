@@ -10,7 +10,7 @@ import (
 
 func lintTestApp(t *testing.T) *app.App {
 	t.Helper()
-	return newPluginTestApp(t, config.AgentsConfig{})
+	return app.New(t.TempDir() + "/settings.json")
 }
 
 func TestLintSettings(t *testing.T) {

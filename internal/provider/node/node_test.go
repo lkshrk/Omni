@@ -825,3 +825,31 @@ func TestResolvedName_NoneFound(t *testing.T) {
 		t.Errorf("ResolvedName() = %q on error, want empty", name)
 	}
 }
+
+func TestInstalledMapSurfacesCommandOutputDetail(t *testing.T) {
+	sentinel := errors.New("pnpm list command failed")
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "pnpm --version", Response: executor.MockCall{Stdout: "8.0.0"}},
+		executor.MatchRule{Pattern: "pnpm ls -g --depth=0", Response: executor.MockCall{Err: sentinel, Stderr: "boom: repo unreachable\n"}},
+	)
+	p := node.New(m, "pnpm")
+	if _, err := p.InstalledMap(context.Background()); err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("InstalledMap() error = %v, want wrapped sentinel", err)
+	} else if !strings.Contains(err.Error(), "boom: repo unreachable") {
+		t.Fatalf("InstalledMap() error = %v, want stderr detail", err)
+	}
+}
+
+func TestInstalledMapSurfacesStdoutDetailWhenStderrEmpty(t *testing.T) {
+	sentinel := errors.New("pnpm list command failed")
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "pnpm --version", Response: executor.MockCall{Stdout: "8.0.0"}},
+		executor.MatchRule{Pattern: "pnpm ls -g --depth=0", Response: executor.MockCall{Err: sentinel, Stdout: "fail written to stdout\n"}},
+	)
+	p := node.New(m, "pnpm")
+	if _, err := p.InstalledMap(context.Background()); err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("InstalledMap() error = %v, want wrapped sentinel", err)
+	} else if !strings.Contains(err.Error(), "fail written to stdout") {
+		t.Fatalf("InstalledMap() error = %v, want stdout detail", err)
+	}
+}

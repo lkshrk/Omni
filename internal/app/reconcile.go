@@ -23,7 +23,7 @@ type ReconcileResult struct {
 	NvmManaged         *NvmManagedMigrationBatchResult
 	SyncAll            *SyncAllResult
 	UpgradeAll         *UpgradeAllResult
-	Agents             *AgentsSyncAllResult // nil when agent features are off for this host
+	Agents             *AgentsSyncAllResult
 	FixedIgnoreEntries []string
 	DotsOps            []dots.Op
 	DotsBackedUp       bool
@@ -47,7 +47,6 @@ type ReconcileIssueSummary struct {
 	NvmFailures     int
 	SyncFailures    int
 	UpgradeFailures int
-	AgentFailures   int
 	DotsConflicts   int
 	DotsMissing     int
 }
@@ -95,9 +94,6 @@ func SummarizeReconcileIssues(result *ReconcileResult) ReconcileIssueSummary {
 	if result.UpgradeAll != nil {
 		summary.UpgradeFailures = len(result.UpgradeAll.Failures)
 	}
-	if result.Agents != nil {
-		summary.AgentFailures = len(result.Agents.Errors)
-	}
 	for _, entry := range result.DotsEntries {
 		switch entry.Health {
 		case HealthConflict:
@@ -110,7 +106,7 @@ func SummarizeReconcileIssues(result *ReconcileResult) ReconcileIssueSummary {
 }
 
 func (s ReconcileIssueSummary) Total() int {
-	return s.NvmFailures + s.SyncFailures + s.UpgradeFailures + s.AgentFailures +
+	return s.NvmFailures + s.SyncFailures + s.UpgradeFailures +
 		s.DotsConflicts + s.DotsMissing
 }
 
@@ -118,7 +114,7 @@ func (s ReconcileIssueSummary) HasIssues() bool {
 	return s.Total() > 0
 }
 
-// Reconcile — Sync tools, upgrade, sync agent resources, sync dotfiles, then back up dirty repo state.
+// Reconcile — Sync tools, upgrade, install the global APM workspace, sync dotfiles, then back up dirty repo state.
 func (a *App) Reconcile(ctx context.Context, opts ReconcileOptions) (*ReconcileResult, error) {
 	result := &ReconcileResult{}
 	var errs []error
@@ -202,20 +198,10 @@ func (a *App) Reconcile(ctx context.Context, opts ReconcileOptions) (*ReconcileR
 	return result, errors.Join(errs...)
 }
 
-// A host with agent features off skips the leg entirely, and a per-feature failure never stops the dot phases.
+// Agent installation is global APM state; deployment targeting belongs in ~/.apm/apm.yml.
 func (a *App) reconcileAgents(ctx context.Context, opts ReconcileOptions, result *ReconcileResult) error {
-	cfg, err := a.loadConfig()
-	if err != nil {
-		return err
-	}
-	if !a.AgentsEnabled(cfg) {
-		return nil
-	}
 	a.reconcileProgress(opts, "syncing agents...")
-	res, err := a.AgentsSyncAll(ctx, AgentsSyncAllOptions{
-		ImportUnmanaged: true,
-		Progress:        opts.Progress,
-	})
+	res, err := a.AgentsSyncAll(ctx, AgentsSyncAllOptions{Progress: opts.Progress})
 	result.Agents = &res
 	return err
 }

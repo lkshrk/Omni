@@ -1,0 +1,309 @@
+{
+  "groups": [
+    {
+      "name": "ai",
+      "tools": [
+        "claude-code",
+        "coder",
+        "herdr",
+        "@openai/codex"
+      ]
+    },
+    {
+      "name": "ai-plugins",
+      "tools": [
+        "cargo",
+        "ccundo",
+        "context-mode",
+        "deepwiki-rs",
+        "oh-my-codex",
+        "openwolf",
+        "rtk",
+        "herdr-tether"
+      ],
+      "skills": [
+        "example/linear-ai",
+        "example/useful-skills",
+        "ShiplightAI/agent-skills-v2",
+        "sopaco/deepwiki-rs"
+      ],
+      "mcp_servers": [
+        "litellm-tools",
+        "shiplight",
+        "codebase-memory-mcp",
+        "context-mode"
+      ],
+      "plugins": [
+        "superpowers",
+        "github",
+        "context-mode",
+        "ponytail",
+        "caveman",
+        "gopls-lsp",
+        "code-simplifier",
+        "codex",
+        "claude-md-management",
+        "smart-docs",
+        "harness",
+        "i-have-adhd",
+        "linear-ai"
+      ],
+      "marketplaces": [
+        "context-mode",
+        "example",
+        "caveman",
+        "claude-plugins-official",
+        "ecc",
+        "ponytail",
+        "openai-codex",
+        "litellm",
+        "i-have-adhd",
+        "harness-marketplace"
+      ]
+    },
+    {
+      "name": "core",
+      "tools": [
+        "bat",
+        "coreutils",
+        "eza",
+        "fd",
+        "jq",
+        "just",
+        "neovim",
+        "ripgrep",
+        "stow",
+        "thefuck",
+        "tmux",
+        "tree",
+        "tree-sitter-cli",
+        "wget",
+        "yq",
+        "omni",
+        "glow",
+        "markdownlint-cli"
+      ]
+    },
+    {
+      "name": "desk",
+      "tools": [
+        "brave-browser",
+        "iina",
+        "zed",
+        "ghostty",
+        "obsidian",
+        "font-hack-nerd-font",
+        "font-intel-one-mono",
+        "font-jetbrains-mono-nerd-font",
+        "chatgpt-classic",
+        "openusage"
+      ]
+    },
+    {
+      "name": "dev",
+      "tools": [
+        "lefthook"
+      ]
+    },
+    {
+      "name": "dev-tooling",
+      "tools": [
+        "docker",
+        "gh",
+        "git-filter-repo",
+        "imagemagick",
+        "lazydocker",
+        "lazygit",
+        "skopeo",
+        "yaml-language-server",
+        "yaml-lint",
+        "yamlfmt",
+        "yamllint",
+        "git-delta",
+        "actionlint",
+        "direnv",
+        "gitleaks"
+      ]
+    },
+    {
+      "name": "gaming",
+      "tools": [
+        "battle-net",
+        "discord",
+        "elgato-stream-deck",
+        "elgato-wave-link",
+        "moonlight",
+        "obs",
+        "linearmouse"
+      ]
+    },
+    {
+      "name": "go",
+      "tools": [
+        "go",
+        "go-task",
+        "golangci-lint",
+        "gomplate",
+        "gopls"
+      ]
+    },
+    {
+      "name": "infra",
+      "tools": [
+        "argo",
+        "cilium-cli",
+        "flux",
+        "flux-local",
+        "helm",
+        "helmfile",
+        "krew",
+        "kubectl-cnpg",
+        "kubectx",
+        "kustomize",
+        "kubernetes-cli",
+        "sops",
+        "talosctl",
+        "opentofu",
+        "minijinja-cli",
+        "watch"
+      ]
+    },
+    {
+      "name": "lua",
+      "tools": [
+        "busted",
+        "lua-language-server",
+        "luacheck",
+        "luarocks",
+        "stylua"
+      ]
+    },
+    {
+      "name": "mac",
+      "tools": [
+        "gnu-sed",
+        "mactop",
+        "mas",
+        "mole",
+        "stats",
+        "swiftformat",
+        "swiftlint",
+        "the-unarchiver",
+        "xcodebuildmcp",
+        "zstd",
+        "hammerspoon",
+        "rbw",
+        "mlx",
+        "flux-markdown",
+        "tree-sitter",
+        "xcodegen",
+        "typewhisper"
+      ]
+    },
+    {
+      "name": "omni",
+      "tools": [
+        "ffmpeg",
+        "ttyd",
+        "vhs"
+      ]
+    },
+    {
+      "name": "prereqs",
+      "tools": [
+        "bun",
+        "nvm",
+        "uv"
+      ]
+    },
+    {
+      "name": "priv",
+      "tools": [
+        "mosh",
+        "plex",
+        "signal",
+        "skhd-zig",
+        "vivaldi",
+        "vlc",
+        "yabai",
+        "linear",
+        "bam",
+        "chatterino",
+        "cmux",
+        "d-streamy"
+      ]
+    },
+    {
+      "name": "python",
+      "tools": [
+        "pip",
+        "pipx",
+        "python@3.14",
+        "wheel"
+      ]
+    },
+    {
+      "name": "shell",
+      "tools": [
+        "zsh",
+        "oh-my-zsh"
+      ]
+    },
+    {
+      "name": "test-tooling",
+      "tools": [
+        "bats-core"
+      ]
+    },
+    {
+      "name": "ts",
+      "tools": [
+        "pm2",
+        "pnpm"
+      ]
+    },
+    {
+      "name": "utils",
+      "tools": [
+        "plantuml",
+        "bcrypt",
+        "sshpass",
+        "witr"
+      ]
+    },
+    {
+      "name": "coder",
+      "special": "host",
+      "tools": [
+        "bubblewrap"
+      ]
+    },
+    {
+      "name": "hermes",
+      "special": "host",
+      "tools": [
+        "camofox-browser",
+        "hermes"
+      ]
+    },
+    {
+      "name": "topaz",
+      "special": "host",
+      "tools": [
+        "cmake",
+        "docker-buildx",
+        "fswatch",
+        "libiscsi",
+        "pkgconf",
+        "parsec",
+        "certifi",
+        "numpy",
+        "npm",
+        "android-commandlinetools",
+        "gradle",
+        "vips",
+        "yt-dlp"
+      ]
+    }
+  ]
+}

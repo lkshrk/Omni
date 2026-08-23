@@ -10,7 +10,7 @@ import (
 func (a *App) DotsPull(ctx context.Context) (ops []dots.Op, err error) {
 	pf, err := a.dotService().preflight()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("dots pull: %w", err)
 	}
 	defer func() {
 		a.recordDotsHistoryResult(ctx, "pull", "", pf.repoPath, ops, err, false)
@@ -26,7 +26,7 @@ func (a *App) DotsPull(ctx context.Context) (ops []dots.Op, err error) {
 func (a *App) DotsPush(ctx context.Context, message string) (err error) {
 	pf, err := a.dotService().preflight()
 	if err != nil {
-		return err
+		return fmt.Errorf("dots push: %w", err)
 	}
 	defer func() {
 		a.recordDotsHistoryResult(ctx, "push", "", pf.repoPath, nil, err, false)
@@ -47,7 +47,7 @@ func (a *App) DotsPush(ctx context.Context, message string) (err error) {
 func (a *App) DotsCommit(ctx context.Context, message string) (err error) {
 	pf, err := a.dotService().preflight()
 	if err != nil {
-		return err
+		return fmt.Errorf("dots commit: %w", err)
 	}
 	defer func() {
 		a.recordDotsHistoryResult(ctx, "commit", "", pf.repoPath, nil, err, false)
@@ -67,7 +67,7 @@ func (a *App) DotsCommit(ctx context.Context, message string) (err error) {
 func (a *App) DotsBackup(ctx context.Context, message string) (err error) {
 	pf, err := a.dotService().preflight()
 	if err != nil {
-		return err
+		return fmt.Errorf("dots backup: %w", err)
 	}
 	defer func() {
 		a.recordDotsHistoryResult(ctx, "backup", "", pf.repoPath, nil, err, false)

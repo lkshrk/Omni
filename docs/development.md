@@ -41,10 +41,11 @@ Do not run integration tests directly against the local machine. Dots and
 package-manager flows intentionally mutate files and package-manager state in
 their isolated environments.
 
-`make test-canary` runs the opt-in upstream contract canary — live checks of the
-skills.sh search API and the agent-skills discovery schema — which the `canary`
-build tag keeps out of every other test target and which CI runs only on its
-weekly schedule.
+`make test-canary` is reserved for opt-in live APM contract checks. It runs only
+`TestCanary*` tests behind the `canary` build tag in `internal/agent` and
+`internal/app`, keeping them out of every other test target. The APM hard
+migration removed the former pre-APM canaries, so no tests currently match
+this target; the scheduled CI invocation performs no external checks.
 
 ## Lint
 

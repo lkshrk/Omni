@@ -20,7 +20,7 @@ func newDoctorCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Run read-only health checks",
-		Long:  "Run read-only diagnostics for config, host setup, providers, dotfiles, native services, and local cache state. With --fix, apply safe auto-fixes (duplicate $include definitions, dead ignore patterns) first.",
+		Long:  "Run read-only diagnostics for config, host setup, providers, dotfiles, native services, and local cache state. With --fix, apply safe auto-fixes (duplicate $include definitions, dead ignore patterns, installing or upgrading the apm CLI) first.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Fix progress is prose, so in JSON mode it goes to stderr rather than into the document stdout parsers consume.
 			out := cmd.OutOrStdout()
@@ -37,12 +37,23 @@ func newDoctorCmd(state *rootState) *cobra.Command {
 				if fixResult.OptimizeErr == nil {
 					printOptimizeReport(out, fixResult.OptimizeReport, dryRun)
 				}
-				printSkillStoreFixReport(out, fixResult.SkillStore, dryRun)
 				if dryRun && fixResult.Err() == nil {
 					fmt.Fprintln(out, "dry run: no files were changed (ignore-pattern cleanup runs only on a real --fix)")
 				}
 				if !dryRun && len(fixResult.IgnoreModified) > 0 {
 					fmt.Fprintf(out, "cleaned ignore patterns for: %s\n", strings.Join(fixResult.IgnoreModified, ", "))
+				}
+				if fixResult.APMInstall.Planned != "" {
+					fmt.Fprintf(out, "dry run: would install or upgrade APM via: %s\n", fixResult.APMInstall.Planned)
+				}
+				if fixResult.APMInstall.Upgraded != "" {
+					fmt.Fprintf(out, "upgraded APM via: %s\n", fixResult.APMInstall.Upgraded)
+				}
+				if fixResult.APMInstall.Installed != "" {
+					fmt.Fprintf(out, "installed APM via: %s\n", fixResult.APMInstall.Installed)
+					if fixResult.APMInstall.NotOnPATH {
+						fmt.Fprintln(out, "warning: apm installed but not resolvable; add its bin directory (usually ~/.local/bin) to PATH")
+					}
 				}
 				fixErr = fixResult.Err()
 			}
@@ -91,26 +102,6 @@ func printOptimizeReport(out io.Writer, report *config.OptimizeReport, dryRun bo
 		}
 		fmt.Fprintf(out, "%s %s duplicate %s from %s (group %q): %s\n",
 			verb, textutil.PluralCount(len(r.Names), "entry", "entries"), r.Key, r.File, r.Group, strings.Join(r.Names, ", "))
-	}
-}
-
-func printSkillStoreFixReport(out io.Writer, report app.SkillStoreFixReport, dryRun bool) {
-	removed, rebuilt := "removed", "rebuilt"
-	if dryRun {
-		removed, rebuilt = "would remove", "would rebuild"
-	}
-	// Each debris line already carries its own verb, since the action varies per item.
-	for _, line := range report.Debris {
-		fmt.Fprintln(out, line)
-	}
-	for _, path := range report.DanglingLinks {
-		fmt.Fprintf(out, "%s dangling skill link %s\n", removed, path)
-	}
-	for _, path := range report.OrphanedPackages {
-		fmt.Fprintf(out, "%s unreferenced skill package %s\n", removed, path)
-	}
-	for _, source := range report.RebuiltMetadata {
-		fmt.Fprintf(out, "%s local install metadata for %s\n", rebuilt, source)
 	}
 }
 

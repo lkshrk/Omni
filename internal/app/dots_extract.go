@@ -212,9 +212,7 @@ func (a *App) removeDotsExtractChildConfig(name string, originalGroups map[strin
 			})
 			changed = changed || len(group.Dots) != before
 			_, existed := originalGroups[group.BaseName()]
-			newEmpty := !existed && group.Description == "" && len(group.Dots) == 0 && len(group.Tools) == 0 &&
-				len(group.Taps) == 0 && len(group.Skills) == 0 && len(group.McpServers) == 0 &&
-				len(group.Plugins) == 0 && len(group.Marketplaces) == 0
+			newEmpty := !existed && group.Description == "" && len(group.Dots) == 0 && len(group.Tools) == 0 && len(group.Taps) == 0
 			if !newEmpty {
 				groups = append(groups, group)
 			} else {

@@ -134,61 +134,15 @@ func buildPalette(m Model) []palCmd {
 	return cmds
 }
 
-// Each action is gated on the feature that owns it: the composed runs need the agents master switch, the skill operations need the skills feature too.
 func appendAgentsPaletteCommands(m Model, cmds []palCmd) []palCmd {
-	if !m.agentsEnabled {
-		return cmds
-	}
 	restore := actions.MustPalette(actions.AgentsRestore)
-	syncAll := actions.MustPalette(actions.AgentsSyncAll)
-	cmds = append(cmds,
+	return append(cmds,
 		palCmd{
 			name: paletteCommandName(restore),
 			desc: restore.Description,
 			run: func(m *Model) tea.Cmd {
 				return m.runAgentsPaletteCommand(func(m *Model) []tea.Cmd {
-					return m.doAgentsRestoreAll()
-				})
-			},
-		},
-		// Sync-all claims on-disk directories, so the palette arms the same confirmation the agents tab's "S" does instead of running it.
-		palCmd{
-			name: paletteCommandName(syncAll),
-			desc: syncAll.Description,
-			run: func(m *Model) tea.Cmd {
-				return m.runAgentsPaletteCommand(func(m *Model) []tea.Cmd {
-					m.agentsSyncAllConfirm = true
-					return []tea.Cmd{m.armConfirmationTimeout()}
-				})
-			},
-		},
-	)
-	if !m.skillsSectionEnabled() {
-		return cmds
-	}
-	importSkills := actions.MustPalette(actions.AgentsSkillsImport)
-	updateSkills := actions.MustPalette(actions.AgentsSkillsUpdate)
-	return append(cmds,
-		palCmd{
-			name: paletteCommandName(importSkills),
-			desc: importSkills.Description,
-			run: func(m *Model) tea.Cmd {
-				return m.runAgentsPaletteCommand(func(m *Model) []tea.Cmd {
-					m.skillsRunning = true
-					m.skillsErr = nil
-					m.skillsImport = nil
-					return []tea.Cmd{m.spinner.Tick, m.doImportSkills()}
-				})
-			},
-		},
-		palCmd{
-			name: paletteCommandName(updateSkills),
-			desc: updateSkills.Description,
-			run: func(m *Model) tea.Cmd {
-				return m.runAgentsPaletteCommand(func(m *Model) []tea.Cmd {
-					m.skillsRunning = true
-					m.skillsErr = nil
-					return []tea.Cmd{m.spinner.Tick, m.doUpdateSkills()}
+					return m.doAgentsSyncAll()
 				})
 			},
 		},
@@ -197,7 +151,7 @@ func appendAgentsPaletteCommands(m Model, cmds []palCmd) []palCmd {
 
 // Refuses while an agents operation is in flight for the same reason the tab's own global actions do: a second bulk run would race the first.
 func (m *Model) runAgentsPaletteCommand(run func(*Model) []tea.Cmd) tea.Cmd {
-	if m.skillsRunning || m.skillAddRunning || m.mcpRunning || m.pluginRunning || m.marketplaceRunning {
+	if m.apmRunning {
 		return setStatus(m, "⚠ agents busy — wait for the running operation to finish", true)
 	}
 	var cmds []tea.Cmd

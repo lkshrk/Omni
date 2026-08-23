@@ -80,6 +80,7 @@ func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 		{"settings", "reset"},
 		{"settings", "reset-cache"},
 		{"settings", "migrate-host-overrides"},
+		{"agents", "sync"},
 		{"dots", "sync"},
 		{"dots", "add"},
 		{"dots", "groups"},
@@ -246,12 +247,6 @@ func TestDeprecatedAliasesStayRunnable(t *testing.T) {
 		old   []string
 		flags []string
 	}{
-		{old: []string{"agents", "restore"}, flags: []string{"dry-run"}},
-		{old: []string{"agents", "skills", "restore"}, flags: []string{"dry-run"}},
-		{old: []string{"agents", "skills", "update"}, flags: []string{"dry-run", "check"}},
-		{old: []string{"agents", "skills", "uninstall"}},
-		{old: []string{"agents", "mcp", "restore"}, flags: []string{"dry-run"}},
-		{old: []string{"agents", "plugins", "restore"}, flags: []string{"dry-run"}},
 		{old: []string{"tools", "delete"}, flags: []string{"provider", "purge"}},
 		{old: []string{"dots", "delete"}, flags: []string{"keep-local", "purge"}},
 	} {
@@ -298,8 +293,8 @@ func TestConfirmableToolActionsHaveYesBypass(t *testing.T) {
 		t.Fatal("root command is missing global --yes confirmation bypass")
 	}
 	for _, action := range actions.All() {
-		if action.RequiresConfirm && len(action.CLI) == 0 {
-			t.Fatalf("%s requires confirmation but has no CLI binding", action.ID)
+		if action.RequiresConfirm && len(action.CLI) == 0 && action.TUI == nil {
+			t.Fatalf("%s requires confirmation but has no runnable binding", action.ID)
 		}
 	}
 }
@@ -407,27 +402,28 @@ func uncatalogedRunnableCLICommandAllowed(path []string) bool {
 		"dots list",
 		"dots status",
 		"dots variant list",
-		"agents skills sync",
-		"agents skills remove",
-		"agents skills group",
 		"agents add",
-		"agents find",
-		"agents mcp list",
-		"agents mcp add",
-		"agents mcp remove",
-		"agents mcp sync",
-		"agents mcp import",
-		"agents mcp group",
-		"agents plugins list",
-		"agents plugins add",
-		"agents plugins remove",
-		"agents plugins sync",
-		"agents plugins import",
-		"agents plugins group",
-		"agents plugins marketplace list",
-		"agents plugins marketplace add",
-		"agents plugins marketplace remove",
-		"agents plugins marketplace group":
+		"agents remove",
+		"agents update",
+		"agents search",
+		"agents audit",
+		"agents targets",
+		"agents onboard",
+		"agents onboard status",
+		"agents onboard resume",
+		"agents onboard rollback",
+		"agents onboard cleanup",
+		"agents outdated",
+		"agents prune",
+		"agents deps list",
+		"agents deps why",
+		"agents deps info",
+		"agents marketplace list",
+		"agents marketplace add",
+		"agents marketplace browse",
+		"agents marketplace update",
+		"agents marketplace validate",
+		"agents marketplace remove":
 		return true
 	default:
 		return false

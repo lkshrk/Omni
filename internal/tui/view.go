@@ -99,48 +99,6 @@ func (m Model) viewString() string {
 		return placePopup(bg, m, renderProviderPriorityPopup(m), providerPriorityPopupFrame(m))
 	}
 
-	if m.editingAgents {
-		bgModel := m
-		bgModel.editingAgents = false
-		bg := bgModel.viewString()
-		return placePopup(bg, m, renderSettingsAgentsEditor(m), agentsEditorPopupFrame(m))
-	}
-
-	if m.skillAgentsPicker {
-		bgModel := m
-		bgModel.skillAgentsPicker = false
-		bg := bgModel.viewString()
-		return placePopup(bg, m, renderSkillAgentsPicker(m), skillAgentsPickerFrame(m))
-	}
-
-	if m.mcpAgentsPicker {
-		bgModel := m
-		bgModel.mcpAgentsPicker = false
-		bg := bgModel.viewString()
-		return placePopup(bg, m, renderSkillAgentsPicker(m), skillAgentsPickerFrame(m))
-	}
-
-	if m.pluginAgentsPicker {
-		bgModel := m
-		bgModel.pluginAgentsPicker = false
-		bg := bgModel.viewString()
-		return placePopup(bg, m, renderSkillAgentsPicker(m), skillAgentsPickerFrame(m))
-	}
-
-	if m.mcpFormOpen {
-		bgModel := m
-		bgModel.mcpFormOpen = false
-		bg := bgModel.viewString()
-		return placePopup(bg, m, renderMcpFormPopup(m), mcpFormPopupFrame(m))
-	}
-
-	if m.pluginFormOpen {
-		bgModel := m
-		bgModel.pluginFormOpen = false
-		bg := bgModel.viewString()
-		return placePopup(bg, m, renderPluginFormPopup(m), pluginFormPopupFrame(m))
-	}
-
 	if m.stowInstallPrompt {
 		bgModel := m
 		bgModel.stowInstallPrompt = false
@@ -179,9 +137,6 @@ func (m Model) viewString() string {
 	if m.mode == viewGroupPicker {
 		bgModel := m
 		bgModel.mode = viewList
-		if m.pickerClaimAgentsSet {
-			bgModel.mode = viewSkills
-		}
 		bg := bgModel.viewString()
 		title := "Choose Group"
 		if m.pickerPurposeClaim {
@@ -199,8 +154,6 @@ func (m Model) viewString() string {
 		switch m.pickerMembershipKind {
 		case pickerMembershipDot:
 			bgModel.mode = viewDots
-		case pickerMembershipSkill:
-			bgModel.mode = viewSkills
 		}
 		bg := bgModel.viewString()
 		paddingX := 2
@@ -280,14 +233,6 @@ func (m Model) viewString() string {
 		bgModel.dashboardReconcilePlanOpen = false
 		bg := bgModel.viewString()
 		return placePopup(bg, m, renderDashboardReconcilePlanPopup(m), dashboardReconcilePlanPopupFrame(m))
-	}
-
-	if m.agentsDriftPromptOpen {
-		bgModel := m
-		bgModel.agentsDriftPromptOpen = false
-		bgModel.suppressFooterHints = true
-		bg := bgModel.viewString()
-		return placePopup(bg, m, renderAgentsDriftPromptPopup(m), agentsDriftPromptPopupFrame(m))
 	}
 
 	if m.mode == viewGroups && m.groupDeleteConfirm {
@@ -713,9 +658,6 @@ func popupTitleForSelectedTool(m Model, action string) string {
 }
 
 func popupTitleForGroupPickerTool(m Model, action string) string {
-	if m.pickerClaimAgentsSet {
-		return popupTitleForName(action, agentsRowName(m, m.pickerClaimAgentsRow))
-	}
 	if m.pickerActionToolSet {
 		return popupTitleForName(action, m.pickerActionTool.Name)
 	}
@@ -753,9 +695,6 @@ func popupTitleForSelectedDot(m Model, action string) string {
 func groupMembershipPopupTitle(m Model) string {
 	if m.pickerMembershipKind == pickerMembershipDot {
 		return popupTitleForSelectedDot(m, "Change Groups")
-	}
-	if m.pickerMembershipKind == pickerMembershipSkill {
-		return popupTitleForName("Change Groups", m.pickerMembershipName)
 	}
 	return popupTitleForMembershipTool(m, "Change Groups")
 }
