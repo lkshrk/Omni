@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // HasRemovedAgentConfig detects whether onboarding must run before normal
@@ -38,13 +37,9 @@ func HasRemovedAgentConfig(path string) (bool, error) {
 		if value := bytes.TrimSpace(raw["agents"]); len(value) > 0 && !bytes.Equal(value, []byte("null")) && !bytes.Equal(value, []byte("{}")) {
 			return true, nil
 		}
-		for _, field := range []string{"groups", "host_settings", "settings"} {
-			text := string(raw[field])
-			for _, key := range []string{"\"skills\"", "\"mcp_servers\"", "\"plugins\"", "\"marketplaces\"", "\"agents_disabled\"", "\"skills_disabled\"", "\"mcp_disabled\"", "\"plugins_disabled\""} {
-				if strings.Contains(text, key) {
-					return true, nil
-				}
-			}
+		delete(raw, "agents")
+		if err := validateRemovedAgentConfigFields(raw); err != nil {
+			return true, nil
 		}
 		var includes []string
 		if value := raw["$include"]; len(value) > 0 {

@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,55 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 )
+
+func TestHasRemovedAgentConfigIgnoresAgentWordsInValues(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"skills", "mcp_servers", "plugins", "marketplaces", "agents_disabled", "skills_disabled", "mcp_disabled", "plugins_disabled"} {
+		t.Run(value, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			data, err := json.Marshal(map[string]any{
+				"version": config.CurrentVersion,
+				"groups": []any{map[string]any{
+					"name": "work",
+					"dots": []any{map[string]any{"name": "herd", "path": "~/.herd", "ignore": []string{value}}},
+				}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			found, err := config.HasRemovedAgentConfig(path)
+			if err != nil || found {
+				t.Fatalf("HasRemovedAgentConfig(%q) = %v, %v; want false, nil", value, found, err)
+			}
+		})
+	}
+}
+
+func TestHasRemovedAgentConfigDetectsStructuralFieldsAcrossIncludes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	root := filepath.Join(dir, "settings.json")
+	include := filepath.Join(dir, "agents.json")
+	if err := os.WriteFile(root, []byte(`{"version":24,"$include":["agents.json"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"settings":{"agents_use":["codex"]}}`,
+		`{"host_settings":{"work":{"skills_disabled":true}}}`,
+		`{"groups":[{"name":"work","plugins":[]}]}`,
+	} {
+		if err := os.WriteFile(include, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		found, err := config.HasRemovedAgentConfig(root)
+		if err != nil || !found {
+			t.Fatalf("HasRemovedAgentConfig(%s) = %v, %v; want true, nil", body, found, err)
+		}
+	}
+}
 
 func TestLoadRejectsRemovedAgentFields(t *testing.T) {
 	t.Parallel()
