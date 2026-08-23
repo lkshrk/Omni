@@ -4,12 +4,12 @@ Status: PASS — local, immutable-pin DinD, native macOS/Windows, and full CI ga
 
 ## Leader release gate
 
-- APM fork commit: `fe2d55f37062a9147ae297d7d4c8a034c327661c` (`0.28.0+omni.3`), pushed to `lkshrk/apm`.
+- APM fork commit: `0c5aa9650616f6561d0d1fbe9ed8c15a5c633311` (`0.28.0+omni.3`), merged into `lkshrk/apm` main.
 - Omni source, Docker, CI, tests, and docs pin that exact commit/version.
 - Real DinD onboarding shard passed against the remote immutable commit:
   `TestAgentsOnboardRealPinnedAPM` and `TestTUIAgentsOnboardingPreviewConfirmAndApply` executed under `-race -trimpath`.
 - The first quoted build-arg attempt ran zero tests; CI quoting was corrected and the unquoted rerun executed both packages successfully.
-- APM Import Onboarding run `32605452767` passed Linux unit/transaction/wheel plus native macOS/Windows jobs at `fe2d55f37062a9147ae297d7d4c8a034c327661c`.
+- APM PR checks passed Linux build/unit/lifecycle/lint/spec/NOTICE plus native macOS/Windows importer jobs at `0c5aa9650616f6561d0d1fbe9ed8c15a5c633311`.
 - Omni CI run `32605834432` passed all unit, lint, vet, native platform, pinned onboarding DinD, and Docker integration jobs.
 
 ## Execution round 8 — final round-three verification

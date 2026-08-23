@@ -114,5 +114,5 @@ Status: **complete; test, review, and native platform gates approved**
 ## Remaining evidence / blockers
 
 - No known implementation blocker.
-- APM Import Onboarding run `32605452767` passed Linux unit/transaction/wheel and native macOS/Windows platform jobs at final commit `fe2d55f37062a9147ae297d7d4c8a034c327661c`.
+- APM PR checks passed Linux build/unit/lifecycle/lint/spec/NOTICE plus native macOS/Windows importer jobs at final commit `0c5aa9650616f6561d0d1fbe9ed8c15a5c633311`.
 - Omni CI run `32605540672` passed every unit, lint, vet, native platform, pinned onboarding DinD, and Docker integration job against that commit.
