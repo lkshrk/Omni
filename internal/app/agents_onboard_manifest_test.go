@@ -801,6 +801,7 @@ func TestValidateReviewedOnboardFreshBindsImmutableItemFields(t *testing.T) {
 func TestResolveOnboardLocalSourceExpandsTilde(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	for _, source := range []string{"~/pkg", "file://~/pkg"} {
 		got, err := resolveOnboardLocalSource(source)
 		if err != nil {
