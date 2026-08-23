@@ -17,7 +17,7 @@ func (m Model) viewSkillsBody() string {
 		p.styleHelp.Render(pad + "O onboard   T status   V resume   X cleanup   S sync   U update   R inspect   e logs"),
 	}
 	if item := m.currentOnboardItem(); item != nil {
-		lines = append(lines, "", p.styleTitle.Render(fmt.Sprintf("%s%d/%d %s (%s)", pad, m.agentsOnboardItem+1, len(m.agentsOnboardPlan.Envelope.Plan.Items), item.Name, item.Classification)), p.styleHelp.Render(pad+"j/k inspect  c codex  l claude  b both  E executables  m map secrets  x exclude"))
+		lines = append(lines, "", p.styleTitle.Render(fmt.Sprintf("%s%d/%d %s (%s)", pad, m.agentsOnboardItem+1, len(m.agentsOnboardPlan.Envelope.Plan.Items), item.Name, item.Classification)), p.styleHelp.Render(pad+"j/k inspect  c codex  l claude  b both  E executables  m map secrets  x leave unmanaged"))
 		if len(item.ReasonCodes) > 0 {
 			lines = append(lines, p.styleHelp.Render(pad+strings.Join(item.ReasonCodes, ", ")))
 		}

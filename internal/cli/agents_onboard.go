@@ -50,7 +50,7 @@ func newAgentsOnboardCmd(state *rootState) *cobra.Command {
 	cmd.Flags().StringArrayVar(&targetFlags, "approve-targets", nil, "Resolve item targets as ITEM=claude,codex (repeatable)")
 	cmd.Flags().StringArrayVar(&envFlags, "map-secret", nil, "Map secret field as ITEM:/json/pointer=ENV_VAR (repeatable)")
 	cmd.Flags().StringArrayVar(&executableFlags, "approve-executable", nil, "Approve executable as ITEM=relative/path (repeatable)")
-	cmd.Flags().StringArrayVar(&excludeFlags, "exclude", nil, "Durably exclude item ID or name (repeatable)")
+	cmd.Flags().StringArrayVar(&excludeFlags, "exclude", nil, "Leave item or unsupported client unmanaged (durable, repeatable)")
 	cmd.AddCommand(newAgentsOnboardStatusCmd(state), newAgentsOnboardResumeCmd(state), newAgentsOnboardCleanupCmd(state))
 	return cmd
 }

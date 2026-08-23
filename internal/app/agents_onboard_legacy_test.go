@@ -56,7 +56,7 @@ func TestInitDetectsJoinedOnboardingRecoveryBeforeMutation(t *testing.T) {
 			if err := writeOnboardJournal(opRoot, journal); err != nil {
 				t.Fatal(err)
 			}
-			mock := &executor.MockExecutor{Responses: []executor.MockCall{{Stdout: "APM CLI version 0.28.0+omni.3\n"}, {Stdout: `{"ok":true,"kind":"import-status-result","result":{"schema_version":1,"operation_id":"0123456789abcdef0123456789abcdef","coordinator":"omni-v24","state":"awaiting-external-commit","next_action":"external-commit-then-finalize","finalize_token_required":true}}`}}}
+			mock := &executor.MockExecutor{Responses: []executor.MockCall{{Stdout: "APM CLI version 0.28.0+omni.4\n"}, {Stdout: `{"ok":true,"kind":"import-status-result","result":{"schema_version":1,"operation_id":"0123456789abcdef0123456789abcdef","coordinator":"omni-v24","state":"awaiting-external-commit","next_action":"external-commit-then-finalize","finalize_token_required":true}}`}}}
 			a := New(configPath)
 			a.StateDir = state
 			a.CacheDir = cache

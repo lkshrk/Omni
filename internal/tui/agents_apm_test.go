@@ -54,7 +54,7 @@ func TestAgentsOnboardBlockerAndRecoveryError(t *testing.T) {
 }
 
 func TestAgentsOnboardResolvesTargetsSecretsExecutablesAndExclusions(t *testing.T) {
-	plan := &apm.ImportPlan{Items: []apm.ImportItem{{ID: "target", Classification: "needs-choice"}, {ID: "secret", Name: "api", Classification: "secret-blocked", ReasonCodes: []string{"secret-field:/env/TOKEN"}}, {ID: "exec", Classification: "importable", ReasonCodes: []string{"executable:bin/run"}}, {ID: "unsupported", Classification: "unsupported"}, {ID: "conflict", Classification: "conflict", CandidateIDs: []string{"winner", "loser"}}, {ID: "conditional", Classification: "needs-choice", ReasonCodes: []string{"conditional-group-host"}}, {ID: "changed", Classification: "excluded-changed"}}}
+	plan := &apm.ImportPlan{Items: []apm.ImportItem{{ID: "target", Classification: "needs-choice"}, {ID: "secret", Name: "api", Classification: "secret-blocked", ReasonCodes: []string{"secret-field:/env/TOKEN"}}, {ID: "exec", Classification: "importable", ReasonCodes: []string{"executable:bin/run"}}, {ID: "unsupported", Name: "cursor", Classification: "unsupported", ReasonCodes: []string{"native-import-decoder-unavailable"}}, {ID: "conflict", Classification: "conflict", CandidateIDs: []string{"winner", "loser"}}, {ID: "conditional", Classification: "needs-choice", ReasonCodes: []string{"conditional-group-host"}}, {ID: "changed", Classification: "excluded-changed"}}}
 	resolveOnboardItem(&plan.Items[0], "c")
 	resolveOnboardItem(&plan.Items[1], "m")
 	resolveOnboardItem(&plan.Items[2], "E")
@@ -67,6 +67,9 @@ func TestAgentsOnboardResolvesTargetsSecretsExecutablesAndExclusions(t *testing.
 	}
 	if plan.Items[1].Resolution.EnvBindings["/env/TOKEN"] != "OMNI_API_SECRET" {
 		t.Fatalf("bindings=%v", plan.Items[1].Resolution.EnvBindings)
+	}
+	if plan.Items[3].Resolution.Decision != "exclude" {
+		t.Fatalf("unsupported client decision=%q", plan.Items[3].Resolution.Decision)
 	}
 }
 
