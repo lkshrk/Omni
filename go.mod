@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/charmbracelet/x/term v0.2.2
-	github.com/charmbracelet/x/vttest v0.0.0-20260730164118-7e2d3e6c5238
+	github.com/charmbracelet/x/vttest v0.0.0-20260823001701-96af6d2cb5f6
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/rogpeppe/go-internal v1.16.0
@@ -35,7 +35,7 @@ require (
 	// Keep x/vt on x/vttest's current commit; x/vttest's go.mod still names an incompatible older revision.
 	github.com/charmbracelet/x/vt v0.0.0-20260713092006-0d683c34c74b // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
-	github.com/charmbracelet/x/xpty v0.1.3 // indirect
+	github.com/charmbracelet/x/xpty v0.1.4 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
