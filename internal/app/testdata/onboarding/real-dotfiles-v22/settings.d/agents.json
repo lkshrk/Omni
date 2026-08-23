@@ -1,0 +1,248 @@
+{
+  "agents": {
+    "packages": [
+      {
+        "source": "example/linear-ai"
+      },
+      {
+        "source": "example/useful-skills"
+      },
+      {
+        "source": "ShiplightAI/agent-skills-v2"
+      },
+      {
+        "source": "sopaco/deepwiki-rs"
+      }
+    ],
+    "mcp_servers": [
+      {
+        "name": "litellm-tools",
+        "transport": "http",
+        "url": "https://ai.example.invalid/mcp/",
+        "headers": {
+          "x-litellm-api-key": "${LITELLM_API}"
+        },
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "shiplight",
+        "transport": "stdio",
+        "command": "bunx @shiplightai/mcp@latest",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "codebase-memory-mcp",
+        "transport": "stdio",
+        "command": "codebase-memory-mcp",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "context-mode",
+        "transport": "stdio",
+        "command": "node ./start.mjs",
+        "agents": [
+          "codex"
+        ]
+      }
+    ],
+    "marketplaces": [
+      {
+        "name": "context-mode",
+        "source": "https://github.com/mksglu/context-mode.git",
+        "agents": [
+          "codex",
+          "claude-code"
+        ]
+      },
+      {
+        "name": "example",
+        "source": "https://github.com/example/agent-marketplace.git",
+        "agents": [
+          "codex"
+        ]
+      },
+      {
+        "name": "caveman",
+        "source": "JuliusBrussee/caveman",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "claude-plugins-official",
+        "source": "anthropics/claude-plugins-official",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "ecc",
+        "source": "affaan-m/everything-claude-code",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "ponytail",
+        "source": "https://github.com/DietrichGebert/ponytail.git",
+        "agents": [
+          "codex"
+        ]
+      },
+      {
+        "name": "openai-codex",
+        "source": "openai/codex-plugin-cc",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "litellm",
+        "source": "https://ai.example.invalid/claude-code/marketplace.json",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "harness-marketplace",
+        "source": "revfactory/harness",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "i-have-adhd",
+        "source": "ayghri/i-have-adhd",
+        "agents": [
+          "claude-code"
+        ]
+      }
+    ],
+    "plugins": [
+      {
+        "name": "superpowers",
+        "marketplace": "claude-plugins-official",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "github",
+        "marketplace": "claude-plugins-official",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "context-mode",
+        "marketplace": "context-mode",
+        "agents": [
+          "codex",
+          "claude-code"
+        ]
+      },
+      {
+        "name": "ponytail",
+        "marketplace": "ponytail",
+        "agents": [
+          "codex"
+        ]
+      },
+      {
+        "name": "caveman",
+        "marketplace": "caveman",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "gopls-lsp",
+        "marketplace": "claude-plugins-official",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "code-simplifier",
+        "marketplace": "claude-plugins-official",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "codex",
+        "marketplace": "openai-codex",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "claude-md-management",
+        "marketplace": "claude-plugins-official",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "smart-docs",
+        "marketplace": "litellm",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "harness",
+        "marketplace": "harness-marketplace",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "i-have-adhd",
+        "marketplace": "i-have-adhd",
+        "agents": [
+          "claude-code"
+        ]
+      },
+      {
+        "name": "linear-ai",
+        "marketplace": "example",
+        "agents": [
+          "codex"
+        ]
+      }
+    ],
+    "ignore": {
+      "skills": [
+        "academic-research-skills"
+      ],
+      "mcp_servers": [
+        "xcodebuildmcp",
+        "openaiDeveloperDocs"
+      ],
+      "plugins": [
+        "swift-lsp",
+        "spreadsheets",
+        "presentations",
+        "documents",
+        "build-ios-apps",
+        "academic-research-skills",
+        "browser",
+        "pdf",
+        "template-creator"
+      ],
+      "marketplaces": [
+        "openai-primary-runtime",
+        "openai-curated",
+        "academic-research-skills",
+        "openai-bundled"
+      ]
+    }
+  }
+}

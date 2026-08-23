@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -109,6 +111,78 @@ func TestExtractLegacyCandidatesNestedIncludesAndSecrets(t *testing.T) {
 	}
 	if len(first.Documents) != 3 {
 		t.Fatalf("documents=%v", first.Documents)
+	}
+}
+
+func TestExtractLegacyCandidatesFromSanitizedRealDotfiles(t *testing.T) {
+	root := filepath.Join("testdata", "onboarding", "real-dotfiles-v22", "settings.json")
+	first, err := ExtractLegacyCandidates(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := ExtractLegacyCandidates(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Envelope.CandidateSetID != second.Envelope.CandidateSetID {
+		t.Fatal("real-world fixture produced an unstable candidate set")
+	}
+	if len(first.Documents) != 3 || len(first.Envelope.SourcePreimages) != 3 {
+		t.Fatalf("documents=%d preimages=%d", len(first.Documents), len(first.Envelope.SourcePreimages))
+	}
+	wantKinds := map[string]int{"package": 4, "skill": 1, "plugin": 22, "marketplace": 14, "mcp": 6, "unsupported": 1}
+	wantTargets := map[string]int{"claude": 20, "claude,codex": 23, "codex": 5}
+	gotKinds := map[string]int{}
+	excluded, conditional, placeholders := 0, 0, 0
+	targets := map[string]int{}
+	preimagePaths := map[string]string{}
+	for _, preimage := range first.Envelope.SourcePreimages {
+		preimagePaths[preimage.ID] = preimage.AbsolutePath
+	}
+	owners := map[string]int{}
+	for _, candidate := range first.Envelope.Candidates {
+		gotKinds[candidate.Kind]++
+		targets[strings.Join(candidate.SourceTarget, ",")]++
+		if len(candidate.SourcePreimageIDs) != 1 {
+			t.Fatalf("candidate %s preimages=%v", candidate.ID, candidate.SourcePreimageIDs)
+		}
+		source := preimagePaths[candidate.SourcePreimageIDs[0]]
+		if source == "" || !strings.HasPrefix(first.Pointers[candidate.ID], source+"#") {
+			t.Fatalf("candidate %s source=%q pointer=%q", candidate.ID, source, first.Pointers[candidate.ID])
+		}
+		owners[filepath.Base(source)]++
+		payload := string(candidate.Payload)
+		if strings.Contains(strings.ToLower(payload), "lkshrk") {
+			t.Fatal("fixture was not sanitized")
+		}
+		if strings.Contains(payload, `"disposition":"excluded"`) {
+			excluded++
+		}
+		if strings.Contains(payload, `"unsupported_reason":"conditional-group-host"`) {
+			conditional++
+		}
+		if strings.Contains(payload, "${") {
+			placeholders++
+		}
+	}
+	if !maps.Equal(gotKinds, wantKinds) || !maps.Equal(targets, wantTargets) || !maps.Equal(owners, map[string]int{"agents.json": 47, "groups.json": 1}) || excluded != 16 || conditional != 1 || placeholders != 1 {
+		t.Fatalf("kinds=%v targets=%v owners=%v excluded=%d conditional=%d placeholders=%d", gotKinds, targets, owners, excluded, conditional, placeholders)
+	}
+	email := regexp.MustCompile(`(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}`)
+	for _, path := range first.Documents {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lower := strings.ToLower(string(data))
+		for _, denied := range []string{"lkshrk", "h-cloud", ".lan", ".local", "/users/", "/home/", "topsecret", `"password"`} {
+			if strings.Contains(lower, denied) {
+				t.Fatalf("fixture contains denied personal data %q in %s", denied, path)
+			}
+		}
+		if email.Match(data) {
+			t.Fatalf("fixture contains an email address in %s", path)
+		}
 	}
 }
 
