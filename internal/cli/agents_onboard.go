@@ -8,25 +8,23 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/lkshrk/omni/internal/apm"
 	"github.com/lkshrk/omni/internal/app"
 )
 
 func newAgentsOnboardCmd(state *rootState) *cobra.Command {
-	var planJSON, applyPlan, projectRoot string
+	var planJSON, applyPlan string
 	var apply, outputJSON bool
-	var sources []string
-	var targetFlags, envFlags, executableFlags, excludeFlags []string
+	var targetFlags, envFlags, excludeFlags, moveFlags, keepDotsFlags []string
 	cmd := &cobra.Command{
 		Use:   "onboard",
-		Short: "Preview or apply migration of existing agent state into APM",
+		Short: "Preview or apply migration of Omni-managed agent state into APM",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if apply || applyPlan != "" {
 				if applyPlan == "" {
 					return errors.New("--apply requires --apply-plan")
 				}
-				resolutions, parseErr := parseOnboardResolutions(targetFlags, envFlags, executableFlags, excludeFlags)
+				resolutions, parseErr := parseOnboardResolutions(targetFlags, envFlags, excludeFlags, moveFlags, keepDotsFlags)
 				if parseErr != nil {
 					return parseErr
 				}
@@ -36,7 +34,7 @@ func newAgentsOnboardCmd(state *rootState) *cobra.Command {
 				}
 				return err
 			}
-			result, err := state.app.AgentsOnboardPlan(cmd.Context(), app.AgentsOnboardOptions{PlanJSON: planJSON, Sources: sources, ProjectRoot: projectRoot})
+			result, err := state.app.AgentsOnboardPlan(cmd.Context(), app.AgentsOnboardOptions{PlanJSON: planJSON})
 			if err == nil || outputJSON {
 				printOnboardJSON(cmd, result)
 			}
@@ -44,22 +42,21 @@ func newAgentsOnboardCmd(state *rootState) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&planJSON, "plan-json", "", "Persist the reviewed plan to an absolute path")
-	cmd.Flags().StringVar(&projectRoot, "project-root", "", "Inventory project-native state from this workspace")
 	cmd.Flags().BoolVar(&apply, "apply", false, "Apply the reviewed plan")
 	cmd.Flags().StringVar(&applyPlan, "apply-plan", "", "Absolute reviewed plan path")
-	cmd.Flags().StringArrayVar(&sources, "from", nil, "APM import source to inventory (repeatable; omit for APM defaults)")
-	cmd.Flags().BoolVar(&outputJSON, "json", false, "Print the Omni/APM result as JSON")
+	cmd.Flags().BoolVar(&outputJSON, "json", false, "Print the onboarding result as JSON")
 	cmd.Flags().StringArrayVar(&targetFlags, "approve-targets", nil, "Resolve item targets as ITEM=target,target (repeatable)")
-	cmd.Flags().StringArrayVar(&envFlags, "map-secret", nil, "Map secret field as ITEM:/json/pointer=ENV_VAR (repeatable)")
-	cmd.Flags().StringArrayVar(&executableFlags, "approve-executable", nil, "Approve executable as ITEM=relative/path (repeatable)")
-	cmd.Flags().StringArrayVar(&excludeFlags, "exclude", nil, "Leave item or unsupported client unmanaged (durable, repeatable)")
+	cmd.Flags().StringArrayVar(&envFlags, "map-secret", nil, "Map secret field as ITEM:FIELD=ENV_VAR (repeatable)")
+	cmd.Flags().StringArrayVar(&excludeFlags, "exclude", nil, "Keep item unmanaged (durable, repeatable)")
+	cmd.Flags().StringArrayVar(&moveFlags, "move-to-apm", nil, "Remove item from dots and migrate it to APM (repeatable)")
+	cmd.Flags().StringArrayVar(&keepDotsFlags, "keep-in-dots", nil, "Keep item managed by dots (repeatable)")
 	cmd.AddCommand(newAgentsOnboardStatusCmd(state), newAgentsOnboardResumeCmd(state), newAgentsOnboardRollbackCmd(state), newAgentsOnboardCleanupCmd(state))
 	return cmd
 }
 
 func newAgentsOnboardRollbackCmd(state *rootState) *cobra.Command {
 	var operation string
-	cmd := &cobra.Command{Use: "rollback", Short: "Rollback an onboarding operation before APM installation", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "rollback", Short: "Rollback an incomplete onboarding migration", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		result, err := state.app.AgentsOnboardRollback(cmd.Context(), operation)
 		if err == nil {
 			printOnboardJSON(cmd, result)
@@ -71,8 +68,8 @@ func newAgentsOnboardRollbackCmd(state *rootState) *cobra.Command {
 	return cmd
 }
 
-func parseOnboardResolutions(targets, bindings, executables, exclusions []string) (app.AgentsOnboardResolutions, error) {
-	out := app.AgentsOnboardResolutions{ApprovedTargets: map[string][]string{}, EnvBindings: map[string]map[string]string{}, ApprovedExecutables: map[string][]string{}, Excluded: map[string]bool{}}
+func parseOnboardResolutions(targets, bindings, exclusions, moves, keepDots []string) (app.AgentsOnboardResolutions, error) {
+	out := app.AgentsOnboardResolutions{ApprovedTargets: map[string][]string{}, EnvBindings: map[string]map[string]string{}, Excluded: map[string]bool{}, MoveToAPM: map[string]bool{}, KeepInDots: map[string]bool{}}
 	for _, value := range targets {
 		item, list, ok := strings.Cut(value, "=")
 		if !ok || strings.TrimSpace(item) == "" {
@@ -80,7 +77,7 @@ func parseOnboardResolutions(targets, bindings, executables, exclusions []string
 		}
 		for _, target := range strings.Split(list, ",") {
 			target = strings.TrimSpace(target)
-			if !apm.ValidImportName(target) {
+			if target == "" {
 				return out, fmt.Errorf("invalid target %q", target)
 			}
 			out.ApprovedTargets[item] = append(out.ApprovedTargets[item], target)
@@ -88,27 +85,32 @@ func parseOnboardResolutions(targets, bindings, executables, exclusions []string
 	}
 	for _, value := range bindings {
 		left, env, ok := strings.Cut(value, "=")
-		item, pointer, hasPointer := strings.Cut(left, ":")
-		if !ok || !hasPointer || item == "" || !strings.HasPrefix(pointer, "/") || !validEnvName(env) {
+		item, field, hasField := strings.Cut(left, ":")
+		if !ok || !hasField || item == "" || field == "" || !validEnvName(env) {
 			return out, fmt.Errorf("invalid --map-secret %q", value)
 		}
 		if out.EnvBindings[item] == nil {
 			out.EnvBindings[item] = map[string]string{}
 		}
-		out.EnvBindings[item][pointer] = env
-	}
-	for _, value := range executables {
-		item, path, ok := strings.Cut(value, "=")
-		if !ok || item == "" || path == "" || strings.Contains(path, "..") || strings.HasPrefix(path, "/") {
-			return out, fmt.Errorf("invalid --approve-executable %q", value)
-		}
-		out.ApprovedExecutables[item] = append(out.ApprovedExecutables[item], path)
+		out.EnvBindings[item][field] = env
 	}
 	for _, item := range exclusions {
 		if strings.TrimSpace(item) == "" {
 			return out, errors.New("--exclude item is empty")
 		}
 		out.Excluded[item] = true
+	}
+	for _, item := range moves {
+		if strings.TrimSpace(item) == "" {
+			return out, errors.New("--move-to-apm item is empty")
+		}
+		out.MoveToAPM[item] = true
+	}
+	for _, item := range keepDots {
+		if strings.TrimSpace(item) == "" {
+			return out, errors.New("--keep-in-dots item is empty")
+		}
+		out.KeepInDots[item] = true
 	}
 	return out, nil
 }
@@ -127,7 +129,7 @@ func validEnvName(value string) bool {
 
 func newAgentsOnboardStatusCmd(state *rootState) *cobra.Command {
 	var operation string
-	cmd := &cobra.Command{Use: "status", Short: "Join Omni and APM recovery status", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "status", Short: "Show local onboarding recovery status", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if operation == "" {
 			return errors.New("--operation is required")
 		}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -85,7 +86,7 @@ description: Offline APM integration fixture
 		t.Fatalf("skill was not deployed: %v", err)
 	}
 	for _, path := range []string{
-		filepath.Join(codexHome, "agents", "reviewer.toml"),
+		filepath.Join(home, ".codex", "agents", "reviewer.toml"),
 		filepath.Join(home, ".claude", "agents", "reviewer.md"),
 	} {
 		if _, err := os.Stat(path); err != nil {
@@ -705,15 +706,15 @@ func requirePinnedAPM(t *testing.T) {
 	t.Helper()
 	path, err := exec.LookPath("apm")
 	if err != nil {
-		t.Fatalf("integration tests require apm 0.28.0+omni.5 on PATH: %v", err)
+		t.Fatalf("integration tests require apm 0.28.0+omni.6 on PATH: %v", err)
 	}
 	output, err := exec.Command(path, "--version").CombinedOutput()
 	if err != nil {
 		t.Fatalf("read APM version: %v\n%s", err, output)
 	}
 	fields := strings.Fields(string(output))
-	if len(fields) == 0 || fields[len(fields)-1] != "0.28.0+omni.5" {
-		t.Fatalf("integration tests require exactly apm 0.28.0+omni.5, got %q", strings.TrimSpace(string(output)))
+	if !slices.Contains(fields, "0.28.0+omni.6") {
+		t.Fatalf("integration tests require exactly apm 0.28.0+omni.6, got %q", strings.TrimSpace(string(output)))
 	}
 }
 

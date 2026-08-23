@@ -14,9 +14,38 @@ import (
 	"slices"
 	"sort"
 	"strings"
-
-	"github.com/lkshrk/omni/internal/apm"
 )
+
+const onboardSchemaVersion = 1
+
+type OnboardSourcePreimage struct {
+	ID                 string `json:"id"`
+	AbsolutePath       string `json:"absolute_path"`
+	Kind               string `json:"kind"`
+	Size               int64  `json:"size"`
+	Mode               uint32 `json:"mode"`
+	ContentFingerprint string `json:"content_fingerprint"`
+}
+
+type OnboardCandidate struct {
+	ID                 string          `json:"id"`
+	Kind               string          `json:"kind"`
+	Name               string          `json:"name"`
+	SourceHandle       string          `json:"source_handle"`
+	SourceTargets      []string        `json:"source_targets"`
+	Payload            json.RawMessage `json:"payload"`
+	ContentFingerprint string          `json:"content_fingerprint"`
+	SourcePreimageIDs  []string        `json:"source_preimage_ids"`
+	SecretBlocked      bool            `json:"secret_blocked,omitempty"`
+	Dots               *OnboardDotsRef `json:"dots,omitempty"`
+}
+
+type OnboardInventory struct {
+	SchemaVersion   int                     `json:"schema_version"`
+	CandidateSetID  string                  `json:"candidate_set_id"`
+	SourcePreimages []OnboardSourcePreimage `json:"source_preimages"`
+	Candidates      []OnboardCandidate      `json:"candidates"`
+}
 
 type legacyDocument struct {
 	Path string
@@ -26,7 +55,7 @@ type legacyDocument struct {
 }
 
 type LegacyInventory struct {
-	Envelope    apm.CandidateEnvelope
+	Envelope    OnboardInventory
 	PreimageSet string
 	Documents   []string
 	Pointers    map[string]string // candidate ID -> owning document JSON pointer
@@ -38,8 +67,8 @@ func ExtractLegacyCandidates(configPath string) (LegacyInventory, error) {
 		return LegacyInventory{}, err
 	}
 	if _, err := os.Stat(abs); errors.Is(err, os.ErrNotExist) {
-		empty := apm.CandidateEnvelope{SchemaVersion: apm.ImportSchemaVersion, Coordinator: "omni-v24", Scope: "global", Sources: []string{"omni-v24"}, SourcePreimages: []apm.SourcePreimage{}, Candidates: []apm.ImportCandidate{}}
-		empty.CandidateSetID = canonicalDigest(map[string]any{"sources": empty.Sources, "preimages": empty.SourcePreimages, "candidates": empty.Candidates})
+		empty := OnboardInventory{SchemaVersion: onboardSchemaVersion, SourcePreimages: []OnboardSourcePreimage{}, Candidates: []OnboardCandidate{}}
+		empty.CandidateSetID = canonicalDigest(map[string]any{"preimages": empty.SourcePreimages, "candidates": empty.Candidates})
 		return LegacyInventory{Envelope: empty, PreimageSet: digest("empty-preimages"), Pointers: map[string]string{}}, nil
 	}
 	var docs []legacyDocument
@@ -48,11 +77,11 @@ func ExtractLegacyCandidates(configPath string) (LegacyInventory, error) {
 	if err := readLegacyDocument(abs, true, visited, active, &docs); err != nil {
 		return LegacyInventory{}, err
 	}
-	envelope := apm.CandidateEnvelope{SchemaVersion: apm.ImportSchemaVersion, Coordinator: "omni-v24", Scope: "global", Sources: []string{"omni-v24"}, SourcePreimages: []apm.SourcePreimage{}, Candidates: []apm.ImportCandidate{}}
+	envelope := OnboardInventory{SchemaVersion: onboardSchemaVersion, SourcePreimages: []OnboardSourcePreimage{}, Candidates: []OnboardCandidate{}}
 	pointers := map[string]string{}
 	for _, doc := range docs {
 		preID := canonicalDigest(map[string]any{"path": doc.Path, "kind": "file"})[:24]
-		envelope.SourcePreimages = append(envelope.SourcePreimages, apm.SourcePreimage{ID: preID, AbsolutePath: doc.Path, Kind: "file", Size: doc.Info.Size(), Mode: uint32(doc.Info.Mode().Perm()), ContentFingerprint: digestBytes(doc.Data)})
+		envelope.SourcePreimages = append(envelope.SourcePreimages, OnboardSourcePreimage{ID: preID, AbsolutePath: doc.Path, Kind: "file", Size: doc.Info.Size(), Mode: uint32(doc.Info.Mode().Perm()), ContentFingerprint: digestBytes(doc.Data)})
 		var agents map[string]json.RawMessage
 		if len(doc.Raw["agents"]) > 0 && !isNull(doc.Raw["agents"]) {
 			if err := json.Unmarshal(doc.Raw["agents"], &agents); err != nil {
@@ -102,18 +131,161 @@ func ExtractLegacyCandidates(configPath string) (LegacyInventory, error) {
 	if err := appendLegacyConditionalCandidates(&envelope, pointers, docs); err != nil {
 		return LegacyInventory{}, err
 	}
+	applyLegacyEffectiveResolution(&envelope, docs)
 	sort.Slice(envelope.SourcePreimages, func(i, j int) bool {
 		return envelope.SourcePreimages[i].ID < envelope.SourcePreimages[j].ID
 	})
 	sort.Slice(envelope.Candidates, func(i, j int) bool { return envelope.Candidates[i].ID < envelope.Candidates[j].ID })
 	preimagesJSON, _ := json.Marshal(envelope.SourcePreimages)
 	preimageSet := digestBytes(preimagesJSON)
-	envelope.CandidateSetID = canonicalDigest(map[string]any{"sources": envelope.Sources, "preimages": envelope.SourcePreimages, "candidates": envelope.Candidates})
+	envelope.CandidateSetID = canonicalDigest(map[string]any{"preimages": envelope.SourcePreimages, "candidates": envelope.Candidates})
 	paths := make([]string, 0, len(docs))
 	for _, doc := range docs {
 		paths = append(paths, doc.Path)
 	}
 	return LegacyInventory{Envelope: envelope, PreimageSet: preimageSet, Documents: paths, Pointers: pointers}, nil
+}
+
+type legacyEffectiveAgentSettings struct {
+	agentsUse                                                    []string
+	useSet                                                       bool
+	agentsDisabled, skillsDisabled, mcpDisabled, pluginsDisabled bool
+}
+
+func applyLegacyEffectiveResolution(envelope *OnboardInventory, docs []legacyDocument) {
+	hostname := currentHostname()
+	hostKeys := map[string]bool{hostname: true, shortHostname(hostname): true}
+	activeGroups := map[string]bool{currentMachineGroupName(): true, hostname: true, shortHostname(hostname): true}
+	for _, doc := range docs {
+		var hosts map[string][]string
+		if json.Unmarshal(doc.Raw["hosts"], &hosts) == nil {
+			for host, groups := range hosts {
+				if hostKeys[host] {
+					for _, group := range groups {
+						activeGroups[group] = true
+					}
+				}
+			}
+		}
+	}
+	settings := legacyEffectiveAgentSettings{}
+	applySettings := func(raw json.RawMessage) {
+		var values map[string]json.RawMessage
+		if json.Unmarshal(raw, &values) != nil {
+			return
+		}
+		if value, ok := values["agents_use"]; ok {
+			settings.useSet = true
+			_ = json.Unmarshal(value, &settings.agentsUse)
+		}
+		for key, dst := range map[string]*bool{"agents_disabled": &settings.agentsDisabled, "skills_disabled": &settings.skillsDisabled, "mcp_disabled": &settings.mcpDisabled, "plugins_disabled": &settings.pluginsDisabled} {
+			if value, ok := values[key]; ok {
+				_ = json.Unmarshal(value, dst)
+			}
+		}
+	}
+	for _, doc := range docs {
+		applySettings(doc.Raw["settings"])
+		var hosts map[string]json.RawMessage
+		if json.Unmarshal(doc.Raw["host_settings"], &hosts) == nil {
+			for host, raw := range hosts {
+				if hostKeys[host] {
+					applySettings(raw)
+				}
+			}
+		}
+	}
+	grouped, activeRefs := map[string]map[string]bool{}, map[string]map[string]bool{}
+	declarations := map[string][]string{"skill": {}, "mcp": {}, "plugin": {}, "marketplace": {}}
+	for _, kind := range []string{"skill", "mcp", "plugin", "marketplace"} {
+		grouped[kind], activeRefs[kind] = map[string]bool{}, map[string]bool{}
+	}
+	for _, candidate := range envelope.Candidates {
+		kind, identity := candidate.Kind, candidate.Name
+		if kind == "package" || kind == "skill" {
+			kind = "skill"
+			var payload map[string]any
+			if json.Unmarshal(candidate.Payload, &payload) == nil {
+				if source, _ := payload["source"].(string); source != "" {
+					identity = source
+				}
+			}
+		}
+		if _, ok := declarations[kind]; ok && !slices.Contains(declarations[kind], identity) {
+			declarations[kind] = append(declarations[kind], identity)
+		}
+	}
+	macros := map[string]string{"@agents.packages": "skill", "@agents.mcp_servers": "mcp", "@agents.plugins": "plugin", "@agents.marketplaces": "marketplace"}
+	for _, doc := range docs {
+		var groups []map[string]any
+		if json.Unmarshal(doc.Raw["groups"], &groups) != nil {
+			continue
+		}
+		for _, group := range groups {
+			name, _ := group["name"].(string)
+			for field, kind := range map[string]string{"skills": "skill", "mcp_servers": "mcp", "plugins": "plugin", "marketplaces": "marketplace"} {
+				for _, identity := range stringList(group[field]) {
+					identities := []string{identity}
+					if macroKind, ok := macros[identity]; ok {
+						if macroKind != kind {
+							continue
+						}
+						identities = declarations[kind]
+					}
+					for _, expanded := range identities {
+						grouped[kind][expanded] = true
+						if activeGroups[name] {
+							activeRefs[kind][expanded] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	useTargets, _ := normalizeLegacyTargets(settings.agentsUse)
+	for i := range envelope.Candidates {
+		candidate := &envelope.Candidates[i]
+		var payload map[string]any
+		if json.Unmarshal(candidate.Payload, &payload) != nil {
+			continue
+		}
+		identity := candidate.Name
+		groupKind := candidate.Kind
+		if candidate.Kind == "package" || candidate.Kind == "skill" {
+			groupKind = "skill"
+			if source, _ := payload["source"].(string); source != "" {
+				identity = source
+			}
+		}
+		if grouped[groupKind][identity] && !activeRefs[groupKind][identity] {
+			payload["disposition"] = "excluded-inactive-group"
+		}
+		disabled := settings.agentsDisabled || ((candidate.Kind == "package" || candidate.Kind == "skill") && settings.skillsDisabled) || candidate.Kind == "mcp" && settings.mcpDisabled || (candidate.Kind == "plugin" || candidate.Kind == "marketplace") && settings.pluginsDisabled
+		if disabled {
+			payload["disposition"] = "excluded-disabled"
+		}
+		if settings.useSet && candidate.Kind != "marketplace" && candidate.Kind != "unsupported" {
+			targets := useTargets
+			if len(candidate.SourceTargets) > 0 {
+				targets = nil
+				for _, target := range candidate.SourceTargets {
+					if slices.Contains(useTargets, target) {
+						targets = append(targets, target)
+					}
+				}
+			}
+			candidate.SourceTargets = sortedUnique(targets)
+			if len(candidate.SourceTargets) == 0 {
+				if _, excluded := payload["disposition"]; !excluded {
+					payload["disposition"] = "excluded-targets"
+				}
+			} else {
+				delete(payload, "target_resolution_required")
+			}
+		}
+		candidate.Payload, _ = json.Marshal(payload)
+		candidate.ContentFingerprint = digestBytes(candidate.Payload)
+	}
 }
 
 func readLegacyDocument(path string, root bool, visited, active map[string]bool, docs *[]legacyDocument) error {
@@ -170,20 +342,25 @@ func readLegacyDocument(path string, root bool, visited, active map[string]bool,
 	return nil
 }
 
-func legacyCandidate(kind string, raw json.RawMessage, sourcePath, pointer, preID string, excluded bool) (apm.ImportCandidate, error) {
+func legacyCandidate(kind string, raw json.RawMessage, sourcePath, pointer, preID string, excluded bool) (OnboardCandidate, error) {
 	var object map[string]any
 	if err := json.Unmarshal(raw, &object); err != nil || object == nil {
-		return apm.ImportCandidate{}, fmt.Errorf("legacy item %s#%s must be an object", sourcePath, pointer)
+		return OnboardCandidate{}, fmt.Errorf("legacy item %s#%s must be an object", sourcePath, pointer)
 	}
 	name := firstString(object, "name", "source")
 	if name == "" {
-		return apm.ImportCandidate{}, fmt.Errorf("legacy item %s#%s has no name/source", sourcePath, pointer)
+		return OnboardCandidate{}, fmt.Errorf("legacy item %s#%s has no name/source", sourcePath, pointer)
 	}
 	name = safeCandidateName(name)
+	if source, ok := object["source"].(string); ok && (strings.HasPrefix(source, "./") || strings.HasPrefix(source, "../")) {
+		if abs, absErr := filepath.Abs(filepath.Join(filepath.Dir(sourcePath), source)); absErr == nil {
+			object["source"] = abs
+		}
+	}
 	rawTargets := stringList(object["agents"])
 	targets, err := normalizeLegacyTargets(rawTargets)
 	if err != nil {
-		return apm.ImportCandidate{}, fmt.Errorf("legacy item %s#%s: %w", sourcePath, pointer, err)
+		return OnboardCandidate{}, fmt.Errorf("legacy item %s#%s: %w", sourcePath, pointer, err)
 	}
 	if len(rawTargets) == 0 {
 		object["target_resolution_required"] = true
@@ -199,16 +376,16 @@ func legacyCandidate(kind string, raw json.RawMessage, sourcePath, pointer, preI
 	}
 	payload, err := json.Marshal(object)
 	if err != nil {
-		return apm.ImportCandidate{}, err
+		return OnboardCandidate{}, err
 	}
 	fingerprint := digestBytes(payload)
 	handleRaw := digest("import-candidates-v1", "omni-legacy", kind, pointer)
 	handle := base64.RawURLEncoding.EncodeToString([]byte(handleRaw))
 	id := digest("import-candidates-v1", "omni-legacy", handle, strings.ToLower(name), kind)
-	return apm.ImportCandidate{ID: id, Kind: kind, Name: name, RootID: "omni-legacy", SourceHandle: handle, SourceTarget: targets, Provenance: "unknown", Payload: payload, ContentFingerprint: fingerprint, SourcePreimageIDs: []string{preID}, ExecutablePaths: []string{}, SecretBlocked: secretBlocked}, nil
+	return OnboardCandidate{ID: id, Kind: kind, Name: name, SourceHandle: handle, SourceTargets: targets, Payload: payload, ContentFingerprint: fingerprint, SourcePreimageIDs: []string{preID}, SecretBlocked: secretBlocked}, nil
 }
 
-func appendLegacyConditionalCandidates(envelope *apm.CandidateEnvelope, pointers map[string]string, docs []legacyDocument) error {
+func appendLegacyConditionalCandidates(envelope *OnboardInventory, pointers map[string]string, docs []legacyDocument) error {
 	active := map[string]bool{currentMachineGroupName(): true, shortHostname(currentHostname()): true}
 	for _, doc := range docs {
 		var hosts map[string][]string
@@ -299,9 +476,19 @@ func sanitizeLegacyPayload(object map[string]any, mcp bool) bool {
 			continue
 		}
 		if text, ok := value.(string); ok {
-			if parsed, err := url.Parse(text); err == nil && parsed.User != nil {
-				object[key], blocked = map[string]string{"blocked": "literal-secret"}, true
-				continue
+			if parsed, err := url.Parse(text); err == nil {
+				querySecret := false
+				for name, values := range parsed.Query() {
+					lowerName := strings.ToLower(name)
+					if len(values) > 0 && (strings.Contains(lowerName, "token") || strings.Contains(lowerName, "password") || strings.Contains(lowerName, "secret") || strings.Contains(lowerName, "auth") || strings.Contains(lowerName, "key")) {
+						querySecret = true
+						break
+					}
+				}
+				if parsed.User != nil || querySecret {
+					object[key], blocked = map[string]string{"blocked": "literal-secret"}, true
+					continue
+				}
 			}
 			if mcp && (strings.Contains(strings.ToLower(text), "bearer ") || strings.Contains(strings.ToLower(text), "token=") || strings.Contains(strings.ToLower(text), "password=")) {
 				object[key], blocked = map[string]string{"blocked": "literal-secret"}, true
@@ -343,6 +530,19 @@ func normalizeLegacyMCP(object map[string]any) bool {
 		}
 	}
 	return blocked
+}
+
+func validOnboardEnvName(name string) bool {
+	if name == "" || !((name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= 'a' && name[0] <= 'z') || name[0] == '_') {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		b := name[i]
+		if !((b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func firstString(object map[string]any, keys ...string) string {
@@ -401,16 +601,13 @@ func canonicalDigest(value any) string {
 
 func normalizeLegacyTargets(targets []string) ([]string, error) {
 	if len(targets) == 0 {
-		return []string{"claude", "codex"}, nil
+		return nil, nil
 	}
-	out := make([]string, 0, 2)
+	out := make([]string, 0, len(targets))
 	for _, target := range targets {
 		switch target {
 		case "claude", "claude-code":
 			target = "claude"
-		case "codex":
-		default:
-			return nil, fmt.Errorf("target %q is not supported by APM native onboarding v1", target)
 		}
 		if !slices.Contains(out, target) {
 			out = append(out, target)

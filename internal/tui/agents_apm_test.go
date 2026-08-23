@@ -1,14 +1,12 @@
 package tui
 
 import (
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/lkshrk/omni/internal/apm"
 	"github.com/lkshrk/omni/internal/app"
 )
 
@@ -29,10 +27,14 @@ func runBatchCmd(cmd tea.Cmd) []tea.Msg {
 func TestAgentsOnboardPreviewConfirmationJourney(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
-	plan := &apm.ImportPlan{SchemaVersion: 1, Coordinator: "omni-v24", OperationID: "0123456789abcdef0123456789abcdef", Items: []apm.ImportItem{{ID: "one"}}, Blockers: []json.RawMessage{}}
-	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: apm.ImportEnvelope{SchemaVersion: 1, Plan: plan}}})
-	if !got.agentsOnboardConfirm || got.agentsOnboardPlan == nil || !strings.Contains(got.apmOutput, "1 item(s), 0 blocker(s)") {
+	plan := &app.OnboardPlan{SchemaVersion: 1, OperationID: "0123456789abcdef0123456789abcdef", Items: []app.OnboardItem{{ID: "one", Resolution: app.OnboardResolution{Decision: "migrate"}}}}
+	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}}})
+	if got.agentsOnboardConfirm || got.agentsOnboardPlan == nil || !strings.Contains(got.apmOutput, "1 item(s), 0 blocker(s)") {
 		t.Fatalf("preview state: %#v", got.agentsOnboardPlan)
+	}
+	got = drive(got, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !got.agentsOnboardConfirm {
+		t.Fatal("reviewed plan did not request confirmation")
 	}
 	got = drive(got, tea.KeyPressMsg{Code: 'n'})
 	if got.agentsOnboardConfirm || got.agentsOnboardPlan != nil || !strings.Contains(got.statusMsg, "cancelled") {
@@ -40,18 +42,18 @@ func TestAgentsOnboardPreviewConfirmationJourney(t *testing.T) {
 	}
 }
 
-func TestAgentsOnboardProjectPreviewNamesReviewedRoot(t *testing.T) {
-	plan := &apm.ImportPlan{Scope: "project", ProjectRoot: "/workspace/demo", Items: []apm.ImportItem{}}
-	got := onboardPlanSummary(app.AgentsOnboardResult{Envelope: apm.ImportEnvelope{Plan: plan}})
-	if !strings.Contains(got, "/workspace/demo") {
+func TestAgentsOnboardPreviewIsLocalMigration(t *testing.T) {
+	plan := &app.OnboardPlan{Items: []app.OnboardItem{}}
+	got := onboardPlanSummary(app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}})
+	if strings.Contains(got, "project") || !strings.Contains(got, "Agent onboarding preview") {
 		t.Fatalf("summary=%q", got)
 	}
 }
 
 func TestAgentsOnboardBlockerAndRecoveryError(t *testing.T) {
 	m := baseModel(nil)
-	plan := &apm.ImportPlan{SchemaVersion: 1, Coordinator: "omni-v24", OperationID: "0123456789abcdef0123456789abcdef", Items: []apm.ImportItem{{ID: "secret", Name: "secret", Classification: "secret-blocked", ReasonCodes: []string{"secret-field:/env/TOKEN"}}}, Blockers: []json.RawMessage{json.RawMessage(`{"reason":"conflict"}`)}}
-	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: apm.ImportEnvelope{SchemaVersion: 1, Plan: plan}}})
+	plan := &app.OnboardPlan{SchemaVersion: 1, OperationID: "0123456789abcdef0123456789abcdef", Items: []app.OnboardItem{{ID: "secret", Name: "secret", Blockers: []string{"secret-mapping-required"}, Resolution: app.OnboardResolution{Decision: "migrate"}}}, Blockers: []string{"secret-mapping-required"}}
+	got := drive(m, agentsOnboardPlanDoneMsg{result: app.AgentsOnboardResult{Envelope: app.OnboardEnvelope{Plan: plan}}})
 	if got.agentsOnboardConfirm || !got.statusIsErr || !strings.Contains(got.statusMsg, "blockers") {
 		t.Fatalf("blocker state: confirm=%v status=%q", got.agentsOnboardConfirm, got.statusMsg)
 	}
@@ -61,26 +63,62 @@ func TestAgentsOnboardBlockerAndRecoveryError(t *testing.T) {
 	}
 }
 
-func TestAgentsOnboardResolvesTargetsSecretsExecutablesAndExclusions(t *testing.T) {
-	plan := &apm.ImportPlan{Items: []apm.ImportItem{{ID: "target", Classification: "needs-choice", CurrentTargets: []string{"future-agent"}, ProposedTargets: []string{"future-agent"}}, {ID: "secret", Name: "api", Classification: "secret-blocked", ReasonCodes: []string{"secret-field:/env/TOKEN"}}, {ID: "exec", Classification: "importable", ReasonCodes: []string{"executable:bin/run"}}, {ID: "unsupported", Name: "cursor", Classification: "unsupported", ReasonCodes: []string{"native-import-decoder-unavailable"}}, {ID: "conflict", Classification: "conflict", CandidateIDs: []string{"winner", "loser"}}, {ID: "conditional", Classification: "needs-choice", ReasonCodes: []string{"conditional-group-host"}}, {ID: "changed", Classification: "excluded-changed"}}}
+func TestAgentsOnboardResolvesLocalMigrationChoices(t *testing.T) {
+	dots := &app.OnboardDotsRef{}
+	plan := &app.OnboardPlan{Items: []app.OnboardItem{
+		{ID: "target", TargetOptions: []string{"future/agent"}, Blockers: []string{"target-resolution-required"}, Resolution: app.OnboardResolution{Decision: "migrate"}},
+		{ID: "secret", Name: "api", Payload: []byte(`{"env":{"TOKEN":{"blocked":true}}}`), Blockers: []string{"secret-mapping-required"}, Resolution: app.OnboardResolution{Decision: "migrate"}},
+		{ID: "unsupported", Name: "custom", Blockers: []string{"unsupported"}, Resolution: app.OnboardResolution{Decision: "migrate"}},
+		{ID: "move", Name: "move", Dots: dots, Resolution: app.OnboardResolution{Decision: "keep-in-dots"}},
+		{ID: "keep", Name: "keep", Dots: dots, Resolution: app.OnboardResolution{Decision: "move-to-apm"}},
+	}}
 	resolveOnboardItem(&plan.Items[0], "1")
 	resolveOnboardItem(&plan.Items[1], "m")
-	resolveOnboardItem(&plan.Items[2], "E")
-	resolveOnboardItem(&plan.Items[3], "x")
-	resolveOnboardItem(&plan.Items[4], "o")
-	resolveOnboardItem(&plan.Items[5], "x")
-	resolveOnboardItem(&plan.Items[6], "x")
+	resolveOnboardItem(&plan.Items[2], "x")
+	resolveOnboardItem(&plan.Items[3], "M")
+	resolveOnboardItem(&plan.Items[4], "d")
 	if got := onboardBlockerCount(plan); got != 0 {
 		t.Fatalf("blockers=%d plan=%#v", got, plan)
 	}
-	if plan.Items[1].Resolution.EnvBindings["/env/TOKEN"] != "OMNI_API_SECRET" {
+	if plan.Items[1].Resolution.EnvBindings["TOKEN"] != "OMNI_API_TOKEN" {
 		t.Fatalf("bindings=%v", plan.Items[1].Resolution.EnvBindings)
 	}
-	if plan.Items[3].Resolution.Decision != "exclude" {
-		t.Fatalf("unsupported client decision=%q", plan.Items[3].Resolution.Decision)
+	if plan.Items[2].Resolution.Decision != "keep-unmanaged" || plan.Items[3].Resolution.Decision != "move-to-apm" || plan.Items[4].Resolution.Decision != "keep-in-dots" {
+		t.Fatalf("decisions=%q,%q,%q", plan.Items[2].Resolution.Decision, plan.Items[3].Resolution.Decision, plan.Items[4].Resolution.Decision)
 	}
-	if plan.Items[0].Resolution.ApprovedTargets[0] != "future-agent" || !strings.Contains(onboardTargetChoiceHelp(plan.Items[0]), "1 future-agent") {
+	if plan.Items[0].Resolution.ApprovedTargets[0] != "future/agent" || !strings.Contains(onboardTargetChoiceHelp(plan.Items[0]), "1 future/agent") {
 		t.Fatalf("dynamic target choice=%#v", plan.Items[0].Resolution)
+	}
+}
+
+func TestAgentsOnboardTargetSelectionPreservesDotsOwnership(t *testing.T) {
+	dots := &app.OnboardDotsRef{}
+	for _, test := range []struct {
+		name string
+		keys []string
+		want []string
+	}{
+		{name: "move then target", keys: []string{"M", "1"}, want: []string{"claude"}},
+		{name: "target then move", keys: []string{"1", "M"}, want: []string{"claude"}},
+		{name: "move then all", keys: []string{"M", "a"}, want: []string{"claude", "codex"}},
+		{name: "all then move", keys: []string{"a", "M"}, want: []string{"claude", "codex"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			item := app.OnboardItem{Dots: dots, TargetOptions: []string{"claude", "codex"}, Resolution: app.OnboardResolution{Decision: "keep-in-dots"}}
+			for _, key := range test.keys {
+				if !resolveOnboardItem(&item, key) {
+					t.Fatalf("key %q was not handled", key)
+				}
+			}
+			if item.Resolution.Decision != "move-to-apm" || strings.Join(item.Resolution.ApprovedTargets, ",") != strings.Join(test.want, ",") {
+				t.Fatalf("resolution=%#v", item.Resolution)
+			}
+		})
+	}
+	item := app.OnboardItem{Dots: dots, TargetOptions: []string{"codex"}}
+	resolveOnboardItem(&item, "1")
+	if item.Resolution.Decision != "" {
+		t.Fatalf("target selection invented dots ownership decision %q", item.Resolution.Decision)
 	}
 }
 

@@ -351,11 +351,13 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.apmOutput = onboardPlanSummary(msg.result)
 		m.agentsOnboardPlan = &msg.result
 		m.agentsOnboardItem = 0
-		if msg.result.Envelope.Plan != nil && onboardBlockerCount(msg.result.Envelope.Plan) == 0 {
+		if msg.result.Envelope.Plan != nil && len(msg.result.Envelope.Plan.Items) == 0 && onboardBlockerCount(msg.result.Envelope.Plan) == 0 {
 			m.agentsOnboardConfirm = true
 			cmds = append(cmds, setStatus(&m, "Apply this onboarding plan? y/N", false))
+		} else if onboardBlockerCount(msg.result.Envelope.Plan) > 0 {
+			cmds = append(cmds, setStatus(&m, "Onboarding blockers must be resolved; press Enter to apply.", true))
 		} else {
-			cmds = append(cmds, setStatus(&m, "Onboarding blockers must be resolved before apply.", true))
+			cmds = append(cmds, setStatus(&m, "Review onboarding choices; press Enter to apply.", false))
 		}
 
 	case agentsOnboardApplyDoneMsg:
@@ -380,7 +382,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		if msg.err != nil {
 			cmds = append(cmds, setStatus(&m, "✗ onboarding recovery: "+msg.err.Error(), true))
 		} else {
-			m.apmOutput = fmt.Sprintf("Onboarding status: Omni=%s APM=%s", msg.result.OmniPhase, msg.result.APM.State)
+			m.apmOutput = fmt.Sprintf("Onboarding status: phase=%s state=%s", msg.result.OmniPhase, msg.result.APM.State)
 			cmds = append(cmds, setStatus(&m, "✓ onboarding recovery status", false))
 		}
 	case agentsOnboardCleanupDoneMsg:
