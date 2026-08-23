@@ -43,11 +43,11 @@ project recovery runs from the reviewed workspace root.
 
 Omni temporarily requires APM `0.28.0+omni.5`, built from the immutable
 `lkshrk/apm` commit
-[`4713ef995283d935943cfe70c42b8fc67c3933eb`](https://github.com/lkshrk/apm/commit/4713ef995283d935943cfe70c42b8fc67c3933eb).
+[`a041fd8f6ffb8b01e3d8e366e483b3297662559b`](https://github.com/lkshrk/apm/commit/a041fd8f6ffb8b01e3d8e366e483b3297662559b).
 Installers use this exact source specification:
 
 ```text
-git+https://github.com/lkshrk/apm.git@4713ef995283d935943cfe70c42b8fc67c3933eb
+git+https://github.com/lkshrk/apm.git@a041fd8f6ffb8b01e3d8e366e483b3297662559b
 ```
 
 The patch makes Hermes a stable explicit target, fixes global Antigravity MCP
