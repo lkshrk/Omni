@@ -3,486 +3,847 @@ package app
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/lkshrk/omni/internal/apm"
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/securefile"
 )
 
 type AgentsOnboardOptions struct {
-	PlanJSON    string
-	ApplyPlan   string
-	Sources     []string
-	ProjectRoot string
+	PlanJSON, ApplyPlan string
+	Sources             []string
+	ProjectRoot         string
 }
 type AgentsOnboardResolutions struct {
-	ApprovedTargets     map[string][]string
-	EnvBindings         map[string]map[string]string
-	ApprovedExecutables map[string][]string
-	Excluded            map[string]bool
+	ApprovedTargets                 map[string][]string
+	EnvBindings                     map[string]map[string]string
+	Excluded, MoveToAPM, KeepInDots map[string]bool
+	ApprovedExecutables             map[string][]string // compatibility; APM validates executables during install
+}
+type OnboardEnvelope struct {
+	OK                          bool         `json:"ok"`
+	Kind                        string       `json:"kind"`
+	Plan                        *OnboardPlan `json:"plan,omitempty"`
+	OperationID                 string       `json:"operation_id,omitempty"`
+	State                       string       `json:"state,omitempty"`
+	Applied, Retained, Blockers []string
 }
 type AgentsOnboardResult struct {
-	Envelope       apm.ImportEnvelope `json:"apm"`
-	CandidateSetID string             `json:"candidate_set_id"`
-	PreimageSet    string             `json:"preimage_set"`
+	Envelope       OnboardEnvelope `json:"onboarding"`
+	CandidateSetID string          `json:"candidate_set_id"`
+	PreimageSet    string          `json:"preimage_set"`
 }
 type AgentsOnboardStatusResult struct {
-	OperationID string             `json:"operation_id"`
-	OmniPhase   string             `json:"omni_phase"`
-	APM         apm.ImportEnvelope `json:"apm"`
+	OperationID string          `json:"operation_id"`
+	OmniPhase   string          `json:"omni_phase"`
+	APM         OnboardEnvelope `json:"onboarding"`
 }
-
 type OnboardingRecoveryError struct {
 	OperationID, OmniPhase, APMState string
 	Cause                            error
 }
 
+var onboardingPinnedAPMCheck = func(ctx context.Context, a *App) error { return a.requirePinnedAPM(ctx) }
+
 func (e *OnboardingRecoveryError) Error() string {
-	detail := e.APMState
-	if detail == "" {
-		detail = "unavailable"
-	}
-	return fmt.Sprintf("onboarding operation %s is incomplete (Omni=%s, APM=%s); run 'omni agents onboard resume --operation %s'", e.OperationID, e.OmniPhase, detail, e.OperationID)
+	return fmt.Sprintf("onboarding operation %s is incomplete (phase=%s); run 'omni agents onboard resume --operation %s'", e.OperationID, e.OmniPhase, e.OperationID)
 }
 func (e *OnboardingRecoveryError) Unwrap() error { return e.Cause }
 
-func (a *App) detectOnboardingRecovery(ctx context.Context) error {
-	rootPath := filepath.Join(a.StateDir, "onboarding")
-	entries, err := os.ReadDir(rootPath)
+func (a *App) detectOnboardingRecovery(context.Context) error {
+	path := filepath.Join(a.StateDir, "onboarding")
+	entries, err := os.ReadDir(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("inspect onboarding recovery state: %w", err)
+		return err
 	}
-	root, err := securefile.OpenRoot(rootPath)
+	root, err := securefile.OpenRoot(path)
 	if err != nil {
-		return fmt.Errorf("open onboarding recovery state: %w", err)
+		return err
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		opRoot, openErr := root.OpenChild(entry.Name())
-		if openErr != nil {
-			return fmt.Errorf("open onboarding operation %q: %w", entry.Name(), openErr)
+		op, err := root.OpenChild(entry.Name())
+		if err != nil {
+			return err
 		}
-		journal, readErr := readOnboardJournal(opRoot)
-		if readErr != nil {
-			return fmt.Errorf("read onboarding operation %q: %w", entry.Name(), readErr)
+		journal, err := readOnboardJournal(op)
+		if err != nil {
+			return err
 		}
-		recovery := &OnboardingRecoveryError{OperationID: journal.OperationID, OmniPhase: journal.Phase}
-		client, clientErr := a.onboardingClient(ctx, journal.ProjectRoot)
-		if clientErr != nil {
-			recovery.Cause = clientErr
-			return recovery
+		if journal.Phase != "complete" && journal.Phase != "rolled-back" {
+			return &OnboardingRecoveryError{OperationID: journal.OperationID, OmniPhase: journal.Phase}
 		}
-		status, _, statusErr := client.ImportStatusAt(ctx, journal.OperationID, journal.ProjectRoot)
-		if statusErr == nil && journal.Phase == "complete" && (status.State == "complete" || status.State == "rolled-back") {
-			continue
-		}
-		recovery.APMState, recovery.Cause = status.State, statusErr
-		return recovery
 	}
 	return nil
 }
 
-func (a *App) onboardingClient(ctx context.Context, projectRoot string) (*apm.Client, error) {
+func (a *App) onboardingClient(ctx context.Context) (*apm.Client, error) {
 	if !a.APMAvailable() {
 		return nil, errAPMNotInstalled()
 	}
-	if err := a.requirePinnedAPM(ctx); err != nil {
+	if err := onboardingPinnedAPMCheck(ctx, a); err != nil {
 		return nil, err
 	}
-	return a.APMClient(apm.Global).AtProjectRoot(projectRoot), nil
+	return a.APMClient(apm.Global), nil
 }
 
-func (a *App) AgentsOnboardPlan(ctx context.Context, opts AgentsOnboardOptions) (result AgentsOnboardResult, retErr error) {
-	projectRoot, err := canonicalOnboardProjectRoot(opts.ProjectRoot)
+func (a *App) AgentsOnboardPlan(ctx context.Context, opts AgentsOnboardOptions) (AgentsOnboardResult, error) {
+	if strings.TrimSpace(opts.ProjectRoot) != "" || slices.Contains(opts.Sources, "native") {
+		return AgentsOnboardResult{}, errors.New("project/native reverse import is unsupported; Omni migrates its legacy config and managed dots")
+	}
+	plan, err := a.buildAgentsOnboardPlan(ctx)
 	if err != nil {
 		return AgentsOnboardResult{}, err
 	}
-	inventory := LegacyInventory{PreimageSet: projectPreimageSet(projectRoot), Pointers: map[string]string{}}
-	if projectRoot == "" {
-		inventory, err = ExtractLegacyCandidates(a.ConfigPath)
+	if opts.PlanJSON != "" {
+		path, err := filepath.Abs(opts.PlanJSON)
 		if err != nil {
 			return AgentsOnboardResult{}, err
 		}
-	}
-	temp, err := os.MkdirTemp("", "omni-onboard-plan-*")
-	if err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	defer func() {
-		if err := os.RemoveAll(temp); err != nil {
-			retErr = errors.Join(retErr, fmt.Errorf("remove onboarding plan staging: %w", err))
-		}
-	}()
-	root, err := securefile.NewRoot(temp)
-	if err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	candidatePath := filepath.Join(root.Path(), "candidates.json")
-	if projectRoot == "" {
-		data, marshalErr := json.MarshalIndent(inventory.Envelope, "", " ")
-		if marshalErr != nil {
-			return AgentsOnboardResult{}, fmt.Errorf("encode onboarding candidates: %w", marshalErr)
-		}
-		if err := root.WriteFileAtomic("candidates.json", append(data, '\n')); err != nil {
-			return AgentsOnboardResult{}, err
-		}
-	}
-	client, err := a.onboardingClient(ctx, projectRoot)
-	if err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	sources := opts.Sources
-	persist := opts.PlanJSON
-	if persist != "" {
-		persist, err = filepath.Abs(persist)
+		data, err := json.MarshalIndent(plan, "", "  ")
 		if err != nil {
 			return AgentsOnboardResult{}, err
 		}
-	}
-	envelope, _, err := client.ImportPlan(ctx, apm.ImportRequest{CandidateFile: candidatePath, PreimageSet: inventory.PreimageSet, Sources: sources, PersistPlan: persist, ProjectRoot: projectRoot})
-	candidateSetID := inventory.Envelope.CandidateSetID
-	if envelope.Plan != nil {
-		candidateSetID = envelope.Plan.CandidateSetID
-	}
-	return AgentsOnboardResult{Envelope: envelope, CandidateSetID: candidateSetID, PreimageSet: inventory.PreimageSet}, err
-}
-
-func (a *App) AgentsOnboardApply(ctx context.Context, planPath string) (result AgentsOnboardResult, retErr error) {
-	planPath, err := filepath.Abs(planPath)
-	if err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	plan, err := readReviewedPlan(planPath)
-	if err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	projectRoot := plan.ProjectRoot
-	inventory := LegacyInventory{PreimageSet: projectPreimageSet(projectRoot), Pointers: map[string]string{}}
-	if projectRoot == "" {
-		inventory, err = ExtractLegacyCandidates(a.ConfigPath)
-		if err != nil {
-			return AgentsOnboardResult{}, err
-		}
-		if err := validateDispositionGate(plan, inventory); err != nil {
+		if err := atomicWriteOnboardFile(path, append(data, '\n'), 0o600); err != nil {
 			return AgentsOnboardResult{}, err
 		}
 	}
-	lock, err := config.AcquireWriteLock(a.ConfigPath)
-	if err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	defer func() {
-		if err := lock.Close(); err != nil {
-			retErr = errors.Join(retErr, fmt.Errorf("release config lock: %w", err))
-		}
-	}()
-	documents, err := captureJournalDocuments(inventory.Documents)
-	if err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	validationTemp, err := os.MkdirTemp("", "omni-onboard-validate-*")
-	if err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	defer func() {
-		if err := os.RemoveAll(validationTemp); err != nil {
-			retErr = errors.Join(retErr, fmt.Errorf("remove onboarding validation staging: %w", err))
-		}
-	}()
-	validationRoot, err := securefile.NewRoot(validationTemp)
-	if err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	if projectRoot == "" {
-		candidateData, marshalErr := json.MarshalIndent(inventory.Envelope, "", " ")
-		if marshalErr != nil {
-			return AgentsOnboardResult{}, fmt.Errorf("encode onboarding candidates: %w", marshalErr)
-		}
-		if err := validationRoot.WriteFileAtomic("candidates.json", append(candidateData, '\n')); err != nil {
-			return AgentsOnboardResult{}, err
-		}
-	}
-	client, err := a.onboardingClient(ctx, projectRoot)
-	if err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	fresh, _, err := client.ImportPlan(ctx, apm.ImportRequest{CandidateFile: filepath.Join(validationRoot.Path(), "candidates.json"), PreimageSet: inventory.PreimageSet, Sources: nativeOnboardSources(plan.Sources), ProjectRoot: projectRoot})
-	if err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	if fresh.Plan == nil || fresh.Plan.CandidateSetID != plan.CandidateSetID || fresh.Plan.InventoryFingerprint != plan.InventoryFingerprint || fresh.Plan.PlanID != plan.PlanID {
-		return AgentsOnboardResult{}, errors.New("reviewed plan is stale: current legacy/native inventory changed")
-	}
-	stateRoot, err := onboardingRoot(a.StateDir)
-	if err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	opRoot, err := stateRoot.Child(plan.OperationID)
-	if err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	randomToken := make([]byte, 32)
-	if _, err := rand.Read(randomToken); err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	token := []byte(base64.RawURLEncoding.EncodeToString(randomToken))
-	journal := onboardJournal{SchemaVersion: 1, OperationID: plan.OperationID, PlanID: plan.PlanID, ResolutionID: plan.ResolutionID, CandidateSetID: plan.CandidateSetID, PreimageSet: inventory.PreimageSet, Scope: plan.Scope, ProjectRoot: projectRoot, Phase: "planned", FinalizeToken: string(token), Documents: documents}
-	if err := writeOnboardJournal(opRoot, journal); err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	if err := opRoot.CopyIn(filepath.Join(validationRoot.Path(), "candidates.json"), "candidates.json"); err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	if err := opRoot.CopyIn(planPath, "plan.json"); err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	journal.Phase = "apm-applying"
-	if err := writeOnboardJournal(opRoot, journal); err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	envelope, _, err := client.ImportApply(ctx, apm.ImportRequest{CandidateFile: filepath.Join(opRoot.Path(), "candidates.json"), PlanFile: filepath.Join(opRoot.Path(), "plan.json"), PreimageSet: inventory.PreimageSet, FinalizeToken: token, ProjectRoot: projectRoot})
-	if err != nil {
-		return AgentsOnboardResult{Envelope: envelope, CandidateSetID: plan.CandidateSetID, PreimageSet: inventory.PreimageSet}, err
-	}
-	if envelope.OperationID != plan.OperationID {
-		return AgentsOnboardResult{}, errors.New("APM apply operation identity mismatch")
-	}
-	journal.Phase = "apm-applied"
-	if err := writeOnboardJournal(opRoot, journal); err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	if err := commitLegacyFragments(documents, a.ConfigPath); err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	journal.Phase = "v24-committed"
-	if err := writeOnboardJournal(opRoot, journal); err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	final, _, err := client.ImportFinalize(ctx, apm.ImportRequest{OperationID: plan.OperationID, PreimageSet: inventory.PreimageSet, FinalizeToken: token, ProjectRoot: projectRoot})
-	if err != nil {
-		return AgentsOnboardResult{Envelope: final, CandidateSetID: plan.CandidateSetID, PreimageSet: inventory.PreimageSet}, err
-	}
-	if final.OperationID != plan.OperationID {
-		return AgentsOnboardResult{}, errors.New("APM finalize operation identity mismatch")
-	}
-	if final.State != "complete" {
-		return AgentsOnboardResult{}, errors.New("APM finalize did not complete")
-	}
-	journal.Phase = "complete"
-	if err := writeOnboardJournal(opRoot, journal); err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	return AgentsOnboardResult{Envelope: final, CandidateSetID: plan.CandidateSetID, PreimageSet: inventory.PreimageSet}, nil
+	env := OnboardEnvelope{OK: len(plan.Blockers) == 0, Kind: "onboard-plan", Plan: &plan, State: "planned", Blockers: plan.Blockers}
+	return AgentsOnboardResult{Envelope: env, CandidateSetID: plan.CandidateSetID, PreimageSet: plan.PreimageSet}, nil
 }
 
-func (a *App) AgentsOnboardApplyReviewed(ctx context.Context, plan apm.ImportPlan) (result AgentsOnboardResult, retErr error) {
-	if err := apm.BindImportPlanResolution(&plan); err != nil {
-		return AgentsOnboardResult{}, err
-	}
-	temp, err := os.MkdirTemp("", "omni-onboard-reviewed-*")
+func (a *App) buildAgentsOnboardPlan(ctx context.Context) (OnboardPlan, error) {
+	inv, err := ExtractLegacyCandidates(a.ConfigPath)
 	if err != nil {
-		return AgentsOnboardResult{}, err
+		return OnboardPlan{}, err
 	}
-	defer func() {
-		if err := os.RemoveAll(temp); err != nil {
-			retErr = errors.Join(retErr, fmt.Errorf("remove reviewed-plan staging: %w", err))
+	dotCandidates, dotPreimages, err := a.extractDotsCandidates()
+	if err != nil {
+		return OnboardPlan{}, err
+	}
+	inv.Envelope.Candidates = append(inv.Envelope.Candidates, dotCandidates...)
+	inv.Envelope.SourcePreimages = append(inv.Envelope.SourcePreimages, dotPreimages...)
+	sort.Slice(inv.Envelope.Candidates, func(i, j int) bool { return inv.Envelope.Candidates[i].ID < inv.Envelope.Candidates[j].ID })
+	sort.Slice(inv.Envelope.SourcePreimages, func(i, j int) bool { return inv.Envelope.SourcePreimages[i].ID < inv.Envelope.SourcePreimages[j].ID })
+	inv.Envelope.CandidateSetID = canonicalDigest(map[string]any{"preimages": inv.Envelope.SourcePreimages, "candidates": inv.Envelope.Candidates})
+	rawPreimages, _ := json.Marshal(inv.Envelope.SourcePreimages)
+	inv.PreimageSet = digestBytes(rawPreimages)
+	client, err := a.onboardingClient(ctx)
+	if err != nil {
+		return OnboardPlan{}, err
+	}
+	targetResult, err := client.TargetsJSON(ctx)
+	if err != nil {
+		return OnboardPlan{}, err
+	}
+	var rows []struct {
+		Target string `json:"target"`
+	}
+	if err := json.Unmarshal([]byte(targetResult.Stdout), &rows); err != nil {
+		return OnboardPlan{}, fmt.Errorf("decode APM targets: %w", err)
+	}
+	var targets []string
+	for _, row := range rows {
+		if row.Target != "" {
+			targets = append(targets, row.Target)
 		}
-	}()
-	root, err := securefile.NewRoot(temp)
+	}
+	targets = sortedUnique(targets)
+	manifestPath, err := onboardManifestPath()
 	if err != nil {
-		return AgentsOnboardResult{}, err
+		return OnboardPlan{}, err
 	}
-	data, err := json.MarshalIndent(plan, "", "  ")
+	existing, _, _, readErr := captureOnboardOptionalFile(manifestPath)
+	if readErr != nil {
+		return OnboardPlan{}, readErr
+	}
+	items := make([]OnboardItem, 0, len(inv.Envelope.Candidates))
+	for _, c := range inv.Envelope.Candidates {
+		item := OnboardItem{ID: c.ID, Kind: c.Kind, Name: c.Name, Source: c.SourceHandle, ProposedTargets: append([]string(nil), c.SourceTargets...), TargetOptions: targets, Payload: c.Payload, ContentFingerprint: c.ContentFingerprint, Dots: c.Dots, Resolution: OnboardResolution{EnvBindings: map[string]string{}, ApprovedTargets: append([]string(nil), c.SourceTargets...)}}
+		var payload map[string]any
+		_ = json.Unmarshal(c.Payload, &payload)
+		if disposition, _ := payload["disposition"].(string); strings.HasPrefix(disposition, "excluded") {
+			item.Resolution.Decision = "keep-unmanaged"
+		}
+		if blocker, _ := payload["blocker"].(string); blocker != "" {
+			item.Blockers = append(item.Blockers, blocker)
+			item.Resolution.Decision = "keep-in-dots"
+		}
+		if c.Kind == "unsupported" {
+			item.Blockers = append(item.Blockers, "unsupported")
+			item.Resolution.Decision = "keep-unmanaged"
+		}
+		if c.Dots != nil && item.Resolution.Decision == "" {
+			item.Resolution.Decision = "keep-in-dots"
+		}
+		if c.Dots == nil && item.Resolution.Decision == "" {
+			item.Resolution.Decision = "migrate"
+		}
+		if len(c.SourceTargets) == 0 && item.Resolution.Decision == "migrate" {
+			item.Blockers = append(item.Blockers, "target-resolution-required")
+		}
+		for _, target := range c.SourceTargets {
+			if !slices.Contains(targets, target) {
+				item.Blockers = append(item.Blockers, "unknown-target:"+target)
+			}
+		}
+		if c.SecretBlocked {
+			item.Blockers = append(item.Blockers, "secret-mapping-required")
+		}
+		items = append(items, item)
+	}
+	proposed, markets, mergeBlockers, err := buildOnboardManifest(existing, items)
 	if err != nil {
-		return AgentsOnboardResult{}, err
+		return OnboardPlan{}, err
 	}
-	if err := root.WriteFileAtomic("plan.json", append(data, '\n')); err != nil {
-		return AgentsOnboardResult{}, err
+	plan := OnboardPlan{SchemaVersion: onboardSchemaVersion, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), CandidateSetID: inv.Envelope.CandidateSetID, PreimageSet: inv.PreimageSet, SourcePreimages: inv.Envelope.SourcePreimages, Items: items, Marketplaces: sortedMarketplaces(markets), ProposedManifest: string(proposed), Blockers: mergeBlockers}
+	for _, item := range items {
+		if item.Resolution.Decision != "keep-unmanaged" && item.Resolution.Decision != "keep-in-dots" {
+			plan.Blockers = append(plan.Blockers, item.Blockers...)
+		}
 	}
-	return a.AgentsOnboardApply(ctx, filepath.Join(root.Path(), "plan.json"))
+	plan.Blockers = sortedUnique(plan.Blockers)
+	if err := bindOnboardPlan(&plan); err != nil {
+		return OnboardPlan{}, err
+	}
+	return plan, nil
 }
 
-func (a *App) AgentsOnboardApplyResolved(ctx context.Context, planPath string, resolutions AgentsOnboardResolutions) (AgentsOnboardResult, error) {
-	plan, err := readReviewedPlan(planPath)
+func (a *App) AgentsOnboardApply(ctx context.Context, path string) (AgentsOnboardResult, error) {
+	plan, err := readReviewedPlan(path)
 	if err != nil {
 		return AgentsOnboardResult{}, err
 	}
-	if err := validateApprovedTargetResolutions(plan, resolutions.ApprovedTargets); err != nil {
+	return a.agentsOnboardApplyPlan(ctx, plan)
+}
+func (a *App) AgentsOnboardApplyReviewed(ctx context.Context, plan OnboardPlan) (AgentsOnboardResult, error) {
+	if err := bindOnboardPlan(&plan); err != nil {
+		return AgentsOnboardResult{}, err
+	}
+	return a.agentsOnboardApplyPlan(ctx, plan)
+}
+func (a *App) AgentsOnboardApplyResolved(ctx context.Context, path string, res AgentsOnboardResolutions) (AgentsOnboardResult, error) {
+	plan, err := readReviewedPlan(path)
+	if err != nil {
+		return AgentsOnboardResult{}, err
+	}
+	if err := validateApprovedTargetResolutions(plan, res.ApprovedTargets); err != nil {
+		return AgentsOnboardResult{}, err
+	}
+	if err := validateOnboardResolutionKeys(plan, res); err != nil {
 		return AgentsOnboardResult{}, err
 	}
 	for i := range plan.Items {
 		item := &plan.Items[i]
-		if targets := lookupResolution(resolutions.ApprovedTargets, item.ID, item.Name); len(targets) > 0 {
-			item.Resolution.Decision = "import"
-			item.Resolution.ApprovedTargets = sortedUnique(targets)
+		if targets := lookupResolution(res.ApprovedTargets, item.ID, item.Name); len(targets) > 0 {
+			item.Resolution.ApprovedTargets = targets
 		}
-		if bindings := lookupResolution(resolutions.EnvBindings, item.ID, item.Name); len(bindings) > 0 {
-			item.Resolution.Decision = "map-secret"
+		if bindings := lookupResolution(res.EnvBindings, item.ID, item.Name); len(bindings) > 0 {
 			item.Resolution.EnvBindings = bindings
+			item.Resolution.Decision = "map-secret"
 		}
-		if paths := lookupResolution(resolutions.ApprovedExecutables, item.ID, item.Name); len(paths) > 0 {
-			item.Resolution.Decision = "import"
-			item.Resolution.ApprovedExecutables = sortedUnique(paths)
+		if res.Excluded[item.ID] || res.Excluded[item.Name] {
+			item.Resolution.Decision = "keep-unmanaged"
 		}
-		if resolutions.Excluded[item.ID] || resolutions.Excluded[item.Name] {
-			item.Resolution.Decision = "exclude"
+		if res.MoveToAPM[item.ID] || res.MoveToAPM[item.Name] {
+			item.Resolution.Decision = "move-to-apm"
+		}
+		if res.KeepInDots[item.ID] || res.KeepInDots[item.Name] {
+			item.Resolution.Decision = "keep-in-dots"
 		}
 	}
-	if err := apm.BindImportPlanResolution(&plan); err != nil {
+	if err := bindOnboardPlan(&plan); err != nil {
 		return AgentsOnboardResult{}, err
 	}
-	return a.AgentsOnboardApplyReviewed(ctx, plan)
+	return a.agentsOnboardApplyPlan(ctx, plan)
 }
 
-func validateApprovedTargetResolutions(plan apm.ImportPlan, resolutions map[string][]string) error {
-	for key, targets := range resolutions {
-		if len(targets) == 0 {
-			return fmt.Errorf("target resolution item %s has no targets", key)
+func (a *App) agentsOnboardApplyPlan(ctx context.Context, plan OnboardPlan) (result AgentsOnboardResult, retErr error) {
+	if err := validateReviewedOnboardPlan(plan); err != nil {
+		return result, err
+	}
+	lock, err := config.AcquireWriteLock(a.ConfigPath)
+	if err != nil {
+		return result, err
+	}
+	lockOpen := true
+	defer func() {
+		if lockOpen {
+			retErr = errors.Join(retErr, lock.Close())
 		}
-		matched := false
+	}()
+	fresh, err := a.buildAgentsOnboardPlan(ctx)
+	if err != nil {
+		return result, err
+	}
+	if err := validateReviewedOnboardFresh(plan, fresh); err != nil {
+		return result, err
+	}
+	manifestPath, err := onboardManifestPath()
+	if err != nil {
+		return result, err
+	}
+	existing, manifestExisted, manifestModeValue, readErr := captureOnboardOptionalFile(manifestPath)
+	if readErr != nil {
+		return result, readErr
+	}
+	proposed, markets, blockers, err := buildOnboardManifest(existing, plan.Items)
+	if err != nil {
+		return result, err
+	}
+	for _, item := range plan.Items {
+		if slices.Contains([]string{"migrate", "move-to-apm", "map-secret"}, item.Resolution.Decision) {
+			for _, blocker := range unresolvedOnboardBlockers(item) {
+				blockers = append(blockers, item.ID+":"+blocker)
+			}
+		}
+	}
+	if len(blockers) > 0 {
+		return result, fmt.Errorf("onboarding plan has unresolved blockers: %s", strings.Join(sortedUnique(blockers), "; "))
+	}
+	marketData, marketExisted, _, err := captureOnboardOptionalFile(filepath.Join(filepath.Dir(manifestPath), "marketplaces.json"))
+	if err != nil {
+		return result, err
+	}
+	if err := validateOnboardMarketplacePreflight(markets); err != nil {
+		return result, err
+	}
+	inv, err := ExtractLegacyCandidates(a.ConfigPath)
+	if err != nil {
+		return result, err
+	}
+	docs, err := captureJournalDocuments(inv.Documents)
+	if err != nil {
+		return result, err
+	}
+	stateRoot, err := onboardingRoot(a.StateDir)
+	if err != nil {
+		return result, err
+	}
+	opRoot, err := stateRoot.Child(plan.OperationID)
+	if err != nil {
+		return result, err
+	}
+	journal := onboardJournal{SchemaVersion: 1, OperationID: plan.OperationID, PlanID: plan.PlanID, ResolutionID: plan.ResolutionID, CandidateSetID: plan.CandidateSetID, PreimageSet: plan.PreimageSet, Phase: "planned", Documents: docs, ManifestPath: manifestPath, ManifestData: base64.StdEncoding.EncodeToString(existing), ManifestExisted: manifestExisted, ManifestMode: manifestModeValue, ManifestHash: digestBytes(existing), ProposedManifestHash: digestBytes(proposed), MarketplaceData: base64.StdEncoding.EncodeToString(marketData), MarketplaceExisted: marketExisted, MarketplaceHash: digestBytes(marketData), Targets: reviewedOnboardTargets(plan), Marketplaces: markets}
+	if err := writePlanAndJournal(opRoot, plan, &journal); err != nil {
+		return result, err
+	}
+	if err := lock.Close(); err != nil {
+		return result, err
+	}
+	lockOpen = false
+	if err := a.continueOnboardOperation(ctx, opRoot, plan, &journal, proposed); err != nil {
+		return result, err
+	}
+	env := OnboardEnvelope{OK: true, Kind: "onboard-apply", OperationID: plan.OperationID, State: "complete"}
+	return AgentsOnboardResult{Envelope: env, CandidateSetID: plan.CandidateSetID, PreimageSet: plan.PreimageSet}, nil
+}
+
+var onboardingPhaseFailpoint func(phase string) error
+var onboardingDotMaterializer = func(ctx context.Context, a *App, ref OnboardDotsRef) error { return a.materializeOnboardDot(ctx, ref) }
+
+func (a *App) continueOnboardOperation(ctx context.Context, root *securefile.Root, plan OnboardPlan, journal *onboardJournal, proposed []byte) error {
+	advance := func(phase string) error {
+		journal.Phase = phase
+		if err := writeOnboardJournal(root, *journal); err != nil {
+			return err
+		}
+		if onboardingPhaseFailpoint != nil {
+			return onboardingPhaseFailpoint(phase)
+		}
+		return nil
+	}
+	if journal.Phase == "planned" {
+		if err := stageOnboardDotPackages(root, plan.Items, journal); err != nil {
+			return err
+		}
+		if err := advance("preflighted"); err != nil {
+			return err
+		}
+	}
+	scrub, err := deriveOnboardScrubEnv(plan, proposed, *journal)
+	if err != nil {
+		return err
+	}
+	if journal.Phase == "preflighted" {
+		if err := verifyOnboardMarketplacePreimage(*journal); err != nil {
+			return err
+		}
+		if err := dryRunOnboardManifest(ctx, a, root, proposed, *journal, scrub); err != nil {
+			return err
+		}
+		if err := advance("materializing-dots"); err != nil {
+			return err
+		}
+	}
+	if journal.Phase == "materializing-dots" {
 		for _, item := range plan.Items {
-			if key != item.ID && key != item.Name {
+			if item.Resolution.Decision != "move-to-apm" || item.Dots == nil || slices.Contains(journal.MaterializedItems, item.ID) {
 				continue
 			}
-			matched = true
-			allowed := item.TargetOptions()
-			for _, target := range targets {
-				if !apm.ValidImportName(target) || !slices.Contains(allowed, target) {
-					return fmt.Errorf("item %s does not allow target %s", item.Name, target)
+			if journal.PendingMaterializeItem == item.ID {
+				if err := verifyMaterializedOnboardItem(item, *journal); err == nil && onboardDotOwnershipReleased(a.ConfigPath, *item.Dots) {
+					journal.MaterializedItems = append(journal.MaterializedItems, item.ID)
+					journal.PendingMaterializeItem = ""
+					if err := writeOnboardJournal(root, *journal); err != nil {
+						return err
+					}
+					continue
+				}
+			}
+			fingerprint, err := onboardTreeFingerprint(item.Dots.SourcePath, item.Dots.SourcePath)
+			if err != nil || fingerprint != item.ContentFingerprint {
+				return &OnboardingRecoveryError{OperationID: plan.OperationID, OmniPhase: journal.Phase, Cause: errors.New("dots source changed after review")}
+			}
+			journal.PendingMaterializeItem = item.ID
+			if err := writeOnboardJournal(root, *journal); err != nil {
+				return err
+			}
+			if err := onboardingDotMaterializer(ctx, a, *item.Dots); err != nil {
+				return &OnboardingRecoveryError{OperationID: plan.OperationID, OmniPhase: journal.Phase, Cause: err}
+			}
+			if err := verifyMaterializedOnboardItem(item, *journal); err != nil {
+				return &OnboardingRecoveryError{OperationID: plan.OperationID, OmniPhase: journal.Phase, Cause: fmt.Errorf("%s: %w", item.Name, err)}
+			}
+			if onboardingPhaseFailpoint != nil {
+				if err := onboardingPhaseFailpoint("after-materialize:" + item.ID); err != nil {
+					return err
+				}
+			}
+			journal.MaterializedItems = append(journal.MaterializedItems, item.ID)
+			journal.PendingMaterializeItem = ""
+			if err := writeOnboardJournal(root, *journal); err != nil {
+				return err
+			}
+			if onboardingPhaseFailpoint != nil {
+				if err := onboardingPhaseFailpoint("materialized:" + item.ID); err != nil {
+					return err
 				}
 			}
 		}
-		if !matched {
-			return fmt.Errorf("target resolution item %s is not in the reviewed plan", key)
+		if err := advance("dots-materialized"); err != nil {
+			return err
+		}
+	}
+	if journal.Phase == "dots-materialized" {
+		client, err := a.onboardingClient(ctx)
+		if err != nil {
+			return err
+		}
+		if err := promoteOnboardPackages(*journal); err != nil {
+			return err
+		}
+		if err := registerOnboardMarketplaces(ctx, client, journal.Marketplaces); err != nil {
+			return err
+		}
+		if err := writeOnboardManifestCAS(*journal, proposed); err != nil {
+			return err
+		}
+		if err := advance("manifest-installed"); err != nil {
+			return err
+		}
+	}
+	if journal.Phase == "manifest-installed" {
+		if err := verifyOnboardManifestHash(journal.ManifestPath, journal.ProposedManifestHash); err != nil {
+			return err
+		}
+		client, err := a.onboardingClient(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err := client.InstallOnly(ctx, apm.SurfacePackages, journal.Targets, apm.InstallOptions{DryRun: true, ScrubEnv: scrub}); err != nil {
+			journal.Phase = "dots-materialized"
+			phaseErr := writeOnboardJournal(root, *journal)
+			if phaseErr == nil && onboardingPhaseFailpoint != nil {
+				phaseErr = onboardingPhaseFailpoint("manifest-replayable-before-restore")
+			}
+			if phaseErr != nil {
+				return errors.Join(err, phaseErr)
+			}
+			restoreErr := restoreOnboardManifest(*journal)
+			return errors.Join(err, restoreErr, phaseErr)
+		}
+		if _, err := client.InstallOnly(ctx, apm.SurfaceMcp, journal.Targets, apm.InstallOptions{DryRun: true, ScrubEnv: scrub}); err != nil {
+			return err
+		}
+		if err := prepareOnboardTransformedTargets(plan, *journal); err != nil {
+			return err
+		}
+		if _, err := client.InstallOnly(ctx, apm.SurfacePackages, journal.Targets, apm.InstallOptions{ScrubEnv: scrub}); err != nil {
+			return err
+		}
+		if err := advance("packages-installed"); err != nil {
+			return err
+		}
+	}
+	if journal.Phase == "packages-installed" {
+		client, err := a.onboardingClient(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err := client.InstallOnly(ctx, apm.SurfaceMcp, journal.Targets, apm.InstallOptions{DryRun: true, ScrubEnv: scrub}); err != nil {
+			return err
+		}
+		if _, err := client.InstallOnly(ctx, apm.SurfaceMcp, journal.Targets, apm.InstallOptions{ScrubEnv: scrub}); err != nil {
+			return err
+		}
+		if err := advance("mcp-installed"); err != nil {
+			return err
+		}
+	}
+	if journal.Phase == "mcp-installed" {
+		client, err := a.onboardingClient(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err := client.AuditGlobal(ctx, scrub); err != nil {
+			return err
+		}
+		if err := advance("audited"); err != nil {
+			return err
+		}
+	}
+	if journal.Phase == "audited" {
+		lock, err := config.AcquireWriteLock(a.ConfigPath)
+		if err != nil {
+			return err
+		}
+		if err := commitLegacyFragments(journal.Documents, a.ConfigPath); err != nil {
+			return errors.Join(err, lock.Close())
+		}
+		if err := lock.Close(); err != nil {
+			return err
+		}
+		if err := advance("v24-committed"); err != nil {
+			return err
+		}
+	}
+	if journal.Phase == "v24-committed" {
+		return advance("complete")
+	}
+	if journal.Phase != "complete" {
+		return fmt.Errorf("unsupported onboarding journal phase %q", journal.Phase)
+	}
+	return nil
+}
+
+func verifyOnboardMarketplacePreimage(j onboardJournal) error {
+	path := filepath.Join(filepath.Dir(j.ManifestPath), "marketplaces.json")
+	data, existed, _, err := captureOnboardOptionalFile(path)
+	if err != nil {
+		return err
+	}
+	if existed != j.MarketplaceExisted || digestBytes(data) != j.MarketplaceHash {
+		return errors.New("APM marketplace registry changed since onboarding preflight")
+	}
+	return nil
+}
+
+func registerOnboardMarketplaces(ctx context.Context, client *apm.Client, markets []OnboardMarketplace) error {
+	registered, err := readRegisteredOnboardMarketplaces()
+	if err != nil {
+		return err
+	}
+	for _, market := range markets {
+		if current, ok := registered[strings.ToLower(market.Name)]; ok {
+			if !sameOnboardMarketplaceSource(current, market.Source) {
+				return fmt.Errorf("marketplace %q conflicts with registered source", market.Name)
+			}
+			continue
+		}
+		if _, err := client.Run(ctx, "marketplace", "add", market.Source, "--name", market.Name); err != nil {
+			return err
+		}
+		registered[strings.ToLower(market.Name)] = market.Source
+	}
+	return nil
+}
+
+func readRegisteredOnboardMarketplaces() (map[string]string, error) {
+	workspace, err := apm.GlobalWorkspaceDir()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(filepath.Join(workspace, "marketplaces.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var registry struct {
+		Marketplaces []struct {
+			Name  string `json:"name"`
+			URL   string `json:"url"`
+			Owner string `json:"owner"`
+			Repo  string `json:"repo"`
+		} `json:"marketplaces"`
+	}
+	if err := json.Unmarshal(data, &registry); err != nil {
+		return nil, fmt.Errorf("parse APM marketplace registry: %w", err)
+	}
+	out := make(map[string]string, len(registry.Marketplaces))
+	for _, market := range registry.Marketplaces {
+		source := market.URL
+		if source == "" && market.Owner != "" && market.Repo != "" {
+			source = market.Owner + "/" + market.Repo
+		}
+		out[strings.ToLower(market.Name)] = source
+	}
+	return out, nil
+}
+
+func sameOnboardMarketplaceSource(left, right string) bool {
+	normalize := func(value string) string {
+		value = strings.TrimSpace(strings.TrimSuffix(value, ".git"))
+		value = strings.TrimSuffix(value, "/")
+		for _, prefix := range []string{"https://github.com/", "http://github.com/", "git@github.com:"} {
+			value = strings.TrimPrefix(value, prefix)
+		}
+		if strings.HasPrefix(value, "/") || strings.HasPrefix(value, ".") || strings.HasPrefix(value, "~") {
+			if abs, err := filepath.Abs(strings.TrimPrefix(value, "~/")); err == nil {
+				value = abs
+			}
+		}
+		return strings.ToLower(value)
+	}
+	return normalize(left) == normalize(right)
+}
+
+func unresolvedOnboardBlockers(item OnboardItem) []string {
+	var out []string
+	for _, blocker := range item.Blockers {
+		switch {
+		case blocker == "target-resolution-required" && len(item.Resolution.ApprovedTargets) > 0:
+			continue
+		case strings.HasPrefix(blocker, "unknown-target:") && allOnboardTargetsAllowed(item):
+			continue
+		case blocker == "secret-mapping-required" && len(item.Resolution.EnvBindings) > 0:
+			continue
+		}
+		out = append(out, blocker)
+	}
+	return out
+}
+
+func allOnboardTargetsAllowed(item OnboardItem) bool {
+	if len(item.Resolution.ApprovedTargets) == 0 {
+		return false
+	}
+	for _, target := range item.Resolution.ApprovedTargets {
+		if !slices.Contains(item.TargetOptions, target) {
+			return false
+		}
+	}
+	return true
+}
+
+func validateReviewedOnboardFresh(reviewed, fresh OnboardPlan) error {
+	if reviewed.CandidateSetID != fresh.CandidateSetID || reviewed.PreimageSet != fresh.PreimageSet || !reflect.DeepEqual(reviewed.SourcePreimages, fresh.SourcePreimages) {
+		return errors.New("reviewed plan is stale: legacy or dots inventory changed")
+	}
+	if len(reviewed.Items) != len(fresh.Items) {
+		return errors.New("reviewed plan item count differs from fresh inventory")
+	}
+	freshByID := make(map[string]OnboardItem, len(fresh.Items))
+	for _, item := range fresh.Items {
+		if !hexID(item.ID, 64) || freshByID[item.ID].ID != "" {
+			return errors.New("fresh onboarding inventory has invalid item identity")
+		}
+		freshByID[item.ID] = item
+	}
+	for _, item := range reviewed.Items {
+		if !hexID(item.ID, 64) {
+			return fmt.Errorf("invalid reviewed item ID %q", item.ID)
+		}
+		current, ok := freshByID[item.ID]
+		if !ok {
+			return fmt.Errorf("reviewed item %s is absent from fresh inventory", item.ID)
+		}
+		left, right := item, current
+		left.Resolution, right.Resolution = OnboardResolution{}, OnboardResolution{}
+		if !reflect.DeepEqual(left, right) {
+			return fmt.Errorf("reviewed item %s immutable fields differ from fresh inventory", item.ID)
+		}
+		delete(freshByID, item.ID)
+	}
+	return nil
+}
+
+func validateOnboardResolutionKeys(plan OnboardPlan, res AgentsOnboardResolutions) error {
+	byName := map[string][]string{}
+	for _, item := range plan.Items {
+		byName[item.Name] = append(byName[item.Name], item.ID)
+	}
+	validateKey := func(key string) error {
+		for _, item := range plan.Items {
+			if item.ID == key {
+				return nil
+			}
+		}
+		ids := byName[key]
+		if len(ids) == 1 {
+			return nil
+		}
+		if len(ids) > 1 {
+			return fmt.Errorf("onboarding resolution name %q is ambiguous; use one of item IDs %s", key, strings.Join(ids, ", "))
+		}
+		return fmt.Errorf("onboarding resolution item %q is not in the reviewed plan", key)
+	}
+	keys := map[string]bool{}
+	for key := range res.ApprovedTargets {
+		keys[key] = true
+	}
+	for key := range res.EnvBindings {
+		keys[key] = true
+	}
+	for key := range res.Excluded {
+		keys[key] = true
+	}
+	for key := range res.MoveToAPM {
+		keys[key] = true
+	}
+	for key := range res.KeepInDots {
+		keys[key] = true
+	}
+	for key := range keys {
+		if err := validateKey(key); err != nil {
+			return err
+		}
+		decisions := 0
+		if res.Excluded[key] {
+			decisions++
+		}
+		if res.MoveToAPM[key] {
+			decisions++
+		}
+		if res.KeepInDots[key] {
+			decisions++
+		}
+		if len(res.EnvBindings[key]) > 0 {
+			decisions++
+		}
+		if decisions > 1 {
+			return fmt.Errorf("onboarding item %q has conflicting decisions", key)
+		}
+	}
+	for _, item := range plan.Items {
+		itemKeys := []string{item.ID}
+		if len(byName[item.Name]) == 1 {
+			itemKeys = append(itemKeys, item.Name)
+		}
+		decisions := 0
+		for _, key := range itemKeys {
+			if res.Excluded[key] {
+				decisions++
+			}
+			if res.MoveToAPM[key] {
+				decisions++
+			}
+			if res.KeepInDots[key] {
+				decisions++
+			}
+			if len(res.EnvBindings[key]) > 0 {
+				decisions++
+			}
+		}
+		if decisions > 1 {
+			return fmt.Errorf("onboarding item %q has conflicting decisions", item.ID)
 		}
 	}
 	return nil
 }
 
-func sortedUnique(values []string) []string {
-	out := append([]string(nil), values...)
-	sort.Strings(out)
-	return slices.Compact(out)
-}
-func lookupResolution[T any](values map[string]T, id, name string) T {
-	if value, ok := values[id]; ok {
-		return value
+func captureOnboardOptionalFile(path string) ([]byte, bool, uint32, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, 0, nil
 	}
-	return values[name]
-}
-
-func (a *App) AgentsOnboardStatus(ctx context.Context, operationID string) (AgentsOnboardStatusResult, error) {
-	if strings.TrimSpace(operationID) == "" {
-		return AgentsOnboardStatusResult{}, errors.New("operation ID is required")
-	}
-	stateRoot, err := securefile.OpenRoot(filepath.Join(a.StateDir, "onboarding"))
 	if err != nil {
-		return AgentsOnboardStatusResult{}, err
+		return nil, false, 0, err
 	}
-	opRoot, err := stateRoot.OpenChild(operationID)
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, false, 0, fmt.Errorf("APM preimage %q must be a regular non-symlink file", path)
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return AgentsOnboardStatusResult{}, err
+		return nil, false, 0, err
 	}
-	journal, err := readOnboardJournal(opRoot)
-	if err != nil {
-		return AgentsOnboardStatusResult{}, err
-	}
-	client, err := a.onboardingClient(ctx, journal.ProjectRoot)
-	if err != nil {
-		return AgentsOnboardStatusResult{}, err
-	}
-	envelope, _, err := client.ImportStatusAt(ctx, operationID, journal.ProjectRoot)
-	return AgentsOnboardStatusResult{OperationID: operationID, OmniPhase: journal.Phase, APM: envelope}, err
+	return data, true, uint32(info.Mode().Perm()), nil
 }
 
-func (a *App) AgentsOnboardResume(ctx context.Context, operationID string) (result AgentsOnboardStatusResult, retErr error) {
-	lock, err := config.AcquireWriteLock(a.ConfigPath)
+func validateOnboardMarketplacePreflight(markets []OnboardMarketplace) error {
+	registered, err := readRegisteredOnboardMarketplaces()
+	if err != nil {
+		return err
+	}
+	for _, market := range markets {
+		if current, ok := registered[strings.ToLower(market.Name)]; ok && !sameOnboardMarketplaceSource(current, market.Source) {
+			return fmt.Errorf("marketplace %q conflicts with registered source", market.Name)
+		}
+	}
+	return nil
+}
+
+func (a *App) AgentsOnboardStatus(_ context.Context, id string) (AgentsOnboardStatusResult, error) {
+	j, err := a.readOnboardOperation(id)
 	if err != nil {
 		return AgentsOnboardStatusResult{}, err
 	}
-	defer func() {
-		if err := lock.Close(); err != nil {
-			retErr = errors.Join(retErr, fmt.Errorf("release config lock: %w", err))
-		}
-	}()
-	stateRoot, err := securefile.OpenRoot(filepath.Join(a.StateDir, "onboarding"))
+	state := "incomplete"
+	if j.Phase == "complete" || j.Phase == "rolled-back" {
+		state = j.Phase
+	}
+	return AgentsOnboardStatusResult{OperationID: id, OmniPhase: j.Phase, APM: OnboardEnvelope{OK: state != "incomplete", Kind: "onboard-status", OperationID: id, State: state}}, nil
+}
+func (a *App) AgentsOnboardResume(ctx context.Context, id string) (result AgentsOnboardStatusResult, retErr error) {
+	j, err := a.readOnboardOperation(id)
 	if err != nil {
 		return AgentsOnboardStatusResult{}, err
 	}
-	opRoot, err := stateRoot.OpenChild(operationID)
+	if j.Phase == "complete" {
+		return a.AgentsOnboardStatus(ctx, id)
+	}
+	root, err := securefile.OpenRoot(filepath.Join(a.StateDir, "onboarding", id))
 	if err != nil {
 		return AgentsOnboardStatusResult{}, err
 	}
-	journal, err := readOnboardJournal(opRoot)
+	plan, err := readReviewedPlan(filepath.Join(root.Path(), "plan.json"))
 	if err != nil {
 		return AgentsOnboardStatusResult{}, err
 	}
-	token := []byte(journal.FinalizeToken)
-	plan, err := readReviewedPlan(filepath.Join(opRoot.Path(), "plan.json"))
+	preimage, err := decodeOnboardRecoveryData(j.ManifestData)
 	if err != nil {
 		return AgentsOnboardStatusResult{}, err
 	}
-	if plan.OperationID != journal.OperationID || plan.PlanID != journal.PlanID || plan.ResolutionID != journal.ResolutionID || plan.CandidateSetID != journal.CandidateSetID {
-		return AgentsOnboardStatusResult{}, errors.New("onboarding journal/plan identity mismatch")
-	}
-	client, err := a.onboardingClient(ctx, journal.ProjectRoot)
+	proposed, _, blockers, err := buildOnboardManifest(preimage, plan.Items)
 	if err != nil {
 		return AgentsOnboardStatusResult{}, err
 	}
-	if journal.Phase == "planned" || journal.Phase == "apm-applying" {
-		envelope, _, resumeErr := client.ImportResume(ctx, apm.ImportRequest{OperationID: operationID, CandidateFile: filepath.Join(opRoot.Path(), "candidates.json"), PlanFile: filepath.Join(opRoot.Path(), "plan.json"), PreimageSet: journal.PreimageSet, FinalizeToken: token, ProjectRoot: journal.ProjectRoot})
-		if resumeErr != nil {
-			return AgentsOnboardStatusResult{OperationID: operationID, OmniPhase: journal.Phase, APM: envelope}, resumeErr
-		}
-		if envelope.OperationID != operationID {
-			return AgentsOnboardStatusResult{}, errors.New("APM resume operation identity mismatch")
-		}
-		if envelope.State != "awaiting-external-commit" {
-			return AgentsOnboardStatusResult{}, fmt.Errorf("APM resume returned state %q", envelope.State)
-		}
-		journal.Phase = "apm-applied"
-		if err := writeOnboardJournal(opRoot, journal); err != nil {
-			return AgentsOnboardStatusResult{}, err
-		}
+	if len(blockers) > 0 {
+		return AgentsOnboardStatusResult{}, fmt.Errorf("resume manifest blockers: %s", strings.Join(blockers, ", "))
 	}
-	if journal.Phase == "apm-applied" {
-		if err := commitLegacyFragments(journal.Documents, a.ConfigPath); err != nil {
-			return AgentsOnboardStatusResult{}, err
-		}
-		journal.Phase = "v24-committed"
-		if err := writeOnboardJournal(opRoot, journal); err != nil {
-			return AgentsOnboardStatusResult{}, err
-		}
+	if err := a.continueOnboardOperation(ctx, root, plan, &j, proposed); err != nil {
+		return AgentsOnboardStatusResult{}, err
 	}
-	if journal.Phase == "v24-committed" {
-		envelope, _, err := client.ImportFinalize(ctx, apm.ImportRequest{OperationID: operationID, PreimageSet: journal.PreimageSet, FinalizeToken: token, ProjectRoot: journal.ProjectRoot})
-		if err != nil {
-			return AgentsOnboardStatusResult{}, err
-		}
-		journal.Phase = "complete"
-		if err := writeOnboardJournal(opRoot, journal); err != nil {
-			return AgentsOnboardStatusResult{}, err
-		}
-		return AgentsOnboardStatusResult{OperationID: operationID, OmniPhase: journal.Phase, APM: envelope}, nil
-	}
-	return a.AgentsOnboardStatus(ctx, operationID)
+	return a.AgentsOnboardStatus(ctx, id)
 }
 
 type AgentsOnboardCleanupPreview struct {
@@ -492,281 +853,498 @@ type AgentsOnboardCleanupPreview struct {
 	AlreadyClean bool     `json:"already_clean"`
 }
 
-func (a *App) AgentsOnboardCleanup(ctx context.Context, operationID string, confirm bool) (AgentsOnboardCleanupPreview, error) {
-	preview := AgentsOnboardCleanupPreview{OperationID: operationID, Paths: []string{filepath.Join(a.StateDir, "onboarding", operationID), filepath.Join("~/.apm/import-journal", operationID)}, Count: 2}
-	tombstones, tombErr := securefile.NewRoot(filepath.Join(a.StateDir, "onboarding-cleanup"))
-	if tombErr != nil {
-		return preview, tombErr
+func (a *App) AgentsOnboardCleanup(_ context.Context, id string, confirm bool) (AgentsOnboardCleanupPreview, error) {
+	path := filepath.Join(a.StateDir, "onboarding", id)
+	p := AgentsOnboardCleanupPreview{OperationID: id, Paths: []string{path}, Count: 1}
+	j, err := a.readOnboardOperation(id)
+	if errors.Is(err, os.ErrNotExist) {
+		p.AlreadyClean = true
+		return p, nil
 	}
-	tombstone := operationID + ".json"
-	if err := tombstones.Verify(tombstone); err == nil {
-		if root, openErr := securefile.OpenRoot(filepath.Join(a.StateDir, "onboarding")); openErr == nil {
-			if removeErr := root.Remove(operationID); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-				return preview, removeErr
-			}
-		}
-		preview.AlreadyClean = true
-		return preview, nil
-	}
-	stateRoot, err := securefile.OpenRoot(filepath.Join(a.StateDir, "onboarding"))
 	if err != nil {
-		return preview, err
+		return p, err
 	}
-	opRoot, err := stateRoot.OpenChild(operationID)
-	if err != nil {
-		return preview, err
-	}
-	journal, err := readOnboardJournal(opRoot)
-	if err != nil {
-		return preview, err
-	}
-	if journal.Phase != "complete" {
-		return preview, errors.New("onboarding cleanup requires a complete operation")
-	}
-	client, err := a.onboardingClient(ctx, journal.ProjectRoot)
-	if err != nil {
-		return preview, err
-	}
-	status, _, err := client.ImportStatusAt(ctx, operationID, journal.ProjectRoot)
-	if err != nil {
-		return preview, err
-	}
-	if status.State != "complete" && status.State != "rolled-back" {
-		return preview, errors.New("APM cleanup requires a terminal operation")
+	if j.Phase != "complete" && j.Phase != "rolled-back" {
+		return p, errors.New("incomplete onboarding cannot be cleaned; resume or roll it back")
 	}
 	if !confirm {
-		return preview, nil
+		return p, nil
 	}
-	if _, _, err := client.ImportCleanupAt(ctx, operationID, journal.ProjectRoot); err != nil {
-		return preview, err
-	}
-	data, marshalErr := json.Marshal(preview)
-	if marshalErr != nil {
-		return preview, marshalErr
-	}
-	if err := tombstones.WriteFileAtomic(tombstone, data); err != nil {
-		return preview, err
-	}
-	if err := stateRoot.Remove(operationID); err != nil {
-		return preview, err
-	}
-	return preview, nil
-}
-
-func readReviewedPlan(path string) (apm.ImportPlan, error) {
-	data, err := os.ReadFile(path)
+	root, err := securefile.OpenRoot(filepath.Join(a.StateDir, "onboarding"))
 	if err != nil {
-		return apm.ImportPlan{}, err
+		return p, err
 	}
-	var envelope apm.ImportEnvelope
-	var probe map[string]json.RawMessage
-	if err := json.Unmarshal(data, &probe); err != nil {
-		return apm.ImportPlan{}, err
+	return p, root.Remove(id)
+}
+func (a *App) AgentsOnboardRollback(_ context.Context, id string) (AgentsOnboardStatusResult, error) {
+	root, err := securefile.OpenRoot(filepath.Join(a.StateDir, "onboarding", id))
+	if err != nil {
+		return AgentsOnboardStatusResult{}, err
 	}
-	if _, wrapped := probe["plan"]; wrapped {
-		if err := decodeOnboardJSON(data, &envelope); err != nil || envelope.Plan == nil {
-			return apm.ImportPlan{}, errors.New("reviewed plan envelope mismatch")
-		}
-		if err := apm.ValidateImportPlanProtocol(*envelope.Plan); err != nil {
-			return apm.ImportPlan{}, err
-		}
-		if err := apm.ValidateImportPlanBinding(*envelope.Plan); err != nil {
-			return apm.ImportPlan{}, err
-		}
-		return *envelope.Plan, nil
+	j, err := readOnboardJournal(root)
+	if err != nil {
+		return AgentsOnboardStatusResult{}, err
 	}
-	var plan apm.ImportPlan
-	if err := decodeOnboardJSON(data, &plan); err != nil {
-		return plan, err
+	if phaseAtOrAfter(j.Phase, "materializing-dots") {
+		return AgentsOnboardStatusResult{}, errors.New("dots materialization started; rollback is unsafe, resume forward")
 	}
-	if err := apm.ValidateImportPlanProtocol(plan); err != nil {
-		return plan, err
+	if err := root.Remove("staging"); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return AgentsOnboardStatusResult{}, err
 	}
-	if err := apm.ValidateImportPlanBinding(plan); err != nil {
-		return plan, err
+	j.Phase = "rolled-back"
+	if err := writeOnboardJournal(root, j); err != nil {
+		return AgentsOnboardStatusResult{}, err
 	}
-	return plan, nil
+	return AgentsOnboardStatusResult{OperationID: id, OmniPhase: j.Phase, APM: OnboardEnvelope{OK: true, State: "rolled-back"}}, nil
 }
 
-func decodeOnboardJSON(data []byte, dst any) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(dst); err != nil {
+func (a *App) readOnboardOperation(id string) (onboardJournal, error) {
+	if !hexID(id, 32) {
+		return onboardJournal{}, errors.New("invalid operation ID")
+	}
+	root, err := securefile.OpenRoot(filepath.Join(a.StateDir, "onboarding", id))
+	if err != nil {
+		return onboardJournal{}, err
+	}
+	return readOnboardJournal(root)
+}
+func validateReviewedOnboardPlan(plan OnboardPlan) error {
+	if plan.SchemaVersion != onboardSchemaVersion {
+		return errors.New("reviewed plan schema mismatch")
+	}
+	p, r, o := plan.PlanID, plan.ResolutionID, plan.OperationID
+	if err := bindOnboardPlan(&plan); err != nil {
 		return err
 	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return errors.New("multiple JSON values")
+	if plan.PlanID != p || plan.ResolutionID != r || plan.OperationID != o {
+		return errors.New("reviewed plan identity mismatch")
 	}
 	return nil
 }
-
-func canonicalOnboardProjectRoot(root string) (string, error) {
-	if strings.TrimSpace(root) == "" {
-		return "", nil
+func readReviewedPlan(path string) (OnboardPlan, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return OnboardPlan{}, err
 	}
-	abs, err := filepath.Abs(root)
+	var plan OnboardPlan
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&plan); err != nil {
+		return OnboardPlan{}, err
+	}
+	return plan, validateReviewedOnboardPlan(plan)
+}
+func sortedUnique(v []string) []string {
+	o := append([]string(nil), v...)
+	sort.Strings(o)
+	return slices.Compact(o)
+}
+func lookupResolution[T any](v map[string]T, id, name string) T {
+	if x, ok := v[id]; ok {
+		return x
+	}
+	return v[name]
+}
+
+func validateApprovedTargetResolutions(plan OnboardPlan, resolutions map[string][]string) error {
+	for key, targets := range resolutions {
+		matched := false
+		for _, item := range plan.Items {
+			if key != item.ID && key != item.Name {
+				continue
+			}
+			matched = true
+			for _, target := range targets {
+				if !slices.Contains(item.TargetOptions, target) {
+					return fmt.Errorf("item %s does not allow target %s", item.Name, target)
+				}
+			}
+		}
+		if !matched || len(targets) == 0 {
+			return fmt.Errorf("invalid target resolution item %s", key)
+		}
+	}
+	return nil
+}
+func onboardManifestPath() (string, error) {
+	root, err := apm.GlobalWorkspaceDir()
 	if err != nil {
 		return "", err
 	}
-	resolved, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		return "", fmt.Errorf("resolve onboarding project root: %w", err)
-	}
-	info, err := os.Stat(resolved)
-	if err != nil || !info.IsDir() {
-		return "", errors.New("onboarding project root must be a directory")
-	}
-	return filepath.Clean(resolved), nil
+	return filepath.Join(root, "apm.yml"), nil
 }
-
-func validateOnboardScope(scope, projectRoot string) error {
-	if scope == "" || scope == "global" {
-		if projectRoot != "" {
-			return errors.New("global onboarding journal cannot declare a project root")
-		}
-		return nil
-	}
-	if scope != "project" {
-		return fmt.Errorf("unsupported onboarding scope %q", scope)
-	}
-	canonical, err := canonicalOnboardProjectRoot(projectRoot)
-	if err != nil || canonical != projectRoot {
-		return errors.New("project onboarding journal has a non-canonical project root")
-	}
-	return nil
-}
-
-func projectPreimageSet(projectRoot string) string {
-	sum := sha256.Sum256([]byte("omni-v24-project\x00" + projectRoot))
-	return fmt.Sprintf("%x", sum[:])
-}
-
-func nativeOnboardSources(sources []string) []string {
-	out := make([]string, 0, len(sources))
-	for _, source := range sources {
-		if source != "omni-v24" {
-			out = append(out, source)
-		}
-	}
-	return out
-}
-
-func (a *App) AgentsOnboardRollback(ctx context.Context, operationID string) (AgentsOnboardStatusResult, error) {
-	stateRoot, err := securefile.OpenRoot(filepath.Join(a.StateDir, "onboarding"))
-	if err != nil {
-		return AgentsOnboardStatusResult{}, err
-	}
-	opRoot, err := stateRoot.OpenChild(operationID)
-	if err != nil {
-		return AgentsOnboardStatusResult{}, err
-	}
-	journal, err := readOnboardJournal(opRoot)
-	if err != nil {
-		return AgentsOnboardStatusResult{}, err
-	}
-	if journal.Phase == "apm-applied" || journal.Phase == "v24-committed" || journal.Phase == "complete" {
-		return AgentsOnboardStatusResult{}, errors.New("onboarding rollback is unavailable after APM installation")
-	}
-	client, err := a.onboardingClient(ctx, journal.ProjectRoot)
-	if err != nil {
-		return AgentsOnboardStatusResult{}, err
-	}
-	envelope, _, err := client.ImportRollback(ctx, operationID, journal.ProjectRoot)
-	if err != nil {
-		return AgentsOnboardStatusResult{OperationID: operationID, OmniPhase: journal.Phase, APM: envelope}, err
-	}
-	journal.Phase = "complete"
-	if err := writeOnboardJournal(opRoot, journal); err != nil {
-		return AgentsOnboardStatusResult{}, err
-	}
-	return AgentsOnboardStatusResult{OperationID: operationID, OmniPhase: journal.Phase, APM: envelope}, nil
-}
-
-func validateDispositionGate(plan apm.ImportPlan, inventory LegacyInventory) error {
-	seen := map[string]bool{}
-	resolutions := map[string]apm.ImportResolution{}
-	legacyIDs := map[string]bool{}
-	for _, candidate := range inventory.Envelope.Candidates {
-		legacyIDs[candidate.ID] = true
-	}
+func reviewedOnboardTargets(plan OnboardPlan) []string {
+	var out []string
 	for _, item := range plan.Items {
-		isLegacy := false
-		for _, id := range item.CandidateIDs {
-			if legacyIDs[id] {
-				isLegacy = true
-				break
-			}
+		if slices.Contains([]string{"migrate", "move-to-apm", "map-secret"}, item.Resolution.Decision) {
+			out = append(out, item.Resolution.ApprovedTargets...)
 		}
-		if !isLegacy {
+	}
+	return sortedUnique(out)
+}
+func reviewedOnboardEnv(plan OnboardPlan) []string {
+	var out []string
+	for _, item := range plan.Items {
+		if !slices.Contains([]string{"migrate", "map-secret"}, item.Resolution.Decision) {
 			continue
 		}
-		exclusionAuthorized := item.Resolution.Decision == "exclude" || slices.Contains(item.ReasonCodes, "legacy-negative-state") || slices.Contains(item.ReasonCodes, "durable-exclusion")
-		conditional := slices.Contains(item.ReasonCodes, "conditional-group-host")
-		needsTargets := slices.Contains(item.ReasonCodes, "legacy-unscoped-targets")
-		choiceResolved := item.Classification == "needs-choice" && item.Resolution.Decision == "import" && (!needsTargets || len(item.Resolution.ApprovedTargets) > 0)
-		conditionalDropped := item.Classification == "needs-choice" && conditional && item.Resolution.Decision == "exclude"
-		secretResolved := item.Classification == "secret-blocked" && item.Resolution.Decision == "map-secret" && len(item.Resolution.EnvBindings) > 0
-		conflictResolved := item.Classification == "conflict" && item.Resolution.Decision == "select-origin" && item.Resolution.SelectedOriginID != ""
-		allowed := item.Classification == "already-managed" || item.Classification == "duplicate" || item.Classification == "importable" || item.Classification == "local-package" || choiceResolved || conditionalDropped || secretResolved || conflictResolved || ((item.Classification == "excluded" || item.Classification == "excluded-changed") && exclusionAuthorized)
-		if !allowed {
-			return fmt.Errorf("legacy item %s remains %s", item.Name, item.Classification)
-		}
-		effectiveTargets := item.ProposedTargets
-		if len(item.Resolution.ApprovedTargets) > 0 {
-			effectiveTargets = item.Resolution.ApprovedTargets
-		}
-		if len(effectiveTargets) == 0 {
-			return fmt.Errorf("legacy item %s has no effective targets", item.Name)
-		}
-		for _, target := range effectiveTargets {
-			if len(item.ProposedTargets) > 0 && !slices.Contains(item.ProposedTargets, target) {
-				return fmt.Errorf("legacy item %s broadens to unreviewed target %s", item.Name, target)
+		for _, name := range item.Resolution.EnvBindings {
+			if validOnboardEnvName(name) {
+				out = append(out, name)
 			}
 		}
-		for pointer, env := range item.Resolution.EnvBindings {
-			if !strings.HasPrefix(pointer, "/") || !validOnboardEnvName(env) {
-				return fmt.Errorf("legacy item %s has invalid environment binding", item.Name)
-			}
-		}
-		requestedExec := []string{}
-		for _, reason := range item.ReasonCodes {
-			if strings.HasPrefix(reason, "executable:") {
-				requestedExec = append(requestedExec, strings.TrimPrefix(reason, "executable:"))
-			}
-		}
-		if len(requestedExec) > 0 {
-			sort.Strings(requestedExec)
-			approved := sortedUnique(item.Resolution.ApprovedExecutables)
-			if !slices.Equal(requestedExec, approved) {
-				return fmt.Errorf("legacy item %s requires exact executable approvals", item.Name)
-			}
-		}
-		for _, id := range item.CandidateIDs {
-			seen[id] = true
-			resolutions[id] = item.Resolution
+		var payload any
+		if json.Unmarshal(item.Payload, &payload) == nil {
+			collectOnboardPlaceholderEnv(payload, &out)
 		}
 	}
-	for _, candidate := range inventory.Envelope.Candidates {
-		if !seen[candidate.ID] {
-			return fmt.Errorf("legacy candidate %s has no reviewed disposition", candidate.Name)
+	return sortedUnique(out)
+}
+
+func deriveOnboardScrubEnv(plan OnboardPlan, proposed []byte, journal onboardJournal) ([]string, error) {
+	out := reviewedOnboardEnv(plan)
+	collectOnboardPlaceholderText(string(proposed), &out)
+	for _, pkg := range journal.Packages {
+		root := pkg.StagedPath
+		if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
+			root, err = durableOnboardPackagePath(pkg.ItemID)
+			if err != nil {
+				return nil, err
+			}
 		}
-		var payload map[string]any
-		resolution := resolutions[candidate.ID]
-		if json.Unmarshal(candidate.Payload, &payload) == nil && payload["target_resolution_required"] == true && payload["disposition"] != "excluded" && resolution.Decision != "exclude" && !(payload["unsupported_reason"] == "conditional-group-host" && resolution.Decision == "exclude") && len(resolution.ApprovedTargets) == 0 {
-			return fmt.Errorf("legacy candidate %s has an unscoped target set and needs an item-specific target resolution", candidate.Name)
+		err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if d.IsDir() {
+				return nil
+			}
+			info, err := os.Lstat(path)
+			if err != nil {
+				return err
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("staged APM input %q is a symlink", path)
+			}
+			if !info.Mode().IsRegular() {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			collectOnboardPlaceholderText(string(data), &out)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return sortedUnique(out), nil
+}
+
+func collectOnboardPlaceholderText(text string, out *[]string) {
+	collectOnboardPlaceholderEnv(text, out)
+}
+
+func collectOnboardPlaceholderEnv(value any, out *[]string) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for _, child := range typed {
+			collectOnboardPlaceholderEnv(child, out)
+		}
+	case []any:
+		for _, child := range typed {
+			collectOnboardPlaceholderEnv(child, out)
+		}
+	case string:
+		for offset := 0; offset < len(typed); {
+			start := strings.Index(typed[offset:], "${")
+			if start < 0 {
+				break
+			}
+			start += offset
+			end := strings.Index(typed[start+2:], "}")
+			if end < 0 {
+				break
+			}
+			end += start + 2
+			name := strings.TrimPrefix(typed[start+2:end], "env:")
+			if validOnboardEnvName(name) {
+				*out = append(*out, name)
+			}
+			offset = end + 1
+		}
+	}
+}
+func writePlanAndJournal(root *securefile.Root, plan OnboardPlan, j *onboardJournal) error {
+	data, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := root.WriteFileAtomic("plan.json", append(data, '\n')); err != nil {
+		return err
+	}
+	return writeOnboardJournal(root, *j)
+}
+func stageOnboardDotPackages(root *securefile.Root, items []OnboardItem, j *onboardJournal) error {
+	for _, item := range items {
+		if item.Resolution.Decision != "move-to-apm" || item.Dots == nil {
+			continue
+		}
+		if err := validateOnboardSourceAncestors(item.Dots.OwnerRoot, item.Dots.SourcePath); err != nil {
+			return err
+		}
+		fingerprint, err := onboardTreeFingerprint(item.Dots.SourcePath, item.Dots.SourcePath)
+		if err != nil || fingerprint != item.ContentFingerprint {
+			return fmt.Errorf("dots item %s source changed before staging", item.ID)
+		}
+		pkg := filepath.Join(root.Path(), "staging", item.ID)
+		if err := os.MkdirAll(filepath.Dir(pkg), 0o700); err != nil {
+			return err
+		}
+		resource := onboardPackageResourcePath(pkg, item)
+		if err := os.MkdirAll(filepath.Dir(resource), 0o700); err != nil {
+			return err
+		}
+		if err := dots.CopyDotPath(item.Dots.SourcePath, resource, nil); err != nil {
+			return err
+		}
+		if item.Kind != "package" && item.Kind != "plugin" {
+			manifest := []byte("name: omni-import-" + item.ID[:12] + "\nversion: 1.0.0\nincludes: auto\n")
+			if err := atomicWriteOnboardFile(filepath.Join(pkg, "apm.yml"), manifest, 0o600); err != nil {
+				return err
+			}
+		}
+		if item.Kind == "plugin" && !regularOnboardFile(filepath.Join(pkg, "apm.yml")) {
+			if err := normalizeStagedOnboardPlugin(pkg); err != nil {
+				return err
+			}
+			manifest := []byte("name: omni-import-" + item.ID[:12] + "\nversion: 1.0.0\nincludes: auto\n")
+			if err := atomicWriteOnboardFile(filepath.Join(pkg, "apm.yml"), manifest, 0o600); err != nil {
+				return err
+			}
+		}
+		if err := validateStagedOnboardPackage(pkg, item); err != nil {
+			return err
+		}
+		hash, err := onboardTreeFingerprint(pkg, pkg)
+		if err != nil {
+			return err
+		}
+		j.Packages = append(j.Packages, journalPackage{ItemID: item.ID, StagedPath: pkg, Hash: hash})
+	}
+	return writeOnboardJournal(root, *j)
+}
+
+func normalizeStagedOnboardPlugin(pkg string) error {
+	for _, dir := range []string{"skills", "agents", "hooks"} {
+		source := filepath.Join(pkg, dir)
+		if _, err := os.Stat(source); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if err := dots.CopyDotPath(source, filepath.Join(pkg, ".apm", dir), nil); err != nil {
+			return err
+		}
+	}
+	commands := filepath.Join(pkg, "commands")
+	entries, err := os.ReadDir(commands)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".md") {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".md") + ".prompt.md"
+		if err := dots.CopyDotPath(filepath.Join(commands, entry.Name()), filepath.Join(pkg, ".apm", "prompts", name), nil); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func validOnboardEnvName(value string) bool {
-	if value == "" {
-		return false
+func onboardPackageResourcePath(pkg string, item OnboardItem) string {
+	if item.Kind == "package" || item.Kind == "plugin" {
+		return pkg
 	}
-	for i, r := range value {
-		if !(r == '_' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || i > 0 && r >= '0' && r <= '9') {
-			return false
+	dir, name := item.Kind+"s", item.Name
+	if item.Kind == "command" || item.Kind == "prompt" {
+		dir = "prompts"
+		name = strings.TrimSuffix(strings.TrimSuffix(name, ".prompt.md"), ".md") + ".prompt.md"
+	}
+	return filepath.Join(pkg, ".apm", dir, name)
+}
+func dryRunOnboardManifest(ctx context.Context, a *App, root *securefile.Root, manifest []byte, j onboardJournal, scrub []string) error {
+	for _, pkg := range j.Packages {
+		durable, err := durableOnboardPackagePath(pkg.ItemID)
+		if err != nil {
+			return err
+		}
+		manifest = bytes.ReplaceAll(manifest, []byte(durable), []byte(pkg.StagedPath))
+	}
+	validation := filepath.Join(root.Path(), "validation")
+	if err := os.MkdirAll(validation, 0o700); err != nil {
+		return err
+	}
+	if err := atomicWriteOnboardFile(filepath.Join(validation, "apm.yml"), manifest, 0o600); err != nil {
+		return err
+	}
+	client, err := a.onboardingClient(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = client.AtProjectRoot(validation).DryRunOnly(ctx, apm.SurfacePackages, j.Targets, scrub)
+	if err != nil {
+		return err
+	}
+	_, err = client.AtProjectRoot(validation).DryRunOnly(ctx, apm.SurfaceMcp, j.Targets, scrub)
+	return err
+}
+func verifyMaterializedOnboardItem(item OnboardItem, j onboardJournal) error {
+	var pkg journalPackage
+	for _, x := range j.Packages {
+		if x.ItemID == item.ID {
+			pkg = x
+			break
 		}
 	}
-	return true
+	if pkg.ItemID == "" {
+		return errors.New("missing staged dots package")
+	}
+	packageRoot := pkg.StagedPath
+	if _, err := os.Lstat(packageRoot); errors.Is(err, os.ErrNotExist) {
+		packageRoot, err = durableOnboardPackagePath(pkg.ItemID)
+		if err != nil {
+			return err
+		}
+	}
+	resource := onboardPackageResourcePath(packageRoot, item)
+	want, err := onboardContentFingerprint(resource)
+	if item.Kind == "plugin" {
+		want, err = onboardContentFingerprintIgnoring(resource, "plugin-generated")
+	}
+	if err != nil {
+		return err
+	}
+	got, err := onboardContentFingerprint(item.Dots.TargetPath)
+	if err != nil {
+		return err
+	}
+	if want != got {
+		return errors.New("post-materialization content drift")
+	}
+	return nil
+}
+
+func prepareOnboardTransformedTargets(plan OnboardPlan, journal onboardJournal) error {
+	for _, item := range plan.Items {
+		if item.Dots == nil || item.Resolution.Decision != "move-to-apm" || (item.Kind != "command" && item.Kind != "prompt") {
+			continue
+		}
+		if _, err := os.Lstat(item.Dots.TargetPath); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if err := verifyMaterializedOnboardItem(item, journal); err != nil {
+			return err
+		}
+		if err := os.Remove(item.Dots.TargetPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func promoteOnboardPackages(j onboardJournal) error {
+	workspace, err := apm.GlobalWorkspaceDir()
+	if err != nil {
+		return err
+	}
+	for _, pkg := range j.Packages {
+		dst := filepath.Join(workspace, "omni-imports", pkg.ItemID)
+		if got, err := onboardTreeFingerprint(dst, dst); err == nil {
+			if got != pkg.Hash {
+				return errors.New("durable package hash conflict")
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			return err
+		}
+		if err := os.Rename(pkg.StagedPath, dst); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func restoreOnboardManifest(j onboardJournal) error {
+	if err := verifyOnboardManifestHash(j.ManifestPath, j.ProposedManifestHash); err != nil {
+		return err
+	}
+	if !j.ManifestExisted {
+		err := os.Remove(j.ManifestPath)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	mode := os.FileMode(j.ManifestMode)
+	if mode == 0 {
+		mode = 0o600
+	}
+	data, err := decodeOnboardRecoveryData(j.ManifestData)
+	if err != nil {
+		return err
+	}
+	return atomicWriteOnboardFile(j.ManifestPath, data, mode)
+}
+
+func decodeOnboardRecoveryData(value string) ([]byte, error) {
+	data, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		return nil, errors.New("invalid onboarding recovery data")
+	}
+	return data, nil
+}
+
+func writeOnboardManifestCAS(j onboardJournal, proposed []byte) error {
+	data, existed, _, err := captureOnboardOptionalFile(j.ManifestPath)
+	if err != nil {
+		return err
+	}
+	currentHash := digestBytes(data)
+	preimageMatches := existed == j.ManifestExisted && currentHash == j.ManifestHash
+	proposalMatches := existed && currentHash == j.ProposedManifestHash
+	if !preimageMatches && !proposalMatches {
+		return errors.New("APM manifest changed since onboarding preflight")
+	}
+	if proposalMatches {
+		return nil
+	}
+	mode := os.FileMode(j.ManifestMode)
+	if mode == 0 {
+		mode = 0o600
+	}
+	return atomicWriteOnboardFile(j.ManifestPath, proposed, mode)
+}
+
+func verifyOnboardManifestHash(path, want string) error {
+	data, existed, _, err := captureOnboardOptionalFile(path)
+	if err != nil {
+		return err
+	}
+	if !existed || digestBytes(data) != want {
+		return errors.New("APM manifest no longer matches onboarding journal")
+	}
+	return nil
+}
+func phaseAtOrAfter(current, threshold string) bool {
+	p := []string{"planned", "preflighted", "materializing-dots", "dots-materialized", "manifest-installed", "packages-installed", "mcp-installed", "audited", "v24-committed", "complete"}
+	return slices.Index(p, current) >= slices.Index(p, threshold)
 }

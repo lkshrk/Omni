@@ -13,7 +13,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lkshrk/omni/internal/apm"
 	"github.com/lkshrk/omni/internal/executor"
 )
 
@@ -34,6 +33,133 @@ func TestInitOnboardingReadOnlyCreatesNothing(t *testing.T) {
 	}
 }
 
+func TestAgentsOnboardPlanDoesNotWriteAnywhereUnderHome(t *testing.T) {
+	a, _, home := newOnboardPlanTestApp(t,
+		`{"version":23,"agents":{"packages":[{"source":"acme/package","agents":["codex"]}]}}`,
+		`[{"target":"codex"}]`,
+	)
+	unrelated := filepath.Join(home, "unrelated.txt")
+	if err := os.WriteFile(unrelated, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshotOnboardTestTree(t, home)
+	if _, err := a.AgentsOnboardPlan(t.Context(), AgentsOnboardOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	after := snapshotOnboardTestTree(t, home)
+	if !maps.Equal(before, after) {
+		t.Fatalf("preview changed HOME: before=%v after=%v", before, after)
+	}
+}
+
+func TestAgentsOnboardPlanUsesLiveAPMTargetsWithoutClientAllowlist(t *testing.T) {
+	a, _, _ := newOnboardPlanTestApp(t,
+		`{"version":23,"agents":{"packages":[{"source":"acme/package","agents":["future-client"]}]}}`,
+		`[{"target":"zeta"},{"target":"future-client"},{"target":"alpha"}]`,
+	)
+	result, err := a.AgentsOnboardPlan(t.Context(), AgentsOnboardOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Envelope.Plan == nil || len(result.Envelope.Plan.Items) != 1 {
+		t.Fatalf("plan=%+v", result.Envelope.Plan)
+	}
+	item := result.Envelope.Plan.Items[0]
+	if got := strings.Join(item.TargetOptions, ","); got != "alpha,future-client,zeta" {
+		t.Fatalf("target options=%q", got)
+	}
+	if got := strings.Join(item.Blockers, ","); strings.Contains(got, "unknown-target") {
+		t.Fatalf("live APM target was rejected: %s", got)
+	}
+}
+
+func TestAgentsOnboardApplyRejectsLegacyPreimageDriftBeforeJournalWrite(t *testing.T) {
+	a, mock, home := newOnboardPlanTestApp(t,
+		`{"version":23,"agents":{"packages":[{"source":"acme/package","agents":["codex"]}]}}`,
+		`[{"target":"codex"}]`,
+	)
+	result, err := a.AgentsOnboardPlan(t.Context(), AgentsOnboardOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(home, ".config", "omni", "settings.json")
+	if err := os.WriteFile(configPath, []byte(`{"version":23,"agents":{"packages":[{"source":"acme/changed","agents":["codex"]}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mock.Reset()
+	_, err = a.AgentsOnboardApplyReviewed(t.Context(), *result.Envelope.Plan)
+	if err == nil || !strings.Contains(err.Error(), "reviewed plan is stale") {
+		t.Fatalf("err=%v", err)
+	}
+	stateRoot := filepath.Join(home, ".local", "state", "omni", "onboarding")
+	if _, err := os.Stat(stateRoot); !os.IsNotExist(err) {
+		t.Fatalf("stale apply wrote journal state: %v", err)
+	}
+}
+
+func newOnboardPlanTestApp(t *testing.T, legacy, targets string) (*App, *executor.MockExecutor, string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	configPath := filepath.Join(home, ".config", "omni", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mock := &executor.MockExecutor{Responses: []executor.MockCall{
+		{Stdout: "Agent Package Manager (APM) CLI version 0.28.0+omni.6\n"},
+		{Stdout: targets},
+	}}
+	a := New(configPath)
+	if err := a.InitOnboardingReadOnly(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	a.SetFallbackExecutor(mock)
+	t.Cleanup(func() { _ = a.Close() })
+	return a, mock, home
+}
+
+func snapshotOnboardTestTree(t *testing.T, root string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		value := info.Mode().String()
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			value += ":" + target
+		} else if info.Mode().IsRegular() {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			value += ":" + digestBytes(data)
+		}
+		out[filepath.ToSlash(rel)] = value
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 func TestReadReviewedPlanRejectsUnknownFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "plan.json")
 	data := `{"schema_version":1,"coordinator":"omni-v24","operation_id":"0123456789abcdef0123456789abcdef","plan_id":"` + strings.Repeat("a", 64) + `","resolution_id":"` + strings.Repeat("b", 64) + `","scope":"global","sources":[],"candidate_set_id":"` + strings.Repeat("c", 64) + `","inventory_fingerprint":"` + strings.Repeat("d", 64) + `","items":[],"summary":{},"warnings":[],"blockers":[],"unknown":true}`
@@ -46,7 +172,7 @@ func TestReadReviewedPlanRejectsUnknownFields(t *testing.T) {
 }
 
 func TestApprovedTargetsComeFromReviewedItem(t *testing.T) {
-	plan := apm.ImportPlan{Items: []apm.ImportItem{{ID: "item", Name: "demo", CurrentTargets: []string{"future-agent"}, ProposedTargets: []string{"future-agent", "next-agent"}}}}
+	plan := OnboardPlan{Items: []OnboardItem{{ID: "item", Name: "demo", TargetOptions: []string{"future-agent", "next-agent"}}}}
 	if err := validateApprovedTargetResolutions(plan, map[string][]string{"item": {"future-agent"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -76,11 +202,11 @@ func TestInitDetectsJoinedOnboardingRecoveryBeforeMutation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			journal := onboardJournal{SchemaVersion: 1, OperationID: op, PlanID: strings.Repeat("a", 64), ResolutionID: strings.Repeat("b", 64), CandidateSetID: strings.Repeat("c", 64), Phase: "apm-applied"}
+			journal := onboardJournal{SchemaVersion: 1, OperationID: op, PlanID: strings.Repeat("a", 64), ResolutionID: strings.Repeat("b", 64), CandidateSetID: strings.Repeat("c", 64), Phase: "packages-installed", ManifestPath: filepath.Join(root, "apm.yml")}
 			if err := writeOnboardJournal(opRoot, journal); err != nil {
 				t.Fatal(err)
 			}
-			mock := &executor.MockExecutor{Responses: []executor.MockCall{{Stdout: "APM CLI version 0.28.0+omni.5\n"}, {Stdout: `{"ok":true,"kind":"import-status-result","result":{"schema_version":1,"operation_id":"0123456789abcdef0123456789abcdef","coordinator":"omni-v24","state":"awaiting-external-commit","next_action":"external-commit-then-finalize","finalize_token_required":true}}`}}}
+			mock := &executor.MockExecutor{Responses: []executor.MockCall{{Stdout: "APM CLI version 0.28.0+omni.6\n"}}}
 			a := New(configPath)
 			a.StateDir = state
 			a.CacheDir = cache
@@ -138,6 +264,35 @@ func TestExtractLegacyCandidatesNestedIncludesAndSecrets(t *testing.T) {
 	}
 }
 
+func TestExtractLegacyCandidatesV23IncludesPreserveExactDeploymentTargets(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "settings.json")
+	child := filepath.Join(dir, "agents.json")
+	if err := os.WriteFile(root, []byte(`{"version":23,"$include":["agents.json"],"agents":{"packages":[{"source":"acme/package","agents":["codex"]}],"marketplaces":[{"name":"tools","source":"acme/tools","agents":["claude-code"]}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(child, []byte(`{"agents":{"plugins":[{"name":"reviewer","marketplace":"tools","agents":["claude-code","codex"]}],"mcp_servers":[{"name":"api","transport":"stdio","command":"api-server","agents":["codex"]}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := ExtractLegacyCandidates(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, candidate := range inventory.Envelope.Candidates {
+		got[candidate.Kind+"/"+candidate.Name] = strings.Join(candidate.SourceTargets, ",")
+	}
+	want := map[string]string{
+		"package/acme/package": "codex",
+		"marketplace/tools":    "claude",
+		"plugin/reviewer":      "claude,codex",
+		"mcp/api":              "codex",
+	}
+	if !maps.Equal(got, want) {
+		t.Fatalf("targets=%v want=%v", got, want)
+	}
+}
+
 func TestExtractLegacyCandidatesFromSanitizedRealDotfiles(t *testing.T) {
 	root := filepath.Join("testdata", "onboarding", "real-dotfiles-v22", "settings.json")
 	first, err := ExtractLegacyCandidates(root)
@@ -155,7 +310,7 @@ func TestExtractLegacyCandidatesFromSanitizedRealDotfiles(t *testing.T) {
 		t.Fatalf("documents=%d preimages=%d", len(first.Documents), len(first.Envelope.SourcePreimages))
 	}
 	wantKinds := map[string]int{"package": 4, "skill": 1, "plugin": 22, "marketplace": 14, "mcp": 6, "unsupported": 1}
-	wantTargets := map[string]int{"claude": 20, "claude,codex": 23, "codex": 5}
+	wantTargets := map[string]int{"": 21, "claude": 20, "claude,codex": 2, "codex": 5}
 	gotKinds := map[string]int{}
 	excluded, conditional, placeholders := 0, 0, 0
 	targets := map[string]int{}
@@ -166,7 +321,7 @@ func TestExtractLegacyCandidatesFromSanitizedRealDotfiles(t *testing.T) {
 	owners := map[string]int{}
 	for _, candidate := range first.Envelope.Candidates {
 		gotKinds[candidate.Kind]++
-		targets[strings.Join(candidate.SourceTarget, ",")]++
+		targets[strings.Join(candidate.SourceTargets, ",")]++
 		if len(candidate.SourcePreimageIDs) != 1 {
 			t.Fatalf("candidate %s preimages=%v", candidate.ID, candidate.SourcePreimageIDs)
 		}
@@ -210,6 +365,60 @@ func TestExtractLegacyCandidatesFromSanitizedRealDotfiles(t *testing.T) {
 	}
 }
 
+func TestExtractLegacyCandidatesFromRealV22PreservesEveryDeclaredTarget(t *testing.T) {
+	root := filepath.Join("testdata", "onboarding", "real-dotfiles-v22", "settings.json")
+	inventory, err := ExtractLegacyCandidates(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, candidate := range inventory.Envelope.Candidates {
+		if candidate.Kind != "package" && candidate.Kind != "mcp" && candidate.Kind != "marketplace" && candidate.Kind != "plugin" {
+			continue
+		}
+		if strings.Contains(string(candidate.Payload), `"disposition":"excluded"`) {
+			continue
+		}
+		got[candidate.Kind+"/"+candidate.Name] = strings.Join(candidate.SourceTargets, ",")
+	}
+	want := map[string]string{
+		"package/example/linear-ai":           "",
+		"package/example/useful-skills":       "",
+		"package/ShiplightAI/agent-skills-v2": "",
+		"package/sopaco/deepwiki-rs":          "",
+		"mcp/litellm-tools":                   "claude",
+		"mcp/shiplight":                       "claude",
+		"mcp/codebase-memory-mcp":             "claude",
+		"mcp/context-mode":                    "codex",
+		"marketplace/context-mode":            "claude,codex",
+		"marketplace/example":                 "codex",
+		"marketplace/caveman":                 "claude",
+		"marketplace/claude-plugins-official": "claude",
+		"marketplace/ecc":                     "claude",
+		"marketplace/ponytail":                "codex",
+		"marketplace/openai-codex":            "claude",
+		"marketplace/litellm":                 "claude",
+		"marketplace/harness-marketplace":     "claude",
+		"marketplace/i-have-adhd":             "claude",
+		"plugin/superpowers":                  "claude",
+		"plugin/github":                       "claude",
+		"plugin/context-mode":                 "claude,codex",
+		"plugin/ponytail":                     "codex",
+		"plugin/caveman":                      "claude",
+		"plugin/gopls-lsp":                    "claude",
+		"plugin/code-simplifier":              "claude",
+		"plugin/codex":                        "claude",
+		"plugin/claude-md-management":         "claude",
+		"plugin/smart-docs":                   "claude",
+		"plugin/harness":                      "claude",
+		"plugin/i-have-adhd":                  "claude",
+		"plugin/linear-ai":                    "codex",
+	}
+	if !maps.Equal(got, want) {
+		t.Fatalf("targets=%v want=%v", got, want)
+	}
+}
+
 func TestExtractLegacyCandidatesCycle(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "settings.json")
@@ -218,6 +427,137 @@ func TestExtractLegacyCandidatesCycle(t *testing.T) {
 	_ = os.WriteFile(child, []byte(`{"$include":["settings.json"]}`), 0o600)
 	if _, err := ExtractLegacyCandidates(root); err == nil || !strings.Contains(err.Error(), "cycle") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestExtractLegacyCandidatesAppliesCurrentHostGroupsAndTargets(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "legacy-host")
+	path := filepath.Join(t.TempDir(), "settings.json")
+	raw := `{"version":22,"agents":{"packages":[{"source":"active","agents":["claude","codex"]},{"source":"inactive","agents":["claude"]},{"source":"global","agents":["claude","codex"]}]},"groups":[{"name":"active-group","skills":["active"]},{"name":"inactive-group","skills":["inactive"]}],"hosts":{"legacy-host":["active-group"]},"host_settings":{"legacy-host":{"agents_use":["codex"]}}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := ExtractLegacyCandidates(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]OnboardCandidate{}
+	for _, candidate := range inv.Envelope.Candidates {
+		got[candidate.Name] = candidate
+	}
+	for _, name := range []string{"active", "global"} {
+		if strings.Join(got[name].SourceTargets, ",") != "codex" || strings.Contains(string(got[name].Payload), "excluded") {
+			t.Fatalf("%s=%+v payload=%s", name, got[name], got[name].Payload)
+		}
+	}
+	if !strings.Contains(string(got["inactive"].Payload), "excluded-inactive-group") {
+		t.Fatalf("inactive payload=%s", got["inactive"].Payload)
+	}
+}
+
+func TestExtractLegacyCandidatesAppliesCurrentHostFeatureDisables(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "legacy-host")
+	for flag, kind := range map[string]string{"skills_disabled": "package", "mcp_disabled": "mcp", "plugins_disabled": "plugin"} {
+		t.Run(flag, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			raw := fmt.Sprintf(`{"version":22,"agents":{"packages":[{"source":"pkg","agents":["codex"]}],"mcp_servers":[{"name":"server","transport":"stdio","command":"true","agents":["codex"]}],"plugins":[{"name":"plug","source":"https://example.test/plug.git","agents":["codex"]}]},"host_settings":{"legacy-host":{"%s":true}}}`, flag)
+			if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			inv, err := ExtractLegacyCandidates(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, candidate := range inv.Envelope.Candidates {
+				if candidate.Kind == kind && !strings.Contains(string(candidate.Payload), "excluded-disabled") {
+					t.Fatalf("%s payload=%s", kind, candidate.Payload)
+				}
+			}
+		})
+	}
+}
+
+func TestExtractLegacyCandidatesExpandsAgentMacrosForActiveAndInactiveGroups(t *testing.T) {
+	for _, active := range []bool{false, true} {
+		t.Run(fmt.Sprintf("active=%v", active), func(t *testing.T) {
+			t.Setenv("OMNI_HOSTNAME", "macro-host")
+			path := filepath.Join(t.TempDir(), "settings.json")
+			hosts := "{}"
+			if active {
+				hosts = `{"macro-host":["bundle"]}`
+			}
+			raw := fmt.Sprintf(`{"version":22,"agents":{"packages":[{"source":"pkg-a","agents":["codex"]},{"source":"pkg-b","agents":["codex"]}],"mcp_servers":[{"name":"mcp-a","transport":"stdio","command":"true","agents":["codex"]}],"plugins":[{"name":"plug-a","source":"https://example.test/plug.git","agents":["codex"]}],"marketplaces":[{"name":"market-a","source":"acme/market"}]},"groups":[{"name":"bundle","skills":["@agents.packages"],"mcp_servers":["@agents.mcp_servers"],"plugins":["@agents.plugins"],"marketplaces":["@agents.marketplaces"]}],"hosts":%s}`, hosts)
+			if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			inv, err := ExtractLegacyCandidates(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, candidate := range inv.Envelope.Candidates {
+				if candidate.Kind == "unsupported" {
+					continue
+				}
+				excluded := strings.Contains(string(candidate.Payload), "excluded-inactive-group")
+				if excluded == active {
+					t.Fatalf("active=%v candidate=%s/%s payload=%s", active, candidate.Kind, candidate.Name, candidate.Payload)
+				}
+			}
+		})
+	}
+}
+
+func TestExtractLegacyCandidatesHostSettingsIgnoreActiveGroupNameCollision(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "laptop")
+	path := filepath.Join(t.TempDir(), "settings.json")
+	raw := `{"version":22,"agents":{"packages":[{"source":"pkg","agents":["claude","codex"]}]},"groups":[{"name":"dev","skills":["pkg"]}],"hosts":{"laptop":["dev"]},"host_settings":{"dev":{"agents_disabled":true},"laptop":{"agents_use":["codex"]}}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := ExtractLegacyCandidates(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var candidate OnboardCandidate
+	for _, item := range inv.Envelope.Candidates {
+		if item.Kind == "package" {
+			candidate = item
+		}
+	}
+	if candidate.ID == "" {
+		t.Fatalf("candidates=%+v", inv.Envelope.Candidates)
+	}
+	if strings.Contains(string(candidate.Payload), "excluded-disabled") || strings.Join(candidate.SourceTargets, ",") != "codex" {
+		t.Fatalf("candidate=%+v payload=%s", candidate, candidate.Payload)
+	}
+}
+
+func TestLegacyNonMCPURLQueryCredentialsAreRedacted(t *testing.T) {
+	object := map[string]any{"source": "https://example.test/pkg.git?token=SENTINEL_SECRET"}
+	if !sanitizeLegacyPayload(object, false) {
+		t.Fatal("credential URL was not blocked")
+	}
+	data, _ := json.Marshal(object)
+	if strings.Contains(string(data), "SENTINEL_SECRET") {
+		t.Fatalf("secret leaked: %s", data)
+	}
+}
+
+func TestExtractLegacyCandidatesAgentsDisabledExcludesEveryDeploymentKind(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "legacy-host")
+	path := filepath.Join(t.TempDir(), "settings.json")
+	raw := `{"version":22,"agents":{"packages":[{"source":"pkg","agents":["codex"]}],"mcp_servers":[{"name":"server","transport":"stdio","command":"true","agents":["codex"]}],"plugins":[{"name":"plug","source":"https://example.test/plug.git","agents":["codex"]}],"marketplaces":[{"name":"tools","source":"acme/tools","agents":["codex"]}]},"host_settings":{"legacy-host":{"agents_disabled":true}}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := ExtractLegacyCandidates(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range inv.Envelope.Candidates {
+		if !strings.Contains(string(candidate.Payload), "excluded-disabled") {
+			t.Fatalf("%s/%s payload=%s", candidate.Kind, candidate.Name, candidate.Payload)
+		}
 	}
 }
 

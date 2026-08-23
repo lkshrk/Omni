@@ -1,15 +1,14 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
-	"os"
 	"slices"
 	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/lkshrk/omni/internal/apm"
 	"github.com/lkshrk/omni/internal/app"
 )
 
@@ -69,22 +68,14 @@ func (m *Model) doAgentsRefresh() []tea.Cmd {
 	return m.runAPM("apm deps list -g", "deps", "list", "-g")
 }
 
-func (m *Model) doAgentsOnboardPlan(project bool) []tea.Cmd {
+func (m *Model) doAgentsOnboardPlan() []tea.Cmd {
 	if m.app == nil {
 		return nil
 	}
 	m.apmRunning, m.apmCommand, m.apmOutput, m.apmErr = true, "omni agents onboard (preview)", "", nil
 	a, ctx := m.app, m.ctx
 	return []tea.Cmd{m.spinner.Tick, func() tea.Msg {
-		opts := app.AgentsOnboardOptions{}
-		if project {
-			root, err := os.Getwd()
-			if err != nil {
-				return agentsOnboardPlanDoneMsg{err: err}
-			}
-			opts.ProjectRoot = root
-		}
-		result, err := a.AgentsOnboardPlan(ctx, opts)
+		result, err := a.AgentsOnboardPlan(ctx, app.AgentsOnboardOptions{})
 		return agentsOnboardPlanDoneMsg{result: result, err: err}
 	}}
 }
@@ -107,12 +98,10 @@ func onboardPlanSummary(result app.AgentsOnboardResult) string {
 		return "No onboarding plan returned."
 	}
 	plan := result.Envelope.Plan
-	text := fmt.Sprintf("Agent onboarding preview (%s): %d item(s), %d blocker(s).", planScopeLabel(plan), len(plan.Items), onboardBlockerCount(plan))
+	text := fmt.Sprintf("Agent onboarding preview: %d item(s), %d blocker(s).", len(plan.Items), onboardBlockerCount(plan))
 	blocked := []string{}
 	for i := range plan.Items {
-		single := *plan
-		single.Items = []apm.ImportItem{plan.Items[i]}
-		if onboardBlockerCount(&single) > 0 {
+		if onboardItemBlockerCount(plan.Items[i]) > 0 {
 			blocked = append(blocked, plan.Items[i].Name)
 		}
 	}
@@ -122,14 +111,7 @@ func onboardPlanSummary(result app.AgentsOnboardResult) string {
 	return text
 }
 
-func planScopeLabel(plan *apm.ImportPlan) string {
-	if plan.Scope == "project" {
-		return plan.ProjectRoot
-	}
-	return "global"
-}
-
-func (m *Model) currentOnboardItem() *apm.ImportItem {
+func (m *Model) currentOnboardItem() *app.OnboardItem {
 	if m.agentsOnboardPlan == nil || m.agentsOnboardPlan.Envelope.Plan == nil || len(m.agentsOnboardPlan.Envelope.Plan.Items) == 0 {
 		return nil
 	}
@@ -138,14 +120,14 @@ func (m *Model) currentOnboardItem() *apm.ImportItem {
 	}
 	return &m.agentsOnboardPlan.Envelope.Plan.Items[m.agentsOnboardItem]
 }
-func resolveOnboardItem(item *apm.ImportItem, key string) bool {
+func resolveOnboardItem(item *app.OnboardItem, key string) bool {
 	if item == nil {
 		return false
 	}
-	options := item.TargetOptions()
+	options := item.TargetOptions
 	if key == "a" && len(options) > 0 {
-		item.Resolution.Decision = "import"
-		item.Resolution.ApprovedTargets = options
+		setOnboardTargetDecision(item, true)
+		item.Resolution.ApprovedTargets = append([]string(nil), options...)
 		return true
 	}
 	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
@@ -161,41 +143,80 @@ func resolveOnboardItem(item *apm.ImportItem, key string) bool {
 			sort.Strings(item.Resolution.ApprovedTargets)
 		}
 		if len(item.Resolution.ApprovedTargets) == 0 {
-			item.Resolution.Decision = ""
+			setOnboardTargetDecision(item, false)
 		} else {
-			item.Resolution.Decision = "import"
+			setOnboardTargetDecision(item, true)
 		}
 		return true
 	}
 	switch key {
 	case "x":
-		item.Resolution.Decision = "exclude"
-	case "o":
-		item.Resolution.Decision = "select-origin"
-		if len(item.CandidateIDs) > 0 {
-			item.Resolution.SelectedOriginID = item.CandidateIDs[0]
+		item.Resolution.Decision = "keep-unmanaged"
+	case "d":
+		if item.Dots == nil {
+			return false
 		}
-	case "E":
-		item.Resolution.Decision = "import"
-		for _, reason := range item.ReasonCodes {
-			if strings.HasPrefix(reason, "executable:") {
-				item.Resolution.ApprovedExecutables = append(item.Resolution.ApprovedExecutables, strings.TrimPrefix(reason, "executable:"))
-			}
+		item.Resolution.Decision = "keep-in-dots"
+	case "M":
+		if item.Dots == nil {
+			return false
 		}
+		item.Resolution.Decision = "move-to-apm"
 	case "m":
 		item.Resolution.Decision = "map-secret"
 		if item.Resolution.EnvBindings == nil {
 			item.Resolution.EnvBindings = map[string]string{}
 		}
-		for _, reason := range item.ReasonCodes {
-			if strings.HasPrefix(reason, "secret-field:") {
-				item.Resolution.EnvBindings[strings.TrimPrefix(reason, "secret-field:")] = "OMNI_" + strings.ToUpper(strings.ReplaceAll(item.Name, "-", "_")) + "_SECRET"
-			}
+		for _, field := range onboardSecretFields(item.Payload) {
+			item.Resolution.EnvBindings[field] = onboardEnvName(item.Name + "_" + field)
 		}
 	default:
 		return false
 	}
 	return true
+}
+
+func setOnboardTargetDecision(item *app.OnboardItem, selected bool) {
+	if item.Dots != nil {
+		return
+	}
+	if selected {
+		item.Resolution.Decision = "migrate"
+	} else {
+		item.Resolution.Decision = ""
+	}
+}
+
+func onboardEnvName(value string) string {
+	var out strings.Builder
+	out.WriteString("OMNI_")
+	for _, r := range strings.ToUpper(value) {
+		if r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' {
+			out.WriteRune(r)
+		} else {
+			out.WriteByte('_')
+		}
+	}
+	return out.String()
+}
+
+func onboardSecretFields(payload json.RawMessage) []string {
+	var object map[string]any
+	if json.Unmarshal(payload, &object) != nil {
+		return nil
+	}
+	var fields []string
+	for _, key := range []string{"env", "headers"} {
+		values, _ := object[key].(map[string]any)
+		for field, raw := range values {
+			blocked, _ := raw.(map[string]any)
+			if blocked["blocked"] != nil {
+				fields = append(fields, field)
+			}
+		}
+	}
+	sort.Strings(fields)
+	return fields
 }
 
 func (m *Model) doAgentsOnboardStatus(resume bool) []tea.Cmd {
@@ -227,39 +248,56 @@ func (m *Model) doAgentsOnboardCleanup(confirm bool) []tea.Cmd {
 	}}
 }
 
-func onboardBlockerCount(plan *apm.ImportPlan) int {
+func onboardBlockerCount(plan *app.OnboardPlan) int {
+	if plan == nil {
+		return 0
+	}
 	count := 0
+	itemBlockers := map[string]bool{}
 	for _, item := range plan.Items {
-		switch item.Classification {
-		case "needs-choice":
-			conditional := slices.Contains(item.ReasonCodes, "conditional-group-host")
-			needsTargets := slices.Contains(item.ReasonCodes, "legacy-unscoped-targets")
-			if !(conditional && item.Resolution.Decision == "exclude") && (item.Resolution.Decision != "import" || needsTargets && len(item.Resolution.ApprovedTargets) == 0) {
-				count++
-			}
-		case "conflict":
-			if item.Resolution.Decision != "select-origin" || item.Resolution.SelectedOriginID == "" {
-				count++
-			}
-		case "secret-blocked":
-			if item.Resolution.Decision != "map-secret" || len(item.Resolution.EnvBindings) == 0 {
-				count++
-			}
-		case "unsupported":
-			if item.Resolution.Decision != "exclude" {
-				count++
-			}
+		for _, blocker := range item.Blockers {
+			itemBlockers[blocker] = true
 		}
-		if item.Classification == "excluded-changed" && item.Resolution.Decision != "exclude" {
+		count += onboardItemBlockerCount(item)
+	}
+	for _, blocker := range plan.Blockers {
+		if !itemBlockers[blocker] {
 			count++
-		}
-		for _, reason := range item.ReasonCodes {
-			if strings.HasPrefix(reason, "executable:") && !slices.Contains(item.Resolution.ApprovedExecutables, strings.TrimPrefix(reason, "executable:")) {
-				count++
-			}
 		}
 	}
 	return count
+}
+
+func onboardItemBlockerCount(item app.OnboardItem) int {
+	count := 0
+	for _, blocker := range item.Blockers {
+		if item.Resolution.Decision == "keep-unmanaged" || item.Resolution.Decision == "keep-in-dots" {
+			continue
+		}
+		if blocker == "target-resolution-required" && len(item.Resolution.ApprovedTargets) > 0 {
+			continue
+		}
+		if strings.HasPrefix(blocker, "unknown-target:") && allOnboardTargetsAllowed(item) {
+			continue
+		}
+		if blocker == "secret-mapping-required" && len(item.Resolution.EnvBindings) > 0 {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func allOnboardTargetsAllowed(item app.OnboardItem) bool {
+	if len(item.Resolution.ApprovedTargets) == 0 {
+		return false
+	}
+	for _, target := range item.Resolution.ApprovedTargets {
+		if !slices.Contains(item.TargetOptions, target) {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
@@ -299,19 +337,20 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea
 			}
 		case "esc":
 			m.agentsOnboardPlan = nil
-		default:
-			if resolveOnboardItem(m.currentOnboardItem(), key) && onboardBlockerCount(m.agentsOnboardPlan.Envelope.Plan) == 0 {
+		case "enter":
+			if onboardBlockerCount(m.agentsOnboardPlan.Envelope.Plan) == 0 {
 				m.agentsOnboardConfirm = true
-				m.apmOutput = onboardPlanSummary(*m.agentsOnboardPlan)
 				return true, []tea.Cmd{setStatus(m, "Apply this onboarding plan? y/N", false)}
 			}
+		default:
+			resolveOnboardItem(m.currentOnboardItem(), key)
 		}
 		if m.agentsOnboardPlan != nil {
 			m.apmOutput = onboardPlanSummary(*m.agentsOnboardPlan)
 		}
 		return true, nil
 	}
-	if key != "U" && key != "S" && key != "R" && key != "O" && key != "P" && key != "T" && key != "V" && key != "X" && key != "e" {
+	if key != "U" && key != "S" && key != "R" && key != "O" && key != "T" && key != "V" && key != "X" && key != "e" {
 		return false, nil
 	}
 	if key == "e" {
@@ -322,9 +361,7 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea
 	}
 	switch key {
 	case "O":
-		return true, m.doAgentsOnboardPlan(false)
-	case "P":
-		return true, m.doAgentsOnboardPlan(true)
+		return true, m.doAgentsOnboardPlan()
 	case "T":
 		return true, m.doAgentsOnboardStatus(false)
 	case "V":

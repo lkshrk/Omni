@@ -33,6 +33,7 @@ func (p *doctorErrorProvider) ListInstalled(context.Context) ([]provider.Install
 
 func TestDoctor_ReportsHostProviderAndCacheState(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
+	t.Setenv("PATH", t.TempDir())
 	a, cfgPath := newImportApp(t, &stubProvider{name: "brew", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Hosts: map[string][]string{"testhost": {"dev"}},
