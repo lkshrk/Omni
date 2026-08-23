@@ -191,6 +191,12 @@ omni dots groups nvim --remove old-host
 | `omni agents prune` | no | APM dependency state | `omni agents audit` |
 | `omni agents deps list|why` | no | Read-only APM state | already read-only |
 | `omni agents marketplace ...` | no | APM marketplace state, network | `omni agents marketplace list` |
+| `omni agents onboard` | no | Read-only | already read-only; use `--plan-json` to persist the reviewed plan |
+| `omni agents onboard --apply --apply-plan <path>` | no | Config, files, dot repo, global APM state, network | Run preview and inspect the persisted plan first |
+| `omni agents onboard status --operation ID` | no | Read-only | already read-only |
+| `omni agents onboard resume --operation ID` | no | Same pending migration state as apply | Check `status` first |
+| `omni agents onboard rollback --operation ID` | no | Local migration journal/staging | Check `status`; unavailable after materialization starts |
+| `omni agents onboard cleanup --operation ID --confirm` | no | Deletes local migration journal/backups | Omit `--confirm` to preview |
 
 `agents sync` directly invokes APM's global install lifecycle against the
 existing `~/.apm/apm.yml`. APM owns manifest and lockfile mutation, dependency
@@ -199,8 +205,10 @@ host-global: every declared server is installed to every enabled user-global
 MCP target. Cursor and OpenCode are workspace-only MCP targets and are
 rejected.
 
-Agent lifecycle operations are thin APM wrappers. Omni does not provide native
-import/adopt/resolve commands or per-agent MCP assignment.
+Steady-state agent lifecycle operations are thin APM wrappers. The reviewed,
+one-time onboarding workflow is the exception: Omni converts its legacy/dots
+ownership and recognizable native filesystem resources into ordinary APM
+state. Omni does not provide per-agent MCP assignment.
 
 ## Group Commands
 

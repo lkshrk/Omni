@@ -9,13 +9,16 @@ omni
 With no subcommand, Omni launches the interactive TUI. On a new machine it runs
 bootstrap first, then opens the dashboard.
 
-Bootstrap does five jobs:
+Bootstrap does four jobs:
 
 1. Creates or loads `settings.json`.
 2. Detects available package managers.
 3. Ensures the current host exists.
 4. Offers to import installed tools or sync from config.
-5. Offers to import agent skill packages a legacy skill CLI installed.
+
+Agent migration is deliberately separate from bootstrap. Open the Agents view
+and press `O`, or run `omni agents onboard`, to generate a read-only reviewed
+plan before any agent state changes.
 
 ## CLI-Only Bootstrap
 

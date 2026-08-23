@@ -14,7 +14,10 @@ deployed agent files:
 - APM target directories and agent configuration files under `$HOME`.
 
 Omni does not maintain a parallel skill/plugin store. Existing-state onboarding
-converts only legacy Omni declarations; APM discovers and adopts native state.
+converts legacy Omni declarations, active dots resources, and recognizable
+native filesystem primitives under APM-reported deploy roots. Omni stages local
+resources as ordinary packages under `~/.apm/omni-imports/`; APM then owns their
+installation, lock state, audit, and deployment.
 
 ## Omni state
 
@@ -26,6 +29,9 @@ Durable onboarding journals and private backups live under
 `$OMNI_STATE_DIR/onboarding/<operation-id>/`, or
 `$XDG_STATE_HOME/omni/onboarding/<operation-id>/` by default. They remain until
 an explicit confirmed cleanup after both Omni and APM are terminal.
+
+`~/.apm/.omni-onboarding-complete` is the durable one-time completion marker.
+It remains after cleanup so later previews do not rediscover APM-deployed files.
 
 ## Environment variables
 

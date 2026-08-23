@@ -71,7 +71,7 @@ nav:
       - Tools: tools.md
       - Dotfiles: dotfiles.md
       - Agents: agents.md
-      - Upgrading From CLI-Managed Skills: migrating-skills.md
+      - Migrating Agent State: migrating-skills.md
       - TUI: tui.md
   - Reference:
       - CLI Reference: cli.md

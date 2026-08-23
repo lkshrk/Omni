@@ -9,6 +9,11 @@ keeping it in dots (`d`), and keeping any item unmanaged (`x`) before
 confirmation. `T`, `V`, and `X` show local status, resume recovery, and
 preview/confirm cleanup.
 
+Native filesystem items can move to APM or remain unmanaged; they cannot be
+labeled as dots-owned. Target selections shown in the item detail come from
+APM, including targets added after Omni was built.
+
 Agent desired/runtime state is owned by APM (`~/.apm/apm.yml`, lockfile, and
-`~/.apm/marketplaces.json`). Omni discovers and converts its legacy config and
-dots state; ordinary APM install and audit own the resulting runtime state.
+`~/.apm/marketplaces.json`). Omni discovers and converts legacy config, dots
+state, and recognizable native filesystem primitives; ordinary APM install and
+audit own the resulting runtime state.

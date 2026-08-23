@@ -39,6 +39,7 @@ omni dots remove <name>
 omni dots resolve <name> --use-repo
 omni dots resolve <name> --use-local
 omni dots push
+omni agents onboard --apply --apply-plan <path>
 omni settings reset
 omni settings reset-cache
 ```
@@ -55,6 +56,25 @@ omni tools sync --prune --dry-run
 omni tools consolidate python uv --dry-run
 omni dots sync --dry-run
 ```
+
+## Agent onboarding
+
+`omni agents onboard` is a read-only inventory. Its APM probes use a disposable
+HOME/XDG environment, so preview does not initialize the user's APM state.
+
+Apply is intentionally broad: it can change Omni config, the dots repo, native
+agent files, `~/.apm/apm.yml`, the APM lockfile, marketplaces, MCP registrations,
+and deployed target files. Persist and review the JSON plan first. Unsafe paths,
+unresolved targets/secrets, and manifest conflicts block mutation.
+
+Before dots/native materialization, an incomplete operation may be rolled back.
+After materialization starts, recovery is forward-only with `status` and
+`resume`; this avoids restoring a mixed ownership state. Confirmed cleanup
+removes private migration backups, not the resulting APM state.
+
+For a native item, `move-to-apm` stages the reviewed resource, then removes that
+original native source before APM deployment. After this materialization starts,
+recovery is forward-only.
 
 ## Reconcile And Discovery
 

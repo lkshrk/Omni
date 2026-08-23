@@ -1,7 +1,7 @@
 # Agents
 
-APM is the sole owner of agent packages, skills, MCP, plugins, marketplaces,
-locks, and deployed runtime state.
+APM is the sole owner of steady-state agent packages, skills, MCP, plugins,
+marketplaces, dependency locks, and deployed runtime state.
 
 `omni agents sync` is the primary integration command. The remaining agent
 commands are thin APM wrappers: `add`, `remove`, `update`, `search`, `audit`,
@@ -16,27 +16,39 @@ APM state:
 MCP is host-global across enabled APM targets that support user-global MCP.
 Cursor and OpenCode are workspace-only and are rejected by global sync.
 
-Omni has no steady-state agent adapter or parallel skill/plugin store. APM owns
+Omni has no native steady-state agent implementation or parallel skill/plugin
+store. Its thin APM adapter keeps no manifest or deployment state; APM owns
 deployment, audit, and lifecycle state after onboarding.
 
 ## Existing-state onboarding
 
-`omni agents onboard` inventories legacy Omni v22/v23 declarations and active
-Omni dotfile entries. Planning is read-only. Persist a reviewed plan with
+`omni agents onboard` inventories legacy Omni v22/v23 declarations, active
+Omni dotfile entries, and recognizable filesystem primitives under deploy roots
+reported by APM. Planning is read-only and runs APM probes in a disposable
+HOME/XDG environment. Persist a reviewed plan with
 `--plan-json /absolute/path/plan.json`, then apply it with
 `omni agents onboard --apply --apply-plan /absolute/path/plan.json`.
+See [Agent Migration](migrating-skills.md) for the complete interactive and CLI
+walkthrough.
 
 For a dots-managed item, choose `move-to-apm` to materialize the real file and
 remove it from dotfile sync, or `keep-in-dots` to leave ownership unchanged.
 Other items can migrate, map secrets to environment variables, or remain
-unmanaged. Target choices come from live `apm targets --json` output; Omni does
-not hard-code target names.
+unmanaged. Native filesystem items can move to APM or remain unmanaged, but
+cannot be marked as dots-owned. Target choices and deploy roots come from live
+`apm targets --json --all` output; Omni does not hard-code target names.
 
-Apply holds Omni's config-root lock, stages ordinary APM packages and manifest
-changes, runs APM install and audit, and commits Omni v24 fragments last.
+Apply uses Omni's config-root lock while revalidating and journaling the plan.
+It then stages ordinary APM packages under `~/.apm/omni-imports`, runs APM
+install and audit, reacquires the lock to commit Omni v24 fragments last, and
+finally writes `~/.apm/.omni-onboarding-complete`.
 Interrupted migrations expose `status`, `resume`, `rollback`, and confirmed
 `cleanup` subcommands. Unknown targets, missing secret mappings, unsafe dots
 sources, and manifest conflicts block mutation.
+
+Adapter-specific native state that cannot be represented losslessly, including
+some client databases and native MCP formats, remains unmanaged rather than
+being guessed or broadened.
 
 ## Patched APM Build
 

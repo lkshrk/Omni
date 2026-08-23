@@ -6,8 +6,9 @@ Portable tool, dotfile, and AI-agent resource management for developer machines.
   <img src="docs/assets/omni-demo.gif" alt="Omni TUI demo" width="900">
 </p>
 
-Omni keeps tools, dotfiles, and AI-agent skills, MCP servers, and plugins in one
-portable JSON config. The CLI and TUI share the same workflows.
+Omni keeps tools and dotfiles portable through its JSON config. AI-agent
+packages, skills, MCP servers, plugins, and marketplaces live in Microsoft APM;
+Omni provides the shared CLI/TUI workflows and a reviewed one-time migration.
 
 > Omni is early-stage software. Review plans and dry-run output before using it
 > on important machines.
@@ -37,7 +38,8 @@ omni reconcile
 ```
 
 Before broad repairs, read the [Safety Model](docs/safety.md). For agent
-resources, start with the [Agents guide](docs/agents.md).
+resources, run `omni agents onboard` to preview existing-state migration, then
+follow the [Agents guide](docs/agents.md).
 
 ## Docs
 

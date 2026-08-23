@@ -292,7 +292,7 @@ Common setting keys:
 
 | Command | Description |
 | --- | --- |
-| `omni agents onboard` | Print a read-only plan for legacy Omni config and active Omni dots. |
+| `omni agents onboard` | Print a read-only plan for legacy config, active dots, and recognizable native filesystem primitives. |
 | `omni agents onboard --plan-json /abs/plan.json` | Persist a reviewable plan. |
 | `omni agents onboard --apply --apply-plan /abs/plan.json` | Revalidate and apply a reviewed plan. |
 | `omni agents onboard status --operation ID` | Show local recovery state. |
@@ -307,6 +307,12 @@ unmanaged). These choices
 are hashed into `resolution_id` and therefore change the operation ID. Approved
 targets must appear in that reviewed item's target options; Omni does not
 hard-code APM target names.
+
+Planning runs APM version/target probes in a disposable HOME/XDG environment,
+so preview does not initialize the user's `~/.apm` or `~/.cache/apm`. Apply
+stages local resources under `~/.apm/omni-imports`, invokes ordinary global APM
+install/audit operations, and writes `~/.apm/.omni-onboarding-complete` only
+after audit and the schema-v24 commit succeed.
 
 `--config`, `--cache-dir`, and `--state-dir` are global path overrides. Apply
 never prompts in non-interactive use and refuses unresolved items.
