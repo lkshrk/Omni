@@ -58,11 +58,15 @@ func TestFixMissingAPMDryRunPlansPreferredInstaller(t *testing.T) {
 
 func TestFixMissingAPMInstallsViaFallbackInstaller(t *testing.T) {
 	a, mock := newAPMFixApp(t, map[string]bool{"pip3": true})
+	mock.Responses = []executor.MockCall{
+		{},
+		{Stdout: "Agent Package Manager (APM) CLI version " + apmVersionPin + "\n"},
+	}
 	report, err := a.FixMissingAPM(context.Background(), false)
 	if err != nil || report.Installed != "pip3 install --user "+apmPackagePin {
 		t.Fatalf("report = %#v, err = %v", report, err)
 	}
-	if len(mock.Calls) != 1 || mock.Calls[0].Name != "pip3" {
+	if len(mock.Calls) != 2 || mock.Calls[0].Name != "pip3" || mock.Calls[1].Name != "apm" {
 		t.Fatalf("calls = %#v", mock.Calls)
 	}
 }
@@ -86,6 +90,10 @@ func TestFixMissingAPMReportsResolvableInstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	mock := &flipExecutor{availExecutor: availExecutor{available: map[string]bool{"uv": true}}, makeAvailable: "apm"}
+	mock.Responses = []executor.MockCall{
+		{},
+		{Stdout: "Agent Package Manager (APM) CLI version " + apmVersionPin + "\n"},
+	}
 	a := New(configPath)
 	a.SetFallbackExecutor(mock)
 	report, err := a.FixMissingAPM(context.Background(), false)
@@ -94,10 +102,10 @@ func TestFixMissingAPMReportsResolvableInstall(t *testing.T) {
 	}
 }
 
-func TestFixMissingAPMFlagsInstallNotOnPATH(t *testing.T) {
+func TestFixMissingAPMRejectsUnverifiableInstall(t *testing.T) {
 	a, _ := newAPMFixApp(t, map[string]bool{"uv": true})
 	report, err := a.FixMissingAPM(context.Background(), false)
-	if err != nil || report.Installed == "" || !report.NotOnPATH {
+	if err == nil || report.Installed != "" || !strings.Contains(err.Error(), apmVersionPin) {
 		t.Fatalf("report = %#v, err = %v", report, err)
 	}
 }
@@ -111,6 +119,7 @@ func TestFixMissingAPMRetriesExternallyManagedPip(t *testing.T) {
 	mock.Responses = []executor.MockCall{
 		{Stderr: "error: externally-managed-environment\n", Err: context.DeadlineExceeded},
 		{},
+		{Stdout: "Agent Package Manager (APM) CLI version " + apmVersionPin + "\n"},
 	}
 	a := New(configPath)
 	a.SetFallbackExecutor(mock)
@@ -118,7 +127,7 @@ func TestFixMissingAPMRetriesExternallyManagedPip(t *testing.T) {
 	if err != nil || report.Installed != "pip3 install --user "+apmPackagePin+" --break-system-packages" {
 		t.Fatalf("report = %#v, err = %v", report, err)
 	}
-	if len(mock.Calls) != 2 || mock.Calls[1].Args[len(mock.Calls[1].Args)-1] != "--break-system-packages" {
+	if len(mock.Calls) != 3 || mock.Calls[1].Args[len(mock.Calls[1].Args)-1] != "--break-system-packages" || mock.Calls[2].Name != "apm" {
 		t.Fatalf("calls = %#v", mock.Calls)
 	}
 }
@@ -157,14 +166,40 @@ func TestFixMissingAPMFallsThroughToTheNextUpgrader(t *testing.T) {
 		{Stdout: "Agent Package Manager (APM) CLI version 0.0.1\n"},
 		{Stderr: "`apm-cli` is not installed\n", Err: errors.New("exit status 1")},
 		{Stdout: "upgraded\n"},
+		{Stdout: "Agent Package Manager (APM) CLI version " + apmVersionPin + "\n"},
 	}
 
 	report, err := a.FixMissingAPM(context.Background(), false)
 	if err != nil || report.Upgraded != "pipx install --force "+apmPackagePin {
 		t.Fatalf("report = %#v, err = %v", report, err)
 	}
-	if len(mock.Calls) != 3 {
+	if len(mock.Calls) != 4 {
 		t.Fatalf("calls = %#v, want the failed uv upgrade followed by pipx", mock.Calls)
+	}
+}
+
+func TestFixMissingAPMReprobesAfterSuccessfulUpgrade(t *testing.T) {
+	a, mock := newAPMFixApp(t, map[string]bool{"apm": true, "uv": true, "pipx": true})
+	mock.Responses = []executor.MockCall{
+		{Stdout: "Agent Package Manager (APM) CLI version 0.0.1\n"},
+		{},
+		{Stdout: "Agent Package Manager (APM) CLI version 0.0.1\n"},
+		{},
+		{Stdout: "Agent Package Manager (APM) CLI version " + apmVersionPin + "\n"},
+	}
+
+	report, err := a.FixMissingAPM(context.Background(), false)
+	if err != nil || report.Upgraded != "pipx install --force "+apmPackagePin {
+		t.Fatalf("report = %#v, err = %v", report, err)
+	}
+	want := []string{"apm", "uv", "apm", "pipx", "apm"}
+	if len(mock.Calls) != len(want) {
+		t.Fatalf("calls = %#v", mock.Calls)
+	}
+	for i, call := range mock.Calls {
+		if call.Name != want[i] {
+			t.Fatalf("calls = %#v", mock.Calls)
+		}
 	}
 }
 

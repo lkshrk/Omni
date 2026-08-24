@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/lkshrk/omni/internal/app"
 )
 
 func runRootStreams(t *testing.T, args ...string) (stdout, stderr string, err error) {
@@ -54,9 +56,9 @@ func writeDoctorFixtureWithDuplicates(t *testing.T) (cfgPath, cacheDir string) {
 func setPinnedAPMPath(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
-	name, script := "apm", "#!/bin/sh\necho 'Agent Package Manager (APM) CLI version 0.28.0+omni.7'\n"
+	name, script := "apm", "#!/bin/sh\necho 'Agent Package Manager (APM) CLI version 0.28.0+omni.8'\n"
 	if runtime.GOOS == "windows" {
-		name, script = "apm.bat", "@echo Agent Package Manager (APM) CLI version 0.28.0+omni.7\r\n"
+		name, script = "apm.bat", "@echo Agent Package Manager (APM) CLI version 0.28.0+omni.8\r\n"
 	}
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -86,6 +88,33 @@ func TestDoctorFixJSON_StdoutIsOnlyTheDocument(t *testing.T) {
 		if !strings.Contains(stderr, "git") {
 			t.Fatalf("%v: fix progress missing from stderr: %q", args, stderr)
 		}
+	}
+}
+
+func TestDoctorFixRecoveryJSONReturnsErrorWithoutStdout(t *testing.T) {
+	setPinnedAPMPath(t)
+	a := app.New(filepath.Join(t.TempDir(), "settings.json"))
+	a.StateDir = t.TempDir()
+	if err := a.InitOnboardingReadOnly(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	recovery := &app.OnboardingRecoveryError{OperationID: strings.Repeat("a", 32), OmniPhase: "preflighted"}
+	cmd := newDoctorCmd(&rootState{app: a, onboardingRecovery: recovery})
+	cmd.SilenceUsage = true
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"--fix", "--format", "json"})
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "onboarding operation") {
+		t.Fatalf("err = %v", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on error", stdout)
+	}
+	if !strings.Contains(stderr.String(), "agents onboard resume") {
+		t.Fatalf("stderr = %q", stderr)
 	}
 }
 

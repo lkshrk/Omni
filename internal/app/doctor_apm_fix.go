@@ -34,6 +34,7 @@ func (a *App) FixMissingAPM(ctx context.Context, dryRun bool) (APMInstallFixRepo
 	if a.APMAvailable() {
 		return a.upgradeOutdatedAPM(ctx, dryRun)
 	}
+	var failures []error
 	for _, candidate := range apmInstallCommands {
 		if !a.commandAvailable(candidate[0]) {
 			continue
@@ -52,9 +53,18 @@ func (a *App) FixMissingAPM(ctx context.Context, dryRun bool) (APMInstallFixRepo
 		if err != nil {
 			return APMInstallFixReport{}, executor.WrapError(err, cmdline, stdout, stderr)
 		}
-		report := APMInstallFixReport{Installed: cmdline}
-		report.NotOnPATH = !a.APMAvailable()
-		return report, nil
+		version, versionErr := a.APMVersion(ctx)
+		if versionErr == nil && apmVersionPinned(version) {
+			return APMInstallFixReport{Installed: cmdline}, nil
+		}
+		if versionErr != nil {
+			failures = append(failures, fmt.Errorf("%s completed but pinned apm %s could not be verified: %w", cmdline, apmVersionPin, versionErr))
+		} else {
+			failures = append(failures, fmt.Errorf("%s completed but apm %s remains installed; want %s", cmdline, version, apmVersionPin))
+		}
+	}
+	if len(failures) > 0 {
+		return APMInstallFixReport{}, errors.Join(failures...)
 	}
 	return APMInstallFixReport{}, fmt.Errorf("no supported installer found (uv, pipx, pip3); install pinned APM manually from %s", apmPackagePin)
 }
@@ -80,7 +90,15 @@ func (a *App) upgradeOutdatedAPM(ctx context.Context, dryRun bool) (APMInstallFi
 			failures = append(failures, executor.WrapError(runErr, cmdline, stdout, stderr))
 			continue
 		}
-		return APMInstallFixReport{Upgraded: cmdline}, nil
+		installedVersion, versionErr := a.APMVersion(ctx)
+		if versionErr == nil && apmVersionPinned(installedVersion) {
+			return APMInstallFixReport{Upgraded: cmdline}, nil
+		}
+		if versionErr != nil {
+			failures = append(failures, fmt.Errorf("%s completed but pinned apm %s could not be verified: %w", cmdline, apmVersionPin, versionErr))
+		} else {
+			failures = append(failures, fmt.Errorf("%s completed but apm %s remains installed; want %s", cmdline, installedVersion, apmVersionPin))
+		}
 	}
 	if len(failures) > 0 {
 		return APMInstallFixReport{}, errors.Join(failures...)

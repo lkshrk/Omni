@@ -157,7 +157,7 @@ func TestContinueOnboardOperationRestoresPhaseWithManifestAfterFailedPackageDryR
 	}
 	failure := errors.New("package dry-run failed")
 	mock := &availableMatchMock{executor.NewMatchMock(
-		executor.MatchRule{Pattern: "apm --version", Response: executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version 0.28.0+omni.7\n"}},
+		executor.MatchRule{Pattern: "apm --version", Response: executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version 0.28.0+omni.8\n"}},
 		executor.MatchRule{Pattern: "apm install -g --only apm --dry-run", Response: executor.MockCall{Err: failure}},
 	).WithFallback(executor.MockCall{})}
 	a := &App{}
@@ -176,7 +176,7 @@ func TestContinueOnboardOperationRestoresPhaseWithManifestAfterFailedPackageDryR
 	if got, err := os.ReadFile(manifest); err != nil || string(got) != string(old) {
 		t.Fatalf("manifest=%q err=%v", got, err)
 	}
-	resume := &availableMatchMock{executor.NewMatchMock(executor.MatchRule{Pattern: "apm --version", Response: executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version 0.28.0+omni.7\n"}}).WithFallback(executor.MockCall{})}
+	resume := &availableMatchMock{executor.NewMatchMock(executor.MatchRule{Pattern: "apm --version", Response: executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version 0.28.0+omni.8\n"}}).WithFallback(executor.MockCall{})}
 	a.SetFallbackExecutor(resume)
 	if err := a.continueOnboardOperation(t.Context(), root, plan, &persisted, proposed); err != nil {
 		t.Fatal(err)
@@ -210,7 +210,7 @@ func TestManifestDryRunFailurePersistsReplayPhaseBeforeRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	failure := errors.New("dryrun")
-	mock := &availableMatchMock{executor.NewMatchMock(executor.MatchRule{Pattern: "apm --version", Response: executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version 0.28.0+omni.7\n"}}, executor.MatchRule{Pattern: "apm install -g --only apm --dry-run", Response: executor.MockCall{Err: failure}}).WithFallback(executor.MockCall{})}
+	mock := &availableMatchMock{executor.NewMatchMock(executor.MatchRule{Pattern: "apm --version", Response: executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version 0.28.0+omni.8\n"}}, executor.MatchRule{Pattern: "apm install -g --only apm --dry-run", Response: executor.MockCall{Err: failure}}).WithFallback(executor.MockCall{})}
 	a := &App{}
 	a.SetFallbackExecutor(mock)
 	original := onboardingPhaseFailpoint
@@ -248,7 +248,7 @@ func TestContinueOnboardOperationRunsMCPDryRunsAndScrubsPlaceholders(t *testing.
 	}
 	journal := onboardJournal{SchemaVersion: 1, OperationID: strings.Repeat("b", 32), PlanID: strings.Repeat("4", 64), ResolutionID: strings.Repeat("5", 64), CandidateSetID: strings.Repeat("6", 64), Phase: "preflighted", ManifestPath: manifest, ManifestHash: digestBytes(nil), ProposedManifestHash: digestBytes(proposed), MarketplaceHash: digestBytes(nil)}
 	plan := OnboardPlan{OperationID: journal.OperationID, Items: []OnboardItem{{Payload: []byte(`{"env":{"TOKEN":"${TOKEN}"},"headers":{"Authorization":"Bearer ${env:HEADER_TOKEN}"}}`), Resolution: OnboardResolution{Decision: "migrate", EnvBindings: map[string]string{"literal": "MAPPED"}}}}}
-	mock := &availableMatchMock{executor.NewMatchMock(executor.MatchRule{Pattern: "apm --version", Response: executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version 0.28.0+omni.7\n"}}).WithFallback(executor.MockCall{})}
+	mock := &availableMatchMock{executor.NewMatchMock(executor.MatchRule{Pattern: "apm --version", Response: executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version 0.28.0+omni.8\n"}}).WithFallback(executor.MockCall{})}
 	a := &App{}
 	a.SetFallbackExecutor(mock)
 	if err := a.continueOnboardOperation(t.Context(), root, plan, &journal, proposed); err != nil {
@@ -289,7 +289,7 @@ func TestContinueOnboardOperationScrubsAuditEnvironment(t *testing.T) {
 	}
 	journal := onboardJournal{SchemaVersion: 1, OperationID: strings.Repeat("7", 32), PlanID: strings.Repeat("8", 64), ResolutionID: strings.Repeat("9", 64), CandidateSetID: strings.Repeat("a", 64), Phase: "mcp-installed", ManifestPath: filepath.Join(home, ".apm", "apm.yml"), MarketplaceHash: digestBytes(nil)}
 	plan := OnboardPlan{OperationID: journal.OperationID, Items: []OnboardItem{{Payload: []byte(`{"env":{"AUDIT_TOKEN":"${AUDIT_TOKEN}"}}`), Resolution: OnboardResolution{Decision: "migrate"}}}}
-	mock := &availableMatchMock{executor.NewMatchMock(executor.MatchRule{Pattern: "apm --version", Response: executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version 0.28.0+omni.7\n"}}).WithFallback(executor.MockCall{})}
+	mock := &availableMatchMock{executor.NewMatchMock(executor.MatchRule{Pattern: "apm --version", Response: executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version 0.28.0+omni.8\n"}}).WithFallback(executor.MockCall{})}
 	a := &App{}
 	a.SetFallbackExecutor(mock)
 	original := onboardingPhaseFailpoint
@@ -1192,7 +1192,7 @@ func TestAgentsOnboardApplyKeepInDotsDoesNotWriteDotsPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	mock := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "apm --version", Response: executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version 0.28.0+omni.7\n"}},
+		executor.MatchRule{Pattern: "apm --version", Response: executor.MockCall{Stdout: "Agent Package Manager (APM) CLI version 0.28.0+omni.8\n"}},
 		executor.MatchRule{Pattern: "apm targets --json", Response: executor.MockCall{Stdout: `[{"target":"codex"}]`}},
 	).WithFallback(executor.MockCall{})
 	a.SetFallbackExecutor(mock)

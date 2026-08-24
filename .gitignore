@@ -30,8 +30,14 @@ GEMINI.md
 CONTEXT.md
 .ai-context/
 _workspace/
-docs/harness/
-.agents/
+docs/harness/*
+!docs/harness/apm-native-onboarding/
+!docs/harness/apm-native-onboarding/team-spec.md
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/apm-native-onboarding-orchestrator/
+!.agents/skills/apm-native-onboarding-orchestrator/SKILL.md
 .codex/
 .claudeignore
 .claude/
@@ -56,5 +62,6 @@ vendor/
 coverage.out
 cover.out
 cpu.prof
+**/.omni-config.lock
 mem.prof
 /gen-schema

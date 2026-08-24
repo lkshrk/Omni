@@ -34,7 +34,7 @@ RUN case "$TARGETARCH" in \
     grok --version
 
 # --break-system-packages is required by externally-managed system Python installs.
-RUN pip3 install --break-system-packages cowsay==6.1 git+https://github.com/lkshrk/apm.git@5ff08cc26c85167972df01e7d671823bf6655984
+RUN pip3 install --break-system-packages cowsay==6.1 git+https://github.com/lkshrk/apm.git@1a87534ea6d5b28098e0b33226bb37e3157e2230
 
 WORKDIR /app
 

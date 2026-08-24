@@ -94,6 +94,11 @@ func (a *App) detectOnboardingRecovery(context.Context) error {
 	return nil
 }
 
+// RequireNoOnboardingRecovery rejects fresh onboarding while recovery is pending.
+func (a *App) RequireNoOnboardingRecovery(ctx context.Context) error {
+	return a.detectOnboardingRecovery(ctx)
+}
+
 func (a *App) onboardingClient(ctx context.Context) (*apm.Client, error) {
 	if err := onboardingPinnedAPMCheck(ctx, a); err != nil {
 		return nil, err

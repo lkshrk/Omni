@@ -34,7 +34,7 @@ func TestParseAPMVersion(t *testing.T) {
 }
 
 func TestAPMVersionPin(t *testing.T) {
-	if apmVersionPin != "0.28.0+omni.7" || apmPackagePin != "git+https://github.com/lkshrk/apm.git@5ff08cc26c85167972df01e7d671823bf6655984" {
+	if apmVersionPin != "0.28.0+omni.8" || apmPackagePin != "git+https://github.com/lkshrk/apm.git@1a87534ea6d5b28098e0b33226bb37e3157e2230" {
 		t.Fatalf("unexpected APM pins: version=%q package=%q", apmVersionPin, apmPackagePin)
 	}
 	for _, tt := range []struct {
@@ -43,7 +43,7 @@ func TestAPMVersionPin(t *testing.T) {
 	}{
 		{"0.27.9", false},
 		{"0.28.0", false},
-		{"0.28.0+omni.7", true},
+		{"0.28.0+omni.8", true},
 		{"0.28.0+omni.2", false},
 		{"0.28.0+build.1", false},
 		{"0.28.1", false},
@@ -118,12 +118,16 @@ func TestDoctorAPMVersionFailsWhenUnparseable(t *testing.T) {
 
 func TestFixMissingAPMUpgradesBelowFloor(t *testing.T) {
 	a, mock := newAPMFixApp(t, map[string]bool{"apm": true, "uv": true})
-	mock.Responses = []executor.MockCall{{Stdout: "APM CLI version 0.27.0\n"}, {}}
+	mock.Responses = []executor.MockCall{
+		{Stdout: "APM CLI version 0.27.0\n"},
+		{},
+		{Stdout: "APM CLI version " + apmVersionPin + "\n"},
+	}
 	report, err := a.FixMissingAPM(context.Background(), false)
 	if err != nil || report.Upgraded != "uv tool install --force "+apmPackagePin || report.AlreadyInstalled {
 		t.Fatalf("report = %#v, err = %v", report, err)
 	}
-	if len(mock.Calls) != 2 || mock.Calls[1].Name != "uv" {
+	if len(mock.Calls) != 3 || mock.Calls[1].Name != "uv" || mock.Calls[2].Name != "apm" {
 		t.Fatalf("calls = %#v", mock.Calls)
 	}
 }

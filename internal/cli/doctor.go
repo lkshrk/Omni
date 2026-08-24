@@ -30,6 +30,18 @@ func newDoctorCmd(state *rootState) *cobra.Command {
 			if dryRun && !fix {
 				return fmt.Errorf("--dry-run requires --fix")
 			}
+			if fix && state.onboardingRecovery != nil {
+				report, err := state.app.FixMissingAPM(cmd.Context(), dryRun)
+				printAPMInstallFixReport(out, report)
+				fmt.Fprintln(out, state.onboardingRecovery)
+				if err != nil {
+					return fmt.Errorf("applying APM fix: %w", err)
+				}
+				if format == "json" {
+					return state.onboardingRecovery
+				}
+				return nil
+			}
 			// A failed fixer must not cost the user the health report, so diagnostics print before the error returns.
 			var fixErr error
 			if fix {
@@ -43,18 +55,7 @@ func newDoctorCmd(state *rootState) *cobra.Command {
 				if !dryRun && len(fixResult.IgnoreModified) > 0 {
 					fmt.Fprintf(out, "cleaned ignore patterns for: %s\n", strings.Join(fixResult.IgnoreModified, ", "))
 				}
-				if fixResult.APMInstall.Planned != "" {
-					fmt.Fprintf(out, "dry run: would install or upgrade APM via: %s\n", fixResult.APMInstall.Planned)
-				}
-				if fixResult.APMInstall.Upgraded != "" {
-					fmt.Fprintf(out, "upgraded APM via: %s\n", fixResult.APMInstall.Upgraded)
-				}
-				if fixResult.APMInstall.Installed != "" {
-					fmt.Fprintf(out, "installed APM via: %s\n", fixResult.APMInstall.Installed)
-					if fixResult.APMInstall.NotOnPATH {
-						fmt.Fprintln(out, "warning: apm installed but not resolvable; add its bin directory (usually ~/.local/bin) to PATH")
-					}
-				}
+				printAPMInstallFixReport(out, fixResult.APMInstall)
 				fixErr = fixResult.Err()
 			}
 			result, err := state.app.Doctor(cmd.Context())
@@ -84,6 +85,21 @@ func newDoctorCmd(state *rootState) *cobra.Command {
 	cmd.Flags().BoolVar(&fix, "fix", false, "apply safe auto-fixes before running checks")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "with --fix: show planned fixes without writing")
 	return cmd
+}
+
+func printAPMInstallFixReport(out io.Writer, report app.APMInstallFixReport) {
+	if report.Planned != "" {
+		fmt.Fprintf(out, "dry run: would install or upgrade APM via: %s\n", report.Planned)
+	}
+	if report.Upgraded != "" {
+		fmt.Fprintf(out, "upgraded APM via: %s\n", report.Upgraded)
+	}
+	if report.Installed != "" {
+		fmt.Fprintf(out, "installed APM via: %s\n", report.Installed)
+		if report.NotOnPATH {
+			fmt.Fprintln(out, "warning: apm installed but not resolvable; add its bin directory (usually ~/.local/bin) to PATH")
+		}
+	}
 }
 
 func printOptimizeReport(out io.Writer, report *config.OptimizeReport, dryRun bool) {

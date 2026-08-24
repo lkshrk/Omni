@@ -52,13 +52,13 @@ being guessed or broadened.
 
 ## Patched APM Build
 
-Omni temporarily requires APM `0.28.0+omni.7`, built from the immutable
+Omni temporarily requires APM `0.28.0+omni.8`, built from the immutable
 `lkshrk/apm` commit
-[`5ff08cc26c85167972df01e7d671823bf6655984`](https://github.com/lkshrk/apm/commit/5ff08cc26c85167972df01e7d671823bf6655984).
+[`1a87534ea6d5b28098e0b33226bb37e3157e2230`](https://github.com/lkshrk/apm/commit/1a87534ea6d5b28098e0b33226bb37e3157e2230).
 Installers use this exact source specification:
 
 ```text
-git+https://github.com/lkshrk/apm.git@5ff08cc26c85167972df01e7d671823bf6655984
+git+https://github.com/lkshrk/apm.git@1a87534ea6d5b28098e0b33226bb37e3157e2230
 ```
 
 The patch makes Hermes a stable explicit target, fixes global Antigravity MCP

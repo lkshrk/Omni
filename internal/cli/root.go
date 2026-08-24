@@ -20,11 +20,12 @@ import (
 )
 
 type rootState struct {
-	configPath string
-	cacheDir   string
-	stateDir   string
-	yes        bool
-	app        *app.App
+	configPath         string
+	cacheDir           string
+	stateDir           string
+	yes                bool
+	app                *app.App
+	onboardingRecovery *app.OnboardingRecoveryError
 }
 
 var initRootApp = func(ctx context.Context, a *app.App) error {
@@ -85,16 +86,30 @@ Already set up?
 				if err := a.InitOnboardingReadOnly(cmd.Context()); err != nil {
 					return fmt.Errorf("initialising onboarding: %w", err)
 				}
+				if cmd.Name() == "onboard" {
+					if err := a.RequireNoOnboardingRecovery(cmd.Context()); err != nil {
+						return fmt.Errorf("initialising onboarding: %w", err)
+					}
+				}
 				state.app = a
 				return nil
 			}
 			if commandInChain(cmd, "doctor") {
 				stop := profile.Start("cli.app_init_read_only")
-				if err := a.InitReadOnly(cmd.Context()); err != nil {
-					stop()
-					return fmt.Errorf("initialising diagnostics: %w", err)
-				}
+				err := a.InitReadOnly(cmd.Context())
 				stop()
+				state.onboardingRecovery = nil
+				if err != nil {
+					var recovery *app.OnboardingRecoveryError
+					fix, _ := cmd.Flags().GetBool("fix")
+					if !fix || !errors.As(err, &recovery) {
+						return fmt.Errorf("initialising diagnostics: %w", err)
+					}
+					if err := a.InitOnboardingReadOnly(cmd.Context()); err != nil {
+						return fmt.Errorf("initialising diagnostics recovery: %w", err)
+					}
+					state.onboardingRecovery = recovery
+				}
 				state.app = a
 				return nil
 			}

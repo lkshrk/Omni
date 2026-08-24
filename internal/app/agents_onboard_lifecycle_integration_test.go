@@ -32,7 +32,7 @@ func TestAgentsOnboardLifecycleOnlyAPM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(versionOut), "0.28.0+omni.7") {
+	if !strings.Contains(string(versionOut), "0.28.0+omni.8") {
 		t.Fatalf("unexpected lifecycle build: %s", versionOut)
 	}
 	originalCheck := onboardingPinnedAPMCheck
@@ -146,8 +146,8 @@ func TestOnboardGeneratedMarketplacePluginInstallsWithPinnedAPM(t *testing.T) {
 		t.Fatalf("pinned APM is required on PATH: %v", err)
 	}
 	versionOut, err := exec.Command(apmPath, "--version").CombinedOutput()
-	if err != nil || !strings.Contains(string(versionOut), "0.28.0+omni.7") {
-		t.Fatalf("expected pinned APM 0.28.0+omni.7: err=%v output=%s", err, versionOut)
+	if err != nil || !strings.Contains(string(versionOut), "0.28.0+omni.8") {
+		t.Fatalf("expected pinned APM 0.28.0+omni.8: err=%v output=%s", err, versionOut)
 	}
 
 	root := t.TempDir()
