@@ -140,7 +140,7 @@ jobs:
           python-version: '3.14'
 
       - name: Install pinned APM
-        run: python -m pip install git+https://github.com/lkshrk/apm.git@44d9233646017610feb6b293ebebcbc259aa7c26
+        run: python -m pip install git+https://github.com/lkshrk/apm.git@5ff08cc26c85167972df01e7d671823bf6655984
 
       - name: Test portable APM target contracts
         run: go test ./internal/app -run '^TestAPM(Target|User)'
@@ -151,8 +151,8 @@ jobs:
       - name: Test real stable-target MCP lifecycle
         run: go test -tags=integration ./internal/apm -run '^TestGlobalMCPLifecycleForEveryStableTarget$' -count=1
 
-      - name: Test lifecycle-only onboarding
-        run: go test -tags=integration ./internal/app -run '^TestAgentsOnboardLifecycleOnlyAPM$' -count=1
+      - name: Test lifecycle and marketplace onboarding
+        run: go test -tags=integration ./internal/app -run '^(TestAgentsOnboardLifecycleOnlyAPM|TestOnboardGeneratedMarketplacePluginInstallsWithPinnedAPM)$' -count=1
 
   onboarding-unit:
     name: Onboarding Unit (race)

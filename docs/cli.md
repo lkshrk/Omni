@@ -56,7 +56,7 @@ first available installer (`uv tool install`, `pipx install`, then
 `pip3 install --user`). Until APM is installed, `omni agents sync` refuses to
 run when the config declares agent packages, and reports how to install APM.
 
-`omni doctor` requires the exact patched build `0.28.0+omni.6`; another version
+`omni doctor` requires the exact patched build `0.28.0+omni.7`; another version
 or an unparseable version fails the "APM version" check. `--fix` restores the
 required build from the immutable fork commit through the same installer
 preference. See [Patched APM Build](agents.md#patched-apm-build) for provenance

@@ -52,19 +52,23 @@ being guessed or broadened.
 
 ## Patched APM Build
 
-Omni temporarily requires APM `0.28.0+omni.6`, built from the immutable
+Omni temporarily requires APM `0.28.0+omni.7`, built from the immutable
 `lkshrk/apm` commit
-[`44d9233646017610feb6b293ebebcbc259aa7c26`](https://github.com/lkshrk/apm/commit/44d9233646017610feb6b293ebebcbc259aa7c26).
+[`5ff08cc26c85167972df01e7d671823bf6655984`](https://github.com/lkshrk/apm/commit/5ff08cc26c85167972df01e7d671823bf6655984).
 Installers use this exact source specification:
 
 ```text
-git+https://github.com/lkshrk/apm.git@44d9233646017610feb6b293ebebcbc259aa7c26
+git+https://github.com/lkshrk/apm.git@5ff08cc26c85167972df01e7d671823bf6655984
 ```
 
 The patch makes Hermes a stable explicit target, fixes global Antigravity MCP
-cleanup, resolves user-scope audit paths correctly, and serializes APM lifecycle
-mutations. The changes are proposed upstream in
-[`microsoft/apm#2655`](https://github.com/microsoft/apm/pull/2655).
+cleanup, resolves user-scope audit paths correctly, serializes APM lifecycle
+mutations, and makes manifest-declared marketplace plugins preserve target
+scoping and resolve before dry-run materialization. The lifecycle changes are
+proposed upstream in
+[`microsoft/apm#2655`](https://github.com/microsoft/apm/pull/2655); the
+marketplace fix remains pinned to the immutable fork commit until it is accepted
+upstream.
 
 This fork is temporary. After the pull request is merged and an official APM
 release contains the fixes, maintainers must run Omni's APM contract and

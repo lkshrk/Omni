@@ -111,7 +111,7 @@ func newOnboardPlanTestApp(t *testing.T, legacy, targets string) (*App, *executo
 		t.Fatal(err)
 	}
 	mock := &executor.MockExecutor{Responses: []executor.MockCall{
-		{Stdout: "Agent Package Manager (APM) CLI version 0.28.0+omni.6\n"},
+		{Stdout: "Agent Package Manager (APM) CLI version 0.28.0+omni.7\n"},
 		{Stdout: targets},
 	}}
 	a := New(configPath)
@@ -206,7 +206,7 @@ func TestInitDetectsJoinedOnboardingRecoveryBeforeMutation(t *testing.T) {
 			if err := writeOnboardJournal(opRoot, journal); err != nil {
 				t.Fatal(err)
 			}
-			mock := &executor.MockExecutor{Responses: []executor.MockCall{{Stdout: "APM CLI version 0.28.0+omni.6\n"}}}
+			mock := &executor.MockExecutor{Responses: []executor.MockCall{{Stdout: "APM CLI version 0.28.0+omni.7\n"}}}
 			a := New(configPath)
 			a.StateDir = state
 			a.CacheDir = cache

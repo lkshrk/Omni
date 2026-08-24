@@ -13,7 +13,7 @@ import (
 	"github.com/lkshrk/omni/internal/executor"
 )
 
-const cliTestPinnedAPMVersion = "0.28.0+omni.6"
+const cliTestPinnedAPMVersion = "0.28.0+omni.7"
 
 func TestAgentsCommandsDelegateToAPM(t *testing.T) {
 	tests := []struct {
