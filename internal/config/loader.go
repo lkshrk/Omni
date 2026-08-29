@@ -15,12 +15,12 @@ import (
 
 // Each call gets its own temp name so concurrent callers for the same path do not collide.
 func atomicWrite(path string, data []byte) (retErr error) {
+	if err := testguard.RequireTempPath("config write", path); err != nil {
+		return err
+	}
 	// Every launch re-normalizes the config; renaming an identical result would churn mtime and downstream dotfile sync.
 	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, data) {
 		return nil
-	}
-	if err := testguard.RequireTempPath("config write", path); err != nil {
-		return err
 	}
 	dir := filepath.Dir(path)
 	// 0o700: settings.json holds host mappings and install pins other local users need not read.
@@ -36,11 +36,11 @@ func atomicWrite(path string, data []byte) (retErr error) {
 }
 
 func atomicWriteUnlocked(path string, data []byte) (retErr error) {
-	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, data) {
-		return nil
-	}
 	if err := testguard.RequireTempPath("config write", path); err != nil {
 		return err
+	}
+	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, data) {
+		return nil
 	}
 	writePath, err := resolveConfigWritePath(path)
 	if err != nil {
@@ -170,7 +170,14 @@ func DefaultCacheDir() (string, error) {
 // never falls back to the working directory.
 func DefaultStateDir() (string, error) {
 	if dir := os.Getenv("OMNI_STATE_DIR"); dir != "" {
-		return filepath.Abs(dir)
+		path, err := filepath.Abs(dir)
+		if err != nil {
+			return "", err
+		}
+		if err := testguard.RequireTempPath("OMNI_STATE_DIR", path); err != nil {
+			return "", err
+		}
+		return path, nil
 	}
 	base := os.Getenv("XDG_STATE_HOME")
 	if base == "" {
@@ -180,7 +187,14 @@ func DefaultStateDir() (string, error) {
 		}
 		base = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Abs(filepath.Join(base, "omni"))
+	path, err := filepath.Abs(filepath.Join(base, "omni"))
+	if err != nil {
+		return "", err
+	}
+	if err := testguard.RequireTempPath("default state dir", path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // Load — Returns an empty RootConfig and no error when the file does not exist.

@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/lkshrk/omni/internal/testguard"
 )
 
 // Stow writes relative symlinks, so resolve against the directory containing the link.
@@ -23,6 +25,12 @@ func StowRelativeSymlinkTarget(linkPath, targetPath string) (string, error) {
 
 // WriteStowShapedSymlink — Shaped as stow writes them so stow -R accepts them; the caller must confirm the link resolves to targetPath.
 func WriteStowShapedSymlink(linkPath, targetPath string) error {
+	if err := testguard.RequireTempEntryPath("dotfiles relink target", linkPath); err != nil {
+		return err
+	}
+	if err := testguard.RequireTempPath("dotfiles relink source", targetPath); err != nil {
+		return err
+	}
 	if err := ValidateHomeTargetPath(linkPath); err != nil {
 		return fmt.Errorf("refusing to write symlink %q: %w", linkPath, err)
 	}
@@ -236,6 +244,12 @@ func backupManagedLinkContent(path string) (string, error) {
 
 // Managed symlinks become real copies of src; non-managed real files follow opts.ConflictOverwrite.
 func unlinkFile(entryName, rel, src, dst string, opts UnlinkOptions) (Op, error) {
+	if err := testguard.RequireTempPath("dotfiles unlink source", src); err != nil {
+		return Op{}, err
+	}
+	if err := testguard.RequireTempEntryPath("dotfiles unlink target", dst); err != nil {
+		return Op{}, err
+	}
 	fileLabel := rel
 	if fileLabel == "" {
 		fileLabel = filepath.Base(src)

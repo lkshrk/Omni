@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/lkshrk/omni/internal/executor"
+	"github.com/lkshrk/omni/internal/testguard"
 )
 
 const BackupDirName = "dotfiles.bkp"
@@ -49,6 +50,12 @@ func BackupLocalPathFromWithExecutor(ctx context.Context, exec executor.Executor
 }
 
 func backupLocalPathFrom(ctx context.Context, exec executor.Executor, path, source string, ignores []string) (string, error) {
+	if err := testguard.RequireTempEntryPath("dotfiles backup source", source); err != nil {
+		return "", err
+	}
+	if err := testguard.RequireTempEntryPath("dotfiles backup target", path); err != nil {
+		return "", err
+	}
 	info, err := os.Lstat(source)
 	if err != nil {
 		return "", err
@@ -69,6 +76,9 @@ func BackupAndRemoveLocalPath(path string) (string, error) {
 }
 
 func BackupAndRemoveLocalPathWithExecutor(ctx context.Context, exec executor.Executor, path string) (string, error) {
+	if err := testguard.RequireTempEntryPath("dotfiles backup and removal target", path); err != nil {
+		return "", err
+	}
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		return "", nil
@@ -96,6 +106,14 @@ func RemoveLocalPathAfterBackup(path, backupPath string) error {
 }
 
 func RemoveLocalPathAfterBackupWithExecutor(ctx context.Context, exec executor.Executor, path, backupPath string) error {
+	if err := testguard.RequireTempEntryPath("dotfiles removal target", path); err != nil {
+		return err
+	}
+	if backupPath != "" {
+		if err := testguard.RequireTempEntryPath("dotfiles removal backup", backupPath); err != nil {
+			return err
+		}
+	}
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		return nil
@@ -127,6 +145,9 @@ func RemoveLocalPathAfterBackupWithExecutor(ctx context.Context, exec executor.E
 
 // TrashLocalPath — Symlinks are unlinked in place because the link itself carries no data.
 func TrashLocalPath(ctx context.Context, exec executor.Executor, path string) error {
+	if err := testguard.RequireTempEntryPath("dotfiles trash target", path); err != nil {
+		return err
+	}
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		return nil
@@ -145,6 +166,9 @@ func TrashLocalPath(ctx context.Context, exec executor.Executor, path string) er
 }
 
 func moveLocalPathToTrash(ctx context.Context, exec executor.Executor, path string, info os.FileInfo) (string, error) {
+	if err := testguard.RequireTempEntryPath("dotfiles trash source", path); err != nil {
+		return "", err
+	}
 	dst, err := trashDestination(path)
 	if err != nil {
 		return "", err
@@ -177,13 +201,20 @@ func trashDestination(path string) (string, error) {
 		return "", err
 	}
 	rootAbs = filepath.Clean(rootAbs)
+	if err := testguard.RequireTempPath("dotfiles trash root", rootAbs); err != nil {
+		return "", err
+	}
 	if abs == rootAbs || strings.HasPrefix(abs, rootAbs+string(filepath.Separator)) {
 		return "", fmt.Errorf("refusing to trash %q inside %s", abs, rootAbs)
 	}
 	if err := os.MkdirAll(rootAbs, 0o700); err != nil {
 		return "", fmt.Errorf("create trash dir: %w", err)
 	}
-	return uniqueBackupDestination(filepath.Join(rootAbs, filepath.Base(abs))), nil
+	dst := uniqueBackupDestination(filepath.Join(rootAbs, filepath.Base(abs)))
+	if err := testguard.RequireTempPath("dotfiles trash destination", dst); err != nil {
+		return "", err
+	}
+	return dst, nil
 }
 
 func trashRoot() (string, error) {
@@ -218,6 +249,9 @@ func backupDestination(path string) (string, error) {
 	}
 	abs = filepath.Clean(abs)
 	root := filepath.Join(home, BackupDirName)
+	if err := testguard.RequireTempPath("dotfiles backup root", root); err != nil {
+		return "", err
+	}
 	if abs == root || strings.HasPrefix(abs, root+string(filepath.Separator)) {
 		return "", fmt.Errorf("refusing to back up %q inside %s", abs, root)
 	}
@@ -226,7 +260,11 @@ func backupDestination(path string) (string, error) {
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		rel = filepath.Base(abs)
 	}
-	return uniqueBackupDestination(filepath.Join(root, rel)), nil
+	dst := uniqueBackupDestination(filepath.Join(root, rel))
+	if err := testguard.RequireTempPath("dotfiles backup destination", dst); err != nil {
+		return "", err
+	}
+	return dst, nil
 }
 
 func uniqueBackupDestination(path string) string {

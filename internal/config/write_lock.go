@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/lkshrk/omni/internal/flock"
+	"github.com/lkshrk/omni/internal/testguard"
 )
 
 type WriteLock struct {
@@ -15,6 +16,9 @@ type WriteLock struct {
 
 // AcquireWriteLock serializes all config-root writers across processes.
 func AcquireWriteLock(configPath string) (*WriteLock, error) {
+	if err := testguard.RequireTempPath("config write lock", configPath); err != nil {
+		return nil, err
+	}
 	dir := configLockRoot(configPath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create config root: %w", err)

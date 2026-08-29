@@ -28,6 +28,31 @@ func TestAtomicWrite_HappyPath(t *testing.T) {
 	}
 }
 
+func TestAtomicWriteRejectsEqualContentOutsideTestSandbox(t *testing.T) {
+	path := filepath.Join("..", "config", "loader.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicWrite(path, data); err == nil || !strings.Contains(err.Error(), "config write") {
+		t.Fatalf("atomicWrite equal outside content error = %v", err)
+	}
+}
+
+func TestAcquireWriteLockRejectsOutsideBeforeCreatingLock(t *testing.T) {
+	path := os.Getenv("OMNI_TEST_ROOT")
+	lockPath := filepath.Join(filepath.Dir(path), ".omni-config.lock")
+	if lock, err := AcquireWriteLock(path); err == nil || !strings.Contains(err.Error(), "config write lock") {
+		if lock != nil {
+			_ = lock.Close()
+		}
+		t.Fatalf("AcquireWriteLock outside error = %v", err)
+	}
+	if _, err := os.Lstat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("outside lock was created: %v", err)
+	}
+}
+
 func TestAtomicWrite_CreatesNestedDirs(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "a", "b", "c", "file.json")

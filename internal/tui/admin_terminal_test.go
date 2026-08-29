@@ -86,7 +86,7 @@ echo "PTY_OK"
 		t.Fatalf("write fake brew: %v", err)
 	}
 	t.Setenv("HOME", home)
-	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Setenv("PATH", t.TempDir())
 
 	events := make(chan tea.Msg, adminTerminalEventBuffer)
 	state := adminTerminalState{

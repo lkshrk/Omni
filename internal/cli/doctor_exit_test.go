@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -10,6 +11,15 @@ import (
 // --dry-run previews the fixers; it does not suppress the health verdict.
 func TestDoctorFixDryRun_ExitsNonZeroOnFailingCheck(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
+	binDir := t.TempDir()
+	apmName, apmBody := "apm", "#!/bin/sh\necho 'APM CLI version 0.29.0'\n"
+	if runtime.GOOS == "windows" {
+		apmName, apmBody = "apm.cmd", "@echo APM CLI version 0.29.0\r\n"
+	}
+	if err := os.WriteFile(filepath.Join(binDir, apmName), []byte(apmBody), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	missingRepo := filepath.Join(dir, "no-such-dots-repo")

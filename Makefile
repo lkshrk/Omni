@@ -11,7 +11,6 @@ DEV_CONFIG  ?= $(DEV_DIR)/settings.json
 DEV_CACHE   ?= $(DEV_DIR)/cache
 DEV_GOCACHE ?= $(DEV_DIR)/go-build
 TEST_SAFE   := bash scripts/run-test-safe.sh
-TEST_UNIT_ROOT := $(TMP_DIR)/test-unit-root
 TEST_PACKAGES ?= ./...
 INTEGRATION_PACKAGES ?= ./integration_tests/... ./internal/provider/... ./internal/apm/... ./internal/app/... ./internal/cli/...
 ARGS        ?= --help
@@ -92,19 +91,11 @@ test: test-scripts test-unit
 
 ## test-unit: run unit tests with race detector
 test-unit:
-	$(MAKE) --no-print-directory prune-tmp
-	@mkdir -p "$(TEST_UNIT_ROOT)"
-	@chmod -R u+w "$(TEST_UNIT_ROOT)" 2>/dev/null || true
-	@find "$(TEST_UNIT_ROOT)" -mindepth 1 -delete
-	OMNI_TEST_ROOT="$(TEST_UNIT_ROOT)" $(TEST_SAFE) go test -race -trimpath $(TEST_PACKAGES)
+	$(TEST_SAFE) go test -race -trimpath $(TEST_PACKAGES)
 
 ## test-unit-fast: run unit tests without the race detector, for quick local iteration
 test-unit-fast:
-	$(MAKE) --no-print-directory prune-tmp
-	@mkdir -p "$(TEST_UNIT_ROOT)"
-	@chmod -R u+w "$(TEST_UNIT_ROOT)" 2>/dev/null || true
-	@find "$(TEST_UNIT_ROOT)" -mindepth 1 -delete
-	OMNI_TEST_ROOT="$(TEST_UNIT_ROOT)" $(TEST_SAFE) go test -trimpath ./...
+	$(TEST_SAFE) go test -trimpath ./...
 
 ## test-fast: run unit tests (no race detector) and script regressions, for quick local iteration
 test-fast: test-scripts test-unit-fast
@@ -118,7 +109,7 @@ test-canary:
 	go test -tags canary -count=1 -run 'TestCanary' ./internal/agent/... ./internal/app/...
 
 ## test-package-managers: run real package-manager provider tests in minimal distro containers
-test-package-managers: prune-tmp
+test-package-managers:
 	@mkdir -p "$(TMP_DIR)/pm-tests"
 	$(call run_pm_test,apt,$$(go env GOARCH),debian:bookworm-slim)
 	$(call run_pm_test,apk,$$(go env GOARCH),alpine:3.20)
@@ -132,7 +123,7 @@ test-package-managers: prune-tmp
 test-all: test test-integration
 
 ## test-integration-build: run the isolated integration test Docker build stage
-test-integration-build: clean-docker
+test-integration-build:
 	docker buildx build -f Dockerfile.test --target integration-test --build-arg "TEST_PACKAGES=$(INTEGRATION_PACKAGES)" $(DOCKER_TEST_CACHE) --output=type=cacheonly .
 
 ## test-integration: run integration-tagged tests inside the isolated Docker environment
@@ -143,7 +134,7 @@ docs-build:
 	$(DOCKER) build -f Dockerfile.docs --target docs-build --output=type=cacheonly .
 
 ## lint: run golangci-lint
-lint: prune-tmp
+lint:
 	@mkdir -p "$(TMP_DIR)/go-build" "$(TMP_DIR)/golangci-lint"
 	@GOCACHE=$${GOCACHE:-$(TMP_DIR)/go-build} GOLANGCI_LINT_CACHE=$${GOLANGCI_LINT_CACHE:-$(TMP_DIR)/golangci-lint} golangci-lint run
 

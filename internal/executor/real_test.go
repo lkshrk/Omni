@@ -179,7 +179,7 @@ func TestResolveCommand_UsesAugmentedPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
-	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Setenv("PATH", t.TempDir())
 	t.Setenv("NVM_DIR", "")
 	t.Setenv("NVM_BIN", "")
 
@@ -203,7 +203,7 @@ func TestCommandAvailable_UsesAugmentedPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
-	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Setenv("PATH", t.TempDir())
 
 	if !CommandAvailable("stow") {
 		t.Fatal("CommandAvailable(stow) = false, want true through augmented PATH")
@@ -235,7 +235,7 @@ func TestResolveCommand_UsesActiveNVMBinBeforeDefaultAlias(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("NVM_DIR", "") // isolate from the invoking shell's real NVM_DIR
 	t.Setenv("NVM_BIN", activeBin)
-	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Setenv("PATH", t.TempDir())
 
 	got, env := ResolveCommand("npm")
 	want := filepath.Join(activeBin, "npm")

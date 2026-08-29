@@ -94,7 +94,10 @@ func (a *App) requireSafeTestDotsMutation(repoPath string, entries []config.DotE
 		if err != nil {
 			return err
 		}
-		if !testguard.PathInRoot(target, home) || !testguard.PathInTempRoot(target) {
+		if err := testguard.RequireTempEntryPath("dotfiles target", target); err != nil {
+			return err
+		}
+		if !testguard.EntryPathInRoot(target, home) {
 			return fmt.Errorf("unsafe dots test setup: target path %q for entry %q is outside test HOME=%q; refusing dots filesystem mutation in InitTestMode", target, entry.Name, home)
 		}
 	}
@@ -264,6 +267,9 @@ func (a *App) resolveStateDir() error {
 		abs, err := filepath.Abs(a.StateDir)
 		if err != nil {
 			return fmt.Errorf("resolving state directory: %w", err)
+		}
+		if err := testguard.RequireTempPath("app state directory", abs); err != nil {
+			return err
 		}
 		a.StateDir = abs
 		return nil

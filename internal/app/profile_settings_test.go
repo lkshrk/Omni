@@ -961,7 +961,7 @@ func TestEffectiveManagers_UsesActiveNVMBin(t *testing.T) {
 	}
 	t.Setenv("HOME", home)
 	t.Setenv("NVM_BIN", activeBin)
-	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Setenv("PATH", t.TempDir())
 
 	a, _ := newImportApp(t)
 	_, nodeBin := a.EffectiveManagers()

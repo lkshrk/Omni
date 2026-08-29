@@ -148,12 +148,15 @@ func TestSyncFailuresReturnErrorAfterSummary(t *testing.T) {
 }
 
 func TestExecuteSIGTERMExitsNonZero(t *testing.T) {
-	const helperEnv = "OMNI_EXECUTE_SIGNAL_HELPER"
+	const helperEnv = "OMNI_TEST_HELPER_EXECUTE_SIGNAL"
 	if os.Getenv(helperEnv) == "1" {
+		cfgPath := os.Getenv("OMNI_CONFIG")
+		withConfig(t, cfgPath, &config.RootConfig{})
+		t.Setenv("OMNI_HOSTNAME", "testhost")
 		os.Args = []string{
 			"omni",
-			"--config", os.Getenv("OMNI_EXECUTE_SIGNAL_CONFIG"),
-			"--cache-dir", os.Getenv("OMNI_EXECUTE_SIGNAL_CACHE"),
+			"--config", cfgPath,
+			"--cache-dir", os.Getenv("OMNI_CACHE_DIR"),
 			"settings", "reset",
 		}
 		Execute()
@@ -163,15 +166,9 @@ func TestExecuteSIGTERMExitsNonZero(t *testing.T) {
 		t.Skip("POSIX signal exit codes are not available on Windows")
 	}
 
-	cfgPath := filepath.Join(t.TempDir(), "settings.json")
-	cacheDir := t.TempDir()
-	withConfig(t, cfgPath, &config.RootConfig{})
 	cmd := exec.Command(os.Args[0], "-test.run=^TestExecuteSIGTERMExitsNonZero$") //nolint:gosec
 	cmd.Env = append(os.Environ(),
 		helperEnv+"=1",
-		"OMNI_EXECUTE_SIGNAL_CONFIG="+cfgPath,
-		"OMNI_EXECUTE_SIGNAL_CACHE="+cacheDir,
-		"OMNI_HOSTNAME=testhost",
 	)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
