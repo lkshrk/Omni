@@ -335,53 +335,37 @@ type Model struct {
 
 	groupDotsEditor groupAssignmentEditor
 
-	pickerGroups           []string
-	pickerCursor           int
-	pickerCreatingGroup    bool // true when the user selected the "+ new group…" sentinel
-	pickerPurposeClaim     bool // true when the picker is for claiming an orphan tool
-	pickerPurposeInstall   bool // true when the picker is for install-and-add
-	pickerPurposeDotAdd    bool // true when the picker is for dots add
-	pickerDotAddPath       string
-	pickerDotAddRawPath    string
-	pickerPurposeReassign  bool     // true when iterating claimed tools for group reassignment
-	pendingGroupReassign   []string // queue of tool names awaiting group reassignment
-	reassignCreatedGroups  []string // groups created during the reassign sequence (carried across pickers)
-	pickerMembershipKind   string
-	pickerMembershipName   string
-	pickerMembershipKey    string
-	mcpMemberships         map[string][]string // mcp server name → current group memberships (picker draft)
-	pluginMemberships      map[string][]string // plugin name → current group memberships (picker draft)
-	marketplaceMemberships map[string][]string // marketplace name → current group memberships (picker draft)
+	pickerGroups          []string
+	pickerCursor          int
+	pickerCreatingGroup   bool // true when the user selected the "+ new group…" sentinel
+	pickerPurposeClaim    bool // true when the picker is for claiming an orphan tool
+	pickerPurposeInstall  bool // true when the picker is for install-and-add
+	pickerPurposeDotAdd   bool // true when the picker is for dots add
+	pickerDotAddPath      string
+	pickerDotAddRawPath   string
+	pickerPurposeReassign bool     // true when iterating claimed tools for group reassignment
+	pendingGroupReassign  []string // queue of tool names awaiting group reassignment
+	reassignCreatedGroups []string // groups created during the reassign sequence (carried across pickers)
+	pickerMembershipKind  string
+	pickerMembershipName  string
+	pickerMembershipKey   string
 	// Set when the group popup opened on a child sub-path row: confirming extracts the subtree into a new entry instead of editing an existing entry's membership.
 	pickerDotExtractParent string
 	pickerDotExtractSub    string
 	pickerActionTool       app.ToolView
 	pickerActionToolSet    bool
-	// Claim payload for an agents-tab orphan row; pickerMembershipKind carries the feature while pickerPurposeClaim is set.
-	pickerClaimAgentsRow agentsAllRow
-	pickerClaimAgentsSet bool
-	pickerOriginalGroups []string
-	pickerCreatedGroups  []string
-	scopeOptions         []scopeOption
-	scopeCursor          int
-	scopeTarget          app.ToolView
-	scopeTargetSet       bool
-	fallbackTarget       app.ToolView
-	fallbackTargetSet    bool
-	fallbackEditor       fallbackEditorState
+	pickerOriginalGroups   []string
+	pickerCreatedGroups    []string
+	scopeOptions           []scopeOption
+	scopeCursor            int
+	scopeTarget            app.ToolView
+	scopeTargetSet         bool
+	fallbackTarget         app.ToolView
+	fallbackTargetSet      bool
+	fallbackEditor         fallbackEditorState
 
-	// 0=create config, 1=import tools, 2=providers, 3=node manager, 4=agents onboarding, 5=enable dotfiles, 6=dots repo path, 7=copy host, 8=host picker, 9=reusable groups, 10=existing-host activation, 11=create config, 12=import advisories
-	setupStep       int
-	setupAgentsList []app.AgentInfo
-	// Import advisories wait here for an explicit acknowledgement: adoption can write a resolved
-	// credential into settings.json, and a status line loses that disclosure to the post-setup reload.
-	setupImportNotices []string
-	// Loaded gates rendering the diff line and the [i]/[s] footer.
-	setupAgentsDiffLoading      bool
-	setupAgentsDiffLoaded       bool
-	setupAgentsUnmanagedSkills  int
-	setupAgentsUnmanagedMcp     int
-	setupAgentsUnmanagedPlugins int
+	// 0=create config, 1=import tools, 2=providers, 3=node manager, 5=enable dotfiles, 6=dots repo path, 7=copy host, 8=host picker, 9=reusable groups, 10=existing-host activation, 11=create config
+	setupStep int
 	// Zero value keeps first-run setup on the tools tab.
 	setupBackgroundMode viewMode
 	setupProviders      []app.SetupProviderOption
@@ -403,10 +387,6 @@ type Model struct {
 
 	// Config exists but no host entry matches this machine; all navigation is locked until a host is active.
 	hostRequired bool
-
-	editingAgents    bool
-	agentsEditRows   []app.AgentPickerRow
-	agentsEditCursor int
 
 	refreshScanErrors              []string
 	editingPriority                bool
@@ -489,139 +469,35 @@ type Model struct {
 	stowInstallPath        string
 	stowInstallVariant     dotsVariantRequest
 
-	agentsEnabled  bool
-	skillsEnabled  bool
-	mcpEnabled     bool
-	pluginsEnabled bool
-	// Unset with empty rows means "not loaded yet" — render as loading, not as the onboarding empty state.
-	skillsRowsKnown      bool
-	mcpRowsKnown         bool
-	pluginRowsKnown      bool
-	marketplaceRowsKnown bool
-	enabledAgents        []string
-	agentsIgnore         app.AgentsIgnore
-	skillsRows           []app.SkillPackageRow
-	skillsUnmanagedRows  []app.SkillPackageRow
-	skillsCursor         int
-	agentsAllCursor      int
-	skillsMemberships    map[string][]string // source → current group memberships (picker draft)
+	apmRunning bool
+	apmCommand string
+	apmOutput  string
+	apmNotices []string
+	apmErr     error
 
-	// Agents-all row (see agentsRowRunKey) with an op in flight, mirroring rowOpKey's tools-tab row-spinner substitution.
-	agentsOpKey string
-
-	// Two-step confirm, tools-tab style, spanning all three features.
-	agentsDeleteConfirm   bool
-	agentsDeleteUninstall bool // skills orphan rows uninstall from disk, not manifest delete
-	agentsDeleteFeature   agentsSection
-	agentsDeleteName      string
-	agentsDeleteOpKey     string
-
-	// Two-step confirm mirroring the tools tab's listConfirmSyncAll: it claims unmanaged skills into the manifest.
-	agentsSyncAllConfirm bool
-
-	// Owns input while open, which is what frees the uppercase batch keys: lowercase u/l stay the row-scoped resolutions underneath.
-	agentsDriftPromptOpen  bool
-	agentsDriftPromptLines []string
-
-	// Two-step confirm on the modal's batch keys: it rewrites every drifted file at once, so it cannot be cheaper than the row-scoped resolve below.
-	agentsBulkResolveConfirm    bool
-	agentsBulkResolveUseManaged bool
-
-	// Two-step confirm: 'u' keeps omni's side, 'l' keeps the local one.
-	agentsResolveConfirm  bool
-	agentsResolveUseLocal bool
-	agentsResolveFeature  agentsSection
-	agentsResolveSource   string
-	agentsResolveOpKey    string
-
-	agentsIgnoreConfirm bool
-	agentsIgnoreFeature agentsSection
-	agentsIgnoreName    string
-	agentsIgnoreOpKey   string
-
-	// Armed by pluginNeedsMarketplaceMsg, confirmed with Confirm/y — a genuine yes/no after an async round-trip, not a press-again confirm.
-	pluginMarketplaceOfferConfirm bool
-	pluginMarketplaceOfferAgentID string
-	pluginMarketplaceOfferPlugin  app.InstalledPlugin
-	pluginMarketplaceOfferGroup   string
-	pluginMarketplaceOfferMarket  string
-	pluginMarketplaceOfferSource  string
-	pluginMarketplaceOfferOpKey   string
-	skillsLoaded                  bool
-	skillsRunning                 bool
-	skillsResult                  *app.RestoreSkillsResult
-	skillsImport                  *app.ImportDiff
-	skillsErr                     error
-	skillTypeIdx                  int // 0=all, 1=skills, 2=mcp, 3=plugin
-	skillAgentIdx                 int // 0=all, 1+=installed agent IDs derived from row.Agents
-
-	skillAgentsPicker bool
-	skillAgentsSource string
-	skillAgentsRows   []app.SkillAgentRow
-	skillAgentsCursor int
-
-	mcpRows          []app.McpServerRow
-	mcpUnmanaged     map[string][]app.InstalledMcpServer
-	mcpCursor        int
-	mcpErr           error
-	mcpRunning       bool
-	mcpLoaded        bool
-	mcpDeleteConfirm bool
-	mcpDeleteName    string
-
-	// Disambiguates which per-agent rendered row is selected when mcpCursor's localIdx expands into multiple agent rows.
-	mcpCursorAgentID string
-
-	mcpAgentsPicker bool
-	mcpAgentsRow    app.McpServerRow
-
-	pluginRows          []app.PluginRow
-	pluginUnmanaged     map[string][]app.InstalledPlugin
-	pluginCursor        int
-	pluginErr           error
-	pluginRunning       bool
-	pluginLoaded        bool
-	pluginDeleteConfirm bool
-	pluginDeleteName    string
-
-	pluginCursorAgentID string
-
-	pluginAgentsPicker bool
-	pluginAgentsRow    app.PluginRow
-
-	pluginFormOpen        bool
-	pluginFormField       int // 0=name,1=marketplace,2=source,3=agents
-	pluginFormName        textinput.Model
-	pluginFormMarketplace textinput.Model
-	pluginFormSource      textinput.Model
-	pluginFormAgents      textinput.Model
-	pluginFormErr         error
-
-	marketplaceRows          []app.MarketplaceRow
-	marketplaceUnmanaged     map[string][]app.InstalledMarketplace
-	marketplaceCursor        int
-	marketplaceErr           error
-	marketplaceRunning       bool
-	marketplaceLoaded        bool
-	marketplaceDeleteConfirm bool
-	marketplaceDeleteName    string
-
-	marketplaceCursorAgentID string
-
-	mcpFormOpen      bool
-	mcpFormField     int // 0=name,1=transport,2=command/url,3=env,4=env_literal
-	mcpFormTransport int // 0=stdio,1=http,2=sse; cycles with ←/→
-	mcpFormName      textinput.Model
-	mcpFormCommand   textinput.Model
-	mcpFormURL       textinput.Model
-	mcpFormEnv       textinput.Model
-	mcpFormEnvLit    textinput.Model
-	mcpFormErr       error
-
-	skillsSearchActive bool
-	skillFindResults   []app.FindResult
-	skillFindCursor    int
-	skillAddRunning    bool
+	agentsRows         []app.AgentsPackageRow
+	agentsMCPRows      []app.AgentsServiceRow
+	agentsLSPRows      []app.AgentsServiceRow
+	agentsNotices      []string
+	agentsSearchActive bool
+	agentsRegistryMode bool
+	agentsRegistry     []app.AgentsRegistryEntry
+	agentsRegistryGen  int
+	agentsConfirmIdx   int // row index pending uninstall confirm; -1 = none
+	agentsRemovalHint  []string
+	agentsRowOpSpec    string
+	// m.filter is shared with tools and dots, so the agents query parks here while another tab owns the input.
+	agentsFilterQuery      string
+	filterOutsideAgents    string
+	agentsRowsKnown        bool
+	agentsRowsErr          error
+	agentsCursor           int
+	agentsRowsGen          int // bumped on every dispatch; stale completions are dropped
+	agentsOutdatedGen      int
+	agentsOutdatedChecking bool
+	agentsOutdatedErr      error
+	agentsOutdatedUnknown  int
+	agentsOutdatedResult   app.AgentsOutdatedResult
 
 	dangerConfirmRow int // settings row awaiting inline confirmation; -1 = none
 
@@ -669,79 +545,31 @@ func New(ctx context.Context, a *app.App) Model {
 	si.Placeholder = "~/dotfiles"
 	si.CharLimit = 256
 
-	mfn := textinput.New()
-	mfn.Placeholder = "server-name"
-	mfn.CharLimit = 64
-
-	mfc := textinput.New()
-	mfc.Placeholder = "npx -y @server/mcp"
-	mfc.CharLimit = 256
-
-	mfu := textinput.New()
-	mfu.Placeholder = "https://mcp.example.com"
-	mfu.CharLimit = 256
-
-	mfe := textinput.New()
-	mfe.Placeholder = "API_KEY,TOKEN"
-	mfe.CharLimit = 256
-
-	mfl := textinput.New()
-	mfl.Placeholder = "LOG_LEVEL=info"
-	mfl.CharLimit = 256
-
-	pfn := textinput.New()
-	pfn.Placeholder = "caveman"
-	pfn.CharLimit = 64
-
-	pfm := textinput.New()
-	pfm.Placeholder = "caveman"
-	pfm.CharLimit = 256
-
-	pfs := textinput.New()
-	pfs.Placeholder = "owner/repo or Git URL"
-	pfs.CharLimit = 512
-
-	pfa := textinput.New()
-	pfa.Placeholder = "claude-code,codex"
-	pfa.CharLimit = 256
-
 	return Model{
-		app:                   a,
-		ctx:                   ctx,
-		cancel:                cancel,
-		agentsEnabled:         true, // enabled by default; the startup snapshot corrects it
-		skillsEnabled:         true,
-		mcpEnabled:            true,
-		pluginsEnabled:        true,
-		keys:                  DefaultKeyMap(),
-		spinner:               sp,
-		help:                  newHelp(),
-		filter:                fi,
-		commandInput:          ci,
-		settingsInput:         si,
-		mcpFormName:           mfn,
-		mcpFormCommand:        mfc,
-		mcpFormURL:            mfu,
-		mcpFormEnv:            mfe,
-		mcpFormEnvLit:         mfl,
-		pluginFormName:        pfn,
-		pluginFormMarketplace: pfm,
-		pluginFormSource:      pfs,
-		pluginFormAgents:      pfa,
-		mode:                  viewStatus,
-		commandCursor:         -1,
-		commandOrigin:         viewList,
-		loading:               true,
-		cursor:                -1, // nothing selected until the user navigates
-		cursorHidden:          true,
-		upgradingKeys:         make(map[string]bool),
-		searchCache:           make(map[string]searchCacheEntry),
-		dotsConfirmIdx:        -1,
-		dotsOverwriteIdx:      -1,
-		dotsLocalIdx:          -1,
-		dotsIgnoreIdx:         -1,
-		dotsVariantIdx:        -1,
-		dangerConfirmRow:      -1,
+		app:              a,
+		ctx:              ctx,
+		cancel:           cancel,
+		keys:             DefaultKeyMap(),
+		spinner:          sp,
+		help:             newHelp(),
+		filter:           fi,
+		commandInput:     ci,
+		settingsInput:    si,
+		mode:             viewStatus,
+		commandCursor:    -1,
+		commandOrigin:    viewList,
+		loading:          true,
+		cursor:           -1, // nothing selected until the user navigates
+		cursorHidden:     true,
+		upgradingKeys:    make(map[string]bool),
+		searchCache:      make(map[string]searchCacheEntry),
+		dotsConfirmIdx:   -1,
+		agentsConfirmIdx: -1,
+		dotsOverwriteIdx: -1,
+		dotsLocalIdx:     -1,
+		dotsIgnoreIdx:    -1,
+		dotsVariantIdx:   -1,
+		dangerConfirmRow: -1,
 		// Async results can land before the first WindowSizeMsg; without a sane size those frames overrun the real terminal.
 		width:         defaultTerminalWidth,
 		height:        defaultTerminalHeight,
@@ -789,6 +617,7 @@ func (m Model) Init() tea.Cmd {
 		loadTools(m.app, m.ctx),
 		m.doRunDoctor(),
 		tea.RequestBackgroundColor,
+		func() tea.Msg { return agentsStartupMsg{} },
 	)
 }
 
@@ -865,17 +694,10 @@ func toolsLoadedMsgFromStartupState(snapshot *app.StartupSnapshot) toolsLoadedMs
 		dotsWatchServiceErr:    errorString(snapshot.DotsWatchServiceErr),
 		dotsConfigured:         snapshot.DotsConfigured,
 		dotsConfiguredKnown:    true,
-		agentsEnabled:          snapshot.AgentsEnabled,
-		skillsEnabled:          snapshot.SkillsEnabled,
-		mcpEnabled:             snapshot.McpEnabled,
-		pluginsEnabled:         snapshot.PluginsEnabled,
-		agentsRows:             snapshot.AgentsRows,
 		dotsSyncAvail:          snapshot.DotsSyncAvailability,
 		dotsSyncAvailKnown:     true,
 		setupProviders:         snapshot.SetupProviders,
 		ecosystemProviders:     snapshot.EcosystemProviderNames,
-		enabledAgents:          snapshot.EnabledAgents,
-		agentsIgnore:           snapshot.AgentsIgnore,
 	}
 }
 
@@ -1003,12 +825,6 @@ func filterHostInventoryTools(tools []*app.ToolView, hostInventory map[string]bo
 	}
 	return filtered
 }
-
-func (m Model) skillsSectionEnabled() bool  { return m.agentsEnabled && m.skillsEnabled }
-func (m Model) mcpSectionEnabled() bool     { return m.agentsEnabled && m.mcpEnabled }
-func (m Model) pluginsSectionEnabled() bool { return m.agentsEnabled && m.pluginsEnabled }
-
-func (m Model) marketplacesSectionEnabled() bool { return m.agentsEnabled && m.pluginsEnabled }
 
 func (m Model) ecosystemProviderNames() []string {
 	if m.app == nil {
@@ -1199,16 +1015,10 @@ type spinnerActivityState struct {
 	doctorRunning              bool
 	settingsSaveRunning        bool
 	dashboardReconcileRunning  bool
-	setupAgentsDiffLoading     bool
 	dotsServicesRefreshing     bool
 	searching                  bool
 	traceLogLoading            bool
-	skillsRunning              bool
-	skillAddRunning            bool
-	mcpRunning                 bool
-	pluginRunning              bool
-	marketplaceRunning         bool
-	agentsOpKey                string
+	apmRunning                 bool
 	scanningProviders          int
 	outdatedProviders          int
 	providerSnapshotRefreshing bool
@@ -1226,16 +1036,10 @@ func (m Model) spinnerActivityState() spinnerActivityState {
 		doctorRunning:              m.doctorRunning,
 		settingsSaveRunning:        m.settingsSaveRunning,
 		dashboardReconcileRunning:  m.dashboardReconcileRunning,
-		setupAgentsDiffLoading:     m.setupAgentsDiffLoading,
 		dotsServicesRefreshing:     m.dotsServicesRefreshing,
 		searching:                  m.searching,
 		traceLogLoading:            m.traceLogLoading,
-		skillsRunning:              m.skillsRunning,
-		skillAddRunning:            m.skillAddRunning,
-		mcpRunning:                 m.mcpRunning,
-		pluginRunning:              m.pluginRunning,
-		marketplaceRunning:         m.marketplaceRunning,
-		agentsOpKey:                m.agentsOpKey,
+		apmRunning:                 m.apmRunning,
 		scanningProviders:          len(m.scanningProviders),
 		outdatedProviders:          len(m.outdatedProviders),
 		providerSnapshotRefreshing: m.providerSnapshotRefreshing,
@@ -1253,16 +1057,10 @@ func (s spinnerActivityState) startedSince(before spinnerActivityState) bool {
 		s.doctorRunning && !before.doctorRunning ||
 		s.settingsSaveRunning && !before.settingsSaveRunning ||
 		s.dashboardReconcileRunning && !before.dashboardReconcileRunning ||
-		s.setupAgentsDiffLoading && !before.setupAgentsDiffLoading ||
 		s.dotsServicesRefreshing && !before.dotsServicesRefreshing ||
 		s.searching && !before.searching ||
 		s.traceLogLoading && !before.traceLogLoading ||
-		s.skillsRunning && !before.skillsRunning ||
-		s.skillAddRunning && !before.skillAddRunning ||
-		s.mcpRunning && !before.mcpRunning ||
-		s.pluginRunning && !before.pluginRunning ||
-		s.marketplaceRunning && !before.marketplaceRunning ||
-		s.agentsOpKey != "" && before.agentsOpKey == "" ||
+		s.apmRunning && !before.apmRunning ||
 		s.scanningProviders > before.scanningProviders ||
 		s.outdatedProviders > before.outdatedProviders ||
 		s.providerSnapshotRefreshing && !before.providerSnapshotRefreshing ||

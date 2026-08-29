@@ -67,11 +67,6 @@ type KeyMap struct {
 	DotUseLocalAll key.Binding // L — force-resolve all conflicts with local version
 	DotCommit      key.Binding // C — commit dotfiles (global)
 
-	AgentsUseManaged    key.Binding // u — resolve a drifted agent resource with omni's side
-	AgentsUseLocal      key.Binding // l — resolve a drifted agent resource with the local side
-	AgentsUseManagedAll key.Binding // U — resolve every drifted agent resource with omni's side
-	AgentsUseLocalAll   key.Binding // L — resolve every drifted agent resource with the local side
-
 	PinProvider key.Binding // p — pin provider scope
 }
 
@@ -286,22 +281,6 @@ func DefaultKeyMap() KeyMap {
 		DotCommit: key.NewBinding(
 			key.WithKeys("C"),
 			key.WithHelp("C", "commit dotfiles"),
-		),
-		AgentsUseManaged: key.NewBinding(
-			key.WithKeys("u"),
-			key.WithHelp("u", actions.MustTUILabel(actions.AgentsSkillsUseManaged)),
-		),
-		AgentsUseLocal: key.NewBinding(
-			key.WithKeys("l"),
-			key.WithHelp("l", actions.MustTUILabel(actions.AgentsSkillsUseLocal)),
-		),
-		AgentsUseManagedAll: key.NewBinding(
-			key.WithKeys("U"),
-			key.WithHelp("U", actions.MustTUILabel(actions.AgentsResolveAllUseManaged)),
-		),
-		AgentsUseLocalAll: key.NewBinding(
-			key.WithKeys("L"),
-			key.WithHelp("L", actions.MustTUILabel(actions.AgentsResolveAllUseLocal)),
 		),
 		PinProvider: key.NewBinding(
 			key.WithKeys("p"),

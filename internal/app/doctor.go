@@ -50,6 +50,7 @@ func (r *DoctorResult) HasFailures() bool {
 func (a *App) Doctor(ctx context.Context) (*DoctorResult, error) {
 	result := &DoctorResult{}
 	cfg, configOK := a.doctorConfig(result)
+	a.doctorLegacyAgents(result)
 	a.doctorCache(result)
 	if configOK {
 		a.doctorHost(result, cfg)
@@ -58,6 +59,10 @@ func (a *App) Doctor(ctx context.Context) (*DoctorResult, error) {
 		a.doctorDots(ctx, result, cfg)
 		a.doctorDotsIgnorePatterns(result, cfg)
 		a.doctorAgents(ctx, result, cfg)
+		// The version check probes apm fresh and seeds the pinned memo, so the audit below needs no second spawn.
+		a.doctorAPMVersion(ctx, result, cfg)
+		a.doctorAPMAudit(ctx, result)
+		a.doctorAPMPin(result)
 	}
 	result.Summary = doctorSummary(result.Checks)
 	return result, nil
@@ -98,6 +103,16 @@ func (a *App) doctorConfig(result *DoctorResult) (*config.RootConfig, bool) {
 	}
 	result.addCheck("config", "Config", DoctorStatusOK, "settings.json is valid", path, fmt.Sprintf("version %d", cfg.Version))
 	return cfg, true
+}
+
+// Runs outside the config gate: a config still carrying agents declarations fails to load.
+func (a *App) doctorLegacyAgents(result *DoctorResult) {
+	found, err := config.HasRemovedAgentConfig(a.ConfigPath)
+	if err != nil || !found {
+		return
+	}
+	result.addCheck("agents-legacy", "Legacy agents", DoctorStatusWarn,
+		"agents declarations present in config — run 'omni agents migrate --host <host>' and move the output to the dotfiles template (docs/agents.md)")
 }
 
 func (a *App) doctorCache(result *DoctorResult) {

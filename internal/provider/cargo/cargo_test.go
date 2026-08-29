@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/executor"
@@ -134,4 +135,24 @@ warning: ignored line
 			t.Fatal("ListInstalled() error = nil")
 		}
 	})
+}
+
+func TestListInstalledSurfacesCommandOutputDetail(t *testing.T) {
+	sentinel := errors.New("exit status 1")
+	p, _ := newCargo(executor.MockCall{Err: sentinel, Stderr: "boom: repo unreachable\n"})
+	if _, err := p.ListInstalled(context.Background()); err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("ListInstalled() error = %v, want wrapped sentinel", err)
+	} else if !strings.Contains(err.Error(), "boom: repo unreachable") {
+		t.Fatalf("ListInstalled() error = %v, want stderr detail", err)
+	}
+}
+
+func TestListInstalledSurfacesStdoutDetailWhenStderrEmpty(t *testing.T) {
+	sentinel := errors.New("exit status 1")
+	p, _ := newCargo(executor.MockCall{Err: sentinel, Stdout: "fail written to stdout\n"})
+	if _, err := p.ListInstalled(context.Background()); err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("ListInstalled() error = %v, want wrapped sentinel", err)
+	} else if !strings.Contains(err.Error(), "fail written to stdout") {
+		t.Fatalf("ListInstalled() error = %v, want stdout detail", err)
+	}
 }

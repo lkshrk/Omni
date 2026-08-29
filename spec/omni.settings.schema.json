@@ -17,9 +17,6 @@
       "description": "JSON Schema reference URI (injected automatically by omni on every write).",
       "type": "string"
     },
-    "agents": {
-      "$ref": "#/$defs/AgentsConfig"
-    },
     "groups": {
       "description": "Tool/dots groups. Host groups use special=\"host\" and are reserved for one hostname.",
       "type": "array",
@@ -122,12 +119,12 @@
     },
     "version": {
       "description": "settings.json format version. Missing means legacy unversioned config; omni migrates it to the current version on write.",
-      "default": 22,
+      "default": 24,
       "examples": [
-        22
+        24
       ],
       "type": "integer",
-      "const": 22
+      "const": 24
     }
   },
   "required": [
@@ -135,110 +132,6 @@
   ],
   "additionalProperties": false,
   "$defs": {
-    "AgentsConfig": {
-      "description": "Omni-managed AI-agent resources: skill packages, MCP servers, plugin marketplaces, and plugins.",
-      "type": "object",
-      "properties": {
-        "ignore": {
-          "$ref": "#/$defs/AgentsIgnore"
-        },
-        "marketplaces": {
-          "description": "Plugin marketplace sources for the configured agents.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Marketplace"
-          }
-        },
-        "mcp_servers": {
-          "description": "MCP server entries restored for the configured agents.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/McpServer"
-          }
-        },
-        "packages": {
-          "description": "Skill package sources restored by Omni.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/SkillPackage"
-          }
-        },
-        "plugins": {
-          "description": "Plugins installed from a declared marketplace or direct source.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Plugin"
-          }
-        },
-        "skills": {
-          "description": "Legacy per-skill manifest. Accepted for one-time migration into packages and never written back.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/ManifestSkill"
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "AgentsIgnore": {
-      "description": "Agent resources skipped during restore/sync.",
-      "type": "object",
-      "properties": {
-        "marketplaces": {
-          "description": "Marketplace names skipped during restore/sync.",
-          "examples": [
-            [
-              "my-marketplace"
-            ]
-          ],
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "mcp_servers": {
-          "description": "MCP server names skipped during restore/sync.",
-          "examples": [
-            [
-              "context7"
-            ]
-          ],
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "plugins": {
-          "description": "Plugin names skipped during restore/sync.",
-          "examples": [
-            [
-              "my-plugin"
-            ]
-          ],
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "skills": {
-          "description": "Skill package sources skipped during restore/sync.",
-          "examples": [
-            [
-              "vercel-labs/agent-skills"
-            ]
-          ],
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
-      },
-      "additionalProperties": false
-    },
     "DotEntry": {
       "description": "A dotfile or directory managed by 'omni dots'.",
       "type": "object",
@@ -639,22 +532,6 @@
             "$ref": "#/$defs/DotEntry"
           }
         },
-        "marketplaces": {
-          "description": "Marketplace names assigned to this group.",
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "mcp_servers": {
-          "description": "MCP server names active on this group's hosts.",
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
         "name": {
           "description": "Group identifier.",
           "examples": [
@@ -663,22 +540,6 @@
             "media"
           ],
           "type": "string"
-        },
-        "plugins": {
-          "description": "Plugin names active on this group's hosts.",
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "skills": {
-          "description": "Skill package sources active on this group's hosts.",
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
         },
         "special": {
           "description": "Reserved marker for protected host groups.",
@@ -725,24 +586,6 @@
       "description": "Per-host setting overrides.",
       "type": "object",
       "properties": {
-        "agents_disabled": {
-          "description": "Master switch: whether the agent skills/mcp/plugins features are disabled on this host.",
-          "type": "boolean"
-        },
-        "agents_use": {
-          "description": "Agent identifiers managed on this host. Omit to inherit the global list; an explicit empty list disables all agents here.",
-          "examples": [
-            [
-              "claude-code",
-              "codex"
-            ]
-          ],
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
         "auto_import": {
           "description": "Ignored per host: auto-import is resolved from the global settings scope only.",
           "default": false,
@@ -803,14 +646,6 @@
           ],
           "type": "string"
         },
-        "mcp_disabled": {
-          "description": "Whether the agent mcp feature is disabled on this host.",
-          "type": "boolean"
-        },
-        "plugins_disabled": {
-          "description": "Whether the agent plugins feature is disabled on this host.",
-          "type": "boolean"
-        },
         "provider_priority": {
           "description": "Host-specific ordered concrete provider/manager priority.",
           "examples": [
@@ -849,10 +684,6 @@
             "$ref": "#/$defs/ProviderEntry"
           }
         },
-        "skills_disabled": {
-          "description": "Whether the agent skills feature is disabled on this host.",
-          "type": "boolean"
-        },
         "update_quarantine": {
           "description": "Defer updates until the reported availability timestamp is older than this duration.",
           "examples": [
@@ -863,220 +694,6 @@
         }
       },
       "additionalProperties": false
-    },
-    "ManifestSkill": {
-      "description": "Legacy single-skill manifest entry, migrated into agents.packages on load.",
-      "type": "object",
-      "properties": {
-        "agents": {
-          "description": "Target agent IDs for this skill. Empty means all configured agents.",
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "name": {
-          "description": "Skill name.",
-          "type": "string",
-          "minLength": 1
-        },
-        "ref": {
-          "description": "Git ref (branch, tag, or commit) to install from.",
-          "type": "string"
-        },
-        "skill_path": {
-          "description": "Path to the skill directory inside the source.",
-          "type": "string"
-        },
-        "source": {
-          "description": "Git repository, well-known HTTP catalog, or local directory locator.",
-          "type": "string",
-          "minLength": 1
-        }
-      },
-      "required": [
-        "name",
-        "source"
-      ],
-      "additionalProperties": false
-    },
-    "Marketplace": {
-      "description": "A plugin marketplace source in the omni agent manifest.",
-      "type": "object",
-      "properties": {
-        "agents": {
-          "description": "Target agent IDs for this marketplace. Empty means all configured agents.",
-          "examples": [
-            [
-              "claude-code",
-              "codex"
-            ]
-          ],
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "name": {
-          "description": "Marketplace identifier.",
-          "type": "string",
-          "minLength": 1
-        },
-        "source": {
-          "description": "Marketplace source (owner/repo or URL) as accepted by the agent CLI's marketplace add command.",
-          "type": "string",
-          "minLength": 1
-        }
-      },
-      "required": [
-        "name",
-        "source"
-      ],
-      "additionalProperties": false
-    },
-    "McpServer": {
-      "description": "One MCP server entry in the omni agent manifest.",
-      "type": "object",
-      "properties": {
-        "agents": {
-          "description": "Target agent IDs for this server. Empty means all configured agents.",
-          "examples": [
-            [
-              "claude-code",
-              "codex"
-            ]
-          ],
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "command": {
-          "description": "Command to launch the server. Required for stdio transport.",
-          "examples": [
-            "npx -y @upstash/context7-mcp"
-          ],
-          "type": "string"
-        },
-        "env": {
-          "description": "Environment variable names resolved from the calling environment at restore time.",
-          "examples": [
-            [
-              "CONTEXT7_API_KEY"
-            ]
-          ],
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "env_literal": {
-          "description": "Non-secret inline environment values forwarded verbatim.",
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "headers": {
-          "description": "HTTP headers sent to remote http/sse servers. Exact ${VAR} values may be stored as environment-backed headers when supported.",
-          "examples": [
-            {
-              "Authorization": "Bearer token"
-            }
-          ],
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "name": {
-          "description": "MCP server identifier.",
-          "examples": [
-            "context7"
-          ],
-          "type": "string",
-          "minLength": 1
-        },
-        "transport": {
-          "description": "MCP transport kind. stdio requires command; http/sse require url.",
-          "examples": [
-            "stdio"
-          ],
-          "type": "string",
-          "enum": [
-            "stdio",
-            "http",
-            "sse"
-          ]
-        },
-        "url": {
-          "description": "Server URL. Required for http/sse transport.",
-          "examples": [
-            "https://mcp.example.com"
-          ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "transport"
-      ],
-      "additionalProperties": false
-    },
-    "Plugin": {
-      "description": "A plugin installed from either a declared marketplace or a direct source accepted by the agent CLI.",
-      "type": "object",
-      "properties": {
-        "agents": {
-          "description": "Target agent IDs for this plugin. Empty means all configured agents.",
-          "examples": [
-            [
-              "claude-code",
-              "codex"
-            ]
-          ],
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "marketplace": {
-          "description": "Name of the declared agents.marketplaces entry this plugin comes from.",
-          "type": "string",
-          "minLength": 1
-        },
-        "name": {
-          "description": "Plugin identifier.",
-          "type": "string",
-          "minLength": 1
-        },
-        "source": {
-          "description": "Direct plugin source accepted by the target agent CLI, such as owner/repo or a Git URL.",
-          "type": "string",
-          "minLength": 1
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "additionalProperties": false,
-      "oneOf": [
-        {
-          "required": [
-            "marketplace"
-          ]
-        },
-        {
-          "required": [
-            "source"
-          ]
-        }
-      ]
     },
     "ProviderEntry": {
       "description": "A provider installed during bootstrap, before the rest of a sync.",
@@ -1174,24 +791,6 @@
       "description": "User-configurable options stored in settings.json.",
       "type": "object",
       "properties": {
-        "agents_disabled": {
-          "description": "Master switch: disable the agent skills/mcp/plugins features for this settings scope.",
-          "type": "boolean"
-        },
-        "agents_use": {
-          "description": "Agent identifiers omni manages. Omit to manage every detected agent.",
-          "examples": [
-            [
-              "claude-code",
-              "codex"
-            ]
-          ],
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
         "auto_import": {
           "description": "Add newly discovered installed tools to the config on every sync.",
           "default": false,
@@ -1272,14 +871,6 @@
           ],
           "type": "string"
         },
-        "mcp_disabled": {
-          "description": "Disable the agent mcp feature for this settings scope.",
-          "type": "boolean"
-        },
-        "plugins_disabled": {
-          "description": "Disable the agent plugins feature for this settings scope.",
-          "type": "boolean"
-        },
         "provider_priority": {
           "description": "Ordered concrete provider/manager priority applied when a tool does not pin one.",
           "examples": [
@@ -1318,10 +909,6 @@
             "$ref": "#/$defs/ProviderEntry"
           }
         },
-        "skills_disabled": {
-          "description": "Disable the agent skills feature for this settings scope.",
-          "type": "boolean"
-        },
         "update_quarantine": {
           "description": "Defer updates until the reported availability timestamp is older than this duration.",
           "examples": [
@@ -1331,56 +918,6 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
-    },
-    "SkillPackage": {
-      "description": "A source of one or more agent skills.",
-      "type": "object",
-      "properties": {
-        "agents": {
-          "description": "Target agent IDs for this package. Empty means all configured agents.",
-          "examples": [
-            [
-              "claude-code",
-              "codex"
-            ]
-          ],
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "ref": {
-          "description": "Git ref (branch, tag, or commit) to install from. Defaults to the package's default branch.",
-          "type": "string"
-        },
-        "skills": {
-          "description": "Skill names selected from this source. Omitted means every discovered skill.",
-          "examples": [
-            [
-              "review",
-              "test"
-            ]
-          ],
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "source": {
-          "description": "Git repository, well-known HTTP catalog, or local directory locator.",
-          "examples": [
-            "vercel-labs/agent-skills"
-          ],
-          "type": "string",
-          "minLength": 1
-        }
-      },
-      "required": [
-        "source"
-      ],
       "additionalProperties": false
     },
     "ToolInstallSpec": {

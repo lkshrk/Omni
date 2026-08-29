@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -23,6 +24,7 @@ func runRootStreams(t *testing.T, args ...string) (stdout, stderr string, err er
 
 func writeDoctorFixtureWithDuplicates(t *testing.T) (cfgPath, cacheDir string) {
 	t.Helper()
+	setPinnedAPMPath(t)
 	cfgDir := t.TempDir()
 	cacheDir = t.TempDir()
 	cfgPath = filepath.Join(cfgDir, "settings.json")
@@ -47,6 +49,19 @@ func writeDoctorFixtureWithDuplicates(t *testing.T) (cfgPath, cacheDir string) {
   "groups": [{"name": "dev", "dots": [{"name": "git", "path": "~/.gitconfig"}]}]
 }`)
 	return cfgPath, cacheDir
+}
+
+func setPinnedAPMPath(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	name, script := "apm", "#!/bin/sh\necho 'Agent Package Manager (APM) CLI version 0.29.0'\n"
+	if runtime.GOOS == "windows" {
+		name, script = "apm.bat", "@echo Agent Package Manager (APM) CLI version 0.29.0\r\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
 }
 
 func TestDoctorFixJSON_StdoutIsOnlyTheDocument(t *testing.T) {

@@ -17,6 +17,7 @@ type CommandTraceView struct {
 	Status     string
 	ExitCode   *int64
 	Error      string
+	Stdout     string
 	Stderr     string
 }
 
@@ -30,6 +31,7 @@ func commandTraceViewFromRow(t database.CommandTrace) CommandTraceView {
 		Command:    t.Command,
 		Status:     t.Status,
 		Error:      t.Error,
+		Stdout:     t.Stdout,
 		Stderr:     t.Stderr,
 	}
 	if t.ExitCode.Valid {

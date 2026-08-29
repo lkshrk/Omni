@@ -69,11 +69,13 @@ func newImportApp(t *testing.T, providers ...provider.Provider) (*app.App, strin
 
 func newReconcileApp(t *testing.T, providers ...provider.Provider) (*app.App, string) {
 	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
-	a := app.New(cfgPath,
-		app.WithMcpAdapters([]app.McpAdapter{}),
-		app.WithPluginAdapters([]app.PluginAdapter{}))
+	a := app.New(cfgPath)
 	if err := a.InitTestMode(context.Background(), providers...); err != nil {
 		t.Fatalf("InitTestMode: %v", err)
 	}

@@ -1,0 +1,6 @@
+{
+  "marketplaces.json": "/home/example/.apm/marketplaces.json",
+  "omni-config-000.json": "/home/example/.config/omni/settings.d/agents.json",
+  "omni-config-001.json": "/home/example/.config/omni/settings.d/groups.json",
+  "omni-config-002.json": "/home/example/.config/omni/settings.json"
+}

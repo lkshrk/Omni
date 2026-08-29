@@ -71,9 +71,9 @@ func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, s
 }
 
 func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool, error) {
-	stdout, _, err := p.exec.Run(ctx, "zypper", "search", "--installed-only", "--type", "package", "--details")
+	stdout, stderr, err := p.exec.Run(ctx, "zypper", "search", "--installed-only", "--type", "package", "--details")
 	if err != nil {
-		return nil, fmt.Errorf("zypper search --installed-only: %w", err)
+		return nil, executor.WrapError(err, "zypper search --installed-only", stdout, stderr)
 	}
 	var tools []provider.InstalledTool
 	for _, line := range strings.Split(stdout, "\n") {
@@ -130,18 +130,18 @@ func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map
 	for _, t := range tools {
 		args = append(args, t.EffectivePackage())
 	}
-	stdout, _, err := p.exec.Run(ctx, "zypper", args...)
+	stdout, stderr, err := p.exec.Run(ctx, "zypper", args...)
 	if err != nil {
-		return nil, fmt.Errorf("zypper info: %w", err)
+		return nil, executor.WrapError(err, "zypper info", stdout, stderr)
 	}
 	return rpm.ParseInfoSummaries(stdout), nil
 }
 
 // Describe fetches a one-line summary via `zypper info`.
 func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, error) {
-	stdout, _, err := p.exec.Run(ctx, "zypper", "info", tool.EffectivePackage())
+	stdout, stderr, err := p.exec.Run(ctx, "zypper", "info", tool.EffectivePackage())
 	if err != nil {
-		return "", fmt.Errorf("zypper info %s: %w", tool.EffectivePackage(), err)
+		return "", executor.WrapError(err, fmt.Sprintf("zypper info %s", tool.EffectivePackage()), stdout, stderr)
 	}
 	return rpm.ParseInfoSummary(stdout), nil
 }

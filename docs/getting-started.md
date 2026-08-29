@@ -9,13 +9,17 @@ omni
 With no subcommand, Omni launches the interactive TUI. On a new machine it runs
 bootstrap first, then opens the dashboard.
 
-Bootstrap does five jobs:
+Bootstrap does four jobs:
 
 1. Creates or loads `settings.json`.
 2. Detects available package managers.
 3. Ensures the current host exists.
 4. Offers to import installed tools or sync from config.
-5. Offers to import agent skill packages a legacy skill CLI installed.
+
+Agent migration is deliberately separate from bootstrap. Run
+`omni agents migrate --host <name>` to print the APM manifest a pre-APM host's
+declarations map to; it writes nothing. See
+[Agent Migration](migrating-skills.md).
 
 ## CLI-Only Bootstrap
 

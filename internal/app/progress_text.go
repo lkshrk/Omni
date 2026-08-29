@@ -521,9 +521,6 @@ func ReconcileIssueLines(result *ReconcileResult) []string {
 	if issues.UpgradeFailures > 0 {
 		lines = append(lines, textutil.PluralCount(issues.UpgradeFailures, "tool", "tools")+" failed to upgrade")
 	}
-	if issues.AgentFailures > 0 {
-		lines = append(lines, textutil.PluralCount(issues.AgentFailures, "agent operation", "agent operations")+" failed")
-	}
 	if issues.DotsConflicts > 0 {
 		lines = append(lines, textutil.PluralCount(issues.DotsConflicts, "dot entry", "dot entries")+" "+reconcileIssueVerb(issues.DotsConflicts)+" conflicts")
 	}

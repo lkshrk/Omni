@@ -1,0 +1,65 @@
+{
+  "agents": {
+    "packages": [
+      {
+        "source": "acme/skills-a",
+        "ref": "v1.2.0",
+        "agents": ["claude-code"]
+      },
+      {
+        "source": "acme/skills-unused"
+      }
+    ],
+    "mcp_servers": [
+      {
+        "name": "gh",
+        "transport": "stdio",
+        "command": "gh-mcp serve --stdio",
+        "env": ["GH_TOKEN"],
+        "agents": ["claude-code"]
+      },
+      {
+        "name": "docs",
+        "transport": "http",
+        "url": "https://docs.example.test/mcp/",
+        "headers": {
+          "x-api-key": "${LITELLM_API}"
+        },
+        "env_literal": {
+          "DOCS_MODE": "readonly"
+        },
+        "agents": ["claude-code", "codex"]
+      },
+      {
+        "name": "implicit-only",
+        "transport": "stdio",
+        "command": "implicit-mcp"
+      }
+    ],
+    "marketplaces": [
+      {
+        "name": "acme-market",
+        "source": "https://github.com/acme/market.git",
+        "agents": ["claude-code"]
+      },
+      {
+        "name": "unused-market",
+        "source": "acme/unused"
+      }
+    ],
+    "plugins": [
+      {
+        "name": "acme-plugin",
+        "marketplace": "acme-market",
+        "agents": ["claude-code"]
+      },
+      {
+        "name": "direct-plugin",
+        "source": "acme/direct-plugin"
+      }
+    ],
+    "ignore": {
+      "skills": ["acme/ignored"]
+    }
+  }
+}

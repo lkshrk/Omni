@@ -82,9 +82,9 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 	if err != nil {
 		return nil, err
 	}
-	stdout, _, err := p.exec.Run(ctx, "dpkg-query", "-W", "-f=${Package}\\t${Version}\\t${db:Status-Abbrev}\\n")
+	stdout, stderr, err := p.exec.Run(ctx, "dpkg-query", "-W", "-f=${Package}\\t${Version}\\t${db:Status-Abbrev}\\n")
 	if err != nil {
-		return nil, fmt.Errorf("dpkg-query list: %w", err)
+		return nil, executor.WrapError(err, "dpkg-query list", stdout, stderr)
 	}
 	var tools []provider.InstalledTool
 	for _, line := range strings.Split(stdout, "\n") {
@@ -109,9 +109,9 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	stdout, _, err := p.exec.Run(ctx, "dpkg-query", "-W", "-f=${Package}\\t${Version}\\t${db:Status-Abbrev}\\n")
+	stdout, stderr, err := p.exec.Run(ctx, "dpkg-query", "-W", "-f=${Package}\\t${Version}\\t${db:Status-Abbrev}\\n")
 	if err != nil {
-		return nil, fmt.Errorf("dpkg-query list: %w", err)
+		return nil, executor.WrapError(err, "dpkg-query list", stdout, stderr)
 	}
 	m := make(map[string]string)
 	for _, line := range strings.Split(stdout, "\n") {
@@ -128,9 +128,9 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 }
 
 func (p *Provider) manualPackages(ctx context.Context) (map[string]bool, error) {
-	stdout, _, err := p.exec.Run(ctx, "apt-mark", "showmanual")
+	stdout, stderr, err := p.exec.Run(ctx, "apt-mark", "showmanual")
 	if err != nil {
-		return nil, fmt.Errorf("apt-mark showmanual: %w", err)
+		return nil, executor.WrapError(err, "apt-mark showmanual", stdout, stderr)
 	}
 	m := make(map[string]bool)
 	for _, line := range strings.Split(stdout, "\n") {
@@ -144,9 +144,9 @@ func (p *Provider) manualPackages(ctx context.Context) (map[string]bool, error) 
 
 // Describe fetches a one-line description via `apt-cache show`.
 func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, error) {
-	stdout, _, err := p.exec.Run(ctx, "apt-cache", "show", tool.EffectivePackage())
+	stdout, stderr, err := p.exec.Run(ctx, "apt-cache", "show", tool.EffectivePackage())
 	if err != nil {
-		return "", fmt.Errorf("apt-cache show %s: %w", tool.EffectivePackage(), err)
+		return "", executor.WrapError(err, fmt.Sprintf("apt-cache show %s", tool.EffectivePackage()), stdout, stderr)
 	}
 	return parseAPTDescription(stdout), nil
 }
@@ -161,9 +161,9 @@ func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map
 	for _, t := range tools {
 		args = append(args, t.EffectivePackage())
 	}
-	stdout, _, err := p.exec.Run(ctx, "apt-cache", args...)
+	stdout, stderr, err := p.exec.Run(ctx, "apt-cache", args...)
 	if err != nil {
-		return nil, fmt.Errorf("apt-cache show: %w", err)
+		return nil, executor.WrapError(err, "apt-cache show", stdout, stderr)
 	}
 	return parseAPTBulkDescriptions(stdout), nil
 }

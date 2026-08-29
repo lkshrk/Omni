@@ -88,7 +88,6 @@ func TestSettingKeysExposeCanonicalOrder(t *testing.T) {
 		"update_quarantine",
 		"dots_repo",
 		"dots_disabled",
-		"agents_disabled",
 		"dots_git.auto_commit",
 		"dots_git.auto_push",
 		"disabled_providers",

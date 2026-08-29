@@ -38,6 +38,7 @@ var fallbackTemplateVariables = map[string]struct{}{
 
 func (a *App) SetFallbackExecutor(exec executor.Executor) {
 	a.fallbackExec = exec
+	a.forgetAPMProbes()
 }
 
 // SaveToolFallback — Only mutates settings.json; install and sync decide later whether to use it.

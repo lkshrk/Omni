@@ -78,9 +78,9 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 	if err != nil {
 		return nil, err
 	}
-	stdout, _, err := p.exec.Run(ctx, "pacman", "-Q")
+	stdout, stderr, err := p.exec.Run(ctx, "pacman", "-Q")
 	if err != nil {
-		return nil, fmt.Errorf("pacman -Q: %w", err)
+		return nil, executor.WrapError(err, "pacman -Q", stdout, stderr)
 	}
 	var tools []provider.InstalledTool
 	for _, line := range strings.Split(stdout, "\n") {
@@ -105,9 +105,9 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	stdout, _, err := p.exec.Run(ctx, "pacman", "-Q")
+	stdout, stderr, err := p.exec.Run(ctx, "pacman", "-Q")
 	if err != nil {
-		return nil, fmt.Errorf("pacman -Q: %w", err)
+		return nil, executor.WrapError(err, "pacman -Q", stdout, stderr)
 	}
 	m := make(map[string]string)
 	for _, line := range strings.Split(stdout, "\n") {
@@ -124,9 +124,9 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 }
 
 func (p *Provider) explicitPackages(ctx context.Context) (map[string]bool, error) {
-	stdout, _, err := p.exec.Run(ctx, "pacman", "-Qqe")
+	stdout, stderr, err := p.exec.Run(ctx, "pacman", "-Qqe")
 	if err != nil {
-		return nil, fmt.Errorf("pacman -Qqe: %w", err)
+		return nil, executor.WrapError(err, "pacman -Qqe", stdout, stderr)
 	}
 	m := make(map[string]bool)
 	for _, line := range strings.Split(stdout, "\n") {
@@ -148,9 +148,9 @@ func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map
 	for _, t := range tools {
 		args = append(args, t.EffectivePackage())
 	}
-	stdout, _, err := p.exec.Run(ctx, "pacman", args...)
+	stdout, stderr, err := p.exec.Run(ctx, "pacman", args...)
 	if err != nil {
-		return nil, fmt.Errorf("pacman -Si: %w", err)
+		return nil, executor.WrapError(err, "pacman -Si", stdout, stderr)
 	}
 	return parsePacmanBulkDescriptions(stdout), nil
 }
@@ -185,9 +185,9 @@ func parsePacmanBulkDescriptions(output string) map[string]string {
 
 // Describe fetches a one-line description via `pacman -Si`.
 func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, error) {
-	stdout, _, err := p.exec.Run(ctx, "pacman", "-Si", tool.EffectivePackage())
+	stdout, stderr, err := p.exec.Run(ctx, "pacman", "-Si", tool.EffectivePackage())
 	if err != nil {
-		return "", fmt.Errorf("pacman -Si %s: %w", tool.EffectivePackage(), err)
+		return "", executor.WrapError(err, fmt.Sprintf("pacman -Si %s", tool.EffectivePackage()), stdout, stderr)
 	}
 	return parsePacmanDescription(stdout), nil
 }

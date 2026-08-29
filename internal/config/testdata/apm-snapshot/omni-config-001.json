@@ -1,0 +1,29 @@
+{
+  "groups": [
+    {
+      "name": "g1",
+      "mcp_servers": ["gh", "docs"],
+      "plugins": ["acme-plugin"],
+      "marketplaces": ["acme-market"],
+      "skills": ["acme/skills-a"]
+    },
+    {
+      "name": "g2",
+      "mcp_servers": ["gh"],
+      "plugins": ["direct-plugin"]
+    },
+    {
+      "name": "h1",
+      "special": "host",
+      "mcp_servers": ["implicit-only"]
+    },
+    {
+      "name": "bare",
+      "special": "host"
+    },
+    {
+      "name": "broken",
+      "mcp_servers": ["ghost"]
+    }
+  ]
+}

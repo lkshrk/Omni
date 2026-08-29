@@ -163,9 +163,9 @@ for d in importlib.metadata.distributions():
 print(json.dumps(owned))`
 
 func (p *Provider) pipOwnedPackageSet(ctx context.Context) (map[string]bool, error) {
-	stdout, _, err := p.exec.Run(ctx, "python3", "-c", pipOwnedPackageSetScript)
+	stdout, stderr, err := p.exec.Run(ctx, "python3", "-c", pipOwnedPackageSetScript)
 	if err != nil {
-		return nil, fmt.Errorf("pip ownership probe: %w", err)
+		return nil, executor.WrapError(err, "pip ownership probe", stdout, stderr)
 	}
 	var raw map[string]int
 	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &raw); err != nil {
@@ -180,9 +180,9 @@ func (p *Provider) pipOwnedPackageSet(ctx context.Context) (map[string]bool, err
 
 // CLIToolSet — Lowercase names with at least one CLI entry point; Import marks the rest auto-ignored.
 func (p *Provider) CLIToolSet(ctx context.Context) (map[string]bool, error) {
-	stdout, _, err := p.exec.Run(ctx, "python3", "-c", cliToolSetScript)
+	stdout, stderr, err := p.exec.Run(ctx, "python3", "-c", cliToolSetScript)
 	if err != nil {
-		return nil, fmt.Errorf("pip cli tool set: %w", err)
+		return nil, executor.WrapError(err, "pip cli tool set", stdout, stderr)
 	}
 	var m map[string]int
 	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &m); err != nil {
@@ -197,9 +197,9 @@ func (p *Provider) CLIToolSet(ctx context.Context) (map[string]bool, error) {
 
 // ListInstalled — Top-level pip-owned packages including pure libraries; distro-owned ones are excluded.
 func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool, error) {
-	stdout, _, err := p.exec.Run(ctx, p.bin, "list", "--not-required", "--format=json")
+	stdout, stderr, err := p.exec.Run(ctx, p.bin, "list", "--not-required", "--format=json")
 	if err != nil {
-		return nil, fmt.Errorf("pip list --not-required: %w", err)
+		return nil, executor.WrapError(err, "pip list --not-required", stdout, stderr)
 	}
 	var entries []pipListEntry
 	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &entries); err != nil {
@@ -225,9 +225,9 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 
 // InstalledMap returns top-level, pip-owned packages as lowercase-name→version.
 func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) {
-	stdout, _, err := p.exec.Run(ctx, p.bin, "list", "--not-required", "--format=json")
+	stdout, stderr, err := p.exec.Run(ctx, p.bin, "list", "--not-required", "--format=json")
 	if err != nil {
-		return nil, fmt.Errorf("pip list --not-required: %w", err)
+		return nil, executor.WrapError(err, "pip list --not-required", stdout, stderr)
 	}
 	var entries []pipListEntry
 	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &entries); err != nil {
@@ -255,9 +255,9 @@ type pipOutdatedEntry struct {
 
 // OutdatedMap returns pip-owned lowercase package name → latest available version.
 func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
-	stdout, _, err := p.exec.Run(ctx, p.bin, "list", "--outdated", "--format=json")
+	stdout, stderr, err := p.exec.Run(ctx, p.bin, "list", "--outdated", "--format=json")
 	if err != nil {
-		return nil, fmt.Errorf("pip list --outdated: %w", err)
+		return nil, executor.WrapError(err, "pip list --outdated", stdout, stderr)
 	}
 	if strings.TrimSpace(stdout) == "null" {
 		return nil, fmt.Errorf("parsing pip outdated: top-level null")
@@ -315,9 +315,9 @@ func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map
 	for _, t := range tools {
 		args = append(args, t.EffectivePackage())
 	}
-	stdout, _, err := p.exec.Run(ctx, p.bin, args...)
+	stdout, stderr, err := p.exec.Run(ctx, p.bin, args...)
 	if err != nil {
-		return nil, fmt.Errorf("pip show: %w", err)
+		return nil, executor.WrapError(err, "pip show", stdout, stderr)
 	}
 	return parsePipShowDescriptions(stdout), nil
 }

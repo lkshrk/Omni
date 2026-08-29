@@ -1,0 +1,1168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v24.schema.json",
+  "title": "omni settings",
+  "description": "omni settings.json — manages all dev tools, dotfiles, host assignments, and groups from a single file.",
+  "type": "object",
+  "properties": {
+    "$include": {
+      "description": "Additional settings fragments to merge into this file on load. Paths are relative to the directory containing this settings file. Stripped before save.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "$schema": {
+      "description": "JSON Schema reference URI (injected automatically by omni on every write).",
+      "type": "string"
+    },
+    "groups": {
+      "description": "Tool/dots groups. Host groups use special=\"host\" and are reserved for one hostname.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GroupConfig"
+      }
+    },
+    "host_settings": {
+      "description": "Per-host setting overrides keyed by short hostname.",
+      "examples": [
+        {
+          "macbook-pro": {
+            "dots_disabled": false
+          }
+        }
+      ],
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/HostSettings"
+      }
+    },
+    "hosts": {
+      "description": "Reusable group assignments keyed by short hostname. The matching special host group is active implicitly and must not be listed here.",
+      "examples": [
+        {
+          "home-desktop": [
+            "personal"
+          ],
+          "macbook-pro": [
+            "work",
+            "personal"
+          ]
+        }
+      ],
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "ignore": {
+      "description": "Tool and dotfile names skipped globally.",
+      "examples": [
+        {
+          "dots": [
+            "work-secrets"
+          ],
+          "tools": [
+            "slack"
+          ]
+        }
+      ],
+      "type": "object",
+      "properties": {
+        "dots": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "settings": {
+      "$ref": "#/$defs/Settings"
+    },
+    "tools": {
+      "description": "Logical tool specs keyed by logical tool name. Groups reference these keys by name.",
+      "examples": [
+        {
+          "ripgrep": {
+            "providers": [
+              {
+                "package": "ripgrep",
+                "provider": "brew"
+              },
+              {
+                "package": "ripgrep",
+                "provider": "apt"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/ToolSpec"
+      }
+    },
+    "version": {
+      "description": "settings.json format version. Missing means legacy unversioned config; omni migrates it to the current version on write.",
+      "default": 24,
+      "examples": [
+        24
+      ],
+      "type": "integer",
+      "const": 24
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "DotEntry": {
+      "description": "A dotfile or directory managed by 'omni dots'.",
+      "type": "object",
+      "properties": {
+        "hosts": {
+          "description": "Host-specific stow package variants keyed by short hostname.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "package": {
+                "description": "Stow package directory to use on this host.",
+                "examples": [
+                  "nvim-work-laptop"
+                ],
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "ignore": {
+          "description": "gitignore-style patterns for files to skip within this entry.",
+          "examples": [
+            [
+              "*.local",
+              "secrets/"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "ignored": {
+          "description": "Keep the entry visible but skip sync/discovery management.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "Human-readable identifier. Also used as the default source directory name.",
+          "examples": [
+            "nvim",
+            "zsh",
+            "git"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
+        "on_conflict": {
+          "description": "How sync resolves a conflict between the repo copy and local content. Omit for manual resolution (sync errors on conflict).",
+          "examples": [
+            "use_repo"
+          ],
+          "type": "string",
+          "enum": [
+            "use_repo",
+            "use_local"
+          ]
+        },
+        "package": {
+          "description": "Default stow package directory. Defaults to the logical dotfile name.",
+          "examples": [
+            "nvim",
+            "zsh-work"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "description": "Original filesystem location managed by this entry (~ and environment variables are expanded).",
+          "examples": [
+            "~/.config/nvim",
+            "~/.zshrc"
+          ],
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "DotsGitConfig": {
+      "description": "Controls git behaviour for the dots repository.",
+      "type": "object",
+      "properties": {
+        "auto_commit": {
+          "description": "Run 'git commit' automatically after add/remove operations.",
+          "default": false,
+          "type": "boolean"
+        },
+        "auto_push": {
+          "description": "Run 'git push' after add/remove (implies auto_commit).",
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "EcosystemSettings": {
+      "description": "Legacy settings for one provider family.",
+      "type": "object",
+      "properties": {
+        "manager": {
+          "description": "Concrete manager used by manager-backed provider families. Omit to auto-detect.",
+          "examples": [
+            "bun",
+            "pnpm",
+            "npm",
+            "uv",
+            "pip3"
+          ],
+          "type": "string"
+        },
+        "priority": {
+          "description": "Ordered concrete provider/manager priority for this provider family.",
+          "examples": [
+            [
+              "apt",
+              "apk",
+              "dnf",
+              "zypper",
+              "pacman",
+              "brew"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "FallbackCommands": {
+      "description": "User-editable fallback lifecycle commands.",
+      "type": "object",
+      "properties": {
+        "check": {
+          "description": "Command that verifies the fallback is installed and usable.",
+          "type": "string"
+        },
+        "install": {
+          "description": "Install command run by fallback sync/install.",
+          "type": "string"
+        },
+        "uninstall": {
+          "description": "Optional uninstall command. If absent, uninstall is reported as unavailable.",
+          "type": "string"
+        },
+        "upgrade": {
+          "description": "Optional upgrade command. If absent, install may be reused for upgrades.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Optional version command used to display installed fallback version.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FallbackPlatform": {
+      "description": "OS/architecture-specific release asset metadata.",
+      "type": "object",
+      "properties": {
+        "asset_pattern": {
+          "description": "Release asset match pattern for this platform.",
+          "type": "string"
+        },
+        "binary_path": {
+          "description": "Path to the executable inside the downloaded asset for this platform.",
+          "type": "string"
+        },
+        "checksum": {
+          "description": "Checksum for the matched release asset on this platform.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "FallbackRecipe": {
+      "description": "Structured fallback recipe metadata.",
+      "type": "object",
+      "properties": {
+        "asset_download_url": {
+          "description": "Resolved release asset download URL recorded at install time.",
+          "type": "string"
+        },
+        "asset_id": {
+          "description": "Resolved release asset identifier recorded at install time.",
+          "type": "string"
+        },
+        "asset_name": {
+          "description": "Resolved release asset filename recorded at install time.",
+          "type": "string"
+        },
+        "asset_pattern": {
+          "description": "Release asset match pattern using fallback template variables.",
+          "examples": [
+            "ripgrep-{version}-{os}-{arch}.tar.gz"
+          ],
+          "type": "string"
+        },
+        "binary_path": {
+          "description": "Path to the executable inside the downloaded asset, when extraction is needed.",
+          "examples": [
+            "rg"
+          ],
+          "type": "string"
+        },
+        "checksum": {
+          "description": "Checksum to verify the matched release asset when confidently known.",
+          "type": "string"
+        },
+        "checksum_asset_id": {
+          "description": "Release asset the recorded checksum was taken from. A rotated asset re-verifies from the release checksums file.",
+          "type": "string"
+        },
+        "checksum_asset_pattern": {
+          "description": "Optional SHA-256 manifest asset pattern for verified, atomic binary installation.",
+          "examples": [
+            "checksums.txt"
+          ],
+          "type": "string"
+        },
+        "installed_version": {
+          "description": "Normalized version recorded at install time. Upgrade detection uses it rather than published_at alone.",
+          "type": "string"
+        },
+        "published_at": {
+          "description": "Publication timestamp of the resolved release, recorded at install time.",
+          "type": "string"
+        },
+        "release_id": {
+          "description": "Resolved GitHub release identifier recorded at install time.",
+          "type": "string"
+        },
+        "tag_name": {
+          "description": "Pinned GitHub release tag (e.g. v0.62.2). Omit to use latest.",
+          "examples": [
+            "v0.62.2"
+          ],
+          "type": "string"
+        },
+        "type": {
+          "description": "Fallback recipe kind.",
+          "examples": [
+            "github_release_asset"
+          ],
+          "type": "string",
+          "enum": [
+            "github_release_asset",
+            "raw_commands",
+            "curl_install_script",
+            "apt_repo"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "FallbackSource": {
+      "description": "Where a fallback recipe came from.",
+      "type": "object",
+      "properties": {
+        "owner": {
+          "description": "GitHub repository owner for github sources.",
+          "examples": [
+            "BurntSushi"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
+        "repo": {
+          "description": "GitHub repository name for github sources.",
+          "examples": [
+            "ripgrep"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "description": "Fallback source kind.",
+          "examples": [
+            "github"
+          ],
+          "type": "string",
+          "enum": [
+            "github"
+          ]
+        },
+        "url": {
+          "description": "Source URL, when known.",
+          "examples": [
+            "https://github.com/BurntSushi/ripgrep"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false
+    },
+    "FallbackSpec": {
+      "description": "A best-effort non-provider install recipe for a system tool.",
+      "type": "object",
+      "properties": {
+        "bin_dir": {
+          "description": "Tool-specific binary directory override. Defaults to settings.fallback_bin_dir.",
+          "examples": [
+            "~/.local/share/omni/fallback/bin"
+          ],
+          "type": "string"
+        },
+        "binary": {
+          "description": "Primary executable name installed or checked by this fallback.",
+          "examples": [
+            "rg"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
+        "commands": {
+          "$ref": "#/$defs/FallbackCommands",
+          "description": "User-editable fallback lifecycle shell commands."
+        },
+        "platforms": {
+          "description": "Optional OS/architecture-specific release asset overrides keyed by os/arch.",
+          "examples": [
+            {
+              "linux/amd64": {
+                "asset_pattern": "ripgrep-{version}-x86_64-unknown-linux-musl.tar.gz"
+              }
+            }
+          ],
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/FallbackPlatform"
+          }
+        },
+        "recipe": {
+          "$ref": "#/$defs/FallbackRecipe",
+          "description": "Structured recipe metadata used to generate or edit fallback commands."
+        },
+        "release_channel": {
+          "description": "Release channel preference. Empty means stable releases only unless no stable release exists.",
+          "examples": [
+            "stable",
+            "prerelease"
+          ],
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/FallbackSource",
+          "description": "Source metadata for the fallback recipe."
+        },
+        "status": {
+          "description": "Resolver or install verification state for this fallback recipe.",
+          "default": "unverified",
+          "examples": [
+            "unverified"
+          ],
+          "type": "string",
+          "enum": [
+            "unresolved",
+            "unsupported",
+            "unverified",
+            "verified",
+            "failed"
+          ]
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "GroupConfig": {
+      "description": "A named collection of logical tool memberships and dotfile entries.",
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "Human-readable description shown in 'omni groups'.",
+          "examples": [
+            "Work tools and configs"
+          ],
+          "type": "string"
+        },
+        "dots": {
+          "description": "Dotfile entries managed by this group.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DotEntry"
+          }
+        },
+        "name": {
+          "description": "Group identifier.",
+          "examples": [
+            "work",
+            "personal",
+            "media"
+          ],
+          "type": "string"
+        },
+        "special": {
+          "description": "Reserved marker for protected host groups.",
+          "examples": [
+            "host"
+          ],
+          "type": "string",
+          "enum": [
+            "host"
+          ]
+        },
+        "taps": {
+          "description": "Legacy Homebrew taps for this group. Prefer tool-level 'taps' on logical tool specs.",
+          "examples": [
+            [
+              "homebrew/cask-fonts"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tools": {
+          "description": "Logical tool names installed by this group.",
+          "examples": [
+            [
+              "ripgrep",
+              "fd",
+              "black"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "HostSettings": {
+      "description": "Per-host setting overrides.",
+      "type": "object",
+      "properties": {
+        "auto_import": {
+          "description": "Ignored per host: auto-import is resolved from the global settings scope only.",
+          "default": false,
+          "type": "boolean"
+        },
+        "disabled_providers": {
+          "description": "Provider family names disabled on this host.",
+          "examples": [
+            [
+              "system",
+              "node",
+              "python"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "dots_disabled": {
+          "description": "Whether dotfile sync is disabled on this host.",
+          "type": "boolean"
+        },
+        "dots_git": {
+          "$ref": "#/$defs/DotsGitConfig"
+        },
+        "dots_repo": {
+          "description": "Host-specific path to the dotfiles git repository.",
+          "examples": [
+            "~/Dev/dotfiles",
+            "~/.dotfiles"
+          ],
+          "type": "string"
+        },
+        "ecosystems": {
+          "description": "Legacy host-specific provider-family manager and priority overrides.",
+          "type": "object",
+          "properties": {
+            "node": {
+              "$ref": "#/$defs/EcosystemSettings"
+            },
+            "python": {
+              "$ref": "#/$defs/EcosystemSettings"
+            },
+            "system": {
+              "$ref": "#/$defs/EcosystemSettings"
+            }
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/EcosystemSettings"
+          }
+        },
+        "fallback_bin_dir": {
+          "description": "Host-specific directory for fallback-installed binaries.",
+          "examples": [
+            "~/.local/share/omni/fallback/bin"
+          ],
+          "type": "string"
+        },
+        "provider_priority": {
+          "description": "Host-specific ordered concrete provider/manager priority.",
+          "examples": [
+            [
+              "apt",
+              "apk",
+              "dnf",
+              "zypper",
+              "pacman",
+              "brew"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "provider_update_quarantine": {
+          "description": "Per-provider update_quarantine overrides keyed by provider or manager name. Concrete names win over provider families.",
+          "examples": [
+            {
+              "brew": "7d",
+              "npm": "0"
+            }
+          ],
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "providers": {
+          "description": "Bootstrap providers installed before the rest of a sync, in list order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProviderEntry"
+          }
+        },
+        "update_quarantine": {
+          "description": "Defer updates until the reported availability timestamp is older than this duration.",
+          "examples": [
+            "2d",
+            "12h"
+          ],
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProviderEntry": {
+      "description": "A provider installed during bootstrap, before the rest of a sync.",
+      "type": "object",
+      "properties": {
+        "hosts": {
+          "description": "Strict hostname-specific install overrides keyed by full or short hostname.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ToolInstallSpec"
+          }
+        },
+        "install_with": {
+          "description": "Legacy concrete provider or manager pin accepted for migration.",
+          "examples": [
+            "brew"
+          ],
+          "type": "string",
+          "enum": [
+            "brew",
+            "apt_repo",
+            "apt",
+            "apk",
+            "dnf",
+            "pacman",
+            "zypper",
+            "bun",
+            "pnpm",
+            "npm",
+            "uv",
+            "pip3",
+            "pip",
+            "cargo"
+          ]
+        },
+        "name": {
+          "description": "Provider or manager being bootstrapped.",
+          "examples": [
+            "brew"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
+        "options": {
+          "description": "Provider-specific install options (key-value pairs).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "package": {
+          "description": "Package identifier passed to the provider. Defaults to the entry name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "description": "Concrete provider or manager used to install it.",
+          "examples": [
+            "script"
+          ],
+          "type": "string",
+          "enum": [
+            "brew",
+            "apt_repo",
+            "apt",
+            "apk",
+            "dnf",
+            "pacman",
+            "zypper",
+            "bun",
+            "pnpm",
+            "npm",
+            "uv",
+            "pip3",
+            "pip",
+            "cargo",
+            "script"
+          ]
+        },
+        "variants": {
+          "description": "Alternate install candidates tried in config order when the default provider is unavailable.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolInstallSpec"
+          }
+        }
+      },
+      "required": [
+        "name",
+        "provider"
+      ],
+      "additionalProperties": false
+    },
+    "Settings": {
+      "description": "User-configurable options stored in settings.json.",
+      "type": "object",
+      "properties": {
+        "auto_import": {
+          "description": "Add newly discovered installed tools to the config on every sync.",
+          "default": false,
+          "type": "boolean"
+        },
+        "disabled_providers": {
+          "description": "Provider family names disabled for this settings scope.",
+          "examples": [
+            [
+              "system",
+              "node",
+              "python"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "dots_disabled": {
+          "description": "Disable dotfile sync for this settings scope.",
+          "type": "boolean"
+        },
+        "dots_git": {
+          "$ref": "#/$defs/DotsGitConfig"
+        },
+        "dots_repo": {
+          "description": "Per-machine path to the dotfiles git repository (~ is expanded).",
+          "examples": [
+            "~/Dev/dotfiles",
+            "~/.dotfiles"
+          ],
+          "type": "string"
+        },
+        "ecosystems": {
+          "description": "Legacy provider-family settings for system, node, and python. New config should prefer provider_priority and tool providers[].",
+          "examples": [
+            {
+              "node": {
+                "manager": "bun"
+              },
+              "python": {
+                "manager": "uv"
+              },
+              "system": {
+                "priority": [
+                  "apt",
+                  "apk",
+                  "dnf",
+                  "zypper",
+                  "pacman",
+                  "brew"
+                ]
+              }
+            }
+          ],
+          "type": "object",
+          "properties": {
+            "node": {
+              "$ref": "#/$defs/EcosystemSettings"
+            },
+            "python": {
+              "$ref": "#/$defs/EcosystemSettings"
+            },
+            "system": {
+              "$ref": "#/$defs/EcosystemSettings"
+            }
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/EcosystemSettings"
+          }
+        },
+        "fallback_bin_dir": {
+          "description": "Default directory for fallback-installed binaries. Omni warns when this directory is not on PATH.",
+          "examples": [
+            "~/.local/share/omni/fallback/bin"
+          ],
+          "type": "string"
+        },
+        "provider_priority": {
+          "description": "Ordered concrete provider/manager priority applied when a tool does not pin one.",
+          "examples": [
+            [
+              "apt",
+              "apk",
+              "dnf",
+              "zypper",
+              "pacman",
+              "brew"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "provider_update_quarantine": {
+          "description": "Per-provider update_quarantine overrides keyed by provider or manager name. Concrete names win over provider families.",
+          "examples": [
+            {
+              "brew": "7d",
+              "npm": "0"
+            }
+          ],
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "providers": {
+          "description": "Bootstrap providers installed before the rest of a sync, in list order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProviderEntry"
+          }
+        },
+        "update_quarantine": {
+          "description": "Defer updates until the reported availability timestamp is older than this duration.",
+          "examples": [
+            "2d",
+            "12h"
+          ],
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ToolInstallSpec": {
+      "description": "One install candidate for a logical tool.",
+      "type": "object",
+      "properties": {
+        "bin": {
+          "description": "Executable name this candidate installs, when it differs from the logical tool name.",
+          "examples": [
+            "rg"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
+        "bin_dir": {
+          "description": "Optional binary directory override for recipe-backed script installs.",
+          "type": "string"
+        },
+        "install_with": {
+          "description": "Legacy concrete provider or manager pin accepted for migration. New providers[] entries should put the concrete value in provider.",
+          "examples": [
+            "brew"
+          ],
+          "type": "string",
+          "enum": [
+            "brew",
+            "apt_repo",
+            "apt",
+            "apk",
+            "dnf",
+            "pacman",
+            "zypper",
+            "bun",
+            "pnpm",
+            "npm",
+            "uv",
+            "pip3",
+            "pip",
+            "cargo"
+          ]
+        },
+        "options": {
+          "description": "Provider-specific install options (key-value pairs).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "package": {
+          "description": "Package identifier passed to the provider. Defaults to the logical tool name.",
+          "examples": [
+            "ripgrep",
+            "typescript"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "description": "Concrete provider or manager for this install candidate.",
+          "examples": [
+            "npm"
+          ],
+          "type": "string",
+          "enum": [
+            "brew",
+            "apt_repo",
+            "apt",
+            "apk",
+            "dnf",
+            "pacman",
+            "zypper",
+            "bun",
+            "pnpm",
+            "npm",
+            "uv",
+            "pip3",
+            "pip",
+            "cargo",
+            "script"
+          ]
+        },
+        "recipe": {
+          "$ref": "#/$defs/FallbackRecipe",
+          "description": "Optional structured install recipe materialized into provider options at resolve time."
+        },
+        "source": {
+          "$ref": "#/$defs/FallbackSource",
+          "description": "Optional structured source metadata for recipe-backed install candidates."
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "additionalProperties": false
+    },
+    "ToolSpec": {
+      "description": "A logical tool spec. Providers define concrete install candidates; legacy provider, variants, and hosts fields are migrated on load.",
+      "type": "object",
+      "properties": {
+        "fallback": {
+          "$ref": "#/$defs/FallbackSpec",
+          "description": "Global fallback recipe used only when this system tool is unavailable from the target system package manager."
+        },
+        "git": {
+          "description": "Upstream git repository URL for this tool. Brew metadata refresh and install-from-search may populate GitHub URLs here for later fallback setup.",
+          "examples": [
+            "https://github.com/BurntSushi/ripgrep"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
+        "hosts": {
+          "description": "Strict hostname-specific install overrides keyed by full or short hostname.",
+          "examples": [
+            {
+              "linuxbox": {
+                "package": "ripgrep",
+                "provider": "apt"
+              }
+            }
+          ],
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ToolInstallSpec"
+          }
+        },
+        "ignore": {
+          "description": "Ignore this logical tool globally. Used for imported libraries/packages that should not be managed.",
+          "default": false,
+          "type": "boolean"
+        },
+        "install_with": {
+          "description": "Legacy concrete provider or manager pin accepted for migration. Use providers[].provider for new config.",
+          "examples": [
+            "brew",
+            "bun",
+            "uv"
+          ],
+          "type": "string",
+          "enum": [
+            "brew",
+            "apt_repo",
+            "apt",
+            "apk",
+            "dnf",
+            "pacman",
+            "zypper",
+            "bun",
+            "pnpm",
+            "npm",
+            "uv",
+            "pip3",
+            "pip",
+            "cargo"
+          ]
+        },
+        "options": {
+          "description": "Provider-specific install options (key-value pairs).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "package": {
+          "description": "Package identifier passed to the provider. Defaults to the logical tool name.",
+          "examples": [
+            "ripgrep",
+            "typescript"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "description": "Legacy provider field accepted for migration. Use providers[] for new config.",
+          "examples": [
+            "brew"
+          ],
+          "type": "string",
+          "enum": [
+            "brew",
+            "apt_repo",
+            "apt",
+            "apk",
+            "dnf",
+            "pacman",
+            "zypper",
+            "bun",
+            "pnpm",
+            "npm",
+            "uv",
+            "pip3",
+            "pip",
+            "cargo",
+            "script"
+          ]
+        },
+        "providers": {
+          "description": "Concrete provider candidates for this logical tool, in priority order.",
+          "examples": [
+            [
+              {
+                "package": "ripgrep",
+                "provider": "brew"
+              },
+              {
+                "package": "ripgrep",
+                "provider": "apt"
+              }
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolInstallSpec"
+          }
+        },
+        "quarantine": {
+          "description": "Per-tool update_quarantine override. Defers updates until the reported availability timestamp is older than this duration.",
+          "examples": [
+            "2d",
+            "12h"
+          ],
+          "type": "string"
+        },
+        "taps": {
+          "description": "Homebrew taps required before installing this tool.",
+          "examples": [
+            [
+              "homebrew/core"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "variants": {
+          "description": "Alternate install candidates tried in config order when the default provider is unavailable.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolInstallSpec"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

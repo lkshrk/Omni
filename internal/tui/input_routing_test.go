@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -148,17 +147,6 @@ func focusedInputCases() []focusedInputCase {
 			value: func(m Model) string { return m.filter.Value() },
 		},
 		{
-			name: "agents search",
-			setup: func(*testing.T) Model {
-				m := baseModel(nil)
-				m.mode = viewSkills
-				m.skillsSearchActive = true
-				m.filter.Focus()
-				return m
-			},
-			value: func(m Model) string { return m.filter.Value() },
-		},
-		{
 			name: "command palette",
 			setup: func(*testing.T) Model {
 				m := baseModel(nil)
@@ -180,63 +168,6 @@ func focusedInputCases() []focusedInputCase {
 		settingsInputCase("membership picker new group", viewGroupMembership, func(m *Model) { m.pickerCreatingGroup = true }),
 		settingsInputCase("group tools search", viewGroupTools, func(m *Model) { m.groupToolsEditor.searchActive = true }),
 		settingsInputCase("group dots search", viewGroupDots, func(m *Model) { m.groupDotsEditor.searchActive = true }),
-	}
-	for field, name := range []string{"name", "marketplace", "source", "agents"} {
-		field := field
-		cases = append(cases, focusedInputCase{
-			name: "plugin " + name,
-			setup: func(*testing.T) Model {
-				m := baseModel(nil)
-				m.mode = viewSkills
-				m.pluginFormOpen = true
-				m.pluginFormName = textinput.New()
-				m.pluginFormMarketplace = textinput.New()
-				m.pluginFormSource = textinput.New()
-				m.pluginFormAgents = textinput.New()
-				m.pluginFormField = field
-				m.focusPluginFormField()
-				return m
-			},
-			value: func(m Model) string {
-				switch field {
-				case 0:
-					return m.pluginFormName.Value()
-				case 1:
-					return m.pluginFormMarketplace.Value()
-				case 2:
-					return m.pluginFormSource.Value()
-				default:
-					return m.pluginFormAgents.Value()
-				}
-			},
-		})
-	}
-	for _, field := range []struct {
-		name      string
-		index     int
-		transport int
-		value     func(Model) string
-	}{
-		{name: "name", index: 0, value: func(m Model) string { return m.mcpFormName.Value() }},
-		{name: "command", index: 2, value: func(m Model) string { return m.mcpFormCommand.Value() }},
-		{name: "url", index: 2, transport: 1, value: func(m Model) string { return m.mcpFormURL.Value() }},
-		{name: "env", index: 3, value: func(m Model) string { return m.mcpFormEnv.Value() }},
-		{name: "env literal", index: 4, value: func(m Model) string { return m.mcpFormEnvLit.Value() }},
-	} {
-		field := field
-		cases = append(cases, focusedInputCase{
-			name: "mcp " + field.name,
-			setup: func(*testing.T) Model {
-				m := baseModel(nil)
-				m.mode = viewSkills
-				m.mcpFormOpen = true
-				m.mcpFormField = field.index
-				m.mcpFormTransport = field.transport
-				m.focusMcpFormField()
-				return m
-			},
-			value: field.value,
-		})
 	}
 	return cases
 }

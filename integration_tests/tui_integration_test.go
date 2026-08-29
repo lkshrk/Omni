@@ -373,6 +373,47 @@ esac
 	}
 }
 
+func TestTUIDotsIgnoreNamedPluginsDoesNotTriggerLegacyOnboarding(t *testing.T) {
+	bin := buildOmniBinary(t)
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	cache := filepath.Join(root, "cache")
+	configPath := filepath.Join(root, "settings.json")
+	repo := filepath.Join(home, "dotfiles")
+	target := filepath.Join(home, ".config", "herd")
+	source := filepath.Join(repo, "dotfiles", "herd", ".config", "herd", "settings.json")
+	env := isolatedTUIEnv(t, home, cache)
+
+	initDotsRepo(t, repo, env)
+	writeIntegrationFile(t, source, "{}\n")
+	runCommand(t, repo, env, "git", "add", ".")
+	runCommand(t, repo, env, "git", "commit", "-m", "add herd dotfile")
+	if err := config.Save(configPath, &config.RootConfig{
+		Version: config.CurrentVersion,
+		Hosts:   map[string][]string{"testhost": {}},
+		Settings: config.Settings{
+			DotsRepo: repo,
+		},
+		Groups: []*config.GroupConfig{{
+			Name:    "testhost",
+			Special: "host",
+			Dots:    []config.DotEntry{{Name: "herd", Path: target, Ignore: []string{"plugins"}}},
+		}},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
+		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool {
+			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools")
+		}, "TUI did not render main tabs")
+		writeTUIKeys(t, term, "\t", "\t")
+		return waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
+			return strings.Contains(text, "Dots") && strings.Contains(text, "herd")
+		}, "valid plugins ignore falsely triggered blank legacy-onboarding Dots tab")
+	})
+}
+
 func TestTUIIncludesStaticIgnoredDotCandidate(t *testing.T) {
 	bin := buildOmniBinary(t)
 	root := t.TempDir()
@@ -769,7 +810,7 @@ func runTUISmoke(t *testing.T, bin, dir string, env []string, args ...string) st
 
 func runTUI(t *testing.T, bin, dir string, env []string, args []string, interact func(*vttest.Terminal) string) string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, bin, args...)

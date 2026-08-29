@@ -9,29 +9,31 @@ import (
 
 type DoctorFixResult struct {
 	OptimizeReport *config.OptimizeReport
+	OwnedChildren  AgentsOwnedChildrenFixReport
 	IgnoreModified []string
-	SkillStore     SkillStoreFixReport
+	APMInstall     APMInstallFixReport
 	OptimizeErr    error
+	OwnedChildErr  error
 	IgnoreErr      error
-	SkillStoreErr  error
+	APMInstallErr  error
 }
 
 func (r DoctorFixResult) Err() error {
-	return errors.Join(r.OptimizeErr, r.IgnoreErr, r.SkillStoreErr)
+	return errors.Join(r.OptimizeErr, r.OwnedChildErr, r.IgnoreErr, r.APMInstallErr)
 }
 
 func runDoctorFixers(
 	dryRun bool,
 	optimize func(bool) (*config.OptimizeReport, error),
 	fixIgnore func() ([]string, error),
-	fixSkillStore func(bool) (SkillStoreFixReport, error),
+	fixAPM func(bool) (APMInstallFixReport, error),
 ) DoctorFixResult {
 	result := DoctorFixResult{}
 	result.OptimizeReport, result.OptimizeErr = optimize(dryRun)
 	if !dryRun {
 		result.IgnoreModified, result.IgnoreErr = fixIgnore()
 	}
-	result.SkillStore, result.SkillStoreErr = fixSkillStore(dryRun)
+	result.APMInstall, result.APMInstallErr = fixAPM(dryRun)
 	return result
 }
 
@@ -41,6 +43,8 @@ func (a *App) OptimizeConfigIncludes(dryRun bool) (*config.OptimizeReport, error
 }
 
 func (a *App) FixDoctorIssues(ctx context.Context, dryRun bool) DoctorFixResult {
-	return runDoctorFixers(dryRun, a.OptimizeConfigIncludes, a.DotsFixIgnorePatterns,
-		func(dryRun bool) (SkillStoreFixReport, error) { return a.FixSkillStore(ctx, dryRun) })
+	result := runDoctorFixers(dryRun, a.OptimizeConfigIncludes, a.DotsFixIgnorePatterns,
+		func(dryRun bool) (APMInstallFixReport, error) { return a.FixMissingAPM(ctx, dryRun) })
+	result.OwnedChildren, result.OwnedChildErr = a.FixAgentsOwnedChildren(ctx, dryRun)
+	return result
 }

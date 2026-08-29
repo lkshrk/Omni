@@ -95,31 +95,6 @@ func promptText(question, defaultVal string) (string, bool) {
 	return answer, true
 }
 
-// A bare Enter returns defaultVal, and state.yes skips the prompt entirely as a "yes".
-// promptYesNoFailClosed asks with defaultVal's hint but treats an unanswered prompt as "no", so a run
-// whose stdin holds an answer is honoured while one with nothing to read cannot fall through to yes.
-func promptYesNoFailClosed(state *rootState, question string, defaultVal bool) bool {
-	if state != nil && state.yes {
-		return true
-	}
-	hint := "[y/N]"
-	if defaultVal {
-		hint = "[Y/n]"
-	}
-	fmt.Fprintf(stdOut(), "%s %s ", question, hint)
-	yes, ok := readYesNo(defaultVal)
-	if !ok {
-		fmt.Fprintln(stdOut())
-		return false
-	}
-	if yes {
-		fmt.Fprintln(stdOut(), "y")
-	} else {
-		fmt.Fprintln(stdOut(), "n")
-	}
-	return yes
-}
-
 func promptYesNo(state *rootState, question string, defaultVal bool) bool {
 	if state != nil && state.yes {
 		return true

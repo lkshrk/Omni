@@ -5,7 +5,10 @@ import "strings"
 type sectionedTab struct {
 	leadingBlank bool
 	top          []string
-	sections     []sectionedTabSection
+	// pinnedTop and footer render outside the scroll window, so a long row list cannot push them off screen.
+	pinnedTop []string
+	footer    []string
+	sections  []sectionedTabSection
 }
 
 type sectionedTabSection struct {
@@ -26,6 +29,7 @@ func renderSectionedTab(m Model, tab sectionedTab) string {
 	var buf scrollBuf
 	// A badge arriving from an async result can overrun the last known width, and an over-wide line soft-wraps and desynchronises bubbletea's frame diff, so clip every line on the way out.
 	write := func(s string) { buf.write(clipLines(s, m.width)) }
+	pinned := len(tab.pinnedTop) > 0 || len(tab.footer) > 0
 	sections := newListSectionWriter(m.palette, m.width, write)
 
 	if tab.leadingBlank {
@@ -35,7 +39,9 @@ func renderSectionedTab(m Model, tab sectionedTab) string {
 		write(line + "\n")
 	}
 	for _, section := range tab.sections {
-		if section.danger {
+		if section.title == "" && !section.danger {
+			sections.wroteSection = true
+		} else if section.danger {
 			if sections.wroteSection {
 				write("\n")
 			}
@@ -70,7 +76,19 @@ func renderSectionedTab(m Model, tab sectionedTab) string {
 			}
 		}
 	}
-	return buf.render(listAvailableHeight(m))
+	if !pinned {
+		return buf.render(listAvailableHeight(m))
+	}
+	var sb strings.Builder
+	for _, line := range tab.pinnedTop {
+		sb.WriteString(clipLines(line, m.width) + "\n")
+	}
+	sb.WriteString(buf.render(max(listAvailableHeight(m)-len(tab.pinnedTop)-len(tab.footer)-1, 1)))
+	sb.WriteString("\n")
+	for _, line := range tab.footer {
+		sb.WriteString(clipLines(line, m.width) + "\n")
+	}
+	return sb.String()
 }
 
 func renderFixedGroupListRow(p palette, selected bool, first, rest []rowCell, firstGap, columnGap int) string {

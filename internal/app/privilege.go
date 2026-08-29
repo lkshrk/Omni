@@ -432,7 +432,7 @@ func (a *App) PrivilegedInstalledUpgradeCommand(ctx context.Context, name string
 	}
 	command, ok := a.PrivilegedToolCommand(ctx, view, provider.PrivilegeActionUpgrade, plan)
 	if !ok {
-		return PrivilegedToolCommand{}, false, fmt.Errorf("admin approval required; unsupported provider command")
+		return PrivilegedToolCommand{}, false, fmt.Errorf("admin approval required for %s, but provider %s has no privileged upgrade command", view.Name, view.Provider)
 	}
 	return command, true, nil
 }

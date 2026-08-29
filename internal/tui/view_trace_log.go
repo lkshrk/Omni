@@ -83,6 +83,7 @@ func traceLogEntryLines(m Model, trace app.CommandTraceView, width int) []string
 		out = append(out, traceLogFieldLines(m, "problem", problem, width, m.palette.styleErr)...)
 	}
 	out = append(out, traceLogFieldLines(m, "error", trace.Error, width, m.palette.styleErr)...)
+	out = append(out, traceLogFieldLines(m, "stdout", trace.Stdout, width, m.palette.styleHelp)...)
 	out = append(out, traceLogFieldLines(m, "stderr", trace.Stderr, width, m.palette.styleHelp)...)
 	return out
 }

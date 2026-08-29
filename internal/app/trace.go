@@ -36,6 +36,7 @@ func (a *App) RecordCommandTrace(ctx context.Context, trace executor.TraceRecord
 		Status:     trace.Status,
 		ExitCode:   trace.ExitCode,
 		Error:      trace.Error,
+		Stdout:     trace.Stdout,
 		Stderr:     trace.Stderr,
 	})
 }

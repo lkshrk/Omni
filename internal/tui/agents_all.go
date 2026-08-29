@@ -1,773 +1,352 @@
 package tui
 
 import (
-	"errors"
-	"fmt"
-	"sort"
+	"context"
+	"slices"
 	"strings"
+	"time"
 
-	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
 )
 
-const (
-	agentsChipAll = iota
-	agentsChipSkills
-	agentsChipMcp
-	agentsChipPlugin
-	agentsChipMarketplace
-)
+const agentsBusyStatus = "⚠ APM busy — wait for the running command to finish"
 
-type agentsSection int
+const agentsUpdateCheckBusyStatus = "checking APM package updates — wait for it to finish"
 
-const (
-	agentsSectionSkills agentsSection = iota
-	agentsSectionMcp
-	agentsSectionPlugins
-	agentsSectionMarketplaces
-)
+type agentsStartupMsg struct{}
 
-type agentsAllRow struct {
-	feature  agentsSection
-	localIdx int
-	agentID  string
-	status   agentsRowStatus
-	mark     agentsSyncMark
-	sortName string
-	// Kept beside status: status names only one condition and drift outranks an update, so a drifted package's pending upgrade would otherwise be invisible.
-	outdated bool
-	// Manufactured for an ignore-list entry with no live row; carries no valid localIdx, so every consumer must check this flag before touching localIdx. Renders name-only, supports only unignore ('x').
-	synthetic bool
+type apmCommandDoneMsg struct {
+	command string
+	stdout  string
+	stderr  string
+	notices []string
+	err     error
 }
 
-func skillExpandAgents(r app.SkillPackageRow, enabledAgents []string) []string {
-	if len(r.Agents) > 0 {
-		return r.Agents
-	}
-	return enabledAgents
+type agentsRowsMsg struct {
+	gen    int
+	status app.AgentsStatus
+	err    error
 }
 
-// Multiple rows share a localIdx (one per agent); key dispatch routes by feature+localIdx and never depends on which agent row triggered it, so it is unaffected.
-func agentsAllRowsList(m Model) []agentsAllRow {
-	var out []agentsAllRow
-	skillsIgnore, mcpIgnore, pluginIgnore, marketplaceIgnore := agentsIgnoreSets(m.agentsIgnore)
-	agentFilterID := ""
-	if agentFilterIDs := skillAgentIDs(m.skillsRows, m.enabledAgents); m.skillAgentIdx > 0 && m.skillAgentIdx <= len(agentFilterIDs) {
-		agentFilterID = agentFilterIDs[m.skillAgentIdx-1]
-	}
-
-	if m.skillsSectionEnabled() {
-		rows, findStart, unmanagedStart := skillsVisibleRows(m)
-		seen := make(map[string]bool, len(rows))
-		for i, r := range rows {
-			seen[r.Name] = true
-			switch {
-			case unmanagedStart >= 0 && i >= unmanagedStart && skillsIgnore[r.Name]:
-				out = append(out, agentsAllRow{feature: agentsSectionSkills, localIdx: i, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: r.Name})
-			case unmanagedStart >= 0 && i >= unmanagedStart:
-				out = append(out, agentsAllRow{feature: agentsSectionSkills, localIdx: i, status: agentsStatusOutOfSync, mark: agentsMarkOrphan, sortName: r.Name})
-			case findStart >= 0 && i >= findStart && skillsIgnore[r.Name]:
-				out = append(out, agentsAllRow{feature: agentsSectionSkills, localIdx: i, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: r.Name})
-			case findStart >= 0 && i >= findStart:
-				out = append(out, agentsAllRow{feature: agentsSectionSkills, localIdx: i, status: agentsStatusAvailable, mark: agentsMarkNone, sortName: r.Name})
-			case skillsIgnore[r.Name] && !r.ShadowedByPlugin:
-				out = append(out, agentsAllRow{feature: agentsSectionSkills, localIdx: i, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: r.Name})
-			default:
-				drifted := len(skillDriftedAgents(r, m.enabledAgents)) > 0
-				packageShadowed := len(skillShadowedAgents(r, m.enabledAgents)) > 0 &&
-					len(skillMissingAgents(r, m.enabledAgents)) == 0
-				// A drifted package is still installed and its upgrade real; a missing one has nothing to upgrade.
-				outdated := skillRowOutdated(r) && !r.ShadowedByPlugin && !packageShadowed && (r.Installed || drifted)
-				status, mark := skillPackageRowStatus(
-					r.Installed, r.ShadowedByPlugin, packageShadowed, drifted, outdated)
-				out = append(out, agentsAllRow{
-					feature: agentsSectionSkills, localIdx: i,
-					status: status, mark: mark, sortName: r.Name, outdated: outdated,
-				})
-			}
-		}
-		out = append(out, agentsOrphanedIgnoreRows(agentsSectionSkills, skillsIgnore, seen)...)
-	}
-
-	if m.mcpSectionEnabled() {
-		seen := make(map[string]bool, len(m.mcpRows))
-		for i, row := range m.mcpRows {
-			seen[row.Name] = true
-			if mcpIgnore[row.Name] && !row.ShadowedByPlugin {
-				out = append(out, agentsAllRow{feature: agentsSectionMcp, localIdx: i, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: row.Name})
-				continue
-			}
-			for _, agentID := range skillExpandAgents(app.SkillPackageRow{Agents: row.Agents}, m.enabledAgents) {
-				if agentFilterID != "" && agentID != agentFilterID {
-					continue
-				}
-				st, ok := row.PerAgentStatus[agentID]
-				if !ok || st == app.McpStatusAgentUnavailable {
-					continue
-				}
-				status, mark := mcpAgentRowStatus(st)
-				out = append(out, agentsAllRow{feature: agentsSectionMcp, localIdx: i, agentID: agentID, status: status, mark: mark, sortName: row.Name})
-			}
-		}
-		unmanagedFlat := mcpUnmanagedFlat(m.mcpUnmanaged)
-		for i, e := range unmanagedFlat {
-			seen[e.srv.Name] = true
-			if agentFilterID != "" && e.agentID != agentFilterID {
-				continue
-			}
-			status, mark := agentsStatusOutOfSync, agentsMarkOrphan
-			if mcpIgnore[e.srv.Name] {
-				status, mark = agentsStatusIgnored, agentsMarkNone
-			}
-			out = append(out, agentsAllRow{
-				feature:  agentsSectionMcp,
-				localIdx: len(m.mcpRows) + i,
-				agentID:  e.agentID,
-				status:   status,
-				mark:     mark,
-				sortName: e.srv.Name,
-			})
-		}
-		out = append(out, agentsOrphanedIgnoreRows(agentsSectionMcp, mcpIgnore, seen)...)
-	}
-
-	if m.pluginsSectionEnabled() {
-		seen := make(map[string]bool, len(m.pluginRows))
-		for i, row := range m.pluginRows {
-			seen[row.Name] = true
-			if pluginIgnore[row.Name] {
-				out = append(out, agentsAllRow{feature: agentsSectionPlugins, localIdx: i, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: row.Name})
-				continue
-			}
-			for _, agentID := range skillExpandAgents(app.SkillPackageRow{Agents: row.Agents}, m.enabledAgents) {
-				if agentFilterID != "" && agentID != agentFilterID {
-					continue
-				}
-				st, ok := row.PerAgentStatus[agentID]
-				if !ok || st == app.PluginStatusAgentUnavailable {
-					continue
-				}
-				status, mark := pluginAgentRowStatus(row, agentID)
-				out = append(out, agentsAllRow{
-					feature: agentsSectionPlugins, localIdx: i, agentID: agentID,
-					status: status, mark: mark, sortName: row.Name, outdated: row.Outdated(),
-				})
-			}
-		}
-		unmanagedFlat := pluginUnmanagedFlat(m.pluginUnmanaged)
-		for i, e := range unmanagedFlat {
-			seen[e.plugin.Name] = true
-			if agentFilterID != "" && e.agentID != agentFilterID {
-				continue
-			}
-			status, mark := agentsStatusOutOfSync, agentsMarkOrphan
-			if pluginIgnore[e.plugin.Name] {
-				status, mark = agentsStatusIgnored, agentsMarkNone
-			}
-			out = append(out, agentsAllRow{
-				feature:  agentsSectionPlugins,
-				localIdx: len(m.pluginRows) + i,
-				agentID:  e.agentID,
-				status:   status,
-				mark:     mark,
-				sortName: e.plugin.Name,
-			})
-		}
-		out = append(out, agentsOrphanedIgnoreRows(agentsSectionPlugins, pluginIgnore, seen)...)
-	}
-
-	if m.marketplacesSectionEnabled() {
-		seen := make(map[string]bool, len(m.marketplaceRows))
-		for i, row := range m.marketplaceRows {
-			seen[row.Name] = true
-			if marketplaceIgnore[row.Name] {
-				out = append(out, agentsAllRow{feature: agentsSectionMarketplaces, localIdx: i, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: row.Name})
-				continue
-			}
-			for _, agentID := range skillExpandAgents(app.SkillPackageRow{Agents: row.Agents}, m.enabledAgents) {
-				if agentFilterID != "" && agentID != agentFilterID {
-					continue
-				}
-				st, ok := row.PerAgentStatus[agentID]
-				if !ok || st == app.PluginStatusAgentUnavailable {
-					continue
-				}
-				status, mark := marketplaceAgentRowStatus(st)
-				out = append(out, agentsAllRow{feature: agentsSectionMarketplaces, localIdx: i, agentID: agentID, status: status, mark: mark, sortName: row.Name})
-			}
-		}
-		unmanagedFlat := marketplaceUnmanagedFlat(m.marketplaceUnmanaged)
-		for i, e := range unmanagedFlat {
-			seen[e.marketplace.Name] = true
-			if agentFilterID != "" && e.agentID != agentFilterID {
-				continue
-			}
-			status, mark := agentsStatusOutOfSync, agentsMarkOrphan
-			if marketplaceIgnore[e.marketplace.Name] {
-				status, mark = agentsStatusIgnored, agentsMarkNone
-			}
-			out = append(out, agentsAllRow{
-				feature:  agentsSectionMarketplaces,
-				localIdx: len(m.marketplaceRows) + i,
-				agentID:  e.agentID,
-				status:   status,
-				mark:     mark,
-				sortName: e.marketplace.Name,
-			})
-		}
-		out = append(out, agentsOrphanedIgnoreRows(agentsSectionMarketplaces, marketplaceIgnore, seen)...)
-	}
-
-	if q := agentsFilterQuery(m); q != "" {
-		kept := out[:0]
-		for _, e := range out {
-			// Skills rows were already matched on source+name by skillsVisibleRows; every other section only has a name.
-			if e.feature != agentsSectionSkills && !strings.Contains(strings.ToLower(e.sortName), q) {
-				continue
-			}
-			kept = append(kept, e)
-		}
-		out = kept
-	}
-
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].status != out[j].status {
-			return out[i].status < out[j].status
-		}
-		if out[i].feature != out[j].feature {
-			return out[i].feature < out[j].feature
-		}
-		if lowerI, lowerJ := strings.ToLower(out[i].sortName), strings.ToLower(out[j].sortName); lowerI != lowerJ {
-			return lowerI < lowerJ
-		}
-		return out[i].agentID < out[j].agentID
-	})
-	return out
+type agentsOutdatedMsg struct {
+	gen    int
+	result app.AgentsOutdatedResult
+	err    error
 }
 
-// Without this an ignore-list entry matching no live row stays invisible, with no way to unignore it from the UI.
-func agentsOrphanedIgnoreRows(feature agentsSection, ignore, seen map[string]bool) []agentsAllRow {
-	var out []agentsAllRow
-	for name := range ignore {
-		if seen[name] {
-			continue
-		}
-		out = append(out, agentsAllRow{feature: feature, localIdx: -1, status: agentsStatusIgnored, mark: agentsMarkNone, sortName: name, synthetic: true})
-	}
-	return out
+func (m *Model) parkAgentsFilter() {
+	m.agentsFilterQuery = m.filter.Value()
+	m.filter.SetValue(m.filterOutsideAgents)
+	m.filter.Blur()
 }
 
-func agentsAllEntryAt(m Model, cursor int) (agentsAllRow, bool) {
-	rows := agentsAllRowsList(m)
-	if cursor < 0 || cursor >= len(rows) {
-		return agentsAllRow{}, false
-	}
-	return rows[cursor], true
+func (m *Model) restoreAgentsFilter() {
+	m.filterOutsideAgents = m.filter.Value()
+	m.filter.SetValue(m.agentsFilterQuery)
+	m.filter.Blur()
+	m.agentsSearchActive = m.agentsFilterQuery != ""
 }
 
-func agentsChipEnabled(m Model, chip int) bool {
-	switch chip {
-	case agentsChipSkills:
-		return m.skillsSectionEnabled()
-	case agentsChipMcp:
-		return m.mcpSectionEnabled()
-	case agentsChipPlugin:
-		return m.pluginsSectionEnabled()
-	case agentsChipMarketplace:
-		return m.marketplacesSectionEnabled()
-	default:
-		return true
-	}
+func (m *Model) openAgentsFilter() {
+	m.agentsSearchActive = true
+	m.filter.Focus()
+	m.agentsCursor = 0
+	// Navigation stays live while typing, so the selection has to be visible from the first keystroke.
+	m.cursorHidden = false
 }
 
-func (m *Model) agentsChipMove(delta int) {
-	for next := m.skillTypeIdx + delta; next >= agentsChipAll && next <= agentsChipMarketplace; next += delta {
-		if agentsChipEnabled(*m, next) {
-			m.setAgentsChip(next)
-			return
-		}
-	}
+func (m *Model) closeAgentsFilter() {
+	m.agentsSearchActive = false
+	m.filter.SetValue("")
+	m.filter.Blur()
+	m.agentsFilterQuery = ""
+	m.agentsCursor = 0
 }
 
-// Same per-agent-row flatten renderAgentsGroupedTab renders, so navigation and rendering always agree on row identity.
-func agentsFilteredRowsList(m Model, feature agentsSection) []agentsAllRow {
-	var out []agentsAllRow
-	for _, e := range agentsAllRowsList(m) {
-		if e.feature == feature {
-			out = append(out, e)
-		}
-	}
-	return out
-}
-
-// Pairs with agentsFeatureCursor's localIdx so a specific rendered row can be pinned when an item expands into multiple per-agent rows.
-func agentsFeatureCursorAgentID(m Model, feature agentsSection) string {
-	switch feature {
-	case agentsSectionMcp:
-		return m.mcpCursorAgentID
-	case agentsSectionPlugins:
-		return m.pluginCursorAgentID
-	case agentsSectionMarketplaces:
-		return m.marketplaceCursorAgentID
-	default:
+func (m Model) agentsFilterText() string {
+	if !m.agentsSearchActive {
 		return ""
 	}
+	return strings.ToLower(strings.TrimSpace(m.filter.Value()))
 }
 
-// -1 when nothing matches (e.g. skills, which never carries an agentID, or a stale position after the row set changed).
-func agentsChipRowPosition(rows []agentsAllRow, localIdx int, agentID string) int {
-	for i, e := range rows {
-		if e.localIdx == localIdx && e.agentID == agentID {
-			return i
-		}
-	}
-	return -1
-}
-
-// When the cursor doesn't resolve to a row in the current flatten, lands on row 0 rather than applying delta from an undefined position.
-func (m *Model) agentsChipMoveRow(feature agentsSection, delta int) {
-	rows := agentsFilteredRowsList(*m, feature)
-	n := len(rows)
-	if n == 0 {
-		return
-	}
-	pos := agentsChipRowPosition(rows, agentsFeatureCursor(*m, feature), agentsFeatureCursorAgentID(*m, feature))
-	if pos < 0 {
-		pos = 0
-	} else {
-		pos = cursorMove(pos, delta, n, true)
-	}
-	landed := rows[pos]
-	switch feature {
-	case agentsSectionSkills:
-		m.skillsCursor = landed.localIdx
-	case agentsSectionMcp:
-		m.mcpCursor = landed.localIdx
-		m.mcpCursorAgentID = landed.agentID
-	case agentsSectionPlugins:
-		m.pluginCursor = landed.localIdx
-		m.pluginCursorAgentID = landed.agentID
-	case agentsSectionMarketplaces:
-		m.marketplaceCursor = landed.localIdx
-		m.marketplaceCursorAgentID = landed.agentID
-	}
-}
-
-// ok=false for the "all" chip, which has no single section.
-func agentsChipSection(chip int) (agentsSection, bool) {
-	switch chip {
-	case agentsChipSkills:
-		return agentsSectionSkills, true
-	case agentsChipMcp:
-		return agentsSectionMcp, true
-	case agentsChipPlugin:
-		return agentsSectionPlugins, true
-	case agentsChipMarketplace:
-		return agentsSectionMarketplaces, true
+// Only the non-printable navigation keys are intercepted while the input has focus; j and k must still type.
+func (m *Model) handleAgentsSearchNavKeyMsg(msg tea.KeyPressMsg) bool {
+	n := m.agentsRowCount()
+	page := max(listAvailableHeight(*m)/2, 1)
+	ctrl := msg.Mod&^lockMods == tea.ModCtrl
+	switch {
+	case msg.Code == tea.KeyUp || (ctrl && msg.Code == 'p'):
+		m.agentsCursor = cursorMove(m.agentsCursor, -1, n, true)
+	case msg.Code == tea.KeyDown || (ctrl && msg.Code == 'n'):
+		m.agentsCursor = cursorMove(m.agentsCursor, 1, n, true)
+	case msg.Code == tea.KeyPgUp || (ctrl && msg.Code == 'u'):
+		m.agentsCursor = max(m.agentsCursor-page, 0)
+	case msg.Code == tea.KeyPgDown || (ctrl && msg.Code == 'd'):
+		m.agentsCursor = min(m.agentsCursor+page, max(n-1, 0))
+	case msg.Code == tea.KeyHome:
+		m.agentsCursor = 0
+	case msg.Code == tea.KeyEnd:
+		m.agentsCursor = max(n-1, 0)
 	default:
-		return agentsSection(0), false
+		return false
 	}
+	m.cursorHidden = false
+	m.agentsConfirmIdx = -1
+	return true
 }
 
-// Syncs the destination cursor from the source's so a row stays selected across chip switches instead of resetting.
-func (m *Model) setAgentsChip(next int) {
-	from := m.skillTypeIdx
-	m.skillTypeIdx = next
-
-	if from == agentsChipAll && next != agentsChipAll {
-		if toSection, ok := agentsChipSection(next); ok {
-			if entry, ok := agentsAllEntryAt(*m, m.agentsAllCursor); ok && entry.feature == toSection {
-				switch next {
-				case agentsChipSkills:
-					m.skillsCursor = entry.localIdx
-					if !entry.synthetic {
-						clampSkillsCursor(m)
-					}
-				case agentsChipMcp:
-					m.mcpCursor = entry.localIdx
-					m.mcpCursorAgentID = entry.agentID
-				case agentsChipPlugin:
-					m.pluginCursor = entry.localIdx
-					m.pluginCursorAgentID = entry.agentID
-				case agentsChipMarketplace:
-					m.marketplaceCursor = entry.localIdx
-					m.marketplaceCursorAgentID = entry.agentID
-				}
-				return
-			}
+func (m *Model) handleAgentsSearchKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
+	if m.handleAgentsSearchNavKeyMsg(msg) {
+		return nil
+	}
+	switch {
+	case key.Matches(msg, m.keys.Back):
+		if m.agentsRegistryMode {
+			m.closeAgentsRegistry()
+			return nil
 		}
-		m.resetAgentsChipCursor()
-		return
-	}
-
-	if next == agentsChipAll && from != agentsChipAll {
-		if fromSection, ok := agentsChipSection(from); ok {
-			fromCursor := agentsFeatureCursor(*m, fromSection)
-			fromAgentID := agentsFeatureCursorAgentID(*m, fromSection)
-			for i, e := range agentsAllRowsList(*m) {
-				if e.feature == fromSection && e.localIdx == fromCursor && e.agentID == fromAgentID {
-					m.agentsAllCursor = i
-					return
-				}
-			}
+		m.closeAgentsFilter()
+		return nil
+	case key.Matches(msg, m.keys.Confirm):
+		if m.agentsRegistryMode {
+			return m.handleAgentsRegistryEnter()
 		}
-		clampAgentsAllCursor(m)
-		return
+		m.filter.Blur()
+		return nil
 	}
-
-	m.resetAgentsChipCursor()
+	previous := m.filter.Value()
+	var cmd tea.Cmd
+	m.filter, cmd = m.filter.Update(msg)
+	if m.filter.Value() != previous {
+		m.agentsCursor = 0
+		m.agentsConfirmIdx = -1
+	}
+	m.agentsCursor = clampIndex(m.agentsCursor, m.agentsRowCount())
+	return []tea.Cmd{cmd}
 }
 
-func (m *Model) agentFilterMove(delta int) {
-	if delta < 0 {
-		if m.skillAgentIdx > 0 {
-			m.skillAgentIdx--
-			clampSkillsCursor(m)
+func (m *Model) doLoadAgentsRows() tea.Cmd {
+	if m.app == nil {
+		return nil
+	}
+	m.agentsRowsGen++
+	gen, a := m.agentsRowsGen, m.app
+	return func() tea.Msg {
+		status, err := a.AgentsStatus()
+		return agentsRowsMsg{gen: gen, status: status, err: err}
+	}
+}
+
+func (m *Model) doCheckAgentsOutdated() tea.Cmd {
+	if m.app == nil {
+		return nil
+	}
+	m.agentsOutdatedGen++
+	gen, a, parent := m.agentsOutdatedGen, m.app, m.ctx
+	m.agentsOutdatedChecking = true
+	m.agentsOutdatedErr = nil
+	m.agentsOutdatedUnknown = 0
+	m.agentsOutdatedResult = app.AgentsOutdatedResult{}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(parent, 45*time.Second)
+		defer cancel()
+		result, err := a.AgentsOutdated(ctx)
+		return agentsOutdatedMsg{gen: gen, result: result, err: err}
+	}
+}
+
+func (m *Model) refreshAgents() []tea.Cmd {
+	if m.agentsOutdatedChecking {
+		return []tea.Cmd{setStatus(m, agentsUpdateCheckBusyStatus, false)}
+	}
+	app.ApplyAgentsOutdated(m.agentsRows, app.AgentsOutdatedResult{})
+	return []tea.Cmd{m.doLoadAgentsRows(), m.doCheckAgentsOutdated()}
+}
+
+// Returns the spinner plus the caller's work, or nil when there is no app to run against.
+func (m *Model) beginAPMOp(command string, work tea.Cmd) []tea.Cmd {
+	if m.app == nil {
+		return nil
+	}
+	m.apmRunning = true
+	m.apmCommand = command
+	m.apmOutput = ""
+	m.apmErr = nil
+	m.agentsRemovalHint = nil
+	m.agentsRowOpSpec = ""
+	return []tea.Cmd{m.spinner.Tick, work}
+}
+
+func (m *Model) runAPM(command string, args ...string) []tea.Cmd {
+	a, ctx := m.app, m.ctx
+	return m.beginAPMOp(command, func() tea.Msg {
+		result, err := a.RunAPM(ctx, args...)
+		output := apmCommandOutput(result.Stdout, result.Stderr)
+		return apmCommandDoneMsg{command: command, stdout: result.Stdout, stderr: result.Stderr, notices: capAgentsNotices(apmMarkedLines(output)), err: err}
+	})
+}
+
+// The TUI has no flags, so sync runs the plain CLI lifecycle: host template first, then install.
+func (m *Model) doAgentsSyncAll() []tea.Cmd {
+	const command = "omni agents sync"
+	a, ctx := m.app, m.ctx
+	return m.beginAPMOp(command, func() tea.Msg {
+		result, err := a.AgentsSyncAll(ctx, app.AgentsSyncAllOptions{})
+		notices := slices.Clone(result.Notices)
+		if result.Warning != "" {
+			notices = append(notices, "warning: "+result.Warning)
 		}
-		return
-	}
-	agentIDs := skillAgentIDs(m.skillsRows, m.enabledAgents)
-	if m.skillAgentIdx < len(agentIDs) {
-		m.skillAgentIdx++
-		clampSkillsCursor(m)
-	}
+		// apm's own verdict lives in the install output, which the structured result does not carry.
+		notices = append(notices, apmMarkedLines(apmCommandOutput(result.Output, result.Stderr))...)
+		return apmCommandDoneMsg{command: command, stdout: result.Output, stderr: result.Stderr, notices: capAgentsNotices(notices), err: err}
+	})
 }
 
-func (m *Model) resetAgentsChipCursor() {
-	switch m.skillTypeIdx {
-	case agentsChipAll:
-		clampAgentsAllCursor(m)
-	case agentsChipSkills:
-		clampSkillsCursor(m)
-	case agentsChipMcp:
-		m.mcpCursor = 0
-		m.mcpCursorAgentID = ""
-		m.agentsChipMoveRow(agentsSectionMcp, 0)
-	case agentsChipPlugin:
-		m.pluginCursor = 0
-		m.pluginCursorAgentID = ""
-		m.agentsChipMoveRow(agentsSectionPlugins, 0)
-	case agentsChipMarketplace:
-		m.marketplaceCursor = 0
-		m.marketplaceCursorAgentID = ""
-		m.agentsChipMoveRow(agentsSectionMarketplaces, 0)
+func (m *Model) doAgentsUpdateAll() []tea.Cmd {
+	return m.runAPM("apm update -g --yes", "update", "-g", "--yes")
+}
+
+func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
+	key := msg.String()
+	if !m.agentsRegistryMode {
+		if handled, cmds := m.handleAgentsRowOpKeyMsg(key); handled {
+			return true, cmds
+		}
 	}
-}
-
-func agentsAllCursorMove(m *Model, delta int) {
-	m.agentsAllCursor = cursorMove(m.agentsAllCursor, delta, len(agentsAllRowsList(*m)), true)
-}
-
-func clampAgentsAllCursor(m *Model) {
-	total := len(agentsAllRowsList(*m))
-	if m.agentsAllCursor >= total {
-		m.agentsAllCursor = total - 1
-	}
-	if m.agentsAllCursor < 0 {
-		m.agentsAllCursor = 0
-	}
-}
-
-const agentsBusyStatus = "⚠ agents busy — wait for the running operation to finish"
-
-func (m *Model) agentsOpInFlight() bool {
-	return m.skillsRunning || m.skillAddRunning || m.mcpRunning || m.pluginRunning || m.marketplaceRunning
-}
-
-// Runs before per-chip dispatch so the bulk keys work from any chip; guarded against re-trigger while an equivalent op is in flight and against firing mid-confirm.
-func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (handled bool, cmds []tea.Cmd) {
-	if m.agentsDeleteConfirm || m.agentsIgnoreConfirm || m.agentsResolveConfirm || m.mcpDeleteConfirm || m.pluginDeleteConfirm || m.marketplaceDeleteConfirm {
+	if key != "U" && key != "S" && key != "R" && key != "e" && key != "/" && key != "enter" && key != "a" {
 		return false, nil
 	}
-	if m.agentsSyncAllConfirm {
-		m.cancelConfirmationTimeout()
-		m.agentsSyncAllConfirm = false
-		if msg.String() == "S" && !m.agentsOpInFlight() {
-			return true, m.doAgentsSyncAll()
+	m.agentsConfirmIdx = -1
+	if key == "e" {
+		return true, []tea.Cmd{m.openTraceLog()}
+	}
+	if key == "/" || key == "a" {
+		// Registry mode already owns the input; re-entering it would only reset the query.
+		if m.agentsRegistryMode {
+			return true, nil
+		}
+		if key == "/" {
+			m.openAgentsFilter()
+			return true, nil
 		}
 	}
-	switch msg.String() {
-	case "U", "S", "R":
-		if m.agentsOpInFlight() {
-			return true, []tea.Cmd{setStatus(m, agentsBusyStatus, true)}
+	if key == "enter" {
+		if m.agentsRegistryMode {
+			return true, m.handleAgentsRegistryEnter()
 		}
-	case "e":
-		// Falls through regardless of an in-flight bulk op: the trace log is a read-only view of past output.
-	default:
 		return false, nil
 	}
-	switch msg.String() {
+	if key == "a" {
+		return true, m.openAgentsRegistry()
+	}
+	if m.apmRunning {
+		return true, []tea.Cmd{setStatus(m, agentsBusyStatus, true)}
+	}
+	if m.agentsOutdatedChecking && (key == "U" || key == "S" || key == "R") {
+		return true, []tea.Cmd{setStatus(m, agentsUpdateCheckBusyStatus, false)}
+	}
+	switch key {
 	case "U":
 		return true, m.doAgentsUpdateAll()
 	case "S":
-		m.agentsSyncAllConfirm = true
-		return true, []tea.Cmd{m.armConfirmationTimeout()}
-	case "e":
-		return true, []tea.Cmd{m.openTraceLog()}
+		return true, m.doAgentsSyncAll()
 	default:
-		return true, m.doAgentsRefreshAll()
+		m.apmCommand, m.apmOutput, m.apmErr = "", "", nil
+		return true, m.refreshAgents()
 	}
 }
 
-// Marketplaces must refresh before outdated plugins are computed: LatestVersion/LatestSha come from the marketplace's local clone, so cached rows cannot know about an update until it is pulled.
-func (m *Model) doAgentsUpdateAll() []tea.Cmd {
-	runSkills := m.skillsSectionEnabled() && len(m.skillsRows) > 0
-	runPlugins := m.pluginsSectionEnabled()
-	runMarketplaces := m.marketplacesSectionEnabled()
-	runMcp := m.mcpSectionEnabled()
-	if !runSkills && !runPlugins && !runMarketplaces && !runMcp {
-		return nil
+func agentsRowMatches(query, name, detail string) bool {
+	if query == "" {
+		return true
 	}
-	if runSkills {
-		m.skillsRunning = true
-		m.skillsErr = nil
-	}
-	if runPlugins {
-		m.pluginRunning = true
-		m.pluginErr = nil
-	}
-	if runMarketplaces {
-		m.marketplaceRunning = true
-		m.marketplaceErr = nil
-	}
-	if runMcp {
-		m.mcpRunning = true
-		m.mcpErr = nil
-	}
-	ch, gen := m.beginProgressStream()
-	a, ctx := m.app, m.ctx
-	work := func() tea.Msg {
-		defer close(ch)
-		done := agentsProgressDoneMsg{gen: gen, skills: runSkills, mcp: runMcp, plugin: runPlugins, marketplace: runMarketplaces}
-		if runSkills {
-			sendProgress(ch, gen, "updating skills…")
-			_, _, err := a.UpdateSkills(ctx, app.UpdateSkillsOptions{})
-			done.skillsErr = err
-		}
-		if runPlugins || runMarketplaces {
-			sendProgress(ch, gen, "updating marketplaces…")
-			res, err := a.UpdateMarketplaces(ctx)
-			mErr := combinePluginErrors(err, res.Errors)
-			if runMarketplaces {
-				done.marketplaceErr = mErr
-			} else {
-				done.pluginErr = mErr
+	return strings.Contains(strings.ToLower(name+" "+detail), query)
+}
+
+func (m Model) agentsVisiblePackages() []app.AgentsPackageRow {
+	query := m.agentsFilterText()
+	out := make([]app.AgentsPackageRow, 0, len(m.agentsRows))
+	for _, updates := range []bool{true, false} {
+		for _, row := range m.agentsRows {
+			search := row.Source + " " + strings.Join(row.Issues, " ")
+			for _, child := range row.Provides {
+				search += " " + child.Kind + " " + child.Name
+			}
+			if row.UpdateAvailable == updates && agentsRowMatches(query, row.Name, search) {
+				out = append(out, row)
 			}
 		}
-		if runPlugins && done.pluginErr == nil {
-			rows, _, err := a.PluginRows(ctx)
-			if err != nil {
-				done.pluginErr = err
-			} else {
-				var outdated []string
-				for _, row := range rows {
-					if row.Outdated() {
-						outdated = append(outdated, row.Name)
-					}
-				}
-				if len(outdated) > 0 {
-					res, err := a.UpdatePluginsPreRefreshed(ctx, outdated, func(name string) {
-						sendProgress(ch, gen, "updating plugin "+name+"…")
-					})
-					done.pluginErr = combinePluginErrors(err, res.Errors)
-				}
-			}
+	}
+	return out
+}
+
+func (m Model) agentsVisibleServices(rows []app.AgentsServiceRow) []app.AgentsServiceRow {
+	query := m.agentsFilterText()
+	if query == "" {
+		return rows
+	}
+	out := make([]app.AgentsServiceRow, 0, len(rows))
+	for _, row := range rows {
+		if agentsRowMatches(query, row.Name, row.Detail) {
+			out = append(out, row)
 		}
-		if runPlugins && done.pluginErr == nil {
-			sendProgress(ch, gen, "installing missing plugins…")
-			res, err := a.RestorePluginsPreRefreshed(ctx, app.RestorePluginOptions{})
-			done.pluginErr = combinePluginErrors(err, res.Errors)
-		}
-		if runMcp {
-			sendProgress(ch, gen, "installing missing mcp servers…")
-			res, err := a.RestoreMcpServers(ctx, app.RestoreMcpOptions{})
-			done.mcpErr = combineMcpErrors(err, res.Errors)
-		}
-		return done
 	}
-	return []tea.Cmd{m.spinner.Tick, work, waitForProgress(ch, gen)}
+	return out
 }
 
-func skillWarningsText(warnings []string) string {
-	return strings.Join(warnings, "; ")
+func (m Model) agentsTotalRowCount() int {
+	return len(m.agentsRows) + len(m.agentsMCPRows) + len(m.agentsLSPRows)
 }
 
-// RestoreSkills only reports per-package failures via res.Failed, so a nil err alone does not mean every package installed.
-func combineSkillErrors(err error, res app.RestoreSkillsResult) error {
-	all := make([]error, 0, len(res.Failed)+1)
-	if err != nil {
-		all = append(all, err)
+func (m Model) agentsRowCount() int {
+	if m.agentsRegistryMode {
+		return len(m.agentsVisibleRegistry())
 	}
-	for _, f := range res.Failed {
-		all = append(all, fmt.Errorf("%s: %s", f.Name, f.Message))
-	}
-	return errors.Join(all...)
+	return len(m.agentsVisiblePackages()) + len(m.agentsVisibleServices(m.agentsMCPRows)) + len(m.agentsVisibleServices(m.agentsLSPRows))
 }
 
-// The claim step adopts on-disk directories, so the action is confirmed before it runs (see handleAgentsGlobalActionKeyMsg).
-func (m *Model) doAgentsSyncAll() []tea.Cmd {
-	return m.doAgentsComposedRun(true)
+func (m *Model) handleAgentsNavigationKeyMsg(msg tea.KeyPressMsg) bool {
+	n := m.agentsRowCount()
+	before := m.agentsCursor
+	switch {
+	case key.Matches(msg, m.keys.Up):
+		m.agentsCursor = cursorMove(m.agentsCursor, -1, n, true)
+	case key.Matches(msg, m.keys.Down):
+		m.agentsCursor = cursorMove(m.agentsCursor, 1, n, true)
+	case key.Matches(msg, m.keys.Top):
+		m.agentsCursor = 0
+	case key.Matches(msg, m.keys.Bottom):
+		m.agentsCursor = max(n-1, 0)
+	case key.Matches(msg, m.keys.HalfPageDown):
+		m.agentsCursor = min(m.agentsCursor+max(listAvailableHeight(*m)/2, 1), max(n-1, 0))
+	case key.Matches(msg, m.keys.HalfPageUp):
+		m.agentsCursor = max(m.agentsCursor-max(listAvailableHeight(*m)/2, 1), 0)
+	case key.Matches(msg, m.keys.PageDown):
+		m.agentsCursor = min(m.agentsCursor+max(listAvailableHeight(*m), 1), max(n-1, 0))
+	case key.Matches(msg, m.keys.PageUp):
+		m.agentsCursor = max(m.agentsCursor-max(listAvailableHeight(*m), 1), 0)
+	default:
+		return false
+	}
+	m.cursorHidden = false
+	if m.agentsCursor != before {
+		m.agentsConfirmIdx = -1
+	}
+	return true
 }
 
-func (m *Model) doAgentsRestoreAll() []tea.Cmd {
-	return m.doAgentsComposedRun(false)
-}
-
-func (m *Model) doAgentsComposedRun(claim bool) []tea.Cmd {
-	runSkills := m.skillsSectionEnabled()
-	runMcp := m.mcpSectionEnabled()
-	runPlugins := m.pluginsSectionEnabled()
-	if !runSkills && !runMcp && !runPlugins {
-		return nil
+func apmCommandOutput(stdout, stderr string) string {
+	parts := make([]string, 0, 2)
+	if stdout = strings.TrimSpace(stdout); stdout != "" {
+		parts = append(parts, stdout)
 	}
-	if runSkills {
-		m.skillsRunning = true
-		m.skillsErr = nil
-		m.skillsResult = nil
+	if stderr = strings.TrimSpace(stderr); stderr != "" {
+		parts = append(parts, stderr)
 	}
-	if runMcp {
-		m.mcpRunning = true
-		m.mcpErr = nil
-	}
-	if runPlugins {
-		m.pluginRunning = true
-		m.pluginErr = nil
-	}
-	ch, gen := m.beginProgressStream()
-	a, ctx := m.app, m.ctx
-	work := func() tea.Msg {
-		defer close(ch)
-		done := agentsProgressDoneMsg{gen: gen, skills: runSkills, mcp: runMcp, plugin: runPlugins}
-		report, err := a.AgentsSyncAll(ctx, app.AgentsSyncAllOptions{
-			ImportUnmanaged: claim,
-			Progress: func(text string) {
-				sendProgress(ch, gen, text)
-			},
-		})
-		if err != nil {
-			if runSkills {
-				done.skillsErr = err
-			}
-			if runMcp {
-				done.mcpErr = err
-			}
-			if runPlugins {
-				done.pluginErr = err
-			}
-		} else {
-			for _, featureErr := range report.Errors {
-				switch featureErr.Feature {
-				case app.AgentsFeatureImport, app.AgentsFeatureSkills:
-					done.skillsErr = errors.Join(done.skillsErr, featureErr)
-				case app.AgentsFeatureMcp:
-					done.mcpErr = errors.Join(done.mcpErr, featureErr)
-				case app.AgentsFeaturePlugins:
-					done.pluginErr = errors.Join(done.pluginErr, featureErr)
-				}
-			}
-		}
-		done.report = &report
-		return done
-	}
-	return []tea.Cmd{m.spinner.Tick, work, waitForProgress(ch, gen)}
-}
-
-func (m *Model) doAgentsRefreshAll() []tea.Cmd {
-	var cmds []tea.Cmd
-	if m.skillsSectionEnabled() {
-		m.skillsLoaded = true
-		cmds = append(cmds, m.loadSkillsManifest(true))
-	}
-	if m.mcpSectionEnabled() {
-		m.mcpRunning = true
-		cmds = append(cmds, m.spinner.Tick, m.doLoadMcpRows())
-	}
-	if m.pluginsSectionEnabled() {
-		m.pluginRunning = true
-		cmds = append(cmds, m.spinner.Tick, m.doLoadPluginRows())
-	}
-	if m.marketplacesSectionEnabled() {
-		m.marketplaceRunning = true
-		cmds = append(cmds, m.spinner.Tick, m.doLoadMarketplaceRows())
-	}
-	return cmds
-}
-
-// Other keys route to the section under the cursor with that section's cursor synced first, so mutating actions work uniformly across the stacked view.
-func (m *Model) handleAgentsAllKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
-	if m.agentsDeleteConfirm {
-		return m.handleAgentsDeleteConfirmKeyMsg(msg)
-	}
-	if m.agentsIgnoreConfirm {
-		return m.handleAgentsIgnoreConfirmKeyMsg(msg)
-	}
-	if m.agentsResolveConfirm {
-		return m.handleAgentsResolveConfirmKeyMsg(msg)
-	}
-	if m.pluginMarketplaceOfferConfirm {
-		return m.handlePluginMarketplaceOfferConfirmKeyMsg(msg)
-	}
-	switch msg.String() {
-	case "up", "k":
-		agentsAllCursorMove(m, -1)
-		return nil
-	case "down", "j":
-		agentsAllCursorMove(m, 1)
-		return nil
-	case "left", "h":
-		m.agentsChipMove(-1)
-		return nil
-	case "right":
-		m.agentsChipMove(1)
-		return nil
-	case "l":
-		// A drifted skills row spends 'l' on use-local (dots' mnemonic); "right" still switches chips there.
-		if entry, ok := agentsAllEntryAt(*m, m.agentsAllCursor); !ok || !agentsResolveEligible(entry) {
-			m.agentsChipMove(1)
-			return nil
-		}
-	case "{":
-		m.agentFilterMove(-1)
-		clampAgentsAllCursor(m)
-		return nil
-	case "}":
-		m.agentFilterMove(1)
-		clampAgentsAllCursor(m)
-		return nil
-	case "/":
-		m.openAgentsSearch()
-		return []tea.Cmd{textinput.Blink}
-	}
-	if handled, cmds := m.handleAgentsAllRowActionKeyMsg(msg); handled {
-		clampAgentsAllCursor(m)
-		return cmds
-	}
-
-	entry, ok := agentsAllEntryAt(*m, m.agentsAllCursor)
-	if !ok {
-		return nil
-	}
-	var cmds []tea.Cmd
-	switch entry.feature {
-	case agentsSectionSkills:
-		m.skillsCursor = entry.localIdx
-		cmds = m.handleSkillsKeyMsg(msg)
-	case agentsSectionMcp:
-		m.mcpCursor = entry.localIdx
-		m.mcpCursorAgentID = entry.agentID
-		cmds = m.handleMcpKeyMsg(msg)
-	case agentsSectionPlugins:
-		m.pluginCursor = entry.localIdx
-		m.pluginCursorAgentID = entry.agentID
-		cmds = m.handlePluginKeyMsg(msg)
-	case agentsSectionMarketplaces:
-		m.marketplaceCursor = entry.localIdx
-		m.marketplaceCursorAgentID = entry.agentID
-		cmds = m.handleMarketplaceKeyMsg(msg)
-	}
-	// load-bearing: delegated handlers ([/] filter, removals) clamp only their section cursor
-	clampAgentsAllCursor(m)
-	return cmds
+	return strings.Join(parts, "\n")
 }

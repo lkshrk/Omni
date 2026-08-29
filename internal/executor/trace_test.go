@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -155,5 +156,44 @@ func TestTracingExecutorSanitizesTraceTextBeforePersistence(t *testing.T) {
 	}
 	if trace.Stderr != "line1\nline2\nline3\tcolred TOKEN=[redacted] 界" {
 		t.Errorf("stderr = %q", trace.Stderr)
+	}
+}
+
+func TestTraceRecordCapsStdoutToItsTail(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; sb.Len() <= tracePreviewLimit*2; i++ {
+		fmt.Fprintf(&sb, "[i] progress line %d\n", i)
+	}
+	sb.WriteString("[x] Install failed after 0.0s.\n")
+
+	got := SanitizeTraceRecord(TraceRecord{Stdout: sb.String()}).Stdout
+	if len(got) > tracePreviewLimit {
+		t.Fatalf("stdout tail = %d bytes, want <= %d", len(got), tracePreviewLimit)
+	}
+	if !strings.HasPrefix(got, traceTruncatedMark+"\n") {
+		t.Fatalf("tail is not marked as truncated: %q", got[:40])
+	}
+	if !strings.HasSuffix(got, "[x] Install failed after 0.0s.") {
+		t.Fatalf("verdict line dropped from the tail: %q", got[len(got)-60:])
+	}
+	if strings.Contains(strings.SplitN(got, "\n", 3)[1], "progress line 0\n") {
+		t.Fatal("tail kept the head of stdout")
+	}
+	if again := SanitizeTraceRecord(TraceRecord{Stdout: got}).Stdout; again != got {
+		t.Fatalf("stdout truncation is not idempotent:\n%q\n%q", got, again)
+	}
+}
+
+func TestTracingExecutorRecordsStdout(t *testing.T) {
+	sink := &traceSinkStub{}
+	tr := NewTracing(&MockExecutor{Responses: []MockCall{{Stdout: "[x] boom\n", Stderr: "warn\n"}}}, sink)
+	if _, _, err := tr.Run(context.Background(), "apm", "install", "-g"); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.records) != 1 {
+		t.Fatalf("records = %#v", sink.records)
+	}
+	if sink.records[0].Stdout != "[x] boom" || sink.records[0].Stderr != "warn" {
+		t.Fatalf("record = %+v", sink.records[0])
 	}
 }

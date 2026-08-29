@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
-	"slices"
+	"sort"
 	"strings"
 )
 
 // CurrentVersion — Version 0 is the legacy unversioned format.
-const CurrentVersion = 22
+const CurrentVersion = 24
 
 const (
 	FallbackSourceGitHub = "github"
@@ -31,15 +31,6 @@ const (
 	FallbackRecipeRawCommands        = "raw_commands"
 	FallbackRecipeCurlInstallScript  = "curl_install_script"
 	FallbackRecipeAptRepo            = "apt_repo"
-
-	// AgentRefPackages expands to every agents.packages[].source value.
-	AgentRefPackages = "@agents.packages"
-	// AgentRefMcpServers expands to every agents.mcp_servers[].name value.
-	AgentRefMcpServers = "@agents.mcp_servers"
-	// AgentRefPlugins expands to every agents.plugins[].name value.
-	AgentRefPlugins = "@agents.plugins"
-	// AgentRefMarketplaces expands to every agents.marketplaces[].name value.
-	AgentRefMarketplaces = "@agents.marketplaces"
 )
 
 // ToolEntry — Group memberships persist as a bare name string; the provider/package fields serve the app/sync flat view only.
@@ -66,9 +57,9 @@ func (e *ToolEntry) UnmarshalJSON(data []byte) error {
 	}
 	var obj map[string]any
 	if err := json.Unmarshal(data, &obj); err == nil {
-		return fmt.Errorf("old group tool object config is no longer supported; use a logical tool name string")
+		return fmt.Errorf("old group tool object config is no longer supported; use a logical tool name string (got %.80s)", string(data))
 	}
-	return fmt.Errorf("tool membership must be a string")
+	return fmt.Errorf("tool membership must be a string (got %.80s)", string(data))
 }
 
 func (e ToolEntry) MarshalJSON() ([]byte, error) {
@@ -238,16 +229,8 @@ type Settings struct {
 	// Per-machine path to the dotfiles git repository.
 	DotsRepo string `json:"dots_repo,omitempty"`
 	// Host-scoped; *bool so an absent host entry (nil) never overrides a global true.
-	DotsDisabled *bool `json:"dots_disabled,omitempty"`
-	// *bool so nil (absent) means enabled-by-default, distinct from an explicit false.
-	AgentsDisabled *bool `json:"agents_disabled,omitempty"`
-	// Per-feature switches; agents_disabled remains the master switch.
-	SkillsDisabled  *bool `json:"skills_disabled,omitempty"`
-	McpDisabled     *bool `json:"mcp_disabled,omitempty"`
-	PluginsDisabled *bool `json:"plugins_disabled,omitempty"`
-	// Host-scoped agent identifiers ("claude-code", "codex"): nil inherits global, an explicit empty list means no agents.
-	AgentsUse []string      `json:"agents_use,omitempty"`
-	DotsGit   DotsGitConfig `json:"dots_git"`
+	DotsDisabled *bool         `json:"dots_disabled,omitempty"`
+	DotsGit      DotsGitConfig `json:"dots_git"`
 	// Host-scoped provider-family names ("system", "node", "python") disabled on this machine.
 	DisabledProviders []string `json:"disabled_providers,omitempty"`
 	ProviderPriority  []string `json:"provider_priority,omitempty"`
@@ -311,17 +294,13 @@ type HostAssignment struct {
 }
 
 type GroupConfig struct {
-	Name         string      `json:"name,omitempty"`
-	Special      string      `json:"special,omitempty"`
-	Description  string      `json:"description,omitempty"`
-	Taps         []string    `json:"taps,omitempty"`
-	Tools        []ToolEntry `json:"tools,omitempty"`
-	Dots         []DotEntry  `json:"dots,omitempty"`
-	Skills       []string    `json:"skills,omitempty"`
-	McpServers   []string    `json:"mcp_servers,omitempty"`
-	Plugins      []string    `json:"plugins,omitempty"`
-	Marketplaces []string    `json:"marketplaces,omitempty"`
-	Ignore       []string    `json:"-"`
+	Name        string      `json:"name,omitempty"`
+	Special     string      `json:"special,omitempty"`
+	Description string      `json:"description,omitempty"`
+	Taps        []string    `json:"taps,omitempty"`
+	Tools       []ToolEntry `json:"tools,omitempty"`
+	Dots        []DotEntry  `json:"dots,omitempty"`
+	Ignore      []string    `json:"-"`
 }
 
 const SystemInventoryGroup = "provider-inventory"
@@ -355,123 +334,84 @@ type RootConfig struct {
 	Groups   []*GroupConfig      `json:"groups,omitempty"`
 	// Per-machine overrides keyed by short hostname; AutoImport and DotsGit are global-only.
 	HostSettings map[string]Settings `json:"host_settings,omitempty"`
-	Agents       AgentsConfig        `json:"agents,omitempty"`
 }
 
-type AgentsConfig struct {
-	Packages     []SkillPackage `json:"packages,omitempty"`
-	McpServers   []McpServer    `json:"mcp_servers,omitempty"`
-	Marketplaces []Marketplace  `json:"marketplaces,omitempty"`
-	Plugins      []Plugin       `json:"plugins,omitempty"`
-	// Legacy per-skill manifest kept only for one-time migration into Packages; never written back.
-	Skills []ManifestSkill `json:"skills,omitempty"`
-	Ignore AgentsIgnore    `json:"ignore,omitempty"`
-}
-
-type AgentsIgnore struct {
-	Skills       []string `json:"skills,omitempty"`
-	McpServers   []string `json:"mcp_servers,omitempty"`
-	Plugins      []string `json:"plugins,omitempty"`
-	Marketplaces []string `json:"marketplaces,omitempty"`
-}
-
-// SkillPackage — Missing Skills means every skill discovered from the source.
-type SkillPackage struct {
-	Source string   `json:"source"`
-	Ref    string   `json:"ref,omitempty"`
-	Skills []string `json:"skills,omitempty"`
-	Agents []string `json:"agents,omitempty"`
-}
-
-// McpServer — Transport "stdio" requires Command, "http"/"sse" require URL; Env names resolve from the environment at restore time and empty Agents means all.
-type McpServer struct {
-	Name       string            `json:"name"`
-	Transport  string            `json:"transport"`
-	Command    string            `json:"command,omitempty"`
-	URL        string            `json:"url,omitempty"`
-	Env        []string          `json:"env,omitempty"`
-	EnvLiteral map[string]string `json:"env_literal,omitempty"`
-	Headers    map[string]string `json:"headers,omitempty"`
-	Agents     []string          `json:"agents,omitempty"`
-}
-
-// Marketplace — Source is whatever form the agent CLIs accept for marketplace add (owner/repo or URL).
-type Marketplace struct {
-	Name   string   `json:"name"`
-	Source string   `json:"source"`
-	Agents []string `json:"agents,omitempty"`
-}
-
-// Plugin — Exactly one of Marketplace or Source identifies where the agent installs the plugin from.
-type Plugin struct {
-	Name        string   `json:"name"`
-	Marketplace string   `json:"marketplace,omitempty"`
-	Source      string   `json:"source,omitempty"`
-	Agents      []string `json:"agents,omitempty"`
-}
-
-// ManifestSkill — Legacy per-skill entry, kept for migration only.
-type ManifestSkill struct {
-	Name      string   `json:"name"`
-	Source    string   `json:"source"`
-	Ref       string   `json:"ref,omitempty"`
-	SkillPath string   `json:"skill_path,omitempty"`
-	Agents    []string `json:"agents,omitempty"`
-}
-
-func MigrateSkillPackages(cfg *RootConfig) {
-	if len(cfg.Agents.Skills) == 0 {
-		return
+func (c *RootConfig) UnmarshalJSON(data []byte) error {
+	type rootConfig RootConfig
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
 	}
-	index := make(map[string]int, len(cfg.Agents.Packages))
-	existing := make(map[string]bool, len(cfg.Agents.Packages))
-	for i, p := range cfg.Agents.Packages {
-		index[p.Source] = i
-		existing[p.Source] = true
+	if err := validateRemovedAgentConfigFields(raw); err != nil {
+		return err
 	}
-	for _, s := range cfg.Agents.Skills {
-		if s.Source == "" {
-			continue
+	var decoded rootConfig
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*c = RootConfig(decoded)
+	return nil
+}
+
+var removedAgentSettingsFields = []string{
+	"agents_use",
+	"agents_disabled",
+	"skills_disabled",
+	"mcp_disabled",
+	"plugins_disabled",
+}
+
+var removedAgentGroupFields = []string{
+	"skills",
+	"mcp_servers",
+	"plugins",
+	"marketplaces",
+}
+
+func validateRemovedAgentConfigFields(raw map[string]json.RawMessage) error {
+	if _, ok := raw["agents"]; ok {
+		return removedAgentConfigFieldError("$.agents")
+	}
+	if field, ok := removedField(raw["settings"], removedAgentSettingsFields); ok {
+		return removedAgentConfigFieldError("$.settings." + field)
+	}
+
+	var hosts map[string]json.RawMessage
+	if json.Unmarshal(raw["host_settings"], &hosts) == nil {
+		names := make([]string, 0, len(hosts))
+		for name := range hosts {
+			names = append(names, name)
 		}
-		i, ok := index[s.Source]
-		if !ok {
-			skills := []string(nil)
-			if s.Name != "" {
-				skills = []string{s.Name}
-			}
-			cfg.Agents.Packages = append(cfg.Agents.Packages, SkillPackage{
-				Source: s.Source,
-				Ref:    s.Ref,
-				Skills: skills,
-				Agents: s.Agents,
-			})
-			index[s.Source] = len(cfg.Agents.Packages) - 1
-			continue
-		}
-		p := &cfg.Agents.Packages[i]
-		if p.Ref == "" {
-			p.Ref = s.Ref
-		}
-		for _, agent := range s.Agents {
-			if !slices.Contains(p.Agents, agent) {
-				p.Agents = append(p.Agents, agent)
+		sort.Strings(names)
+		for _, name := range names {
+			if field, ok := removedField(hosts[name], removedAgentSettingsFields); ok {
+				return removedAgentConfigFieldError(fmt.Sprintf("$.host_settings.%q.%s", name, field))
 			}
 		}
-		if s.Name == "" || (existing[s.Source] && len(p.Skills) == 0) {
-			continue
-		}
-		found := false
-		for _, name := range p.Skills {
-			if name == s.Name {
-				found = true
-				break
+	}
+
+	var groups []json.RawMessage
+	if json.Unmarshal(raw["groups"], &groups) == nil {
+		for i, group := range groups {
+			if field, ok := removedField(group, removedAgentGroupFields); ok {
+				return removedAgentConfigFieldError(fmt.Sprintf("$.groups[%d].%s", i, field))
 			}
 		}
-		if !found {
-			p.Skills = append(p.Skills, s.Name)
+	}
+	return nil
+}
+
+func removedField(data json.RawMessage, fields []string) (string, bool) {
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(data, &raw) != nil {
+		return "", false
+	}
+	for _, field := range fields {
+		if _, ok := raw[field]; ok {
+			return field, true
 		}
 	}
-	cfg.Agents.Skills = nil
+	return "", false
 }
 
 func (c *RootConfig) EffectiveSettings(shortHostname string) Settings {
@@ -501,27 +441,11 @@ func (c *RootConfig) EffectiveSettings(shortHostname string) Settings {
 	if hs.DotsDisabled != nil {
 		s.DotsDisabled = hs.DotsDisabled
 	}
-	if hs.AgentsDisabled != nil {
-		s.AgentsDisabled = hs.AgentsDisabled
-	}
-	if hs.SkillsDisabled != nil {
-		s.SkillsDisabled = hs.SkillsDisabled
-	}
-	if hs.McpDisabled != nil {
-		s.McpDisabled = hs.McpDisabled
-	}
-	if hs.PluginsDisabled != nil {
-		s.PluginsDisabled = hs.PluginsDisabled
-	}
 	if hs.DisabledProviders != nil {
 		s.DisabledProviders = cloneStringSlice(hs.DisabledProviders)
 	}
 	if hs.ProviderPriority != nil {
 		s.ProviderPriority = cloneStringSlice(hs.ProviderPriority)
-	}
-	// A non-nil host list, including empty, replaces the global list entirely.
-	if hs.AgentsUse != nil {
-		s.AgentsUse = cloneStringSlice(hs.AgentsUse)
 	}
 	if hs.Providers != nil {
 		s.Providers = cloneProviders(hs.Providers)
@@ -649,35 +573,6 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 		}
 	}
 
-	pkgSources := make(map[string]struct{}, len(cfg.Agents.Packages))
-	for i, pkg := range cfg.Agents.Packages {
-		path := fmt.Sprintf("$.agents.packages[%d]", i)
-		if strings.TrimSpace(pkg.Source) == "" {
-			errs = append(errs, ValidationError{Path: path + ".source", Message: "skill package source is required"})
-			continue
-		}
-		errs = append(errs, validateSkillSelector(path, pkg.Skills)...)
-		pkgSources[pkg.Source] = struct{}{}
-	}
-	errs = append(errs, validateMcpServers(cfg.Agents.McpServers, "$.agents.mcp_servers")...)
-	marketplaceNames := make(map[string]struct{}, len(cfg.Agents.Marketplaces))
-	errs = append(errs, validateMarketplaces(cfg.Agents.Marketplaces, marketplaceNames, "$.agents.marketplaces")...)
-	errs = append(errs, validatePlugins(cfg.Agents.Plugins, marketplaceNames, "$.agents.plugins")...)
-
-	mcpServerNames := make(map[string]struct{}, len(cfg.Agents.McpServers))
-	for _, s := range cfg.Agents.McpServers {
-		if strings.TrimSpace(s.Name) != "" {
-			mcpServerNames[s.Name] = struct{}{}
-		}
-	}
-
-	pluginNames := make(map[string]struct{}, len(cfg.Agents.Plugins))
-	for _, p := range cfg.Agents.Plugins {
-		if strings.TrimSpace(p.Name) != "" {
-			pluginNames[p.Name] = struct{}{}
-		}
-	}
-
 	groupNames := make(map[string]struct{}, len(cfg.Groups))
 	groupByName := make(map[string]*GroupConfig, len(cfg.Groups))
 	dotMemberships := make(map[string]*GroupConfig)
@@ -764,53 +659,6 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 				}
 			}
 		}
-		for si, src := range g.Skills {
-			if IsAgentRef(src) {
-				continue
-			}
-			if _, ok := pkgSources[src]; !ok {
-				errs = append(errs, ValidationError{
-					Path:    fmt.Sprintf("$.groups[%d].skills[%d]", gi, si),
-					Message: fmt.Sprintf("group skill ref %q has no matching package", src),
-				})
-			}
-		}
-		for mi, name := range g.McpServers {
-			if IsAgentRef(name) {
-				continue
-			}
-			if _, ok := mcpServerNames[name]; !ok {
-				errs = append(errs, ValidationError{
-					Path:    fmt.Sprintf("$.groups[%d].mcp_servers[%d]", gi, mi),
-					Message: fmt.Sprintf("group mcp_server ref %q has no matching mcp_server in agents.mcp_servers", name),
-					Warn:    true,
-				})
-			}
-		}
-		for pi, name := range g.Plugins {
-			if IsAgentRef(name) {
-				continue
-			}
-			if _, ok := pluginNames[name]; !ok {
-				errs = append(errs, ValidationError{
-					Path:    fmt.Sprintf("$.groups[%d].plugins[%d]", gi, pi),
-					Message: fmt.Sprintf("group plugin ref %q has no matching plugin in agents.plugins", name),
-					Warn:    true,
-				})
-			}
-		}
-		for mi, name := range g.Marketplaces {
-			if IsAgentRef(name) {
-				continue
-			}
-			if _, ok := marketplaceNames[name]; !ok {
-				errs = append(errs, ValidationError{
-					Path:    fmt.Sprintf("$.groups[%d].marketplaces[%d]", gi, mi),
-					Message: fmt.Sprintf("group marketplace ref %q has no matching marketplace in agents.marketplaces", name),
-					Warn:    true,
-				})
-			}
-		}
 	}
 	for host, groups := range cfg.Hosts {
 		if strings.TrimSpace(host) == "" {
@@ -860,135 +708,6 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 	for i, ignored := range cfg.Ignore.Dots {
 		if strings.TrimSpace(ignored) == "" {
 			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.ignore.dots[%d]", i), Message: "dotfile name is required"})
-		}
-	}
-	return errs
-}
-
-// An empty selector means "every skill in the package", so a blank entry is never the narrowing the author wrote it to express.
-func validateSkillSelector(path string, skills []string) []ValidationError {
-	var errs []ValidationError
-	seen := make(map[string]struct{}, len(skills))
-	for i, skill := range skills {
-		name := strings.TrimSpace(skill)
-		if name == "" {
-			errs = append(errs, ValidationError{Path: fmt.Sprintf("%s.skills[%d]", path, i), Message: "skill name is required"})
-			continue
-		}
-		if _, dup := seen[name]; dup {
-			errs = append(errs, ValidationError{Path: fmt.Sprintf("%s.skills[%d]", path, i), Message: fmt.Sprintf("duplicate skill %q", name), Warn: true})
-			continue
-		}
-		seen[name] = struct{}{}
-	}
-	return errs
-}
-
-func validateMcpServers(servers []McpServer, path string) []ValidationError {
-	var errs []ValidationError
-	seen := make(map[string]struct{}, len(servers))
-	for i, s := range servers {
-		p := fmt.Sprintf("%s[%d]", path, i)
-		if strings.TrimSpace(s.Name) == "" {
-			errs = append(errs, ValidationError{Path: p + ".name", Message: "mcp_server name must not be empty"})
-		} else if _, dup := seen[s.Name]; dup {
-			errs = append(errs, ValidationError{Path: p + ".name", Message: fmt.Sprintf("duplicate mcp_server name %q", s.Name)})
-		}
-		seen[s.Name] = struct{}{}
-		for j, envName := range s.Env {
-			if strings.TrimSpace(envName) == "" {
-				errs = append(errs, ValidationError{Path: fmt.Sprintf("%s.env[%d]", p, j), Message: "env var name must not be empty"})
-			}
-		}
-		for name := range s.Headers {
-			if !validHTTPHeaderName(name) {
-				errs = append(errs, ValidationError{Path: p + ".headers", Message: fmt.Sprintf("invalid HTTP header name %q", name)})
-			}
-		}
-		switch s.Transport {
-		case "stdio":
-			if strings.TrimSpace(s.Command) == "" {
-				errs = append(errs, ValidationError{Path: p + ".command", Message: "stdio transport requires command"})
-			}
-			if s.URL != "" {
-				errs = append(errs, ValidationError{Path: p + ".url", Message: "stdio transport must not set url"})
-			}
-			if len(s.Headers) > 0 {
-				errs = append(errs, ValidationError{Path: p + ".headers", Message: "stdio transport must not set headers"})
-			}
-		case "http", "sse":
-			if strings.TrimSpace(s.URL) == "" {
-				errs = append(errs, ValidationError{Path: p + ".url", Message: fmt.Sprintf("%s transport requires url", s.Transport)})
-			}
-			if s.Command != "" {
-				errs = append(errs, ValidationError{Path: p + ".command", Message: fmt.Sprintf("%s transport must not set command", s.Transport)})
-			}
-		default:
-			errs = append(errs, ValidationError{Path: p + ".transport", Message: fmt.Sprintf("unknown transport %q; must be stdio, http, or sse", s.Transport)})
-		}
-	}
-	return errs
-}
-
-func validHTTPHeaderName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for i := range len(name) {
-		c := name[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
-			continue
-		}
-		switch c {
-		case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
-			continue
-		}
-		return false
-	}
-	return true
-}
-
-func validateMarketplaces(marketplaces []Marketplace, names map[string]struct{}, path string) []ValidationError {
-	var errs []ValidationError
-	for i, mkt := range marketplaces {
-		p := fmt.Sprintf("%s[%d]", path, i)
-		if strings.TrimSpace(mkt.Name) == "" {
-			errs = append(errs, ValidationError{Path: p + ".name", Message: "marketplace name must not be empty"})
-			continue
-		}
-		if _, dup := names[mkt.Name]; dup {
-			errs = append(errs, ValidationError{Path: p + ".name", Message: fmt.Sprintf("duplicate marketplace name %q", mkt.Name)})
-		}
-		names[mkt.Name] = struct{}{}
-		if strings.TrimSpace(mkt.Source) == "" {
-			errs = append(errs, ValidationError{Path: p + ".source", Message: "marketplace source must not be empty"})
-		}
-	}
-	return errs
-}
-
-// validatePlugins rejects ambiguous sources and dangling marketplace references because they make restore impossible.
-func validatePlugins(plugins []Plugin, marketplaceNames map[string]struct{}, path string) []ValidationError {
-	var errs []ValidationError
-	seen := make(map[string]struct{}, len(plugins))
-	for i, p := range plugins {
-		pp := fmt.Sprintf("%s[%d]", path, i)
-		if strings.TrimSpace(p.Name) == "" {
-			errs = append(errs, ValidationError{Path: pp + ".name", Message: "plugin name must not be empty"})
-		} else if _, dup := seen[p.Name]; dup {
-			errs = append(errs, ValidationError{Path: pp + ".name", Message: fmt.Sprintf("duplicate plugin name %q", p.Name)})
-		}
-		seen[p.Name] = struct{}{}
-		marketplace := strings.TrimSpace(p.Marketplace)
-		source := strings.TrimSpace(p.Source)
-		if (marketplace == "") == (source == "") {
-			errs = append(errs, ValidationError{Path: pp, Message: "plugin requires exactly one of marketplace or source"})
-			continue
-		}
-		if marketplace != "" {
-			if _, ok := marketplaceNames[marketplace]; !ok {
-				errs = append(errs, ValidationError{Path: pp + ".marketplace", Message: fmt.Sprintf("plugin marketplace %q has no matching agents.marketplaces entry", p.Marketplace)})
-			}
 		}
 	}
 	return errs

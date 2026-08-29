@@ -52,19 +52,14 @@ func ExtractIncludeFragments(path string) (*ExtractReport, error) {
 
 	groupsSansDots, dotsOnly := splitGroupsAndDots(cfg.Groups)
 	fragmentValues := map[string]any{
-		"settings.d/agents.json": nil,
 		"settings.d/tools.json":  nil,
 		"settings.d/groups.json": nil,
 		"settings.d/dots.json":   nil,
 	}
 	fragmentKeys := map[string]string{
-		"settings.d/agents.json": "agents",
 		"settings.d/tools.json":  "tools",
 		"settings.d/groups.json": "groups",
 		"settings.d/dots.json":   "groups",
-	}
-	if !agentsConfigEmpty(&cfg.Agents) {
-		fragmentValues["settings.d/agents.json"] = cfg.Agents
 	}
 	if len(cfg.Tools) > 0 {
 		fragmentValues["settings.d/tools.json"] = cfg.Tools
@@ -179,18 +174,4 @@ func splitGroupsAndDots(groups []*GroupConfig) (sansDots, dotsOnly []*GroupConfi
 		})
 	}
 	return sansDots, dotsOnly
-}
-
-func agentsConfigEmpty(agents *AgentsConfig) bool {
-	if agents == nil {
-		return true
-	}
-	return len(agents.Packages) == 0 &&
-		len(agents.McpServers) == 0 &&
-		len(agents.Marketplaces) == 0 &&
-		len(agents.Plugins) == 0 &&
-		len(agents.Ignore.Skills) == 0 &&
-		len(agents.Ignore.McpServers) == 0 &&
-		len(agents.Ignore.Plugins) == 0 &&
-		len(agents.Ignore.Marketplaces) == 0
 }

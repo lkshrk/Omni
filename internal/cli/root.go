@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -21,6 +22,7 @@ import (
 type rootState struct {
 	configPath string
 	cacheDir   string
+	stateDir   string
 	yes        bool
 	app        *app.App
 }
@@ -76,13 +78,16 @@ Already set up?
 			if state.cacheDir != "" {
 				a.CacheDir = state.cacheDir
 			}
+			if state.stateDir != "" {
+				a.StateDir = state.stateDir
+			}
 			if commandInChain(cmd, "doctor") {
 				stop := profile.Start("cli.app_init_read_only")
-				if err := a.InitReadOnly(cmd.Context()); err != nil {
-					stop()
+				err := a.InitReadOnly(cmd.Context())
+				stop()
+				if err != nil {
 					return fmt.Errorf("initialising diagnostics: %w", err)
 				}
-				stop()
 				state.app = a
 				return nil
 			}
@@ -110,6 +115,8 @@ Already set up?
 		"omni config file path (default: $XDG_CONFIG_HOME/omni/settings.json)")
 	root.PersistentFlags().StringVar(&state.cacheDir, "cache-dir", "",
 		"omni cache directory for the database (default: $XDG_CACHE_HOME/omni)")
+	root.PersistentFlags().StringVar(&state.stateDir, "state-dir", "",
+		"omni durable state directory (default: $XDG_STATE_HOME/omni)")
 	root.PersistentFlags().BoolVarP(&state.yes, "yes", "y", false,
 		"assume yes for confirmation prompts")
 
@@ -215,6 +222,16 @@ func Execute() {
 		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		printProviderErrorAdvice(os.Stderr, err)
-		os.Exit(1)
+		os.Exit(commandExitCode(err))
 	}
+}
+
+func commandExitCode(err error) int {
+	var exitErr interface{ ExitCode() int }
+	if errors.As(err, &exitErr) {
+		if code := exitErr.ExitCode(); code > 0 && code < 256 {
+			return code
+		}
+	}
+	return 1
 }

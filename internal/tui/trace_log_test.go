@@ -284,19 +284,6 @@ func TestTraceLog_EFromDotsEntryWithoutLastErrorIsNoOp(t *testing.T) {
 	}
 }
 
-func TestTraceLog_EFromAgentsTabOpensPopup(t *testing.T) {
-	t.Parallel()
-	m := baseModel(nil)
-	m.mode = viewSkills
-	m.agentsEnabled = true
-	m.skillTypeIdx = agentsChipAll
-
-	got := drive(m, pressRune('e'))
-	if !got.traceLogLoading {
-		t.Fatal("e on the agents tab should open the command log")
-	}
-}
-
 func TestTraceLog_EFromDotsEntryRendersPopup(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -318,23 +305,6 @@ func TestTraceLog_EFromDotsEntryRendersPopup(t *testing.T) {
 	view := m.View().Content
 	if !strings.Contains(view, "Command Log") || !strings.Contains(view, "brew install ripgrep") {
 		t.Fatalf("e on a dots entry with a last error should render the command log popup:\n%s", view)
-	}
-}
-
-func TestTraceLog_EFromAgentsTabRendersPopup(t *testing.T) {
-	t.Parallel()
-	m := baseModel(nil)
-	m.mode = viewSkills
-	m.agentsEnabled = true
-	m.skillTypeIdx = agentsChipAll
-
-	gen := m.traceLogGen + 1
-	m = drive(m, pressRune('e'))
-	m = drive(m, traceLogLoadedMsg{gen: gen, traces: fixtureTraces()})
-
-	view := m.View().Content
-	if !strings.Contains(view, "Command Log") || !strings.Contains(view, "brew install ripgrep") {
-		t.Fatalf("e on the agents tab should render the command log popup:\n%s", view)
 	}
 }
 
@@ -379,34 +349,6 @@ func TestTraceLog_EFromDotsChildRowUsesParentLastError(t *testing.T) {
 	got := drive(m, pressRune('e'))
 	if !got.traceLogLoading {
 		t.Fatal("e on a child row should fall back to the parent entry's last error and open the command log")
-	}
-}
-
-func TestTraceLog_EFromAgentsTabBlockedDuringDeleteConfirm(t *testing.T) {
-	t.Parallel()
-	m := baseModel(nil)
-	m.mode = viewSkills
-	m.agentsEnabled = true
-	m.skillTypeIdx = agentsChipAll
-	m.agentsDeleteConfirm = true
-
-	got := drive(m, pressRune('e'))
-	if got.traceLogLoading {
-		t.Fatal("e on the agents tab during a delete confirmation should not open the command log")
-	}
-}
-
-func TestTraceLog_EFromAgentsTabOpensDuringBulkOp(t *testing.T) {
-	t.Parallel()
-	m := baseModel(nil)
-	m.mode = viewSkills
-	m.agentsEnabled = true
-	m.skillTypeIdx = agentsChipAll
-	m.skillsRunning = true
-
-	got := drive(m, pressRune('e'))
-	if !got.traceLogLoading {
-		t.Fatal("e on the agents tab should open the command log even while a bulk op is running")
 	}
 }
 
@@ -716,20 +658,6 @@ func TestTraceLog_RenderGate_VisibleInDots(t *testing.T) {
 	}
 }
 
-func TestTraceLog_RenderGate_VisibleInAgents(t *testing.T) {
-	t.Parallel()
-	m := settingsTraceLogModel()
-	m = injectTraces(m, fixtureTraces())
-	m.mode = viewSkills
-	m.agentsEnabled = true
-	m.skillTypeIdx = agentsChipAll
-
-	view := m.View().Content
-	if !strings.Contains(view, "brew install ripgrep") || !strings.Contains(view, "Command Log") {
-		t.Fatalf("command log should be visible over the agents view:\n%s", view)
-	}
-}
-
 func TestTraceLog_DisablesMainTabClicksWhileOpen(t *testing.T) {
 	t.Parallel()
 	m := settingsTraceLogModel()
@@ -891,3 +819,28 @@ func TestTraceLog_Integration_RealAppRealDB(t *testing.T) {
 
 // Shadows the per-test App built by newDotsModelForCmds so callers can reach m.app for direct DB operations.
 var _ *app.App // keep the app import used
+
+func TestTraceLog_RendersStdoutFromTheDatabase(t *testing.T) {
+	m, _ := newDotsModelForCmds(t)
+	if err := m.app.DB().RecordCommandTrace(context.Background(), &database.CommandTrace{
+		StartedAt: time.Date(2024, 1, 15, 10, 30, 45, 0, time.UTC),
+		Command:   "apm install -g",
+		Status:    "failed",
+		Stdout:    "[i] Installing to user scope\n[x] Install failed after 0.0s.",
+		Stderr:    "stderr detail",
+	}); err != nil {
+		t.Fatalf("record command trace: %v", err)
+	}
+	m.mode = viewSettings
+	m.settingsCursor = settingsRowTraceLog
+	m.dangerConfirmRow = -1
+	m = drive(m, pressEnter())
+	m = drive(m, m.doLoadTraces()())
+
+	plain := stripANSIEscapeSequences(m.View().Content)
+	for _, want := range []string{"stdout:", "[x] Install failed after 0.0s.", "stderr detail"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("trace log missing %q:\n%s", want, plain)
+		}
+	}
+}

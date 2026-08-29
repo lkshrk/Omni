@@ -5,6 +5,15 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// The popup renders and takes keys in exactly these tabs; view and key routing must not drift apart.
+func (m Model) traceLogPopupActive() bool {
+	switch m.mode {
+	case viewSettings, viewList, viewSearch, viewDots, viewSkills:
+		return m.traceLog != nil || m.traceLogLoading
+	}
+	return false
+}
+
 func (m *Model) handleTraceLogLoadedMsg(msg traceLogLoadedMsg) []tea.Cmd {
 	// Discard responses that do not belong to the current open: a stale generation, or loading already cleared by a Back keypress that raced the goroutine.
 	if msg.gen != m.traceLogGen || !m.traceLogLoading {

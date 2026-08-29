@@ -117,6 +117,56 @@ jobs:
           fi
           make test-unit TEST_PACKAGES="$packages"
 
+  apm-platform-contracts:
+    name: APM Platform Contracts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.14'
+
+      - name: Install pinned APM
+        run: python -m pip install git+https://github.com/microsoft/apm.git@b75a02b1cfab3ffa5e1952916045b6d5374090ae
+
+      - name: Test portable APM target contracts
+        run: go test ./internal/app -run '^TestAPM(Target|User)'
+
+      - name: Test onboarding protocol and private-state contracts
+        run: go test ./internal/securefile ./internal/config ./internal/apm ./internal/app -run 'Onboard|ImportSchema|DefaultStateDir|RootPrivate|RootRejects|VerifyDetects|CommitLegacyFragments|DescriptorRelative|WriteConfigLocks|InitDetects'
+
+      - name: Test real stable-target MCP lifecycle
+        run: go test -tags=integration ./internal/apm -run '^TestGlobalMCPLifecycleForEveryStableTarget$' -count=1
+
+      - name: Test lifecycle and marketplace onboarding
+        run: go test -tags=integration ./internal/app -run '^(TestAgentsOnboardLifecycleOnlyAPM|TestOnboardGeneratedMarketplacePluginInstallsWithPinnedAPM)$' -count=1
+
+  onboarding-unit:
+    name: Onboarding Unit (race)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test onboarding coordinator, protocol, security, and CLI
+        run: go test -race -count=1 ./internal/securefile ./internal/config ./internal/executor ./internal/apm ./internal/app ./internal/cli ./internal/tui -run 'Onboard|Legacy|CommitLegacyFragments|ImportSchema|DefaultStateDir|ActionCatalog|RootPrivate|RootRejects|APMCommand|DescriptorRelative|WriteConfigLocks|InitDetects'
+
   integration:
     name: Docker Integration Tests (${{ matrix.name }})
     runs-on: ubuntu-latest
@@ -137,11 +187,17 @@ jobs:
           - name: providers
             packages: ./internal/provider/...
             cache: provider-tests
+          - name: apm
+            packages: ./internal/apm/... ./internal/cli/...
+            cache: integration-apm
+          - name: onboarding
+            packages: -parallel=1 -run=^(TestAgentsMigrationRealAPMLifecycle|TestAgentsManifestlessRealAPMLifecycle|TestTUIAgentsTabSyncsMCPThroughRealAPM)$$ ./internal/app/... ./integration_tests/...
+            cache: integration-onboarding
     steps:
       - uses: actions/checkout@v7.0.1
 
       # container driver: type=gha export fails on the default docker driver
-      - uses: docker/setup-buildx-action@v4.2.0
+      - uses: docker/setup-buildx-action@v4.3.0
 
       # exposes the GHA runtime env that type=gha cache needs outside build-push-action
       - uses: crazy-max/ghaction-github-runtime@v4.0.0
@@ -155,4 +211,6 @@ jobs:
             --cache-from type=gha,scope=integration-tests
             --cache-from type=gha,scope=integration-non-cli
             --cache-from type=gha,scope=provider-tests
+            --cache-from type=gha,scope=integration-apm
+            --cache-from type=gha,scope=integration-onboarding
             --cache-to type=gha,scope=${{ matrix.cache }},mode=max

@@ -1,0 +1,10 @@
+{
+  "$schema": "./omni.settings.v22.schema.json",
+  "version": 22,
+  "$include": ["settings.d/agents.json", "settings.d/groups.json"],
+  "hosts": {
+    "h1": ["g1", "g2"],
+    "bare": [],
+    "broken-host": ["broken"]
+  }
+}

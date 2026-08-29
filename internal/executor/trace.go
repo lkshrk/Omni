@@ -29,6 +29,7 @@ type TraceRecord struct {
 	Status     string
 	ExitCode   sql.NullInt64
 	Error      string
+	Stdout     string
 	Stderr     string
 }
 
@@ -75,6 +76,24 @@ func (t *TracingExecutor) RunEnv(ctx context.Context, env []string, name string,
 	})
 }
 
+func (t *TracingExecutor) RunDir(ctx context.Context, dir, name string, args ...string) (string, string, error) {
+	return t.run(ctx, name, args, func() (string, string, error) {
+		return RunInDirWithEnv(ctx, t.Next, dir, nil, name, args...)
+	})
+}
+
+func (t *TracingExecutor) RunDirEnv(ctx context.Context, dir string, env []string, name string, args ...string) (string, string, error) {
+	return t.run(ctx, name, args, func() (string, string, error) {
+		return RunInDirWithEnv(ctx, t.Next, dir, env, name, args...)
+	})
+}
+
+func (t *TracingExecutor) RunDirEnvStdin(ctx context.Context, dir string, env []string, stdin []byte, name string, args ...string) (string, string, error) {
+	return t.run(ctx, name, args, func() (string, string, error) {
+		return RunInDirWithEnvAndStdin(ctx, t.Next, dir, env, stdin, name, args...)
+	})
+}
+
 func (t *TracingExecutor) run(ctx context.Context, name string, args []string, run func() (string, string, error)) (string, string, error) {
 	if t == nil || t.Next == nil {
 		return "", "", errors.New("tracing executor missing wrapped executor")
@@ -91,6 +110,7 @@ func (t *TracingExecutor) run(ctx context.Context, name string, args []string, r
 		Status:     traceStatus(ctx, err),
 		ExitCode:   traceExitCode(err),
 		Error:      errorString(err),
+		Stdout:     stdout,
 		Stderr:     stderr,
 	}))
 	return stdout, stderr, err
@@ -155,6 +175,7 @@ func SanitizeTraceRecord(trace TraceRecord) TraceRecord {
 	trace.Command = redactTraceText(trace.Command)
 	trace.Status = redactTraceText(trace.Status)
 	trace.Error = limitTracePreview(redactTraceText(trace.Error))
+	trace.Stdout = limitTraceTail(redactTraceText(trace.Stdout))
 	trace.Stderr = limitTracePreview(redactTraceText(trace.Stderr))
 	return trace
 }
@@ -248,6 +269,22 @@ func sanitizeTraceText(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// Tools that report their outcome last (apm above all) need the end of stdout, not its beginning.
+func limitTraceTail(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= tracePreviewLimit {
+		return s
+	}
+	tail := s[len(s)-(tracePreviewLimit-len(traceTruncatedMark)-1):]
+	for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
+		tail = tail[1:]
+	}
+	if i := strings.IndexByte(tail, '\n'); i >= 0 && i+1 < len(tail) {
+		tail = tail[i+1:]
+	}
+	return traceTruncatedMark + "\n" + tail
 }
 
 func limitTracePreview(s string) string {

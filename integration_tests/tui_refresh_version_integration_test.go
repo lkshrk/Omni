@@ -75,6 +75,7 @@ func TestRecipeToolProbesTheRecordedBinaryNotTheToolName(t *testing.T) {
 	cache := filepath.Join(root, "cache")
 	configPath := filepath.Join(root, "settings.json")
 	env := isolatedTUIEnv(t, home, cache)
+	env = append(env, "OMNI_GITHUB_API_BASE=http://127.0.0.1:1")
 	binDir := filepath.Join(home, ".local", "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatalf("create bin dir: %v", err)

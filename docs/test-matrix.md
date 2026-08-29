@@ -1,6 +1,6 @@
 # Test Matrix
 
-This matrix tracks the 11 actual program flows and the 79 user-visible actions
+This matrix tracks the 11 actual program flows and the 67 user-visible actions
 in `internal/actions/catalog.go`. It separates cheap model/render checks from
 real-terminal journeys so `TUI: yes` does not imply an expensive binary test for
 every action.
@@ -48,7 +48,7 @@ both cheaper and sufficient.
 | TS-06 | UNKNOWN | Dotfile lifecycle | Classification, path validation, and config mutation branches | Adopt/discover/sync/status/extract/variant/unignore/delete filesystem journeys | covered: discovered sync and ignored-candidate include persist state | GNU Stow remains in the integration environment |
 | TS-07 | UNKNOWN | Dotfile safety and services | Conflict detection, nested ignores, rollback, and service-state branches | Conflict resolution, pull/commit/push, reminder, watch, and data-preservation journeys | covered: destructive resolution is cancelled, then confirmed with backup/symlink filesystem proof | Platform service checks only where host isolation is available |
 | TS-08 | UNKNOWN | Hosts, groups, settings, and migration | Migration and unrelated-config preservation | Mutations persist across reload; lint/extract/migration flows | covered: host-group assignment and a setting toggle persist through config reload | n/a |
-| TS-09 | UNKNOWN | Agents, skills, MCP, plugins, and marketplaces | Adapter parsing, identity, status, and feature-gate contracts | Add/import/group/remove/sync/upgrade for each resource family | covered: fake-Claude plugin install persists adapter and config state; real-Git fixture covers versionless PATH-outdated; skill outdated detection covered per source type (local dir, Git branch, pinned tag, well-known index) with a request-counting stub for the recheck cadence | Fake agent CLIs, real local Git fixture, and a local HTTP index stub; no network |
+| TS-09 | UNKNOWN | Agents, skills, MCP, plugins, and marketplaces | Snapshot and installed-module ownership evidence, strict manifestless `claude_skill`/`skill_bundle` zero-service proof, deterministic owner/child fingerprints, exact/conflict/multi-owner classification, child-health rollup, exact-only template repair, sync lock/preflight ordering, wrapper integrity, and exact pinned-build validation | Migration preview/write routing, Doctor report/dry-run/fix/refusal, zero-mutation sync failure, and sync handoff | covered: ownership appears as package `provides`/`issues`; conflicting standalone rows remain visible | Lifecycle smoke covers exact repair, manual conflict repair, independent services, manifestless DeepWiki/Shiplight packages, and unavailable-evidence first install; direct isolated-HOME `apm audit --ci` has a known wrapper-path false positive; platform gates remain |
 | TS-10 | UNKNOWN | TUI shell and parity | Reducer branches, layout, key routing, modal, progress, and error state | n/a | covered: `x/vttest` current-screen checks exercise resize, help/search, cancel/confirm, async failure/recovery, nested PTY, and clean quit | n/a |
 | TS-11 | UNKNOWN | Provider families | Install/query/upgrade/uninstall parsing and command contracts | Routing through fake executors | n/a: provider permutations do not become safer through the TUI | Tagged Docker package-manager lane |
 
@@ -66,7 +66,7 @@ one unless it proves a new interaction contract.
 | TUI-03 Tool mutation | Edit fallback -> install with fake provider -> progress -> persisted state -> cancel then confirm delete | Durable fallback save and fake-Brew lifecycle tests | covered |
 | TUI-04 Reconcile recovery | Open plan -> run failure -> retain error -> retry -> durable success | Injected fake-Brew failure/retry plus dot-ignore reconcile | covered |
 | TUI-05 Dot safety | Discover/sync candidate -> conflict -> cancel -> confirm resolution; verify config and filesystem | Candidate include/sync and conflict backup/symlink tests | covered |
-| TUI-06 Agents mutation | Render/filter -> install missing plugin; verify adapter/config state and versionless PATH-outdated classification | Fake-Claude install and real-Git PATH-outdated tests | covered |
+| TUI-06 Agents mutation | Open Agents -> cancel/reopen -> inspect and resolve targets, secrets, dots/native ownership, conflicts, and unmanaged items -> review/apply -> local status -> preview/confirm cleanup; verify manifest, lock, durable package, completion marker, runtime state, and post-cleanup no-op | `TestTUIAgentsTabSyncsMCPThroughRealAPM`, `TestTUIAgentsOnboardingPreviewConfirmAndApply` | covered |
 | TUI-07 Groups/settings | Assign current host group -> toggle one setting -> reload config -> verify persistence | `TestTUIAssignsHostGroupAndPersistsSetting` | covered |
 | TUI-08 Admin terminal | Run fake privileged command -> exchange input/output -> observe completion/dismissal without corrupting the parent UI | Real nested PTY plus component-level nonzero-exit coverage | covered |
 
@@ -80,6 +80,86 @@ one unless it proves a new interaction contract.
 - Target two seconds per transition and ten seconds per journey, but measure before enforcing a suite budget.
 - Assert semantic text/cells and durable state. Use full-screen goldens only when layout itself is the behavior.
 - On failure retain the current screen, command/fake-executor log, config, and DB diagnostics.
+
+## Non-action workflow coverage
+
+Onboarding is a coordinated CLI/TUI workflow, not an `internal/actions`
+catalog entry. Its evidence is tracked here instead of inventing an action ID.
+
+| Workflow | App/protocol | CLI/model | Real integration | Remaining gate |
+| --- | --- | --- | --- | --- |
+| Host template and pre-APM migration | Offline ownership planning, exact-child suppression, mandatory content-addressed wrappers, source `apm.yml` rebasing, marked-template publication, first-sync/divergence guards, installed-module ownership preflight, exact-source-byte Doctor repair, and canonical-template/APM lock ordering | `agents migrate --host/--snapshot` defaults to preview; `--dry-run` aliases preview; `--write` publishes only the marked template/wrappers; Doctor reports/fixes exact duplicates; `agents sync --force-template` materializes the validated candidate bytes | Focused fixtures cover exact/conflict/multi-owner/relevant-unavailable-evidence classification, strict manifestless skill-only proof, all-or-nothing source-layout refusal, symlink and classification-input identity rechecks, zero-mutation preflight failures, child-health rollup, plus existing wrapper integrity; lifecycle smoke covers exact and manual repair paths | Immutable pinned-APM DinD plus macOS/Windows path and canonicalization jobs; direct isolated-HOME `apm audit --ci` wrapper-path false positive is known |
+
+## APM ownership migration verification
+
+The normal PR gate is:
+
+```sh
+go test -count=1 ./internal/config -run 'AgentsSnapshot|LegacyAgent'
+go test -count=1 ./internal/app -run 'AgentsMigrate|BundleOwnership|AgentsSync'
+go test -count=1 ./internal/cli -run 'AgentsMigrate'
+go build ./...
+go test -count=1 ./...
+go vet ./...
+make lint
+```
+
+The isolated temporary HOME/state/APM-workspace lifecycle smoke passed this
+sequence:
+
+1. Two previews are byte-identical and leave filesystem hashes unchanged.
+2. `--write` produces one owner dependency, suppresses owned standalone
+   children, updates only the marked template, and leaves the live manifest
+   unchanged.
+3. `omni agents sync` materializes the guarded live manifest and the pinned APM
+   installs it on the empty home.
+4. The wrapped MCP handshake succeeds. Global `apm audit --ci` has a known
+   APM 0.29.0 false positive for deployed `.agents/**` paths. Until upstream
+   path resolution is fixed, use `omni agents sync` plus `omni doctor` as the
+   global verification gate. CI may allow only the exact known `.agents/**`
+   findings after independently checking those files; all other findings fail.
+5. Reinstall is a byte/semantic no-op.
+6. Uninstall removes owner-attributed artifacts while unrelated configuration
+   survives.
+7. A repeat migration over the unchanged snapshot selects the same wrapper
+   hash; rerunning migrate after source changes refreshes the wrapper snapshot.
+8. `/home/coder/apm` remains unchanged.
+
+Package-owned child reconciliation adds these lifecycle scenarios:
+
+1. An exact standalone MCP/LSP duplicate is reported by Doctor; dry-run changes
+   nothing; fix removes only that canonical-template item; sync succeeds; the
+   TUI shows the child once under package `provides`.
+2. The differing `context-mode` declarations remain unchanged by Doctor and
+   block sync before live/APM mutation; the TUI shows a degraded package plus
+   the conflicting standalone row until the top-level template entry is
+   removed manually.
+3. Independent services remain top-level and retain existing health/install
+   behavior. Multiple owners block deterministically.
+4. A first install with unavailable package evidence and standalone services
+   blocks before materialization/APM; package-only first install proceeds.
+5. Manifestless DeepWiki `skill_bundle` and Shiplight `claude_skill` packages
+   are proven service-free only from complete pinned lock/module evidence; the
+   standalone Shiplight MCP remains independent and Doctor removes nothing.
+6. Unknown, plugin, hybrid, mixed, incomplete, unsafe, unreadable, and changed
+   evidence remains unavailable. Pre-mutation identity changes produce zero
+   template/live writes and zero APM calls.
+
+Focused proof:
+
+```sh
+go test ./internal/app -run 'ManifestlessSkill|OwnedChild|AgentsStatus|AgentsSyncAll|DoctorAgents'
+go test ./internal/cli -run Doctor
+go test ./internal/tui -run Agents
+```
+
+APM is not modified by this reconciliation. Omni repairs only its canonical
+template, then hands runtime ownership back to the pinned APM build. The
+manifestless proof does not change TUI rendering, update checks, or versions.
+
+Release remains gated on the focused and full lanes on Linux, the immutable
+pinned-APM DinD lane, and the existing macOS/Windows path and canonicalization
+jobs. Fixtures and diagnostics must contain no literal secrets.
 
 ## Action-level coverage
 
@@ -153,18 +233,6 @@ real-terminal test; the eight-journey budget above owns that layer.
 | `settings.migrate_host_overrides` | yes | n/a | n/a | n/a | CLI-only config migration |
 | `settings.extract` | yes | n/a | n/a | n/a | CLI-only config layout migration |
 | `setup.init` | yes | yes | yes | yes | CLI command is `bootstrap`; `init` remains an alias |
-| `agents.restore` | yes | yes | yes | yes | CLI command is `agents sync`; `restore` remains a deprecated alias |
-| `agents.sync_all` | yes | yes | yes | yes | - |
-| `agents.skills_import` | yes | yes | yes | yes | - |
-| `agents.skills_update` | yes | yes | yes | yes | CLI command is `agents skills upgrade`; `update` remains a deprecated alias |
-| `agents.skills_resolve_use_managed` | yes | yes | yes | yes | - |
-| `agents.skills_resolve_use_local` | yes | yes | yes | yes | - |
-| `agents.mcp_resolve_use_managed` | yes | yes | yes | yes | - |
-| `agents.mcp_resolve_use_local` | yes | yes | yes | yes | - |
-| `agents.plugins_resolve_use_managed` | yes | yes | yes | yes | - |
-| `agents.plugins_resolve_use_local` | yes | yes | yes | yes | - |
-| `agents.resolve_all_use_managed` | yes | yes | yes | yes | - |
-| `agents.resolve_all_use_local` | yes | yes | yes | yes | - |
-| `agents.skills_status` | yes | yes | yes | n/a | Read-only CLI view; the TUI shows the same state in the agents rows. |
+| `agents.sync` | yes | yes | yes | yes | Single APM-backed lifecycle; dry-run and frozen replay covered |
 | `doctor` | yes | yes | yes | yes | - |
-| `doctor.fix` | yes | yes | yes | yes | Covers include-chain dedupe, dry-run, catalog routing, TUI execution, and doctor refresh. |
+| `doctor.fix` | yes | yes | yes | yes | Covers include-chain dedupe, exact package-child removal, dry-run, symlink preservation/refusal, conflict preservation, catalog routing, TUI execution, and doctor refresh. |

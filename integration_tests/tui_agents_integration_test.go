@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,45 +15,42 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-func TestTUIAgentsTabInstallsMissingPluginWithFakeClaudeStub(t *testing.T) {
+func TestTUIAgentsTabSyncsMCPThroughRealAPM(t *testing.T) {
+	apmBin, err := exec.LookPath("apm")
+	if err != nil {
+		t.Fatalf("integration tests require apm on PATH: %v", err)
+	}
 	bin := buildOmniBinary(t)
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	cache := filepath.Join(root, "cache")
 	configPath := filepath.Join(root, "settings.json")
-	binDir := filepath.Join(root, "bin")
-	installedMarker := filepath.Join(root, "caveman-installed")
-	env := isolatedTUIEnv(t, home, cache)
-
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		t.Fatalf("create fake bin dir: %v", err)
-	}
-	writeFakeClaudeStub(t, binDir)
-	// InstalledAgents detects claude-code by ~/.claude existing, not by PATH.
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
-		t.Fatalf("create fake ~/.claude dir: %v", err)
-	}
-	// PATH is replaced, not prepended, so a real codex on the host cannot turn this claude-only fixture into two agents.
-	env = append(env,
-		"PATH="+binDir+":/usr/bin:/bin",
-		"OMNI_TEST_CLAUDE_PLUGIN_STATE="+installedMarker,
+	env := append(isolatedTUIEnv(t, home, cache),
+		"PATH="+filepath.Join(home, ".test-stub-bin")+string(os.PathListSeparator)+filepath.Dir(apmBin)+string(os.PathListSeparator)+minimalTestPATH,
 	)
 
 	if err := config.Save(configPath, &config.RootConfig{
 		Version: config.CurrentVersion,
-		Agents: config.AgentsConfig{
-			McpServers: []config.McpServer{
-				{Name: "grafana", Transport: "http", URL: "https://mcp.example.com"},
-			},
-			Marketplaces: []config.Marketplace{
-				{Name: "lkshrk", Source: "lkshrk/marketplace"},
-			},
-			Plugins: []config.Plugin{
-				{Name: "caveman", Marketplace: "lkshrk"},
-			},
-		},
 	}); err != nil {
 		t.Fatalf("save config: %v", err)
+	}
+	apmDir := filepath.Join(home, ".apm")
+	if err := os.MkdirAll(apmDir, 0o700); err != nil {
+		t.Fatalf("create APM workspace: %v", err)
+	}
+	manifest := `name: omni-tui
+version: 1.0.0
+targets: [codex]
+dependencies:
+  apm: []
+  mcp:
+    - name: omni-tui
+      registry: false
+      transport: http
+      url: https://example.invalid/mcp
+`
+	if err := os.WriteFile(filepath.Join(apmDir, "apm.yml"), []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write APM manifest: %v", err)
 	}
 	runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "hosts", "ensure", "testhost")
 
@@ -61,81 +59,36 @@ func TestTUIAgentsTabInstallsMissingPluginWithFakeClaudeStub(t *testing.T) {
 			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools")
 		}, "TUI did not render main tabs")
 		writeTUIKeys(t, term, "\t", "\t", "\t")
-		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
-			return strings.Contains(text, "Out of Sync") &&
-				strings.Contains(text, "missing") &&
-				strings.Contains(text, "caveman") &&
-				strings.Contains(text, "✓ lkshrk")
-		}, "TUI did not render configured caveman plugin as missing")
-		writeTUIKeys(t, term, "]", "]", "]")
-		waitForRequiredScreen(t, term, 2*time.Second, func(text string) bool {
-			return strings.Contains(text, "[plugin]") && strings.Contains(text, "caveman")
-		}, "TUI did not select the plugin filter")
-		writeTUIKeys(t, term, "[", "[", "[")
-		writeTUIKeys(t, term, "j")
-		waitForRequiredScreen(t, term, 2*time.Second, func(text string) bool {
-			return strings.Contains(text, "[all]") && strings.Contains(text, "> ✗ caveman")
-		}, "TUI did not select the caveman row in the all filter")
-		writeTUIKeys(t, term, "i")
-		return waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
-			_, markerErr := os.Stat(installedMarker)
-			return markerErr == nil &&
-				strings.Contains(text, "Updates Available") &&
-				strings.Contains(text, "1.0.0 → 2.0.0") &&
-				strings.Contains(text, "claude-code") &&
-				strings.Contains(text, "✓") &&
-				strings.Contains(text, "grafana") &&
-				strings.Contains(text, "caveman")
-		}, "TUI did not install and refresh the configured caveman plugin")
+		waitForRequiredScreen(t, term, 4*time.Second, func(text string) bool {
+			return strings.Contains(text, "~/.apm/apm.yml") &&
+				strings.Contains(text, "MCP servers") && strings.Contains(text, "omni-tui")
+		}, "TUI did not render the APM workspace")
+		waitForRequiredScreen(t, term, 7*time.Second, func(text string) bool {
+			return !strings.Contains(text, "checking package updates")
+		}, "Agents update check did not settle")
+
+		writeTUIKeys(t, term, "S")
+		return waitForRequiredScreen(t, term, 7*time.Second, func(text string) bool {
+			return strings.Contains(text, "omni agents sync") && !strings.Contains(text, "running omni agents sync")
+		}, "TUI did not show APM sync success")
 	})
 	if strings.Contains(strings.ToLower(screen), "error") {
-		t.Fatalf("TUI showed an error while rendering agents tab; screen:\n%s", screen)
+		t.Fatalf("TUI showed an error while syncing MCP through APM; screen:\n%s", screen)
 	}
-	if marker, err := os.ReadFile(installedMarker); err != nil || strings.TrimSpace(string(marker)) != "caveman@lkshrk" {
-		t.Fatalf("fake claude install marker = %q, %v", marker, err)
-	}
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		t.Fatalf("load config after plugin install: %v", err)
-	}
-	if got := cfg.Agents.Plugins[0].Agents; len(got) != 1 || got[0] != "claude-code" {
-		t.Fatalf("persisted caveman agents = %v, want [claude-code]", got)
-	}
-}
 
-func writeFakeClaudeStub(t *testing.T, binDir string) {
-	t.Helper()
-	script := `#!/bin/sh
-set -eu
-state="${OMNI_TEST_CLAUDE_PLUGIN_STATE:?}"
-case "$*" in
-"plugins list --json --available")
-  if [ -f "$state" ]; then
-    printf '{"installed":[{"id":"caveman@lkshrk","version":"1.0.0","scope":"user","enabled":true}],"available":[{"name":"caveman","marketplaceName":"lkshrk","latestVersion":"2.0.0"}]}\n'
-  else
-    printf '{"installed":[],"available":[{"name":"caveman","marketplaceName":"lkshrk","latestVersion":"2.0.0"}]}\n'
-  fi
-  exit 0
-  ;;
-"plugins marketplace list --json")
-  printf '[{"name":"lkshrk","source":"github","repo":"lkshrk/marketplace"}]\n'
-  exit 0
-  ;;
-"plugins install caveman@lkshrk")
-  printf 'caveman@lkshrk\n' > "$state"
-  exit 0
-  ;;
-"mcp list")
-  printf 'Checking MCP server health…\n'
-  printf '\n'
-  printf 'grafana: https://mcp.example.com (HTTP) - ✔ Connected\n'
-  exit 0
-  ;;
-esac
-exit 1
-`
-	path := filepath.Join(binDir, "claude")
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake claude stub: %v", err)
+	for path, wants := range map[string][]string{
+		filepath.Join(home, ".apm", "apm.yml"):       {"omni-tui", "https://example.invalid/mcp"},
+		filepath.Join(home, ".apm", "apm.lock.yaml"): {"codex", "omni-tui"},
+		filepath.Join(home, ".codex", "config.toml"): {"omni-tui", "https://example.invalid/mcp"},
+	} {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read APM state %s: %v", path, err)
+		}
+		for _, want := range wants {
+			if !strings.Contains(string(content), want) {
+				t.Fatalf("%s missing %q:\n%s", path, want, content)
+			}
+		}
 	}
 }

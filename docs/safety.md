@@ -39,6 +39,7 @@ omni dots remove <name>
 omni dots resolve <name> --use-repo
 omni dots resolve <name> --use-local
 omni dots push
+omni agents sync --force-template
 omni settings reset
 omni settings reset-cache
 ```
@@ -55,6 +56,26 @@ omni tools sync --prune --dry-run
 omni tools consolidate python uv --dry-run
 omni dots sync --dry-run
 ```
+
+## Agent manifest
+
+`omni agents migrate` is read-only: it parses a snapshot and prints a manifest.
+It writes no file and runs no APM command.
+
+The host template is the one place Omni overwrites APM state. Sync replaces
+`~/.apm/apm.yml` wholesale with `~/.config/omni/apm.yml`, and the install that
+follows can then add, remove, or redeploy agent files accordingly. Two guards
+stand in front of that copy, and both are advisory warnings rather than
+failures:
+
+- A live manifest Omni has never applied a template over is left alone on the
+  first sync.
+- A live manifest that changed outside Omni since the last applied template is
+  left alone and reported as diverged.
+
+`--force-template` overrides both. Diff the template against the live manifest
+before using it, because the overwrite discards direct `apm` edits. `--dry-run`
+never materializes the template.
 
 ## Reconcile And Discovery
 
@@ -115,13 +136,9 @@ and the package managers or Git remotes they invoke:
 - provider search, refresh, install, upgrade, and delete commands can contact
   package registries or OS package mirrors
 - `dots pull` and `dots push` contact the configured Git remote
-- native skill add/sync/upgrade can contact configured Git remotes or
-  well-known HTTP endpoints; an HTTP index must declare the supported
-  discovery schema and a SHA-256 digest per artifact, and Omni verifies each
-  digest before staging the content, so there is no unverified HTTP install
-  path
-- `agents find` contacts skills.sh; catalog failure never blocks sync,
-  update, remove, or reconcile
+- APM agent add/sync/update/search and marketplace operations can contact
+  configured package sources and marketplaces; APM owns validation, artifact
+  handling, and network failures
 - release downloads happen only through your chosen install channel
 - the `$schema` URI in `settings.json` is editor metadata; Omni writes it but
   does not fetch it as part of normal config writes

@@ -27,7 +27,11 @@ Desktop.ini
 CLAUDE.md
 AGENTS.md
 GEMINI.md
-.agents/
+CONTEXT.md
+.ai-context/
+_workspace/
+docs/harness/*
+.agents/*
 .codex/
 .claudeignore
 .claude/
@@ -52,5 +56,6 @@ vendor/
 coverage.out
 cover.out
 cpu.prof
+**/.omni-config.lock
 mem.prof
 /gen-schema

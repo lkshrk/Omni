@@ -70,13 +70,22 @@ func loadIncludeChainFrom(path string, stack *includePathStack) ([]routedFile, e
 }
 
 // PatchRawRouted — Each key goes to the last fragment defining it (mirroring merge order), unowned keys to the main file, with "groups" split at group-field granularity.
-func PatchRawRouted(path string, patch map[string]json.RawMessage) error {
+func PatchRawRouted(path string, patch map[string]json.RawMessage) (retErr error) {
+	lock, err := AcquireWriteLock(path)
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, lock.Close()) }()
+	return patchRawRoutedUnlocked(path, patch)
+}
+
+func patchRawRoutedUnlocked(path string, patch map[string]json.RawMessage) error {
 	chain, err := loadIncludeChain(path)
 	if err != nil {
 		return err
 	}
 	if len(chain) == 1 {
-		return PatchRaw(path, patch)
+		return patchRawUnlocked(path, patch)
 	}
 	mainPatch := make(map[string]json.RawMessage)
 	fragmentPatches := make(map[int]map[string]json.RawMessage)
@@ -145,7 +154,7 @@ func PatchRawRouted(path string, patch map[string]json.RawMessage) error {
 	if len(mainPatch) == 0 {
 		return nil
 	}
-	return PatchRaw(path, mainPatch)
+	return patchRawUnlocked(path, mainPatch)
 }
 
 func countChainFilesWithKey(chain []routedFile, key string) int {
@@ -164,7 +173,7 @@ func patchFragmentRaw(path string, raw map[string]json.RawMessage, patch map[str
 	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, rendered) {
 		return nil
 	}
-	return atomicWrite(path, rendered)
+	return atomicWriteUnlocked(path, rendered)
 }
 
 func renderFragmentRaw(raw map[string]json.RawMessage, patch map[string]json.RawMessage) []byte {
@@ -206,7 +215,7 @@ func renderFragmentRaw(raw map[string]json.RawMessage, patch map[string]json.Raw
 }
 
 // groupFieldNames are the GroupConfig fields routed independently per group.
-var groupFieldNames = []string{"taps", "tools", "dots", "skills", "mcp_servers", "plugins", "marketplaces", "description", "special"}
+var groupFieldNames = []string{"taps", "tools", "dots", "description", "special"}
 
 type groupsOwnership struct {
 	declared map[string]int            // group name -> last file declaring it
@@ -265,14 +274,6 @@ func groupFieldEmpty(group *GroupConfig, fieldName string) bool {
 		return len(group.Tools) == 0
 	case "dots":
 		return len(group.Dots) == 0
-	case "skills":
-		return len(group.Skills) == 0
-	case "mcp_servers":
-		return len(group.McpServers) == 0
-	case "plugins":
-		return len(group.Plugins) == 0
-	case "marketplaces":
-		return len(group.Marketplaces) == 0
 	case "description":
 		return strings.TrimSpace(group.Description) == ""
 	case "special":
@@ -289,14 +290,6 @@ func copyGroupField(dst, src *GroupConfig, fieldName string) {
 		dst.Tools = src.Tools
 	case "dots":
 		dst.Dots = src.Dots
-	case "skills":
-		dst.Skills = src.Skills
-	case "mcp_servers":
-		dst.McpServers = src.McpServers
-	case "plugins":
-		dst.Plugins = src.Plugins
-	case "marketplaces":
-		dst.Marketplaces = src.Marketplaces
 	case "description":
 		dst.Description = src.Description
 	case "special":

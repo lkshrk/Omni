@@ -102,7 +102,7 @@ type PackageAvailability struct {
 	CheckedAt time.Time `bun:"checked_at,notnull"`
 }
 
-// CommandTrace — Intentionally compact: stdout is never stored, and stderr/error arrive already truncated and redacted.
+// CommandTrace — Intentionally compact: stdout, stderr, and error all arrive already truncated and redacted.
 type CommandTrace struct {
 	bun.BaseModel `bun:"table:command_traces,alias:ct"`
 
@@ -115,6 +115,7 @@ type CommandTrace struct {
 	Status     string        `bun:"status,notnull,default:''"`
 	ExitCode   sql.NullInt64 `bun:"exit_code"`
 	Error      string        `bun:"error,type:TEXT,notnull,default:''"`
+	Stdout     string        `bun:"stdout,type:TEXT,notnull,default:''"`
 	Stderr     string        `bun:"stderr,type:TEXT,notnull,default:''"`
 }
 
@@ -490,6 +491,9 @@ func (db *DB) Migrate(ctx context.Context) error {
 		if err := addCol("tool_cache", c.col, c.def); err != nil {
 			return err
 		}
+	}
+	if err := addCol("command_traces", "stdout", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
 	}
 	for _, c := range []struct{ col, def string }{
 		{"source_type", "TEXT NOT NULL DEFAULT ''"},
