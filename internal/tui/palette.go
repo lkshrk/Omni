@@ -135,7 +135,7 @@ func buildPalette(m Model) []palCmd {
 }
 
 func appendAgentsPaletteCommands(m Model, cmds []palCmd) []palCmd {
-	restore := actions.MustPalette(actions.AgentsRestore)
+	restore := actions.MustPalette(actions.AgentsSync)
 	return append(cmds,
 		palCmd{
 			name: paletteCommandName(restore),

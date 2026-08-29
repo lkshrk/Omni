@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/lkshrk/omni/internal/actions"
+	"github.com/lkshrk/omni/internal/testflow"
 )
 
 func TestToolActionCatalogCLIBindingsExist(t *testing.T) {
@@ -33,11 +35,81 @@ func TestToolActionCatalogCLIBindingsExist(t *testing.T) {
 
 func TestRunnableCLICommandsHaveCatalogCoverageOrExplicitExemption(t *testing.T) {
 	root := NewRootCmd()
+	repoRoot := filepath.Join("..", "..")
+	catalog, err := testflow.Load(filepath.Join(repoRoot, "test", "flows.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	actionSurfaces := cliActionSurfaces()
 	for _, path := range discoverRunnableCLICommands(root) {
-		if catalogHasCLICommand(path) || uncatalogedRunnableCLICommandAllowed(path) {
-			continue
+		path := path
+		t.Run(strings.Join(path, "/"), func(t *testing.T) {
+			owners := testflow.ResolveCLICommand(catalog, actionSurfaces, path)
+			exemption, exempt := uncatalogedRunnableCLICommandExemption(path)
+			if len(owners) == 0 && exempt {
+				if exemption.kind == "" || exemption.reason == "" {
+					t.Fatalf("runnable CLI command %q has an incomplete catalog exemption: %+v", strings.Join(path, " "), exemption)
+				}
+				return
+			}
+			if exempt {
+				t.Fatalf("runnable CLI command %q is both flow-owned and exempt", strings.Join(path, " "))
+			}
+			if len(owners) == 0 {
+				t.Fatalf("product-visible runnable CLI command %q needs one action-backed or non-action flow owner", strings.Join(path, " "))
+			}
+			assertUniqueCLIFlowOwners(t, path, owners)
+		})
+	}
+}
+
+func cliActionSurfaces() []testflow.ActionSurface {
+	all := actions.All()
+	out := make([]testflow.ActionSurface, 0, len(all))
+	for _, action := range all {
+		commands := make([]testflow.CLICommandSurface, 0, len(action.CLI))
+		for _, binding := range action.CLI {
+			commands = append(commands, testflow.CLICommandSurface{Command: binding.Command, RequiredFlags: binding.RequiredFlags})
 		}
-		t.Fatalf("runnable CLI command %q needs an action catalog binding or an explicit read-only/utility exemption", strings.Join(path, " "))
+		out = append(out, testflow.ActionSurface{
+			ID: string(action.ID), CLI: len(action.CLI) > 0, CLICommands: commands,
+			TUI: action.TUI != nil || action.Palette != nil, Mutates: action.Mutates,
+		})
+	}
+	return out
+}
+
+func assertUniqueCLIFlowOwners(t *testing.T, path []string, owners []testflow.CLICommandOwner) {
+	t.Helper()
+	seenVariants := map[string]string{}
+	defaultOwners, nonActionOwners := 0, 0
+	for _, owner := range owners {
+		if owner.FlowID == "" {
+			t.Fatalf("CLI command %q action %q is not mapped to a flow", strings.Join(path, " "), owner.ActionID)
+		}
+		flags := append([]string(nil), owner.RequiredFlags...)
+		sort.Strings(flags)
+		variant := strings.Join(flags, "\x00")
+		label := owner.FlowID + "/" + owner.ActionID
+		if other := seenVariants[variant]; other != "" {
+			t.Fatalf("CLI command %q variant %v maps to both %s and %s", strings.Join(path, " "), flags, other, label)
+		}
+		seenVariants[variant] = label
+		if len(flags) == 0 {
+			defaultOwners++
+		}
+		if owner.ActionID == "" {
+			nonActionOwners++
+		}
+	}
+	if nonActionOwners != 0 {
+		if len(owners) != 1 {
+			t.Fatalf("non-action CLI command %q collides with another flow owner: %+v", strings.Join(path, " "), owners)
+		}
+		return
+	}
+	if defaultOwners != 1 {
+		t.Fatalf("action-backed CLI command %q has %d default owners, want exactly one", strings.Join(path, " "), defaultOwners)
 	}
 }
 
@@ -81,6 +153,14 @@ func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 		{"settings", "reset-cache"},
 		{"settings", "migrate-host-overrides"},
 		{"agents", "sync"},
+		{"agents", "add"},
+		{"agents", "remove"},
+		{"agents", "update"},
+		{"agents", "migrate"},
+		{"agents", "prune"},
+		{"agents", "marketplace", "add"},
+		{"agents", "marketplace", "update"},
+		{"agents", "marketplace", "remove"},
 		{"dots", "sync"},
 		{"dots", "add"},
 		{"dots", "groups"},
@@ -117,6 +197,22 @@ func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 		}
 		if !catalogHasCLICommand(path) {
 			t.Fatalf("mutating CLI command %q is missing from action catalog", strings.Join(path, " "))
+		}
+	}
+}
+
+func TestMutatingAgentCLILeavesAreCatalogedAsMutatingActions(t *testing.T) {
+	root := NewRootCmd()
+	for _, path := range discoverMutatingCLICommands(root) {
+		if path[0] != "agents" {
+			continue
+		}
+		action, ok := catalogedCLIAction(path)
+		if !ok {
+			t.Fatalf("mutating agent CLI command %q is missing from action catalog", strings.Join(path, " "))
+		}
+		if !action.Mutates {
+			t.Fatalf("mutating agent CLI command %q is cataloged as read-only by %s", strings.Join(path, " "), action.ID)
 		}
 	}
 }
@@ -300,6 +396,11 @@ func TestConfirmableToolActionsHaveYesBypass(t *testing.T) {
 }
 
 func catalogHasCLICommand(path []string) bool {
+	_, ok := catalogedCLIAction(path)
+	return ok
+}
+
+func catalogedCLIAction(path []string) (actions.Action, bool) {
 	for _, action := range actions.All() {
 		for _, binding := range action.CLI {
 			if len(binding.Command) != len(path) {
@@ -313,11 +414,11 @@ func catalogHasCLICommand(path []string) bool {
 				}
 			}
 			if matches {
-				return true
+				return action, true
 			}
 		}
 	}
-	return false
+	return actions.Action{}, false
 }
 
 func catalogCommandFlags() map[string]map[string]bool {
@@ -380,49 +481,21 @@ func discoverRunnableCLICommands(root *cobra.Command) [][]string {
 	return out
 }
 
-func uncatalogedRunnableCLICommandAllowed(path []string) bool {
+type cliCatalogExemption struct {
+	kind   cliCatalogExemptionKind
+	reason string
+}
+
+type cliCatalogExemptionKind string
+
+const cliCatalogUtility cliCatalogExemptionKind = "utility"
+
+func uncatalogedRunnableCLICommandExemption(path []string) (cliCatalogExemption, bool) {
 	switch commandKey(path) {
-	case "ui",
-		"trace list",
-		"tools list",
-		"tools search",
-		"tools providers",
-		"groups",
-		"hosts",
-		"settings",
-		"dots",
-		"dots variant",
-		"dots reminder",
-		"dots watch",
-		"dots services",
-		"hosts list",
-		"settings show",
-		"settings get",
-		"settings lint",
-		"dots list",
-		"dots status",
-		"dots variant list",
-		"agents add",
-		"agents remove",
-		"agents update",
-		"agents search",
-		"agents audit",
-		"agents targets",
-		"agents migrate",
-		"agents outdated",
-		"agents prune",
-		"agents deps list",
-		"agents deps why",
-		"agents deps info",
-		"agents marketplace list",
-		"agents marketplace add",
-		"agents marketplace browse",
-		"agents marketplace update",
-		"agents marketplace validate",
-		"agents marketplace remove":
-		return true
+	case "trace list":
+		return cliCatalogExemption{kind: cliCatalogUtility, reason: "Developer trace inspection utility; it does not expose a product capability."}, true
 	default:
-		return false
+		return cliCatalogExemption{}, false
 	}
 }
 
@@ -534,6 +607,11 @@ func isMutatingCLICommand(path []string) bool {
 		return len(path) == 2 && oneOf(path[1], "ensure", "set-groups", "add-group", "remove-group", "copy", "remove")
 	case "settings":
 		return len(path) == 2 && oneOf(path[1], "set", "disable-provider", "enable-provider", "reset", "reset-cache")
+	case "agents":
+		if len(path) == 2 {
+			return oneOf(path[1], "sync", "add", "remove", "update", "migrate", "prune")
+		}
+		return len(path) == 3 && path[1] == "marketplace" && oneOf(path[2], "add", "update", "remove")
 	case "dots":
 		return isMutatingDotsCLICommand(path)
 	default:

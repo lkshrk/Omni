@@ -38,19 +38,115 @@ No upstream artifact declares P0-P3 priorities, so every flow remains
 `partial` names the remaining distinct behavior. `n/a` means another layer is
 both cheaper and sufficient.
 
-| ID | Priority | Program flow | Focused unit/contract proof | CLI integration proof | Real-terminal TUI proof | Container/external proof |
+<!-- BEGIN GENERATED FLOW CATALOG -->
+| Flow ID | Criticality | Surfaces | Parity | Requirements | Gaps | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| TS-01 | UNKNOWN | Bootstrap and host activation | Config migration, DB initialization, host-selection branches | Bootstrap, ensure/copy/delete host, reload active host | covered: first-run wizard creates and activates a host through the dashboard | n/a |
-| TS-02 | UNKNOWN | Single-tool lifecycle | Provider resolution, validation, rollback, and failure branches | Set/group/install/list/upgrade/reinstall/delete with persisted config and DB state | covered: fake-provider install plus cancel and confirm delete with config/provider evidence | One representative real package-manager lifecycle |
-| TS-03 | UNKNOWN | Bulk sync and prune | Planner, ordering, quarantine, retry, and partial-failure branches | Dry-run, claim, install, prune, failure, and retry permutations | covered: progress and row-level failure/retry are exercised by tool and reconcile journeys | n/a |
-| TS-04 | UNKNOWN | Provider routing and fallback | Provider contracts, priority, availability, weak-match, and fallback selection | Disabled/unavailable provider, fallback, switch, and recovery permutations | covered: provider list plus durable fallback editor save | Provider command/privilege contracts |
-| TS-05 | UNKNOWN | Reconcile | Step ordering and partial-failure preservation | Tools, dots, and Git plan/execution flows | covered: injected provider failure stays visible, the UI remains usable, and retry persists success | n/a |
-| TS-06 | UNKNOWN | Dotfile lifecycle | Classification, path validation, and config mutation branches | Adopt/discover/sync/status/extract/variant/unignore/delete filesystem journeys | covered: discovered sync and ignored-candidate include persist state | GNU Stow remains in the integration environment |
-| TS-07 | UNKNOWN | Dotfile safety and services | Conflict detection, nested ignores, rollback, and service-state branches | Conflict resolution, pull/commit/push, reminder, watch, and data-preservation journeys | covered: destructive resolution is cancelled, then confirmed with backup/symlink filesystem proof | Platform service checks only where host isolation is available |
-| TS-08 | UNKNOWN | Hosts, groups, settings, and migration | Migration and unrelated-config preservation | Mutations persist across reload; lint/extract/migration flows | covered: host-group assignment and a setting toggle persist through config reload | n/a |
-| TS-09 | UNKNOWN | Agents, skills, MCP, plugins, and marketplaces | Snapshot and installed-module ownership evidence, strict manifestless `claude_skill`/`skill_bundle` zero-service proof, deterministic owner/child fingerprints, exact/conflict/multi-owner classification, child-health rollup, exact-only template repair, sync lock/preflight ordering, wrapper integrity, and exact pinned-build validation | Migration preview/write routing, Doctor report/dry-run/fix/refusal, zero-mutation sync failure, and sync handoff | covered: ownership appears as package `provides`/`issues`; conflicting standalone rows remain visible | Lifecycle smoke covers exact repair, manual conflict repair, independent services, manifestless DeepWiki/Shiplight packages, and unavailable-evidence first install; direct isolated-HOME `apm audit --ci` has a known wrapper-path false positive; platform gates remain |
-| TS-10 | UNKNOWN | TUI shell and parity | Reducer branches, layout, key routing, modal, progress, and error state | n/a | covered: `x/vttest` current-screen checks exercise resize, help/search, cancel/confirm, async failure/recovery, nested PTY, and clean quit | n/a |
-| TS-11 | UNKNOWN | Provider families | Install/query/upgrade/uninstall parsing and command contracts | Routing through fake executors | n/a: provider permutations do not become safer through the TUI | Tagged Docker package-manager lane |
+| `agents.add` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `agents.audit` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `agents.deps.info` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `agents.deps.list` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `agents.deps.why` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `agents.marketplace.add` | high | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `agents.marketplace.remove` | high | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `agents.marketplace.update` | high | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `agents.marketplaces.browse` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `agents.marketplaces.list` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `agents.marketplaces.validate` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `agents.migrate` | high | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `agents.prune` | high | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `agents.refresh` | medium | CLI+TUI | query | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `agents.remove` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `agents.search` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `agents.sync` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `agents.targets` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `agents.update` | high | TUI | — | integration, tui_blackbox | integration (Stage 4); tui_blackbox (Stage 5) | — |
+| `agents.update_all` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `doctor` | medium | CLI+TUI | query | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `doctor.fix` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.add` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.commit` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.delete` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.disable` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.edit_groups` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.enable` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.history` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `dots.ignore` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.list` | high | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `dots.pull` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.push` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.refresh` | medium | CLI+TUI | query | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.reminder` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.reminder.check` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `dots.reminder.run` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `dots.reminder.status` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `dots.resolve_all_use_local` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.resolve_all_use_repo` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.resolve_use_local` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.resolve_use_repo` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.services.status` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `dots.status` | high | CLI+TUI | query | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); parity (Stage 6); tui_blackbox (Stage 5) | integration: `github.com/lkshrk/omni/integration_tests.TestDotsListReportsReincludedSubfolderDrift` |
+| `dots.sync` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.variant` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.variant.list` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `dots.watch` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `dots.watch.run` | high | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `dots.watch.status` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `groups.create` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `groups.delete` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `groups.edit_dots` | high | TUI | — | integration, tui_blackbox | integration (Stage 4); tui_blackbox (Stage 5) | — |
+| `groups.edit_tools` | high | TUI | — | integration, tui_blackbox | integration (Stage 4); tui_blackbox (Stage 5) | — |
+| `groups.list` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `groups.rename` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `hosts.copy` | high | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `hosts.create` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `hosts.delete` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `hosts.edit_groups` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `hosts.list` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `reconcile` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `settings.extract` | high | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `settings.get` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `settings.lint` | high | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `settings.migrate_host_overrides` | high | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `settings.provider` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `settings.reset` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `settings.reset_cache` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `settings.set` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `settings.show` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `setup.init` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.baseline_system_inventory` | high | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `tools.change_group` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.claim` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.consolidate` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.delete` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.delete_spec` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.fallback` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.heal_brew_taps` | high | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `tools.ignore` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.import` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.install` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.list` | high | CLI+TUI | query | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); parity (Stage 6); tui_blackbox (Stage 5) | integration: `github.com/lkshrk/omni/integration_tests.TestApp_ListTools_ReflectsDBState`; integration: `github.com/lkshrk/omni/integration_tests.TestCLI/config-migration-stale-tracked-list` |
+| `tools.migrate_nvm` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.normalize_provider_overrides` | high | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `tools.pin_provider` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.providers` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `tools.refresh` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.reinstall_default` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.search` | medium | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `tools.set_spec` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.switch_provider` | high | CLI | — | cli_blackbox, integration | cli_blackbox (Stage 5); integration (Stage 4) | — |
+| `tools.sync` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.sync_all` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.update` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tools.update_all` | high | CLI+TUI | state | cli_blackbox, integration, parity, tui_blackbox | cli_blackbox (Stage 5); integration (Stage 4); parity (Stage 6); tui_blackbox (Stage 5) | — |
+| `tui.details` | medium | TUI | — | component, tui_blackbox | component (Stage 3); tui_blackbox (Stage 5) | — |
+| `tui.error` | high | TUI | — | component, tui_blackbox | component (Stage 3); tui_blackbox (Stage 5) | — |
+| `tui.loading` | medium | TUI | — | component, tui_blackbox | component (Stage 3); tui_blackbox (Stage 5) | — |
+| `tui.mouse` | medium | TUI | — | component, tui_blackbox | component (Stage 3); tui_blackbox (Stage 5) | — |
+| `tui.navigation` | high | TUI | — | component, tui_blackbox | component (Stage 3); tui_blackbox (Stage 5) | — |
+| `tui.resize` | medium | TUI | — | component, tui_blackbox | component (Stage 3); tui_blackbox (Stage 5) | — |
+| `tui.search` | medium | TUI | — | component, tui_blackbox | component (Stage 3); tui_blackbox (Stage 5) | — |
+| `tui.startup` | high | CLI+TUI | query | cli_blackbox, component, parity, tui_blackbox | cli_blackbox (Stage 5); component (Stage 3); parity (Stage 6); tui_blackbox (Stage 5) | — |
+<!-- END GENERATED FLOW CATALOG -->
 
 ## Real-terminal TUI target
 
@@ -167,72 +263,84 @@ The detailed action table below records representative app, CLI, and TUI
 model/render evidence. Its TUI column does **not** require a separate
 real-terminal test; the eight-journey budget above owns that layer.
 
-| Action ID | App/shared | CLI unit | CLI integration | TUI model/render | Gap/next fixture |
-| --- | --- | --- | --- | --- | --- |
-| `reconcile` | yes | yes | yes | yes | - |
-| `tools.sync` | yes | yes | yes | yes | - |
-| `tools.install` | yes | yes | yes | yes | - |
-| `tools.delete` | yes | yes | yes | yes | CLI command is `tools remove --purge`; `delete` remains a deprecated alias |
-| `tools.update` | yes | yes | yes | yes | - |
-| `tools.update_all` | yes | yes | yes | yes | - |
-| `tools.sync_all` | yes | yes | yes | yes | - |
-| `tools.claim` | yes | yes | yes | yes | - |
-| `tools.ignore` | yes | yes | yes | yes | - |
-| `tools.change_group` | yes | yes | yes | yes | - |
-| `tools.pin_provider` | yes | yes | yes | yes | - |
-| `tools.reinstall_default` | yes | yes | yes | yes | - |
-| `tools.migrate_nvm` | yes | yes | yes | yes | - |
-| `tools.refresh` | yes | yes | yes | yes | - |
-| `tools.consolidate` | yes | yes | yes | yes | - |
-| `tools.set_spec` | yes | yes | yes | yes | - |
-| `tools.fallback` | yes | yes | yes | yes | Covers config save, TUI edit/render, native-unavailable sync/install, native recovery after failed fallback, retry-failed, upgrade, and uninstall-unavailable routing. |
-| `tools.delete_spec` | yes | yes | yes | yes | - |
-| `tools.normalize_provider_overrides` | yes | yes | yes | n/a | - |
-| `tools.heal_brew_taps` | yes | partial | yes | n/a | CLI integration covers dry-run healing. |
-| `tools.baseline_system_inventory` | yes | yes | gap | n/a | Add a CLI integration fixture with a fake system provider inventory. |
-| `tools.import` | yes | yes | yes | yes | - |
-| `tools.switch_provider` | yes | yes | yes | n/a | - |
-| `dots.sync` | yes | yes | yes | yes | - |
-| `dots.refresh` | yes | yes | yes | yes | - |
-| `dots.add` | yes | yes | yes | yes | - |
-| `dots.edit_groups` | yes | yes | yes | yes | - |
-| `dots.variant` | yes | yes | yes | yes | - |
-| `dots.delete` | yes | yes | yes | yes | CLI command is `dots remove`; `delete` remains a deprecated alias |
-| `dots.resolve_use_repo` | yes | yes | yes | yes | - |
-| `dots.resolve_use_local` | yes | yes | yes | yes | - |
-| `dots.resolve_all_use_repo` | yes | yes | yes | yes | - |
-| `dots.resolve_all_use_local` | yes | yes | yes | yes | - |
-| `dots.ignore` | yes | yes | yes | yes | - |
-| `dots.enable` | yes | yes | yes | yes | - |
-| `dots.disable` | yes | yes | yes | yes | - |
-| `dots.pull` | yes | yes | yes | n/a | - |
-| `dots.commit` | yes | yes | yes | yes | - |
-| `dots.push` | yes | yes | yes | n/a | - |
-| `dots.reminder` | yes | yes | yes | yes | - |
-| `dots.reminder.check` | yes | yes | yes | n/a | - |
-| `dots.reminder.run` | yes | yes | yes | n/a | - |
-| `dots.reminder.status` | yes | yes | yes | n/a | - |
-| `dots.watch` | yes | yes | yes | yes | - |
-| `dots.watch.run` | yes | yes | yes | n/a | - |
-| `dots.watch.status` | yes | yes | yes | n/a | - |
-| `dots.services.status` | yes | yes | yes | yes | - |
-| `dots.history` | yes | yes | yes | yes | - |
-| `groups.create` | yes | yes | yes | yes | - |
-| `groups.rename` | yes | yes | yes | yes | - |
-| `groups.delete` | yes | yes | yes | yes | - |
-| `groups.edit_tools` | yes | yes | yes | yes | - |
-| `groups.edit_dots` | yes | yes | yes | yes | - |
-| `hosts.create` | yes | yes | yes | n/a | - |
-| `hosts.copy` | yes | yes | yes | yes | TUI coverage is onboarding-only |
-| `hosts.delete` | yes | yes | yes | yes | - |
-| `hosts.edit_groups` | yes | yes | yes | yes | - |
-| `settings.set` | yes | yes | yes | yes | - |
-| `settings.provider` | yes | yes | yes | yes | - |
-| `settings.reset` | yes | yes | yes | yes | - |
-| `settings.reset_cache` | yes | yes | yes | yes | - |
-| `settings.migrate_host_overrides` | yes | n/a | n/a | n/a | CLI-only config migration |
-| `settings.extract` | yes | n/a | n/a | n/a | CLI-only config layout migration |
-| `setup.init` | yes | yes | yes | yes | CLI command is `bootstrap`; `init` remains an alias |
-| `agents.sync` | yes | yes | yes | yes | Single APM-backed lifecycle; dry-run and frozen replay covered |
-| `doctor` | yes | yes | yes | yes | - |
-| `doctor.fix` | yes | yes | yes | yes | Covers include-chain dedupe, exact package-child removal, dry-run, symlink preservation/refusal, conflict preservation, catalog routing, TUI execution, and doctor refresh. |
+<!-- BEGIN GENERATED ACTION CATALOG -->
+| Action ID | CLI | TUI | Flow |
+| --- | --- | --- | --- |
+| `agents.add` | yes | yes | `agents.add` |
+| `agents.marketplace.add` | yes | — | `agents.marketplace.add` |
+| `agents.marketplace.remove` | yes | — | `agents.marketplace.remove` |
+| `agents.marketplace.update` | yes | — | `agents.marketplace.update` |
+| `agents.migrate` | yes | — | `agents.migrate` |
+| `agents.prune` | yes | — | `agents.prune` |
+| `agents.refresh` | yes | yes | `agents.refresh` |
+| `agents.remove` | yes | yes | `agents.remove` |
+| `agents.sync` | yes | yes | `agents.sync` |
+| `agents.update` | — | yes | `agents.update` |
+| `agents.update_all` | yes | yes | `agents.update_all` |
+| `doctor` | yes | yes | `doctor` |
+| `doctor.fix` | yes | yes | `doctor.fix` |
+| `dots.add` | yes | yes | `dots.add` |
+| `dots.commit` | yes | yes | `dots.commit` |
+| `dots.delete` | yes | yes | `dots.delete` |
+| `dots.disable` | yes | yes | `dots.disable` |
+| `dots.edit_groups` | yes | yes | `dots.edit_groups` |
+| `dots.enable` | yes | yes | `dots.enable` |
+| `dots.history` | yes | — | `dots.history` |
+| `dots.ignore` | yes | yes | `dots.ignore` |
+| `dots.pull` | yes | yes | `dots.pull` |
+| `dots.push` | yes | yes | `dots.push` |
+| `dots.refresh` | yes | yes | `dots.refresh` |
+| `dots.reminder` | yes | yes | `dots.reminder` |
+| `dots.reminder.check` | yes | — | `dots.reminder.check` |
+| `dots.reminder.run` | yes | — | `dots.reminder.run` |
+| `dots.reminder.status` | yes | — | `dots.reminder.status` |
+| `dots.resolve_all_use_local` | yes | yes | `dots.resolve_all_use_local` |
+| `dots.resolve_all_use_repo` | yes | yes | `dots.resolve_all_use_repo` |
+| `dots.resolve_use_local` | yes | yes | `dots.resolve_use_local` |
+| `dots.resolve_use_repo` | yes | yes | `dots.resolve_use_repo` |
+| `dots.services.status` | yes | — | `dots.services.status` |
+| `dots.sync` | yes | yes | `dots.sync` |
+| `dots.variant` | yes | yes | `dots.variant` |
+| `dots.watch` | yes | yes | `dots.watch` |
+| `dots.watch.run` | yes | — | `dots.watch.run` |
+| `dots.watch.status` | yes | — | `dots.watch.status` |
+| `groups.create` | yes | yes | `groups.create` |
+| `groups.delete` | yes | yes | `groups.delete` |
+| `groups.edit_dots` | — | yes | `groups.edit_dots` |
+| `groups.edit_tools` | — | yes | `groups.edit_tools` |
+| `groups.rename` | yes | yes | `groups.rename` |
+| `hosts.copy` | yes | — | `hosts.copy` |
+| `hosts.create` | yes | yes | `hosts.create` |
+| `hosts.delete` | yes | yes | `hosts.delete` |
+| `hosts.edit_groups` | yes | yes | `hosts.edit_groups` |
+| `reconcile` | yes | yes | `reconcile` |
+| `settings.extract` | yes | — | `settings.extract` |
+| `settings.migrate_host_overrides` | yes | — | `settings.migrate_host_overrides` |
+| `settings.provider` | yes | yes | `settings.provider` |
+| `settings.reset` | yes | yes | `settings.reset` |
+| `settings.reset_cache` | yes | yes | `settings.reset_cache` |
+| `settings.set` | yes | yes | `settings.set` |
+| `setup.init` | yes | yes | `setup.init` |
+| `tools.baseline_system_inventory` | yes | — | `tools.baseline_system_inventory` |
+| `tools.change_group` | yes | yes | `tools.change_group` |
+| `tools.claim` | yes | yes | `tools.claim` |
+| `tools.consolidate` | yes | yes | `tools.consolidate` |
+| `tools.delete` | yes | yes | `tools.delete` |
+| `tools.delete_spec` | yes | yes | `tools.delete_spec` |
+| `tools.fallback` | yes | yes | `tools.fallback` |
+| `tools.heal_brew_taps` | yes | — | `tools.heal_brew_taps` |
+| `tools.ignore` | yes | yes | `tools.ignore` |
+| `tools.import` | yes | yes | `tools.import` |
+| `tools.install` | yes | yes | `tools.install` |
+| `tools.migrate_nvm` | yes | yes | `tools.migrate_nvm` |
+| `tools.normalize_provider_overrides` | yes | — | `tools.normalize_provider_overrides` |
+| `tools.pin_provider` | yes | yes | `tools.pin_provider` |
+| `tools.refresh` | yes | yes | `tools.refresh` |
+| `tools.reinstall_default` | yes | yes | `tools.reinstall_default` |
+| `tools.set_spec` | yes | yes | `tools.set_spec` |
+| `tools.switch_provider` | yes | — | `tools.switch_provider` |
+| `tools.sync` | yes | yes | `tools.sync` |
+| `tools.sync_all` | yes | yes | `tools.sync_all` |
+| `tools.update` | yes | yes | `tools.update` |
+| `tools.update_all` | yes | yes | `tools.update_all` |
+<!-- END GENERATED ACTION CATALOG -->

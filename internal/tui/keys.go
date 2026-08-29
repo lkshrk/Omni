@@ -56,7 +56,6 @@ type KeyMap struct {
 	GroupNext key.Binding // } — cycle group filter forward
 
 	DotRefresh     key.Binding // R — refresh status and discover candidates
-	DotPull        key.Binding // p — git pull + resync (command palette only)
 	DotDelete      key.Binding // d — delete dots entry (confirm required)
 	DotAdd         key.Binding // a — adopt a new path into the dots repo
 	DotVariant     key.Binding // v — create/remove host-specific package variant
@@ -68,6 +67,13 @@ type KeyMap struct {
 	DotCommit      key.Binding // C — commit dotfiles (global)
 
 	PinProvider key.Binding // p — pin provider scope
+
+	AgentsSync      key.Binding // S — install the global APM workspace
+	AgentsAdd       key.Binding // a — browse and install a package
+	AgentsUpdate    key.Binding // u — update the selected package
+	AgentsUpdateAll key.Binding // U — update every package
+	AgentsRemove    key.Binding // x — uninstall the selected package
+	AgentsRefresh   key.Binding // R — reload packages and check for updates
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -242,10 +248,6 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("R"),
 			key.WithHelp("R", actions.MustTUILabel(actions.DotsRefresh)),
 		),
-		DotPull: key.NewBinding(
-			key.WithKeys("p"),
-			key.WithHelp("p", "pull"),
-		),
 		DotDelete: key.NewBinding(
 			key.WithKeys("d"),
 			key.WithHelp("d", actions.MustTUILabel(actions.DotsDelete)),
@@ -285,6 +287,30 @@ func DefaultKeyMap() KeyMap {
 		PinProvider: key.NewBinding(
 			key.WithKeys("p"),
 			key.WithHelp("p", actions.MustTUILabel(actions.ToolPinProvider)),
+		),
+		AgentsSync: key.NewBinding(
+			key.WithKeys("S"),
+			key.WithHelp("S", actions.MustTUILabel(actions.AgentsSync)),
+		),
+		AgentsAdd: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", actions.MustTUILabel(actions.AgentsAdd)),
+		),
+		AgentsUpdate: key.NewBinding(
+			key.WithKeys("u"),
+			key.WithHelp("u", actions.MustTUILabel(actions.AgentsUpdate)),
+		),
+		AgentsUpdateAll: key.NewBinding(
+			key.WithKeys("U"),
+			key.WithHelp("U", actions.MustTUILabel(actions.AgentsUpdateAll)),
+		),
+		AgentsRemove: key.NewBinding(
+			key.WithKeys("x"),
+			key.WithHelp("x", actions.MustTUILabel(actions.AgentsRemove)),
+		),
+		AgentsRefresh: key.NewBinding(
+			key.WithKeys("R"),
+			key.WithHelp("R", actions.MustTUILabel(actions.AgentsRefresh)),
 		),
 		GroupPrev: key.NewBinding(
 			key.WithKeys("{"),

@@ -35,7 +35,7 @@ LDFLAGS     := -X $(MODULE)/internal/buildinfo.Version=$(GIT_VERSION) \
                -X $(MODULE)/internal/buildinfo.Commit=$(GIT_COMMIT) \
                -X $(MODULE)/internal/buildinfo.Date=$(BUILD_DATE)
 
-.PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-unit test-scripts test-canary test-package-managers test-all test-integration-build test-integration docs-build lint clean clean-cache clean-docker prune-tmp install gen-schema demo-gif
+.PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-unit test-scripts test-canary test-package-managers test-all test-integration-build test-integration docs-build lint clean clean-cache clean-docker prune-tmp install gen-schema check-flows gen-flows demo-gif
 
 ## build: compile the binary to ./bin/omni
 build:
@@ -75,6 +75,14 @@ install:
 ## gen-schema: regenerate versioned/current settings JSON schemas from config types
 gen-schema:
 	go run ./scripts/gen-schema
+
+## check-flows: validate the flow catalog and generated test matrix
+check-flows:
+	go run ./scripts/flow-catalog
+
+## gen-flows: regenerate catalog-backed tables in the test matrix
+gen-flows:
+	go run ./scripts/flow-catalog -write
 
 ## demo-gif: render the README demo GIF with VHS
 demo-gif:

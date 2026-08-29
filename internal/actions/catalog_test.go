@@ -1,6 +1,7 @@
 package actions
 
 import (
+	"sort"
 	"strings"
 	"testing"
 )
@@ -206,6 +207,9 @@ func TestActionsHaveSurfaceBindings(t *testing.T) {
 		if action.CLIOnlyReason != "" && (action.TUI != nil || action.Palette != nil) {
 			t.Fatalf("%s declares CLI-only reason but also has non-CLI bindings", action.ID)
 		}
+		if action.TUIOnlyReason != "" && len(action.CLI) != 0 {
+			t.Fatalf("%s declares TUI-only reason but also has CLI bindings", action.ID)
+		}
 		if action.TUI != nil && (action.TUI.KeyMapField == "" || action.TUI.DefaultKey == "") {
 			t.Fatalf("%s has incomplete TUI binding: %+v", action.ID, action.TUI)
 		}
@@ -229,13 +233,66 @@ func TestActionsHaveSurfaceBindings(t *testing.T) {
 		if action.Palette != nil && !action.PaletteEligible {
 			t.Fatalf("%s has a palette binding but is not marked palette-eligible", action.ID)
 		}
-		if len(action.CLI) == 0 {
+		if len(action.CLI) == 0 && action.TUIOnlyReason == "" {
 			t.Fatalf("%s has no CLI binding", action.ID)
 		}
 		if action.RequiresConfirm && action.ConfirmDescription == "" {
 			t.Fatalf("%s requires confirmation without confirm text", action.ID)
 		}
 	}
+}
+
+func TestAgentActionContracts(t *testing.T) {
+	for _, action := range Agents {
+		if action.Mutates && len(action.CLI) == 0 && action.TUIOnlyReason == "" {
+			t.Fatalf("%s mutates agent state without a CLI binding or TUI-only reason", action.ID)
+		}
+	}
+	if action := mustAction(t, AgentsRefresh); action.Mutates || !hasCLICommand(action, []string{"agents", "outdated"}) {
+		t.Fatalf("%s must model the shared read-only refresh/outdated action: %+v", action.ID, action)
+	}
+	if action := mustAction(t, AgentsUpdate); action.TUI == nil || action.TUIOnlyReason == "" || len(action.CLI) != 0 {
+		t.Fatalf("%s must accurately remain a TUI-only single-package operation: %+v", action.ID, action)
+	}
+}
+
+func TestCLIActionVariantsAreUniqueAndCanonical(t *testing.T) {
+	owners := map[string]map[string]ID{}
+	for _, action := range All() {
+		for _, binding := range action.CLI {
+			path := strings.Join(binding.Command, " ")
+			flags := append([]string(nil), binding.RequiredFlags...)
+			sort.Strings(flags)
+			for i, flag := range flags {
+				if !strings.HasPrefix(flag, "--") {
+					t.Fatalf("%s CLI variant %q has non-canonical required flag %q", action.ID, path, flag)
+				}
+				if i > 0 && flags[i-1] == flag {
+					t.Fatalf("%s CLI variant %q repeats required flag %q", action.ID, path, flag)
+				}
+				if !containsString(binding.Flags, flag) {
+					t.Fatalf("%s CLI variant %q requires %s without listing it in Flags", action.ID, path, flag)
+				}
+			}
+			variant := strings.Join(flags, "\x00")
+			if owners[path] == nil {
+				owners[path] = map[string]ID{}
+			}
+			if other := owners[path][variant]; other != "" {
+				t.Fatalf("CLI variant %q flags %v is owned by both %s and %s", path, flags, other, action.ID)
+			}
+			owners[path][variant] = action.ID
+		}
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestActionCatalogIncludesDurableDomains(t *testing.T) {

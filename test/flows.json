@@ -1,0 +1,3685 @@
+{
+  "schema_version": 1,
+  "flows": [
+    {
+      "id": "reconcile",
+      "capability": "lifecycle",
+      "title": "reconcile",
+      "criticality": "high",
+      "criticality_reason": "Reconcile coordinates tool, APM, dotfile, and git mutations, so partial success can leave the host inconsistent.",
+      "action_ids": [
+        "reconcile"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized installed tools, APM workspace, dotfile links, and backup commit after reconcile",
+        "rationale": "reconcile is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.sync",
+      "capability": "tools",
+      "title": "tools sync",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.sync"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.sync",
+        "rationale": "tools.sync is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.install",
+      "capability": "tools",
+      "title": "tools install",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.install"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.install",
+        "rationale": "tools.install is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.delete",
+      "capability": "tools",
+      "title": "tools delete",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.delete"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.delete",
+        "rationale": "tools.delete is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.update",
+      "capability": "tools",
+      "title": "tools update",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.update"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.update",
+        "rationale": "tools.update is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.update_all",
+      "capability": "tools",
+      "title": "tools update all",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.update_all"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.update_all",
+        "rationale": "tools.update_all is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.sync_all",
+      "capability": "tools",
+      "title": "tools sync all",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.sync_all"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.sync_all",
+        "rationale": "tools.sync_all is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.claim",
+      "capability": "tools",
+      "title": "tools claim",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.claim"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.claim",
+        "rationale": "tools.claim is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.ignore",
+      "capability": "tools",
+      "title": "tools ignore",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.ignore"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.ignore",
+        "rationale": "tools.ignore is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.change_group",
+      "capability": "tools",
+      "title": "tools change group",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.change_group"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.change_group",
+        "rationale": "tools.change_group is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.pin_provider",
+      "capability": "tools",
+      "title": "tools pin provider",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.pin_provider"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.pin_provider",
+        "rationale": "tools.pin_provider is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.reinstall_default",
+      "capability": "tools",
+      "title": "tools reinstall default",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.reinstall_default"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.reinstall_default",
+        "rationale": "tools.reinstall_default is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.migrate_nvm",
+      "capability": "tools",
+      "title": "tools migrate nvm",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.migrate_nvm"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.migrate_nvm",
+        "rationale": "tools.migrate_nvm is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.refresh",
+      "capability": "tools",
+      "title": "tools refresh",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.refresh"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.refresh",
+        "rationale": "tools.refresh is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.consolidate",
+      "capability": "tools",
+      "title": "tools consolidate",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.consolidate"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.consolidate",
+        "rationale": "tools.consolidate is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.set_spec",
+      "capability": "tools",
+      "title": "tools set spec",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.set_spec"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.set_spec",
+        "rationale": "tools.set_spec is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.fallback",
+      "capability": "tools",
+      "title": "tools fallback",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.fallback"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.fallback",
+        "rationale": "tools.fallback is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.delete_spec",
+      "capability": "tools",
+      "title": "tools delete spec",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.delete_spec"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.delete_spec",
+        "rationale": "tools.delete_spec is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.normalize_provider_overrides",
+      "capability": "tools",
+      "title": "tools normalize provider overrides",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.normalize_provider_overrides"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "tools.heal_brew_taps",
+      "capability": "tools",
+      "title": "tools heal brew taps",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.heal_brew_taps"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "tools.baseline_system_inventory",
+      "capability": "tools",
+      "title": "tools baseline system inventory",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.baseline_system_inventory"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "tools.import",
+      "capability": "tools",
+      "title": "tools import",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.import"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.import",
+        "rationale": "tools.import is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.switch_provider",
+      "capability": "tools",
+      "title": "tools switch provider",
+      "criticality": "high",
+      "criticality_reason": "Tool lifecycle actions can install or remove packages and rewrite persisted provider configuration.",
+      "action_ids": [
+        "tools.switch_provider"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "dots.sync",
+      "capability": "dots",
+      "title": "dots sync",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.sync"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.sync",
+        "rationale": "dots.sync is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.refresh",
+      "capability": "dots",
+      "title": "dots refresh",
+      "criticality": "medium",
+      "criticality_reason": "Dotfile status and discovery must accurately distinguish local, repository, and linked state.",
+      "action_ids": [
+        "dots.refresh"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_query": "normalized dot entry, drift, and repository status query for dots.refresh",
+        "rationale": "dots.refresh is read-only; parity compares normalized query results."
+      }
+    },
+    {
+      "id": "dots.add",
+      "capability": "dots",
+      "title": "dots add",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.add"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.add",
+        "rationale": "dots.add is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.edit_groups",
+      "capability": "dots",
+      "title": "dots edit groups",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.edit_groups"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.edit_groups",
+        "rationale": "dots.edit_groups is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.variant",
+      "capability": "dots",
+      "title": "dots variant",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.variant"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.variant",
+        "rationale": "dots.variant is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.delete",
+      "capability": "dots",
+      "title": "dots delete",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.delete"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.delete",
+        "rationale": "dots.delete is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.resolve_use_repo",
+      "capability": "dots",
+      "title": "dots resolve use repo",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.resolve_use_repo"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.resolve_use_repo",
+        "rationale": "dots.resolve_use_repo is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.resolve_use_local",
+      "capability": "dots",
+      "title": "dots resolve use local",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.resolve_use_local"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.resolve_use_local",
+        "rationale": "dots.resolve_use_local is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.resolve_all_use_repo",
+      "capability": "dots",
+      "title": "dots resolve all use repo",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.resolve_all_use_repo"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.resolve_all_use_repo",
+        "rationale": "dots.resolve_all_use_repo is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.resolve_all_use_local",
+      "capability": "dots",
+      "title": "dots resolve all use local",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.resolve_all_use_local"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.resolve_all_use_local",
+        "rationale": "dots.resolve_all_use_local is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.ignore",
+      "capability": "dots",
+      "title": "dots ignore",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.ignore"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.ignore",
+        "rationale": "dots.ignore is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.enable",
+      "capability": "dots",
+      "title": "dots enable",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.enable"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.enable",
+        "rationale": "dots.enable is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.disable",
+      "capability": "dots",
+      "title": "dots disable",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.disable"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.disable",
+        "rationale": "dots.disable is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.pull",
+      "capability": "dots",
+      "title": "dots pull",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.pull"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.pull",
+        "rationale": "dots.pull is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.commit",
+      "capability": "dots",
+      "title": "dots commit",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.commit"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.commit",
+        "rationale": "dots.commit is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.push",
+      "capability": "dots",
+      "title": "dots push",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.push"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.push",
+        "rationale": "dots.push is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.reminder",
+      "capability": "dots",
+      "title": "dots reminder",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.reminder"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.reminder",
+        "rationale": "dots.reminder is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.reminder.check",
+      "capability": "dots",
+      "title": "dots reminder check",
+      "criticality": "medium",
+      "criticality_reason": "Dotfile status and discovery must accurately distinguish local, repository, and linked state.",
+      "action_ids": [
+        "dots.reminder.check"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "dots.reminder.run",
+      "capability": "dots",
+      "title": "dots reminder run",
+      "criticality": "medium",
+      "criticality_reason": "Dotfile status and discovery must accurately distinguish local, repository, and linked state.",
+      "action_ids": [
+        "dots.reminder.run"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "dots.reminder.status",
+      "capability": "dots",
+      "title": "dots reminder status",
+      "criticality": "medium",
+      "criticality_reason": "Dotfile status and discovery must accurately distinguish local, repository, and linked state.",
+      "action_ids": [
+        "dots.reminder.status"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "dots.watch",
+      "capability": "dots",
+      "title": "dots watch",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.watch"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized dot entry, local/repository content, link, and git state after dots.watch",
+        "rationale": "dots.watch is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "dots.watch.run",
+      "capability": "dots",
+      "title": "dots watch run",
+      "criticality": "high",
+      "criticality_reason": "Dotfile lifecycle actions can replace links or files and mutate the managed git repository.",
+      "action_ids": [
+        "dots.watch.run"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "dots.watch.status",
+      "capability": "dots",
+      "title": "dots watch status",
+      "criticality": "medium",
+      "criticality_reason": "Dotfile status and discovery must accurately distinguish local, repository, and linked state.",
+      "action_ids": [
+        "dots.watch.status"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "dots.services.status",
+      "capability": "dots",
+      "title": "dots services status",
+      "criticality": "medium",
+      "criticality_reason": "Dotfile status and discovery must accurately distinguish local, repository, and linked state.",
+      "action_ids": [
+        "dots.services.status"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "dots.history",
+      "capability": "dots",
+      "title": "dots history",
+      "criticality": "medium",
+      "criticality_reason": "Dotfile status and discovery must accurately distinguish local, repository, and linked state.",
+      "action_ids": [
+        "dots.history"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "groups.create",
+      "capability": "groups",
+      "title": "groups create",
+      "criticality": "high",
+      "criticality_reason": "Group changes alter which tools and dotfiles apply to hosts.",
+      "action_ids": [
+        "groups.create"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized group definition and tool/dot membership after groups.create",
+        "rationale": "groups.create is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "groups.rename",
+      "capability": "groups",
+      "title": "groups rename",
+      "criticality": "high",
+      "criticality_reason": "Group changes alter which tools and dotfiles apply to hosts.",
+      "action_ids": [
+        "groups.rename"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized group definition and tool/dot membership after groups.rename",
+        "rationale": "groups.rename is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "groups.delete",
+      "capability": "groups",
+      "title": "groups delete",
+      "criticality": "high",
+      "criticality_reason": "Group changes alter which tools and dotfiles apply to hosts.",
+      "action_ids": [
+        "groups.delete"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized group definition and tool/dot membership after groups.delete",
+        "rationale": "groups.delete is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "groups.edit_tools",
+      "capability": "groups",
+      "title": "groups edit tools",
+      "criticality": "high",
+      "criticality_reason": "Group changes alter which tools and dotfiles apply to hosts.",
+      "action_ids": [
+        "groups.edit_tools"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "groups.edit_dots",
+      "capability": "groups",
+      "title": "groups edit dots",
+      "criticality": "high",
+      "criticality_reason": "Group changes alter which tools and dotfiles apply to hosts.",
+      "action_ids": [
+        "groups.edit_dots"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "hosts.create",
+      "capability": "hosts",
+      "title": "hosts create",
+      "criticality": "high",
+      "criticality_reason": "Host changes alter effective groups and host-specific configuration.",
+      "action_ids": [
+        "hosts.create"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized host definition and group membership after hosts.create",
+        "rationale": "hosts.create is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "hosts.copy",
+      "capability": "hosts",
+      "title": "hosts copy",
+      "criticality": "high",
+      "criticality_reason": "Host changes alter effective groups and host-specific configuration.",
+      "action_ids": [
+        "hosts.copy"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "hosts.delete",
+      "capability": "hosts",
+      "title": "hosts delete",
+      "criticality": "high",
+      "criticality_reason": "Host changes alter effective groups and host-specific configuration.",
+      "action_ids": [
+        "hosts.delete"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized host definition and group membership after hosts.delete",
+        "rationale": "hosts.delete is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "hosts.edit_groups",
+      "capability": "hosts",
+      "title": "hosts edit groups",
+      "criticality": "high",
+      "criticality_reason": "Host changes alter effective groups and host-specific configuration.",
+      "action_ids": [
+        "hosts.edit_groups"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized host definition and group membership after hosts.edit_groups",
+        "rationale": "hosts.edit_groups is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "settings.set",
+      "capability": "settings",
+      "title": "settings set",
+      "criticality": "high",
+      "criticality_reason": "Settings changes rewrite persisted configuration and can alter future lifecycle behavior.",
+      "action_ids": [
+        "settings.set"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized persisted and effective settings after settings.set",
+        "rationale": "settings.set is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "settings.provider",
+      "capability": "settings",
+      "title": "settings provider",
+      "criticality": "high",
+      "criticality_reason": "Settings changes rewrite persisted configuration and can alter future lifecycle behavior.",
+      "action_ids": [
+        "settings.provider"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized persisted and effective settings after settings.provider",
+        "rationale": "settings.provider is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "settings.reset",
+      "capability": "settings",
+      "title": "settings reset",
+      "criticality": "high",
+      "criticality_reason": "Settings changes rewrite persisted configuration and can alter future lifecycle behavior.",
+      "action_ids": [
+        "settings.reset"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized persisted and effective settings after settings.reset",
+        "rationale": "settings.reset is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "settings.reset_cache",
+      "capability": "settings",
+      "title": "settings reset cache",
+      "criticality": "high",
+      "criticality_reason": "Settings changes rewrite persisted configuration and can alter future lifecycle behavior.",
+      "action_ids": [
+        "settings.reset_cache"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized persisted and effective settings after settings.reset_cache",
+        "rationale": "settings.reset_cache is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "settings.migrate_host_overrides",
+      "capability": "settings",
+      "title": "settings migrate host overrides",
+      "criticality": "high",
+      "criticality_reason": "Settings changes rewrite persisted configuration and can alter future lifecycle behavior.",
+      "action_ids": [
+        "settings.migrate_host_overrides"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "settings.extract",
+      "capability": "settings",
+      "title": "settings extract",
+      "criticality": "high",
+      "criticality_reason": "Settings changes rewrite persisted configuration and can alter future lifecycle behavior.",
+      "action_ids": [
+        "settings.extract"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "setup.init",
+      "capability": "setup",
+      "title": "setup init",
+      "criticality": "high",
+      "criticality_reason": "Bootstrap creates or activates the host configuration used by every later command.",
+      "action_ids": [
+        "setup.init"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized activated config, host groups, provider families, tools, and dots after bootstrap",
+        "rationale": "setup.init is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "agents.sync",
+      "capability": "agents",
+      "title": "agents sync",
+      "criticality": "high",
+      "criticality_reason": "Agent actions rewrite the APM manifest or deployed agent files.",
+      "action_ids": [
+        "agents.sync"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized APM manifest, lock, dependency, and deployed-file state after agents.sync",
+        "rationale": "agents.sync is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "agents.add",
+      "capability": "agents",
+      "title": "agents add",
+      "criticality": "high",
+      "criticality_reason": "Agent actions rewrite the APM manifest or deployed agent files.",
+      "action_ids": [
+        "agents.add"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized APM manifest, lock, dependency, and deployed-file state after agents.add",
+        "rationale": "agents.add is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "agents.update",
+      "capability": "agents",
+      "title": "agents update",
+      "criticality": "high",
+      "criticality_reason": "Agent actions rewrite the APM manifest or deployed agent files.",
+      "action_ids": [
+        "agents.update"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "agents.update_all",
+      "capability": "agents",
+      "title": "agents update all",
+      "criticality": "high",
+      "criticality_reason": "Agent actions rewrite the APM manifest or deployed agent files.",
+      "action_ids": [
+        "agents.update_all"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized APM manifest, lock, dependency, and deployed-file state after agents.update_all",
+        "rationale": "agents.update_all is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "agents.remove",
+      "capability": "agents",
+      "title": "agents remove",
+      "criticality": "high",
+      "criticality_reason": "Agent actions rewrite the APM manifest or deployed agent files.",
+      "action_ids": [
+        "agents.remove"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized APM manifest, lock, dependency, and deployed-file state after agents.remove",
+        "rationale": "agents.remove is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "agents.refresh",
+      "capability": "agents",
+      "title": "agents refresh",
+      "criticality": "medium",
+      "criticality_reason": "APM dependency and update queries drive package maintenance decisions.",
+      "action_ids": [
+        "agents.refresh"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_query": "normalized APM dependency and available-update query for agents.refresh",
+        "rationale": "agents.refresh is read-only; parity compares normalized query results."
+      }
+    },
+    {
+      "id": "agents.migrate",
+      "capability": "agents",
+      "title": "agents migrate",
+      "criticality": "high",
+      "criticality_reason": "Agent actions rewrite the APM manifest or deployed agent files.",
+      "action_ids": [
+        "agents.migrate"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "agents.prune",
+      "capability": "agents",
+      "title": "agents prune",
+      "criticality": "high",
+      "criticality_reason": "Agent actions rewrite the APM manifest or deployed agent files.",
+      "action_ids": [
+        "agents.prune"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "agents.marketplace.add",
+      "capability": "agents",
+      "title": "agents marketplace add",
+      "criticality": "high",
+      "criticality_reason": "Agent actions rewrite the APM manifest or deployed agent files.",
+      "action_ids": [
+        "agents.marketplace.add"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "agents.marketplace.update",
+      "capability": "agents",
+      "title": "agents marketplace update",
+      "criticality": "high",
+      "criticality_reason": "Agent actions rewrite the APM manifest or deployed agent files.",
+      "action_ids": [
+        "agents.marketplace.update"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "agents.marketplace.remove",
+      "capability": "agents",
+      "title": "agents marketplace remove",
+      "criticality": "high",
+      "criticality_reason": "Agent actions rewrite the APM manifest or deployed agent files.",
+      "action_ids": [
+        "agents.marketplace.remove"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "doctor",
+      "capability": "diagnostics",
+      "title": "doctor",
+      "criticality": "medium",
+      "criticality_reason": "Diagnostic findings determine which repair actions users trust and run.",
+      "action_ids": [
+        "doctor"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_query": "normalized diagnostic finding query for doctor",
+        "rationale": "doctor is read-only; parity compares normalized query results."
+      }
+    },
+    {
+      "id": "doctor.fix",
+      "capability": "diagnostics",
+      "title": "doctor fix",
+      "criticality": "high",
+      "criticality_reason": "Doctor fixes rewrite configuration before recalculating health findings.",
+      "action_ids": [
+        "doctor.fix"
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No verified CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified TUI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_state": "normalized diagnostic findings and persisted fixes after doctor.fix",
+        "rationale": "doctor.fix is mutable; parity compares resulting state, not adapter output."
+      }
+    },
+    {
+      "id": "tools.list",
+      "capability": "tools",
+      "title": "list tools",
+      "criticality": "high",
+      "criticality_reason": "The primary inventory view drives install and upgrade decisions.",
+      "surfaces": {
+        "cli": true,
+        "tui": true
+      },
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestApp_ListTools_ReflectsDBState",
+                "tags": [
+                  "docker"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "integration",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/config-migration-stale-tracked-list",
+                "fixture": "integration_tests/testdata/scripts/config-migration-stale-tracked-list.txtar",
+                "tags": [
+                  "docker",
+                  "testscript"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "The current testscript runs the in-process command harness, not an independently built binary.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "Existing TUI tests do not yet prove listing through a real PTY.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI list results are not compared as semantic tool state.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_query": "normalized tool inventory, provider, version, and status query for tools.list",
+        "rationale": "tools.list is read-only; parity compares normalized query results."
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "tools",
+          "list"
+        ]
+      ]
+    },
+    {
+      "id": "dots.status",
+      "capability": "dots",
+      "title": "show dotfile status",
+      "criticality": "high",
+      "criticality_reason": "Incorrect status can lead users to overwrite the wrong dotfile version.",
+      "surfaces": {
+        "cli": true,
+        "tui": true
+      },
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestDotsListReportsReincludedSubfolderDrift",
+                "tags": [
+                  "docker"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "The current testscript runs the in-process command harness, not an independently built binary.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "Existing TUI tests do not yet prove dot status through a real PTY.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "CLI and TUI dot status are not compared semantically.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "parity": {
+        "semantic_query": "normalized dot entry, drift, and repository status query for dots.status",
+        "rationale": "dots.status is read-only; parity compares normalized query results."
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "dots",
+          "status"
+        ]
+      ]
+    },
+    {
+      "id": "agents.audit",
+      "capability": "agents",
+      "title": "audit APM workspace",
+      "criticality": "medium",
+      "criticality_reason": "The read result controls package maintenance decisions.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "The delegated APM query lacks linked integration evidence.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "The delegated APM query lacks linked CLI black-box evidence.",
+          "target_stage": "Stage 5"
+        }
+      ],
+      "mutates": false,
+      "cli_commands": [
+        [
+          "agents",
+          "audit"
+        ]
+      ]
+    },
+    {
+      "id": "agents.deps.list",
+      "capability": "agents",
+      "title": "list APM dependencies",
+      "criticality": "medium",
+      "criticality_reason": "The read result controls package maintenance decisions.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "The delegated APM query lacks linked integration evidence.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "The delegated APM query lacks linked CLI black-box evidence.",
+          "target_stage": "Stage 5"
+        }
+      ],
+      "mutates": false,
+      "cli_commands": [
+        [
+          "agents",
+          "deps",
+          "list"
+        ]
+      ]
+    },
+    {
+      "id": "agents.deps.why",
+      "capability": "agents",
+      "title": "explain an APM dependency",
+      "criticality": "medium",
+      "criticality_reason": "The read result controls package maintenance decisions.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "The delegated APM query lacks linked integration evidence.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "The delegated APM query lacks linked CLI black-box evidence.",
+          "target_stage": "Stage 5"
+        }
+      ],
+      "mutates": false,
+      "cli_commands": [
+        [
+          "agents",
+          "deps",
+          "why"
+        ]
+      ]
+    },
+    {
+      "id": "agents.marketplaces.list",
+      "capability": "agents",
+      "title": "list APM marketplaces",
+      "criticality": "medium",
+      "criticality_reason": "The read result controls package maintenance decisions.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "The delegated APM query lacks linked integration evidence.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "The delegated APM query lacks linked CLI black-box evidence.",
+          "target_stage": "Stage 5"
+        }
+      ],
+      "mutates": false,
+      "cli_commands": [
+        [
+          "agents",
+          "marketplace",
+          "list"
+        ]
+      ]
+    },
+    {
+      "id": "tui.startup",
+      "capability": "tui",
+      "title": "start the TUI",
+      "criticality": "high",
+      "criticality_reason": "This interaction is shared across TUI capabilities and regressions can block normal use.",
+      "surfaces": {
+        "cli": true,
+        "tui": true
+      },
+      "requirements": [
+        {
+          "level": "component",
+          "status": "gap",
+          "reason": "Existing model coverage has not yet been linked to this flow.",
+          "target_stage": "Stage 3"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified real-binary PTY evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No independently built startup command evidence is linked yet.",
+          "target_stage": "Stage 5"
+        },
+        {
+          "level": "parity",
+          "status": "gap",
+          "reason": "Startup state is not compared across the command launch and TUI runtime boundary.",
+          "target_stage": "Stage 6"
+        }
+      ],
+      "mutates": false,
+      "cli_commands": [
+        [
+          "ui"
+        ]
+      ],
+      "parity": {
+        "semantic_query": "normalized initial tab, focus, viewport, loading, and error state after ui startup",
+        "rationale": "Startup parity compares the launched runtime state rather than terminal bytes."
+      }
+    },
+    {
+      "id": "tui.navigation",
+      "capability": "tui",
+      "title": "navigate tabs rows and pages",
+      "criticality": "high",
+      "criticality_reason": "This interaction is shared across TUI capabilities and regressions can block normal use.",
+      "surfaces": {
+        "cli": false,
+        "tui": true
+      },
+      "requirements": [
+        {
+          "level": "component",
+          "status": "gap",
+          "reason": "Existing model coverage has not yet been linked to this flow.",
+          "target_stage": "Stage 3"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified real-binary PTY evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ],
+      "mutates": false
+    },
+    {
+      "id": "tui.search",
+      "capability": "tui",
+      "title": "filter and search rows",
+      "criticality": "medium",
+      "criticality_reason": "This interaction is shared across TUI capabilities and regressions can block normal use.",
+      "surfaces": {
+        "cli": false,
+        "tui": true
+      },
+      "requirements": [
+        {
+          "level": "component",
+          "status": "gap",
+          "reason": "Existing model coverage has not yet been linked to this flow.",
+          "target_stage": "Stage 3"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified real-binary PTY evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ],
+      "mutates": false
+    },
+    {
+      "id": "tui.mouse",
+      "capability": "tui",
+      "title": "select and scroll with the mouse",
+      "criticality": "medium",
+      "criticality_reason": "This interaction is shared across TUI capabilities and regressions can block normal use.",
+      "surfaces": {
+        "cli": false,
+        "tui": true
+      },
+      "requirements": [
+        {
+          "level": "component",
+          "status": "gap",
+          "reason": "Existing model coverage has not yet been linked to this flow.",
+          "target_stage": "Stage 3"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified real-binary PTY evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ],
+      "mutates": false
+    },
+    {
+      "id": "tui.resize",
+      "capability": "tui",
+      "title": "resize the terminal viewport",
+      "criticality": "medium",
+      "criticality_reason": "This interaction is shared across TUI capabilities and regressions can block normal use.",
+      "surfaces": {
+        "cli": false,
+        "tui": true
+      },
+      "requirements": [
+        {
+          "level": "component",
+          "status": "gap",
+          "reason": "Existing model coverage has not yet been linked to this flow.",
+          "target_stage": "Stage 3"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified real-binary PTY evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ],
+      "mutates": false
+    },
+    {
+      "id": "tui.details",
+      "capability": "tui",
+      "title": "show selected-row details",
+      "criticality": "medium",
+      "criticality_reason": "This interaction is shared across TUI capabilities and regressions can block normal use.",
+      "surfaces": {
+        "cli": false,
+        "tui": true
+      },
+      "requirements": [
+        {
+          "level": "component",
+          "status": "gap",
+          "reason": "Existing model coverage has not yet been linked to this flow.",
+          "target_stage": "Stage 3"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified real-binary PTY evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ],
+      "mutates": false
+    },
+    {
+      "id": "tui.loading",
+      "capability": "tui",
+      "title": "render loading state",
+      "criticality": "medium",
+      "criticality_reason": "This interaction is shared across TUI capabilities and regressions can block normal use.",
+      "surfaces": {
+        "cli": false,
+        "tui": true
+      },
+      "requirements": [
+        {
+          "level": "component",
+          "status": "gap",
+          "reason": "Existing model coverage has not yet been linked to this flow.",
+          "target_stage": "Stage 3"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified real-binary PTY evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ],
+      "mutates": false
+    },
+    {
+      "id": "tui.error",
+      "capability": "tui",
+      "title": "render and recover from errors",
+      "criticality": "high",
+      "criticality_reason": "This interaction is shared across TUI capabilities and regressions can block normal use.",
+      "surfaces": {
+        "cli": false,
+        "tui": true
+      },
+      "requirements": [
+        {
+          "level": "component",
+          "status": "gap",
+          "reason": "Existing model coverage has not yet been linked to this flow.",
+          "target_stage": "Stage 3"
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "gap",
+          "reason": "No verified real-binary PTY evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ],
+      "mutates": false
+    },
+    {
+      "id": "agents.deps.info",
+      "capability": "agents",
+      "title": "show APM dependency details",
+      "criticality": "medium",
+      "criticality_reason": "APM catalog and dependency queries drive package selection and maintenance decisions.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "agents",
+          "deps",
+          "info"
+        ]
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "No verified semantic integration evidence is linked yet.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No independently built CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "agents.marketplaces.browse",
+      "capability": "agents",
+      "title": "browse an APM marketplace",
+      "criticality": "medium",
+      "criticality_reason": "APM catalog and dependency queries drive package selection and maintenance decisions.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "agents",
+          "marketplace",
+          "browse"
+        ]
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "No verified semantic integration evidence is linked yet.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No independently built CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "agents.marketplaces.validate",
+      "capability": "agents",
+      "title": "validate an APM marketplace",
+      "criticality": "medium",
+      "criticality_reason": "APM catalog and dependency queries drive package selection and maintenance decisions.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "agents",
+          "marketplace",
+          "validate"
+        ]
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "No verified semantic integration evidence is linked yet.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No independently built CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "agents.search",
+      "capability": "agents",
+      "title": "search available APM packages",
+      "criticality": "medium",
+      "criticality_reason": "APM catalog and dependency queries drive package selection and maintenance decisions.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "agents",
+          "search"
+        ]
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "No verified semantic integration evidence is linked yet.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No independently built CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "agents.targets",
+      "capability": "agents",
+      "title": "list supported APM targets",
+      "criticality": "medium",
+      "criticality_reason": "APM catalog and dependency queries drive package selection and maintenance decisions.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "agents",
+          "targets"
+        ]
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "No verified semantic integration evidence is linked yet.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No independently built CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "dots.list",
+      "capability": "dots",
+      "title": "list managed dotfiles",
+      "criticality": "high",
+      "criticality_reason": "The managed dot inventory must identify configured paths without hiding drift or conflicts.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "dots",
+          "list"
+        ]
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "No verified semantic integration evidence is linked yet.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No independently built CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "dots.variant.list",
+      "capability": "dots",
+      "title": "list dotfile variants",
+      "criticality": "medium",
+      "criticality_reason": "Variant discovery must report the host-specific packages available for a managed dot entry.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "dots",
+          "variant",
+          "list"
+        ]
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "No verified semantic integration evidence is linked yet.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No independently built CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "groups.list",
+      "capability": "groups",
+      "title": "list groups",
+      "criticality": "medium",
+      "criticality_reason": "Group inventory determines which reusable tool and dot memberships users can edit.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "groups"
+        ]
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "No verified semantic integration evidence is linked yet.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No independently built CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "hosts.list",
+      "capability": "hosts",
+      "title": "list hosts",
+      "criticality": "medium",
+      "criticality_reason": "Host inventory determines which host-specific group and setting scopes users can edit.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "hosts",
+          "list"
+        ]
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "No verified semantic integration evidence is linked yet.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No independently built CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "settings.get",
+      "capability": "settings",
+      "title": "get one effective setting",
+      "criticality": "medium",
+      "criticality_reason": "Effective setting lookup must match the value lifecycle operations will consume.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "settings",
+          "get"
+        ]
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "No verified semantic integration evidence is linked yet.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No independently built CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "settings.lint",
+      "capability": "settings",
+      "title": "lint settings",
+      "criticality": "high",
+      "criticality_reason": "Settings validation must detect invalid configuration before mutating commands consume it.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "settings",
+          "lint"
+        ]
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "No verified semantic integration evidence is linked yet.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No independently built CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "settings.show",
+      "capability": "settings",
+      "title": "show effective settings",
+      "criticality": "medium",
+      "criticality_reason": "The effective settings view must match merged host and group configuration.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "settings",
+          "show"
+        ]
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "No verified semantic integration evidence is linked yet.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No independently built CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "tools.providers",
+      "capability": "tools",
+      "title": "list available providers",
+      "criticality": "medium",
+      "criticality_reason": "Provider availability determines which install and migration actions are possible.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "tools",
+          "providers"
+        ]
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "No verified semantic integration evidence is linked yet.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No independently built CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "tools.search",
+      "capability": "tools",
+      "title": "search provider packages",
+      "criticality": "medium",
+      "criticality_reason": "Provider search results drive package and provider selection.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "mutates": false,
+      "cli_commands": [
+        [
+          "tools",
+          "search"
+        ]
+      ],
+      "requirements": [
+        {
+          "level": "integration",
+          "status": "gap",
+          "reason": "No verified semantic integration evidence is linked yet.",
+          "target_stage": "Stage 4"
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "gap",
+          "reason": "No independently built CLI black-box evidence is linked yet.",
+          "target_stage": "Stage 5"
+        }
+      ]
+    }
+  ]
+}
+

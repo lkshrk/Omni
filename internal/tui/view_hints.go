@@ -643,7 +643,7 @@ func tabShortHelpBindings(m *Model) []key.Binding {
 		return footerBindings(k, actions, nil)
 	case viewSkills:
 		// Row ops live on the cursor row's own hint line; the bar carries only tab-wide actions.
-		footerActions := []key.Binding{agentsSyncAllBinding(), agentsUpgradeAllBinding(), agentsRefreshBinding(), agentsRegistryBinding(), agentsTraceLogBinding()}
+		footerActions := []key.Binding{k.AgentsSync, k.AgentsUpdateAll, k.AgentsRefresh, k.AgentsAdd, agentsTraceLogBinding()}
 		return footerBindings(k, footerActions, []key.Binding{agentsFilterBinding()})
 	default:
 		if m.listConfirm.action == listConfirmSyncAll {
@@ -695,37 +695,12 @@ func footerFilterBinding(k KeyMap, includeGroup bool) key.Binding {
 	return key.NewBinding(key.WithKeys(keys...), key.WithHelp(strings.Join(labels, ","), providerHelp.Desc))
 }
 
-// Display only: handleAgentsGlobalActionKeyMsg handles U/S/R directly by key string.
-func agentsUpgradeAllBinding() key.Binding {
-	return key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "upgrade all"))
-}
-
-func agentsSyncAllBinding() key.Binding {
-	return key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "sync all"))
-}
-
-func agentsRefreshBinding() key.Binding {
-	return key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh"))
-}
-
 func agentsTraceLogBinding() key.Binding {
 	return key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "logs"))
 }
 
 func agentsFilterBinding() key.Binding {
 	return key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter"))
-}
-
-func agentsRegistryBinding() key.Binding {
-	return key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add"))
-}
-
-func agentsRowUpdateBinding() key.Binding {
-	return key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update"))
-}
-
-func agentsRowUninstallBinding() key.Binding {
-	return key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "uninstall"))
 }
 
 func footerClearFiltersBinding(k KeyMap) key.Binding {
@@ -796,8 +771,8 @@ func tabFullHelpBindings(m *Model) [][]key.Binding {
 	case viewSkills:
 		return [][]key.Binding{
 			common,
-			{agentsRowUpdateBinding(), agentsRowUninstallBinding()},
-			{agentsRegistryBinding(), agentsUpgradeAllBinding(), agentsSyncAllBinding(), agentsRefreshBinding(), agentsTraceLogBinding(), agentsFilterBinding()},
+			{k.AgentsUpdate, k.AgentsRemove},
+			{k.AgentsAdd, k.AgentsUpdateAll, k.AgentsSync, k.AgentsRefresh, agentsTraceLogBinding(), agentsFilterBinding()},
 		}
 	default:
 		return [][]key.Binding{
@@ -1008,8 +983,8 @@ func helpActionGroups(m Model) []helpGroup {
 	case viewSkills:
 		return []helpGroup{
 			{title: "Row", items: []hintItem{
-				hintFromBinding(agentsRowUpdateBinding()),
-				hintFromBinding(agentsRowUninstallBinding()),
+				hintFromBinding(k.AgentsUpdate),
+				hintFromBinding(k.AgentsRemove),
 			}},
 			{title: "Navigation", items: []hintItem{
 				hintFromBindingDesc(k.Up, "previous package"),
@@ -1018,10 +993,10 @@ func helpActionGroups(m Model) []helpGroup {
 				hintFromBindingDesc(k.Bottom, "last package"),
 			}},
 			{title: "Bulk", items: []hintItem{
-				hintFromBinding(agentsRegistryBinding()),
-				hintFromBinding(agentsUpgradeAllBinding()),
-				hintFromBinding(agentsSyncAllBinding()),
-				hintFromBinding(agentsRefreshBinding()),
+				hintFromBinding(k.AgentsAdd),
+				hintFromBinding(k.AgentsUpdateAll),
+				hintFromBinding(k.AgentsSync),
+				hintFromBinding(k.AgentsRefresh),
 				hintFromBinding(agentsTraceLogBinding()),
 				hintFromBinding(agentsFilterBinding()),
 			}},

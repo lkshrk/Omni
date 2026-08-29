@@ -68,7 +68,17 @@ const (
 	SettingsMigrateHostOverrides   ID = "settings.migrate_host_overrides"
 	SettingsExtract                ID = "settings.extract"
 	SetupInit                      ID = "setup.init"
-	AgentsRestore                  ID = "agents.sync"
+	AgentsSync                     ID = "agents.sync"
+	AgentsAdd                      ID = "agents.add"
+	AgentsUpdate                   ID = "agents.update"
+	AgentsUpdateAll                ID = "agents.update_all"
+	AgentsRemove                   ID = "agents.remove"
+	AgentsRefresh                  ID = "agents.refresh"
+	AgentsMigrate                  ID = "agents.migrate"
+	AgentsPrune                    ID = "agents.prune"
+	AgentsMarketplaceAdd           ID = "agents.marketplace.add"
+	AgentsMarketplaceUpdate        ID = "agents.marketplace.update"
+	AgentsMarketplaceRemove        ID = "agents.marketplace.remove"
 	Doctor                         ID = "doctor"
 	DoctorFix                      ID = "doctor.fix"
 )
@@ -104,8 +114,9 @@ type TUIBinding struct {
 
 // CLIBinding records the CLI exposure for an action without depending on Cobra.
 type CLIBinding struct {
-	Command []string
-	Flags   []string
+	Command       []string
+	Flags         []string
+	RequiredFlags []string
 }
 
 type PaletteBinding struct {
@@ -131,6 +142,7 @@ type Action struct {
 	Palette            *PaletteBinding
 	PaletteEligible    bool
 	CLIOnlyReason      string
+	TUIOnlyReason      string
 }
 
 var Lifecycle = []Action{
@@ -197,7 +209,7 @@ var Tools = []Action{
 		ConfirmDescription: ConfirmDelete,
 		Requirements:       []Requirement{RequiresToolName},
 		TUI:                &TUIBinding{KeyMapField: "Delete", DefaultKey: "d", Label: LabelDelete, Description: "Delete the selected tool and config entry.", ConfirmDescription: ConfirmDelete},
-		CLI:                []CLIBinding{{Command: []string{"tools", "remove"}, Flags: []string{"--provider", "--purge"}}},
+		CLI:                []CLIBinding{{Command: []string{"tools", "remove"}, Flags: []string{"--provider", "--purge"}, RequiredFlags: []string{"--purge"}}},
 	},
 	{
 		ID:              ToolUpdate,
@@ -220,7 +232,7 @@ var Tools = []Action{
 		LongDescription: "Upgrade every outdated installed tool currently tracked in the local cache.",
 		Mutates:         true,
 		TUI:             &TUIBinding{KeyMapField: "UpgradeAll", DefaultKey: "U", Label: "upgrade all", Description: "Upgrade every visible outdated tool."},
-		CLI:             []CLIBinding{{Command: []string{"tools", "upgrade"}, Flags: []string{"--all", "--force"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "upgrade"}, Flags: []string{"--all", "--force"}, RequiredFlags: []string{"--all"}}},
 	},
 	{
 		ID:                 ToolSyncAll,
@@ -233,7 +245,7 @@ var Tools = []Action{
 		RequiresConfirm:    true,
 		ConfirmDescription: ConfirmSyncAll,
 		TUI:                &TUIBinding{KeyMapField: "SyncAll", DefaultKey: "S", Label: "sync all", Description: "Add discovered tools and install missing tools.", ConfirmDescription: ConfirmSyncAll},
-		CLI:                []CLIBinding{{Command: []string{"tools", "sync"}, Flags: []string{"--all", "--allow-weak"}}},
+		CLI:                []CLIBinding{{Command: []string{"tools", "sync"}, Flags: []string{"--all", "--allow-weak"}, RequiredFlags: []string{"--all"}}},
 	},
 	{
 		ID:              ToolClaim,
@@ -291,7 +303,7 @@ var Tools = []Action{
 		Requirements:    []Requirement{RequiresToolName, RequiresProviderScope},
 		TUI:             &TUIBinding{KeyMapField: "PinProvider", DefaultKey: "p", Label: "pin provider", Description: "Pin or remove provider settings for the selected tool."},
 		CLI: []CLIBinding{
-			{Command: []string{"tools", "set"}, Flags: []string{"--provider", "--install-with", "--global", "--host", "--quarantine"}},
+			{Command: []string{"tools", "set"}, Flags: []string{"--provider", "--install-with", "--global", "--host", "--quarantine"}, RequiredFlags: []string{"--install-with"}},
 		},
 	},
 	{
@@ -306,7 +318,7 @@ var Tools = []Action{
 		ConfirmDescription: ConfirmReinstall,
 		Requirements:       []Requirement{RequiresToolName},
 		TUI:                &TUIBinding{KeyMapField: "Install", DefaultKey: "i", Label: "reinstall", Description: "Uninstall the current provider and reinstall with the preferred provider.", ConfirmDescription: ConfirmReinstall},
-		CLI:                []CLIBinding{{Command: []string{"tools", "reinstall"}, Flags: []string{"--reinstall-default", "--provider"}}},
+		CLI:                []CLIBinding{{Command: []string{"tools", "reinstall"}, Flags: []string{"--reinstall-default", "--provider"}, RequiredFlags: []string{"--reinstall-default"}}},
 	},
 	{
 		ID:                 ToolMigrateNvm,
@@ -561,7 +573,7 @@ var Dots = []Action{
 		ConfirmDescription: "confirm use local",
 		Requirements:       []Requirement{RequiresToolName},
 		TUI:                &TUIBinding{KeyMapField: "DotUseLocal", DefaultKey: "l", Label: "use local", Description: "Resolve the selected conflict with the local version.", ConfirmDescription: "confirm use local"},
-		CLI:                []CLIBinding{{Command: []string{"dots", "resolve"}, Flags: []string{"--use-local"}}},
+		CLI:                []CLIBinding{{Command: []string{"dots", "resolve"}, Flags: []string{"--use-local"}, RequiredFlags: []string{"--use-local"}}},
 	},
 	{
 		ID:                 DotsResolveAllUseRepo,
@@ -574,7 +586,10 @@ var Dots = []Action{
 		RequiresConfirm:    true,
 		ConfirmDescription: "confirm use repo for all",
 		TUI:                &TUIBinding{KeyMapField: "DotUseRepoAll", DefaultKey: "U", Label: "use repo (all)", Description: "Force-resolve every conflict with the repo version.", ConfirmDescription: "confirm use repo for all"},
-		CLI:                []CLIBinding{{Command: []string{"dots", "sync"}, Flags: []string{"--use-repo"}}},
+		CLI: []CLIBinding{
+			{Command: []string{"dots", "sync"}, Flags: []string{"--use-repo", "--use-managed"}, RequiredFlags: []string{"--use-repo"}},
+			{Command: []string{"dots", "sync"}, Flags: []string{"--use-repo", "--use-managed"}, RequiredFlags: []string{"--use-managed"}},
+		},
 	},
 	{
 		ID:                 DotsResolveAllUseLocal,
@@ -587,7 +602,7 @@ var Dots = []Action{
 		RequiresConfirm:    true,
 		ConfirmDescription: "confirm use local for all",
 		TUI:                &TUIBinding{KeyMapField: "DotUseLocalAll", DefaultKey: "L", Label: "use local (all)", Description: "Force-resolve every conflict with the local version.", ConfirmDescription: "confirm use local for all"},
-		CLI:                []CLIBinding{{Command: []string{"dots", "sync"}, Flags: []string{"--use-local"}}},
+		CLI:                []CLIBinding{{Command: []string{"dots", "sync"}, Flags: []string{"--use-local"}, RequiredFlags: []string{"--use-local"}}},
 	},
 	{
 		ID:              DotsIgnore,
@@ -648,7 +663,7 @@ var Dots = []Action{
 		Description:     "Commit dotfile changes.",
 		LongDescription: "Stage and commit pending dotfile repository changes without pushing.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "commit dotfiles", Description: "Commit pending dotfile repository changes."},
+		TUI:             &TUIBinding{KeyMapField: "DotCommit", DefaultKey: "C", Label: "commit dotfiles", Description: "Commit pending dotfile repository changes."},
 		CLI:             []CLIBinding{{Command: []string{"dots", "commit"}, Flags: []string{"--message"}}},
 		Palette:         &PaletteBinding{Command: []string{"dots", "commit"}, Description: "commit dotfile changes without pushing"},
 		PaletteEligible: true,
@@ -819,13 +834,7 @@ var Groups = []Action{
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresGroupAssignment, RequiresIgnoreScope},
 		TUI:             &TUIBinding{KeyMapField: "GroupTools", DefaultKey: "t", Label: LabelEditTools, Description: "Edit tools in the selected group."},
-		CLI: []CLIBinding{
-			{Command: []string{"groups", "move-tool"}},
-			{Command: []string{"groups", "set-tool"}},
-			{Command: []string{"groups", "remove-tool"}},
-			{Command: []string{"groups", "ignore-tool"}},
-			{Command: []string{"groups", "unignore-tool"}},
-		},
+		TUIOnlyReason:   "The CLI exposes the same mutations from the selected tool through tools.change_group and tools.ignore.",
 	},
 	{
 		ID:              GroupEditDots,
@@ -837,7 +846,7 @@ var Groups = []Action{
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresGroupAssignment},
 		TUI:             &TUIBinding{KeyMapField: "GroupDots", DefaultKey: "f", Label: LabelEditDots, Description: "Edit dotfiles in the selected group."},
-		CLI:             []CLIBinding{{Command: []string{"dots", "groups"}, Flags: []string{"--move", "--remove", "--group"}}},
+		TUIOnlyReason:   "The CLI exposes the same mutation from the selected dotfile through dots.edit_groups.",
 	},
 }
 
@@ -989,16 +998,127 @@ var Setup = []Action{
 
 var Agents = []Action{
 	{
-		ID:              AgentsRestore,
+		ID:              AgentsSync,
 		Domain:          "agents",
 		Scope:           ScopeGlobal,
 		Label:           "sync agents",
 		Description:     "Install the global APM manifest onto this host.",
 		LongDescription: "Run APM's global install against ~/.apm/apm.yml; APM owns resolution, lockfiles, security checks, and harness deployment.",
 		Mutates:         true,
+		TUI:             &TUIBinding{KeyMapField: "AgentsSync", DefaultKey: "S", Label: "sync all", Description: "Install the global APM manifest."},
 		CLI:             []CLIBinding{{Command: []string{"agents", "sync"}, Flags: []string{"--dry-run", "--frozen", "--force-template"}}},
 		Palette:         &PaletteBinding{Command: []string{"agents", "sync"}, Description: "install the global APM manifest"},
 		PaletteEligible: true,
+	},
+	{
+		ID:              AgentsAdd,
+		Domain:          "agents",
+		Scope:           ScopeGlobal,
+		Label:           "add package",
+		Description:     "Browse registered marketplaces and install one APM package.",
+		LongDescription: "Open the package registry in the TUI or install a named global APM package from the CLI.",
+		Mutates:         true,
+		TUI:             &TUIBinding{KeyMapField: "AgentsAdd", DefaultKey: "a", Label: "add", Description: "Browse and install an APM package."},
+		CLI:             []CLIBinding{{Command: []string{"agents", "add"}, Flags: []string{"--skill"}}},
+	},
+	{
+		ID:              AgentsUpdate,
+		Domain:          "agents",
+		Scope:           ScopeRow,
+		Label:           "update package",
+		Description:     "Update the selected APM package.",
+		LongDescription: "Update one unpinned, non-local package selected in the Agents view.",
+		Mutates:         true,
+		TUI:             &TUIBinding{KeyMapField: "AgentsUpdate", DefaultKey: "u", Label: "update", Description: "Update the selected APM package."},
+		TUIOnlyReason:   "The CLI update command updates the complete global APM workspace; package selection is currently a TUI-only operation.",
+	},
+	{
+		ID:              AgentsUpdateAll,
+		Domain:          "agents",
+		Scope:           ScopeGlobal,
+		Label:           "update all packages",
+		Description:     "Update all global APM packages.",
+		LongDescription: "Update every dependency in the global APM workspace and redeploy affected files.",
+		Mutates:         true,
+		TUI:             &TUIBinding{KeyMapField: "AgentsUpdateAll", DefaultKey: "U", Label: "upgrade all", Description: "Update all global APM packages."},
+		CLI:             []CLIBinding{{Command: []string{"agents", "update"}}},
+	},
+	{
+		ID:              AgentsRemove,
+		Domain:          "agents",
+		Scope:           ScopeRow,
+		Label:           "uninstall package",
+		Description:     "Uninstall an APM package and its deployed files.",
+		LongDescription: "Remove one selected package from the global APM workspace and clean up its deployed files.",
+		Mutates:         true,
+		TUI:             &TUIBinding{KeyMapField: "AgentsRemove", DefaultKey: "x", Label: "uninstall", Description: "Uninstall the selected APM package.", ConfirmDescription: "confirm uninstall"},
+		CLI:             []CLIBinding{{Command: []string{"agents", "remove"}}},
+	},
+	{
+		ID:              AgentsRefresh,
+		Domain:          "agents",
+		Scope:           ScopeGlobal,
+		Label:           "refresh packages",
+		Description:     "Reload installed packages and check for available updates.",
+		LongDescription: "Reload the Agents view and query the global APM workspace for outdated dependencies without applying changes.",
+		Mutates:         false,
+		TUI:             &TUIBinding{KeyMapField: "AgentsRefresh", DefaultKey: "R", Label: "refresh", Description: "Reload packages and check for updates."},
+		CLI:             []CLIBinding{{Command: []string{"agents", "outdated"}}},
+	},
+	{
+		ID:              AgentsMigrate,
+		Domain:          "agents",
+		Scope:           ScopeGlobal,
+		Label:           "migrate agent declarations",
+		Description:     "Preview or write an APM manifest from a pre-migration snapshot.",
+		LongDescription: "Convert a host's pre-migration agent declarations into the guarded host APM template; preview unless --write is supplied.",
+		Mutates:         true,
+		CLIOnlyReason:   "One-time migration requires an explicit host and snapshot options rather than an interactive TUI action.",
+		CLI:             []CLIBinding{{Command: []string{"agents", "migrate"}, Flags: []string{"--host", "--snapshot", "--dry-run", "--write"}}},
+	},
+	{
+		ID:              AgentsPrune,
+		Domain:          "agents",
+		Scope:           ScopeGlobal,
+		Label:           "prune packages",
+		Description:     "Remove unused APM dependencies.",
+		LongDescription: "Ask APM to remove dependencies no longer required by the global workspace.",
+		Mutates:         true,
+		CLIOnlyReason:   "Pruning is an explicit maintenance operation and is not exposed in the TUI.",
+		CLI:             []CLIBinding{{Command: []string{"agents", "prune"}}},
+	},
+	{
+		ID:              AgentsMarketplaceAdd,
+		Domain:          "agents",
+		Scope:           ScopeGlobal,
+		Label:           "add marketplace",
+		Description:     "Register an APM marketplace.",
+		LongDescription: "Add a marketplace source to APM's local registry with an optional display name and Git ref.",
+		Mutates:         true,
+		CLIOnlyReason:   "Marketplace registry administration is exposed through the CLI.",
+		CLI:             []CLIBinding{{Command: []string{"agents", "marketplace", "add"}, Flags: []string{"--name", "--ref"}}},
+	},
+	{
+		ID:              AgentsMarketplaceUpdate,
+		Domain:          "agents",
+		Scope:           ScopeGlobal,
+		Label:           "update marketplaces",
+		Description:     "Refresh registered APM marketplace data.",
+		LongDescription: "Update one named marketplace or every registered marketplace in APM's local registry.",
+		Mutates:         true,
+		CLIOnlyReason:   "Marketplace registry administration is exposed through the CLI.",
+		CLI:             []CLIBinding{{Command: []string{"agents", "marketplace", "update"}}},
+	},
+	{
+		ID:              AgentsMarketplaceRemove,
+		Domain:          "agents",
+		Scope:           ScopeGlobal,
+		Label:           "remove marketplace",
+		Description:     "Remove a registered APM marketplace.",
+		LongDescription: "Remove one marketplace from APM's local registry.",
+		Mutates:         true,
+		CLIOnlyReason:   "Marketplace registry administration is exposed through the CLI.",
+		CLI:             []CLIBinding{{Command: []string{"agents", "marketplace", "remove"}}},
 	},
 }
 
@@ -1023,7 +1143,7 @@ var Diagnostics = []Action{
 		LongDescription: "Remove duplicate include-chain definitions and dead dotfile ignore patterns, then rerun doctor.",
 		Mutates:         true,
 		TUI:             &TUIBinding{KeyMapField: "Fallback", DefaultKey: "f", Label: "fix issues", Description: "Apply safe fixes for the current Doctor findings."},
-		CLI:             []CLIBinding{{Command: []string{"doctor"}, Flags: []string{"--fix", "--dry-run"}}},
+		CLI:             []CLIBinding{{Command: []string{"doctor"}, Flags: []string{"--fix", "--dry-run"}, RequiredFlags: []string{"--fix"}}},
 	},
 }
 

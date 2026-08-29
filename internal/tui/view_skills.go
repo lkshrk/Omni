@@ -137,7 +137,7 @@ func (m Model) agentsDetailBlock(description string, details []string, ctx hintC
 	}
 	var interaction string
 	if ctx == hintCtxAgentsRow && m.agentsConfirmIdx == m.agentsCursor {
-		interaction = renderConfirmActionHints(m, hintPrefix, agentsRowUninstallBinding(), "confirm uninstall")
+		interaction = renderConfirmActionHints(m, hintPrefix, m.keys.AgentsRemove, "confirm uninstall")
 	} else if ctx == hintCtxAgentsRow && m.apmRunning && m.agentsRowOpSpec != "" {
 		if row, ok := m.agentsSelectedRow(); ok && row.kind == agentsRowPackage && agentsUninstallSpec(row.pkg) == m.agentsRowOpSpec {
 			interaction = renderRowOperationStatusLine(m, prefix, m.spinner.View()+" running "+m.apmCommand+"…")

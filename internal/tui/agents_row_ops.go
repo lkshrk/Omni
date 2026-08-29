@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
@@ -104,10 +105,10 @@ func agentsRowHintItems(m Model) []hintItem {
 	}
 	var items []hintItem
 	if _, status := agentsUpdateAction(row.pkg); status == "" {
-		items = append(items, hintFromBinding(agentsRowUpdateBinding()))
+		items = append(items, hintFromBinding(m.keys.AgentsUpdate))
 	}
 	if _, status := agentsUninstallAction(row.pkg); status == "" {
-		items = append(items, hintFromBinding(agentsRowUninstallBinding()))
+		items = append(items, hintFromBinding(m.keys.AgentsRemove))
 	}
 	return items
 }
@@ -167,8 +168,10 @@ func (m *Model) runAPMRowOp(command, spec string, args ...string) []tea.Cmd {
 	return cmds
 }
 
-func (m *Model) handleAgentsRowOpKeyMsg(key string) (bool, []tea.Cmd) {
-	if key != "u" && key != "x" {
+func (m *Model) handleAgentsRowOpKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
+	update := key.Matches(msg, m.keys.AgentsUpdate)
+	remove := key.Matches(msg, m.keys.AgentsRemove)
+	if !update && !remove {
 		return false, nil
 	}
 	row, ok := m.agentsSelectedRow()
@@ -185,7 +188,7 @@ func (m *Model) handleAgentsRowOpKeyMsg(key string) (bool, []tea.Cmd) {
 	if m.agentsOutdatedChecking {
 		return true, []tea.Cmd{setStatus(m, agentsUpdateCheckBusyStatus, false)}
 	}
-	if key == "u" {
+	if update {
 		m.agentsConfirmIdx = -1
 		return true, m.doAgentsRowUpdate(row.pkg)
 	}

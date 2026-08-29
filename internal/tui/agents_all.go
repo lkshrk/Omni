@@ -212,48 +212,53 @@ func (m *Model) doAgentsUpdateAll() []tea.Cmd {
 }
 
 func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
-	key := msg.String()
 	if !m.agentsRegistryMode {
-		if handled, cmds := m.handleAgentsRowOpKeyMsg(key); handled {
+		if handled, cmds := m.handleAgentsRowOpKeyMsg(msg); handled {
 			return true, cmds
 		}
 	}
-	if key != "U" && key != "S" && key != "R" && key != "e" && key != "/" && key != "enter" && key != "a" {
+	updateAll := key.Matches(msg, m.keys.AgentsUpdateAll)
+	syncAll := key.Matches(msg, m.keys.AgentsSync)
+	refresh := key.Matches(msg, m.keys.AgentsRefresh)
+	add := key.Matches(msg, m.keys.AgentsAdd)
+	keyText := msg.String()
+	if !updateAll && !syncAll && !refresh && !add && keyText != "e" && keyText != "/" && keyText != "enter" {
 		return false, nil
 	}
 	m.agentsConfirmIdx = -1
-	if key == "e" {
+	if keyText == "e" {
 		return true, []tea.Cmd{m.openTraceLog()}
 	}
-	if key == "/" || key == "a" {
+	if add {
 		// Registry mode already owns the input; re-entering it would only reset the query.
 		if m.agentsRegistryMode {
 			return true, nil
 		}
-		if key == "/" {
-			m.openAgentsFilter()
+		return true, m.openAgentsRegistry()
+	}
+	if keyText == "/" {
+		if m.agentsRegistryMode {
 			return true, nil
 		}
+		m.openAgentsFilter()
+		return true, nil
 	}
-	if key == "enter" {
+	if keyText == "enter" {
 		if m.agentsRegistryMode {
 			return true, m.handleAgentsRegistryEnter()
 		}
 		return false, nil
 	}
-	if key == "a" {
-		return true, m.openAgentsRegistry()
-	}
 	if m.apmRunning {
 		return true, []tea.Cmd{setStatus(m, agentsBusyStatus, true)}
 	}
-	if m.agentsOutdatedChecking && (key == "U" || key == "S" || key == "R") {
+	if m.agentsOutdatedChecking && (updateAll || syncAll || refresh) {
 		return true, []tea.Cmd{setStatus(m, agentsUpdateCheckBusyStatus, false)}
 	}
-	switch key {
-	case "U":
+	switch {
+	case updateAll:
 		return true, m.doAgentsUpdateAll()
-	case "S":
+	case syncAll:
 		return true, m.doAgentsSyncAll()
 	default:
 		m.apmCommand, m.apmOutput, m.apmErr = "", "", nil

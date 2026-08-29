@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/actions"
 	"github.com/lkshrk/omni/internal/app"
@@ -105,54 +106,69 @@ func TestCanonicalActionKeys(t *testing.T) {
 	}
 }
 
-func TestDurableTUIActionsAreCataloged(t *testing.T) {
+func TestDefaultKeyMapFieldsAreCatalogedOrExplicitlyTransient(t *testing.T) {
 	t.Parallel()
-	for _, id := range []actions.ID{
-		actions.ToolInstall,
-		actions.ToolDelete,
-		actions.ToolUpdate,
-		actions.ToolUpdateAll,
-		actions.ToolSyncAll,
-		actions.ToolClaim,
-		actions.ToolIgnore,
-		actions.ToolChangeGroup,
-		actions.ToolPinProvider,
-		actions.ToolReinstallDefault,
-		actions.ToolRefresh,
-		actions.DotsSync,
-		actions.DotsRefresh,
-		actions.DotsAdd,
-		actions.DotsEditGroups,
-		actions.DotsVariant,
-		actions.DotsDelete,
-		actions.DotsResolveUseRepo,
-		actions.DotsResolveUseLocal,
-		actions.DotsIgnore,
-		actions.DotsEnable,
-		actions.DotsDisable,
-		actions.DotsReminder,
-		actions.DotsWatch,
-		actions.GroupCreate,
-		actions.GroupRename,
-		actions.GroupDelete,
-		actions.GroupEditTools,
-		actions.GroupEditDots,
-		actions.HostCreate,
-		actions.HostDelete,
-		actions.HostEditGroups,
-		actions.SettingsSet,
-		actions.SettingsProvider,
-		actions.SettingsReset,
-		actions.SettingsResetCache,
-		actions.SetupInit,
-	} {
-		action, ok := actions.Get(id)
-		if !ok {
-			t.Fatalf("missing TUI durable action %s", id)
+	cataloged := map[string][]actions.ID{}
+	for _, action := range actions.All() {
+		if action.TUI != nil {
+			cataloged[action.TUI.KeyMapField] = append(cataloged[action.TUI.KeyMapField], action.ID)
 		}
+	}
+	navigation := "Navigation or filtering input; it does not execute a product action."
+	exemptions := map[string]string{
+		"Up": navigation, "Down": navigation, "Top": navigation, "Bottom": navigation,
+		"HalfPageUp": navigation, "HalfPageDown": navigation, "PageUp": navigation, "PageDown": navigation,
+		"ProviderPrev": navigation, "ProviderNext": navigation, "Search": navigation,
+		"Back": navigation, "Tab": navigation, "PrevTab": navigation, "NextTab": navigation,
+		"GroupPrev": navigation, "GroupNext": navigation,
+		"Quit":          "Application lifecycle control; it does not execute a product action.",
+		"Palette":       "Transient command launcher; its durable entries are derived from action palette bindings.",
+		"Help":          "Transient help overlay; it does not execute a product action.",
+		"ApplySolution": "Contextual dispatcher; the selected durable provider remedy is cataloged separately.",
+		"ErrorLog":      "Read-only transient error-log overlay.",
+		"EditIgnore":    "Contextual alternate entry to the cataloged tool ignore action.",
+	}
+	keyMapType := reflect.TypeOf(KeyMap{})
+	for i := 0; i < keyMapType.NumField(); i++ {
+		field := keyMapType.Field(i)
+		if len(cataloged[field.Name]) > 0 {
+			if _, exempt := exemptions[field.Name]; exempt {
+				t.Fatalf("KeyMap.%s is both action-cataloged and exempt", field.Name)
+			}
+			continue
+		}
+		if reason := exemptions[field.Name]; reason == "" {
+			t.Fatalf("KeyMap.%s needs an action catalog binding or an explicit navigation/transient exemption", field.Name)
+		}
+	}
+	for field, reason := range exemptions {
+		if reason == "" {
+			t.Fatalf("KeyMap.%s has an empty exemption reason", field)
+		}
+		if _, ok := keyMapType.FieldByName(field); !ok {
+			t.Fatalf("stale KeyMap exemption %s", field)
+		}
+	}
+}
+
+func TestDurableAgentsTUIActionsHonorCatalogKeyBindings(t *testing.T) {
+	for _, action := range actions.Agents {
 		if action.TUI == nil {
-			t.Fatalf("TUI durable action %s has no TUI binding", id)
+			continue
 		}
+		action := action
+		t.Run(string(action.ID), func(t *testing.T) {
+			m := agentsRowsModel(t)
+			field := reflect.ValueOf(&m.keys).Elem().FieldByName(action.TUI.KeyMapField)
+			if !field.IsValid() || !field.CanSet() {
+				t.Fatalf("%s references unusable KeyMap field %q", action.ID, action.TUI.KeyMapField)
+			}
+			field.Set(reflect.ValueOf(key.NewBinding(key.WithKeys("z"), key.WithHelp("z", action.TUI.Label))))
+			handled, _ := m.handleAgentsGlobalActionKeyMsg(tea.KeyPressMsg{Code: 'z', Text: "z"})
+			if !handled {
+				t.Fatalf("%s does not route through KeyMap.%s", action.ID, action.TUI.KeyMapField)
+			}
+		})
 	}
 }
 
