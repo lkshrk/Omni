@@ -18,8 +18,8 @@ Bootstrap does four jobs:
 
 Agent migration is deliberately separate from bootstrap. Run
 `omni agents migrate --host <name>` to print the APM manifest a pre-APM host's
-declarations map to; it writes nothing. See
-[Agent Migration](migrating-skills.md).
+declarations map to. After reviewing the preview, use `--write`, then run
+`omni agents sync`. See [Agent Migration](migrating-skills.md).
 
 ## CLI-Only Bootstrap
 

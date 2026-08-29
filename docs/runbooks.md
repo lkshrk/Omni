@@ -285,11 +285,11 @@ omni doctor
 ## Manual TUI QA In A Browser
 
 `scripts/tui-e2e.sh up` builds a static `omni`, seeds an isolated Alpine
-container (manifest skill package, a legacy CLI-managed install for
-import/claim flows, a planted drifted skill, and a stubbed catalog for
-`find`), and serves the TUI at `http://127.0.0.1:7681/` through `ttyd`. Each
+container, and serves the TUI at `http://127.0.0.1:7681/` through `ttyd`. Each
 browser connection spawns a fresh TUI process against the container's
-persistent state, so flows that mutate state carry over between reloads.
+persistent state, so flows that mutate state carry over between reloads. This
+is a rendering/navigation rig; APM lifecycle coverage lives in the Docker
+integration tests.
 
 Requirements: `docker` and `ttyd` on the host. `scripts/tui-e2e.sh down`
 removes the container and stops the bridge. The page can be driven manually

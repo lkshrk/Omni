@@ -59,8 +59,10 @@ omni dots sync --dry-run
 
 ## Agent manifest
 
-`omni agents migrate` is read-only: it parses a snapshot and prints a manifest.
-It writes no file and runs no APM command.
+`omni agents migrate` previews by default: it parses a snapshot, prints a
+manifest, writes no file, and runs no APM command. `--write` publishes verified
+local wrappers and atomically updates only the migration-owned host template;
+it still does not write the live manifest or run APM.
 
 The host template is the one place Omni overwrites APM state. Sync replaces
 `~/.apm/apm.yml` wholesale with `~/.config/omni/apm.yml`, and the install that

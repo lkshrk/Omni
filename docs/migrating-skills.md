@@ -15,8 +15,9 @@ omni agents migrate --host workstation
 ```
 
 This reads the snapshot, prints the apm.yml those declarations map to, and
-writes nothing. Trailing `# apm marketplace add` comment lines cover the
-marketplace registrations apm.yml cannot express.
+writes nothing. `--dry-run` is an explicit alias for the same preview. Trailing
+`# apm marketplace add` comment lines cover the marketplace registrations
+apm.yml cannot express.
 
 Omni finds the snapshot by resolving the loaded config path through its symlink
 and globbing `.omni-apm-migration-backup-*` next to it. If there is no such
@@ -29,20 +30,25 @@ host, plus a group named after the host itself. See
 
 ## Adopt it
 
-Review the output, then save it as the host template and sync:
+Review the output, then let Omni publish the verified wrappers and marked host
+template before syncing:
 
 ```sh
-omni agents migrate --host workstation > ~/.config/omni/apm.yml
-omni agents sync --force-template
+omni agents migrate --host workstation --write
+omni agents sync
 ```
+
+`--write` only publishes content-addressed local APM wrappers and atomically
+updates the migration-owned host template. It never writes the live
+`~/.apm/apm.yml` or runs APM. It refuses to replace an unmarked template.
 
 Keep the printed `# apm marketplace add` comment lines in the template: sync
 registers any marketplace they declare that APM does not know yet, so no manual
 registration step is needed.
 
-`--force-template` is required here: the first sync that finds both a template
-and an existing `~/.apm/apm.yml` refuses to overwrite the live manifest and
-warns instead, so the two can be compared before the template wins.
+If a live manifest already exists, the first sync refuses to overwrite it and
+asks you to compare it with the generated template. After that comparison, run
+`omni agents sync --force-template` to adopt the template.
 
 Adapter-specific state that cannot be represented losslessly—such as some
 client databases or native MCP formats—is not rendered. Move it by hand or

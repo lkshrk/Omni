@@ -191,7 +191,8 @@ omni dots groups nvim --remove old-host
 | `omni agents prune` | no | APM dependency state | `omni agents audit` |
 | `omni agents deps list|why` | no | Read-only APM state | already read-only |
 | `omni agents marketplace ...` | no | APM marketplace state, network | `omni agents marketplace list` |
-| `omni agents migrate --host <name>` | no | Read-only | already read-only; it prints a manifest and writes nothing |
+| `omni agents migrate --host <name>` | no | Read-only preview | already read-only; `--dry-run` is an explicit alias |
+| `omni agents migrate --host <name> --write` | no | Publishes verified wrappers and replaces only a migration-owned host template | run the preview first |
 | `omni agents sync --force-template` | no | Overwrites `~/.apm/apm.yml` with the host template, plus everything `agents sync` touches | Diff the template against the live manifest first |
 
 `agents sync` directly invokes APM's global install lifecycle against the

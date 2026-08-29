@@ -129,20 +129,6 @@ merged mappings, same-line sibling content, ambiguous comment ownership, and
 unsafe symlink/source layouts are reported but left byte-for-byte unchanged. If
 any exact candidate has an unsupported source layout, the fixer removes none.
 
-The current `context-mode` standalone MCP uses `command: node` with
-`args: [./start.mjs]`, which does not fingerprint identically to the child
-provided by `mksglu/context-mode`. Doctor therefore refuses to remove it. Keep
-the `mksglu/context-mode` package, delete only the top-level `context-mode` item
-from `dependencies.mcp` in the canonical host template, then run:
-
-```sh
-omni doctor
-omni agents sync
-```
-
-Do not edit `~/.apm/apm.yml` directly when a host template exists; the next
-sync would replace that edit.
-
 ## Migrating a pre-APM host
 
 `omni agents migrate --host <name>` previews the apm.yml equivalent of the agent
@@ -206,71 +192,26 @@ manual `apm marketplace remove`.
 
 ### Verified wrappers
 
-Omni snapshots every selected owner into one local package at:
+With `--write`, Omni snapshots each selected legacy owner into one
+content-addressed local APM package under:
 
 ```text
 <Omni state>/agents-migration/bundles/<sha256>/
-  apm.yml
-  runtime/...
-  skills/...
-  hooks/...
-  agents/...
-  commands/...
 ```
 
-The SHA-256 covers the normalized manifest plus every copied file's destination,
-content, and executable mode. Wrapper preparation uses private temporary
-directories and atomic rename. An existing hash directory must match exactly or
-migration stops as corruption.
-
-Source `apm.yml` packages are wrapped too. Omni preserves supported manifest
-metadata and dependency semantics while rebasing bundle-relative paths into the
-wrapper. Unsupported native extensions, dependency forms, or other behavior
-that cannot be represented losslessly blocks the owner instead of being
-silently dropped.
-
-Migrate never deletes stale wrapper hashes. The live manifest may still point
-at the previous template's hash until `omni agents sync` finishes, so old hashes
-remain safe inputs. Rerun `omni agents migrate --host <name> --write` after the
-copied source snapshot changes to publish and select the refreshed wrapper.
-
-Migration is offline and non-executing. It does not read `apm.lock.yaml`, the
-live APM package cache, the network, or APM source, and it does not expand
-environment variables or run bundle commands, hooks, package managers, or
-clients. It rejects traversal, absolute or NUL-containing child paths,
-symlinked/escaping roots, special files, unreadable runtime files, and missing
-runtime references. Literal values in authorization, cookie, token, secret,
-password, or API-key header/environment fields block migration; symbolic
-`${VAR}` and `${env:VAR}` references remain symbolic.
-
-The scan is capped at 256 owners, 4,096 filesystem entries and 512 MiB of
-runtime data per owner, depth 32, 1 MiB per manifest/config, 16 MiB total
-manifest/config data, 64 MiB per runtime file, and 1 GiB total runtime data.
+The package preserves supported source metadata and runtime files while
+rebasing relative paths. Migration is offline and non-executing; unsafe paths,
+literal secrets, unreadable files, ambiguous ownership, or unsupported native
+behavior block the whole write. Rerun `--write` after the snapshot changes;
+old hashes remain available until no live manifest references them.
 
 ### Lifecycle handoff
 
 `omni agents sync` is the only command that materializes the live manifest and
-invokes APM. Migrate and sync serialize on the same canonical-template lock, so
-a sync cannot observe a partially published migration.
-
-Sync performs package-child ownership preflight for marked and unmarked
-templates. It acquires the canonical-template lock, then the global APM
-workspace lock; under both locks it hashes and parses the candidate template,
-reads installed package manifests, classifies duplicates/conflicts/ambiguities,
-and rechecks the inspected identities and candidate hash. The exact candidate
-bytes that passed preflight are the bytes materialized; a concurrent template
-edit makes sync refuse instead. Preflight also retains the migration marker,
-owner identity, wrapper path, content hash, file mode, and symlink-boundary
-checks. Any failure happens before writing `~/.apm/apm.yml`, registering a
-marketplace, or invoking APM. Dry-run uses the same preflight.
-
-Both locks remain held through APM completion for Omni-mediated operations.
-Running `apm` directly at the same time as `omni agents sync` is unsupported:
-external APM processes do not honor Omni's workspace lock. APM itself is
-unchanged and remains the runtime owner after preflight succeeds.
-
-The isolated migration lifecycle smoke covers preview, write, sync/install,
-bundled MCP execution, reinstall, and uninstall.
+invokes APM. Migrate and sync share the template/workspace locks and recheck the
+candidate before mutation, so a concurrent edit fails before the live manifest
+or APM changes. Do not run `apm` directly in parallel with sync; external APM
+processes do not participate in Omni's lock.
 
 > **Known APM 0.29.0 limitation:** a global `apm audit --ci` may falsely
 > report managed `.agents/**` files as missing or unintegrated because audit

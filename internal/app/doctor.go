@@ -112,7 +112,7 @@ func (a *App) doctorLegacyAgents(result *DoctorResult) {
 		return
 	}
 	result.addCheck("agents-legacy", "Legacy agents", DoctorStatusWarn,
-		"agents declarations present in config — run 'omni agents migrate --host <host>' and move the output to the dotfiles template (docs/agents.md)")
+		"agents declarations present in config — preview with 'omni agents migrate --host <host>', then rerun with --write (docs/agents.md)")
 }
 
 func (a *App) doctorCache(result *DoctorResult) {

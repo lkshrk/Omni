@@ -76,7 +76,6 @@ nav:
   - Reference:
       - CLI Reference: cli.md
       - Command Matrix: command-matrix.md
-      - Schema Reference: schema-reference.md
       - Architecture: architecture.md
       - Glossary: glossary.md
   - Operations:
@@ -86,4 +85,3 @@ nav:
       - Troubleshooting: troubleshooting.md
       - Development: development.md
       - Test Matrix: test-matrix.md
-      - Documentation Maintenance: documentation-maintenance.md

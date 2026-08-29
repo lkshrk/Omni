@@ -28,20 +28,10 @@ conflict. If a package has not been installed and its manifest is unavailable,
 sync permits a package-only first install but blocks a template that also
 declares standalone MCP/LSP services rather than guessing ownership.
 
-For an installed package with no `apm.yml`, Omni may prove that the package has
-no service children from `~/.apm/apm.lock.yaml` and the installed module. This
-strict negative proof applies only to pinned `claude_skill` and `skill_bundle`
-entries with one unambiguous lock identity, a resolved commit, a non-empty
-skill-only deployed-file inventory, canonical regular `SKILL.md` files, and no
-plugin, MCP, or LSP carrier recognized by pinned APM 0.29.0. DeepWiki is the
-`skill_bundle` case; Shiplight is the `claude_skill` case. Its separately
-declared `shiplight` MCP remains independent.
-
-Missing or changed lock data, unknown/plugin/mixed package types, unsafe paths,
-incomplete skill files, and any present or unreadable carrier keep ownership
-unavailable. Sync and Doctor fix recheck the lock, module, positive skill files,
-and negative carrier evidence under the existing locks before mutation. No new
-state file or synthesized package version is created.
+Manifestless skill packages use strict, fail-closed evidence from the APM lock
+and installed module; Omni creates no replacement state file or synthesized
+package metadata. See [Package-owned MCP and LSP](agents.md#package-owned-mcp-and-lsp)
+for the supported boundary and Doctor behavior.
 
 ## Omni state
 

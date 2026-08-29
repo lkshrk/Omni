@@ -37,9 +37,19 @@ omni doctor
 omni reconcile
 ```
 
-Before broad repairs, read the [Safety Model](docs/safety.md). For agent
-resources, run `omni agents migrate --host <name>` to render a pre-APM host's
-declarations as an APM manifest, then follow the
+Before broad repairs, read the [Safety Model](docs/safety.md). To move a
+pre-APM host into APM, preview its manifest, write the verified host template,
+then sync it:
+
+```sh
+omni agents migrate --host <name>
+omni agents migrate --host <name> --write
+omni agents sync
+```
+
+The Agents view checks package updates on startup; press `R` to check again.
+Use `omni agents outdated` for a read-only CLI check and `omni agents update`
+to apply updates. Ownership, migration, and Doctor behavior are covered in the
 [Agents guide](docs/agents.md).
 
 ## Docs

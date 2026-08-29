@@ -90,8 +90,21 @@ mkdocs serve
 The `Docs` GitHub Actions workflow builds the MkDocs site on pull requests and
 deploys it to GitHub Pages from `main`.
 
-See [Documentation Maintenance](documentation-maintenance.md) for the page
-ownership matrix, CLI drift checks, and docs quality gates.
+Keep README as the minimal entry point and update the focused guide plus its
+reference page:
+
+| Change | Review |
+| --- | --- |
+| CLI command or flag | [CLI Reference](cli.md), [Command Matrix](command-matrix.md) |
+| Configuration or state | [Configuration](configuration.md), [State And Files](state-and-files.md) |
+| Tool/provider behavior | [Tools](tools.md), [Providers](providers.md), [Troubleshooting](troubleshooting.md) |
+| Dotfile behavior | [Dotfiles](dotfiles.md), [Safety Model](safety.md), [Runbooks](runbooks.md) |
+| Agent/APM behavior | [Agents](agents.md), [CLI Reference](cli.md), [TUI](tui.md) when interactive |
+
+Use `omni <command> --help` as the final syntax source. `make docs-build` is the
+local strict-build check. The [Docs workflow](https://github.com/lkshrk/omni/blob/main/.github/workflows/docs.yml)
+also checks links, anchors, headings, and placeholder markers. Prefer
+cross-links over copying long explanations between pages.
 
 ## Demo GIF
 
@@ -111,7 +124,6 @@ notes. Release automation is CI-gated by commit SHA.
 ## More References
 
 - [Architecture](architecture.md)
-- [Documentation maintenance](documentation-maintenance.md)
 - [Test matrix](test-matrix.md)
 - [Contributing guide](https://github.com/lkshrk/omni/blob/main/CONTRIBUTING.md)
 - [Settings schema](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.schema.json)

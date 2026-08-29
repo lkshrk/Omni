@@ -1,5 +1,7 @@
 # TUI
 
+## Agent status
+
 The Agents view is a navigable per-package list: one row per declared or locked
 package with its source, version, targets, and status (installed, drifted,
 unavailable, missing, or orphaned). Rows come from reading `~/.apm/apm.yml` and
@@ -17,6 +19,8 @@ entry whose command binary is not on `PATH` is reported `unavailable`: APM write
 such entries to the lockfile without ever checking that they can run. An empty
 section is omitted.
 
+## Ownership and runtime health
+
 Package-owned MCP/LSP children render under the selected package as
 `provides:`, sorted by kind and name, instead of appearing again as top-level
 service rows. `issues:` shows duplicate, conflict, ambiguity, unavailable
@@ -31,10 +35,6 @@ visible with `conflicts with package <owner>` while the package shows the same
 problem. Multi-owner ambiguity marks every involved package. Independent and
 unmanaged services remain top-level. Package-owned child health never improves
 an already missing, orphaned, unavailable, or drifted package.
-
-The current `context-mode` declarations differ, so the Agents view keeps one
-degraded package row plus the conflicting standalone MCP row until the
-top-level `context-mode` item is manually removed from the canonical template.
 
 Those two sections also read the deployed harness files — `~/.claude.json`
 (`mcpServers`, `lspServers`) and `~/.codex/config.toml` (`[mcp_servers.<name>]`)
@@ -68,6 +68,8 @@ definitions, multi-owner ambiguity, and unavailable package evidence when the
 same template declares standalone MCP/LSP services. These checks run before the
 live manifest is materialized, including for dry-run.
 
+## Navigation and package actions
+
 `/` filters every section by name and by source or transport, hides the
 sections it empties, and reports how many rows are showing; the arrow keys keep
 moving the selection while the query has focus. The selected row always carries
@@ -96,6 +98,8 @@ one. An uninstall re-deploys the surviving packages and can drop their trusted
 still runs APM's scope-wide passes, so its workspace-wide summary counts are
 dropped from the footer — the full output stays in the trace log.
 
+## Registry and tab actions
+
 `a` opens the registry: every plugin the registered marketplaces offer, read
 from `~/.apm/marketplaces.json` and the catalogs under
 `~/.apm/cache/marketplace/`. APM files a catalog under the registered
@@ -108,12 +112,15 @@ present in the lockfile are marked and cannot be re-installed. Sync never
 refreshes an existing cache, so a marketplace with no resolvable catalog says
 to run `apm marketplace update`.
 
-It also exposes sync/install (`S`), update (`U`), row refresh (`R`), and the
-trace log (`e`). `S` runs the same lifecycle as `omni agents sync`, so it materializes
-the host template before installing and reports the divergence warning below the
-list. The TUI takes no flags; use the CLI for `--frozen`, `--dry-run`, or
-`--force-template`. `U` dispatches APM; `R` only re-reads the manifest and
-lockfile. Full APM output goes to the trace log, not the pane.
+It also exposes sync/install (`S`), update (`U`), refresh (`R`), and the trace
+log (`e`). `S` runs the same lifecycle as `omni agents sync`, so it materializes
+the host template before installing and reports the divergence warning below
+the list. The TUI takes no flags; use the CLI for `--frozen`, `--dry-run`, or
+`--force-template`. `U` dispatches APM. The view checks for package updates on
+startup; `R` reloads the manifest and lockfile and runs that check again.
+Available versions appear in a separate `Updates Available` section. A failed
+check leaves the package rows usable and offers `R` to retry. Full APM output
+goes to the trace log, not the pane.
 
 Agent desired/runtime state is owned by APM (`~/.apm/apm.yml`, lockfile, and
 `~/.apm/marketplaces.json`). Targets come from APM, including targets added after

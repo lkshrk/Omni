@@ -59,7 +59,7 @@ omni reconcile
 | Understand the data model | [Core Concepts](concepts.md) |
 | Know where state lives | [State And Files](state-and-files.md) |
 | Copy a working workflow | [Recipes](recipes.md) |
-| Edit `settings.json` directly | [Configuration](configuration.md) and [Schema Reference](schema-reference.md) |
+| Edit `settings.json` directly | [Configuration](configuration.md) |
 | Understand provider resolution | [Providers](providers.md) |
 | Manage tools | [Tools](tools.md) |
 | Manage dotfiles | [Dotfiles](dotfiles.md) |
@@ -72,4 +72,4 @@ omni reconcile
 | Look up terminology | [Glossary](glossary.md) |
 | Answer common questions | [FAQ](faq.md) |
 | Fix a broken setup | [Troubleshooting](troubleshooting.md) |
-| Work on Omni itself | [Development](development.md), [Test Matrix](test-matrix.md), and [Documentation Maintenance](documentation-maintenance.md) |
+| Work on Omni itself | [Development](development.md) and [Test Matrix](test-matrix.md) |

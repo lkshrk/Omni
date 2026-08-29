@@ -41,4 +41,5 @@ sequenceDiagram
 
 The recorded hash is Omni's whole state for this surface. A pre-APM host's old
 declarations live in a read-only snapshot committed in dotfiles;
-`omni agents migrate` renders them as a manifest and writes nothing.
+`omni agents migrate` previews the rendered manifest, while `--write` publishes
+verified local wrappers and updates only the marked host template.
