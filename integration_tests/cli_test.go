@@ -40,6 +40,10 @@ var githubCLILatestRelease []byte
 
 // Registers "omni" as a testscript command so the real binary runs in a subprocess, with no separate build step.
 func TestMain(m *testing.M) {
+	if err := os.Setenv("OMNI_TEST_COMMAND_CHILD", "testscript"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 	os.Exit(testscript.RunMain(m, map[string]func() int{
 		"omni":                                func() int { cli.Execute(); return 0 },
 		"omni-assert-claude-mcp-header":       assertClaudeMcpHeaderMain,
@@ -763,13 +767,113 @@ func TestCLI(t *testing.T) {
 		Files:               scripts,
 		RequireExplicitExec: true,
 		Setup: func(env *testscript.Env) error {
-			// Cache dir points at the per-test work dir so SQLite stays writable under testscript's HOME=/no-home.
-			env.Vars = append(env.Vars, "OMNI_CACHE_DIR="+filepath.Join(env.WorkDir, ".omni-cache"))
-			// Use a fixed hostname so txtar scripts can configure hosts deterministically.
-			env.Vars = append(env.Vars, "OMNI_HOSTNAME=testhost")
-			return nil
+			return setupCLITestSandbox(env)
 		},
 	})
+}
+
+func setupCLITestSandbox(env *testscript.Env) error {
+	parentRoot := os.Getenv("OMNI_TEST_ROOT")
+	parentNonce := os.Getenv("OMNI_TEST_NONCE")
+	root, err := filepath.EvalSymlinks(env.WorkDir)
+	if err != nil {
+		return err
+	}
+	canonicalParent, err := filepath.EvalSymlinks(parentRoot)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(canonicalParent, root)
+	if err != nil || parentNonce == "" || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return fmt.Errorf("testscript work dir %q is outside validated parent sandbox %q", root, canonicalParent)
+	}
+	env.Setenv("OMNI_TEST_ISOLATED", "1")
+	env.Setenv("OMNI_TEST_ROOT", parentRoot)
+	env.Setenv("OMNI_TEST_NONCE", parentNonce)
+	env.Setenv("OMNI_TEST_COMMAND_CHILD", "testscript")
+	home := filepath.Join(root, "home")
+	configRoot := filepath.Join(root, "config")
+	data := filepath.Join(root, "data")
+	cache := filepath.Join(root, "cache")
+	state := filepath.Join(root, "state")
+	tmp := filepath.Join(root, "tmp")
+	for _, dir := range []string{
+		home, filepath.Join(home, "AppData", "Roaming"), filepath.Join(home, "AppData", "Local"),
+		filepath.Join(configRoot, "omni"), filepath.Join(configRoot, "git"), filepath.Join(configRoot, "gnupg"),
+		filepath.Join(configRoot, "docker"), filepath.Join(configRoot, "kube"), filepath.Join(data, "go"),
+		filepath.Join(data, "cargo"), filepath.Join(data, "rustup"), filepath.Join(data, "npm-global"),
+		filepath.Join(cache, "go-build"), filepath.Join(cache, "go-mod"), filepath.Join(cache, "npm"),
+		filepath.Join(root, ".omni-cache"), filepath.Join(state, "omni"), tmp,
+	} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+	}
+	for key, value := range map[string]string{
+		"HOME": home, "USERPROFILE": home,
+		"APPDATA": filepath.Join(home, "AppData", "Roaming"), "LOCALAPPDATA": filepath.Join(home, "AppData", "Local"),
+		"XDG_CONFIG_HOME": configRoot, "XDG_DATA_HOME": data, "XDG_CACHE_HOME": cache, "XDG_STATE_HOME": state,
+		"OMNI_CONFIG": filepath.Join(configRoot, "omni", "settings.json"), "OMNI_CACHE_DIR": filepath.Join(root, ".omni-cache"),
+		"OMNI_STATE_DIR": filepath.Join(state, "omni"), "OMNI_HOSTNAME": "testhost",
+		"TMPDIR": tmp, "TMP": tmp, "TEMP": tmp,
+		"GOPATH": filepath.Join(data, "go"), "GOCACHE": filepath.Join(cache, "go-build"), "GOMODCACHE": filepath.Join(cache, "go-mod"),
+		"CARGO_HOME": filepath.Join(data, "cargo"), "RUSTUP_HOME": filepath.Join(data, "rustup"),
+		"NPM_CONFIG_USERCONFIG": filepath.Join(configRoot, "npmrc"), "NPM_CONFIG_CACHE": filepath.Join(cache, "npm"),
+		"NPM_CONFIG_PREFIX": filepath.Join(data, "npm-global"), "GIT_CONFIG_GLOBAL": filepath.Join(configRoot, "git", "config"),
+		"GIT_CONFIG_SYSTEM": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "/bin/false",
+		"SHELL":     os.Getenv("SHELL"),
+		"GNUPGHOME": filepath.Join(configRoot, "gnupg"), "KUBECONFIG": filepath.Join(configRoot, "kube", "config"),
+		"DOCKER_CONFIG": filepath.Join(configRoot, "docker"),
+		"HTTP_PROXY":    "http://127.0.0.1:1", "HTTPS_PROXY": "http://127.0.0.1:1", "ALL_PROXY": "http://127.0.0.1:1",
+		"http_proxy": "http://127.0.0.1:1", "https_proxy": "http://127.0.0.1:1", "all_proxy": "http://127.0.0.1:1",
+		"NO_PROXY": "localhost,127.0.0.1,::1", "no_proxy": "localhost,127.0.0.1,::1",
+	} {
+		env.Setenv(key, value)
+	}
+	return nil
+}
+
+func TestSetupCLITestSandboxConfinesWritablePaths(t *testing.T) {
+	work := t.TempDir()
+	path := os.Getenv("PATH")
+	env := &testscript.Env{WorkDir: work, Vars: []string{"PATH=" + path}}
+	if err := setupCLITestSandbox(env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Getenv("PATH") != path {
+		t.Fatal("testscript PATH was replaced instead of preserved")
+	}
+	if env.Getenv("OMNI_TEST_COMMAND_CHILD") != "testscript" {
+		t.Fatal("testscript command child marker is missing")
+	}
+	for key, want := range map[string]string{
+		"OMNI_TEST_ISOLATED": "1", "OMNI_TEST_ROOT": os.Getenv("OMNI_TEST_ROOT"), "OMNI_TEST_NONCE": os.Getenv("OMNI_TEST_NONCE"),
+	} {
+		if got := env.Getenv(key); got != want {
+			t.Fatalf("%s=%q, want %q", key, got, want)
+		}
+	}
+	for _, key := range []string{
+		"HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+		"XDG_CACHE_HOME", "XDG_STATE_HOME", "OMNI_CONFIG", "OMNI_CACHE_DIR", "OMNI_STATE_DIR",
+		"TMPDIR", "TMP", "TEMP", "GOPATH", "GOCACHE", "GOMODCACHE", "CARGO_HOME", "RUSTUP_HOME",
+		"NPM_CONFIG_USERCONFIG", "NPM_CONFIG_CACHE", "NPM_CONFIG_PREFIX", "GIT_CONFIG_GLOBAL",
+		"GNUPGHOME", "KUBECONFIG", "DOCKER_CONFIG",
+	} {
+		if got := env.Getenv(key); !strings.HasPrefix(got, work+string(os.PathSeparator)) {
+			t.Fatalf("%s=%q is outside testscript work dir %q", key, got, work)
+		}
+	}
+	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"} {
+		if got := env.Getenv(key); got != "http://127.0.0.1:1" {
+			t.Fatalf("%s=%q", key, got)
+		}
+	}
+	for _, key := range []string{"NO_PROXY", "no_proxy"} {
+		if got := env.Getenv(key); got != "localhost,127.0.0.1,::1" {
+			t.Fatalf("%s=%q", key, got)
+		}
+	}
 }
 
 func stowAwareScriptFiles() ([]string, error) {

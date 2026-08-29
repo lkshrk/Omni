@@ -13,9 +13,42 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/reconcile-yes-tool-dotfile",
+                "fixture": "integration_tests/testdata/scripts/reconcile-yes-tool-dotfile.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "integration",
+              "role": "regression",
+              "reference": "Preserves the prior partial-reconcile backup commit failure regression.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/reconcile-dot-commit-failure",
+                "fixture": "integration_tests/testdata/scripts/reconcile-dot-commit-failure.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -53,9 +86,41 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/tools-sync-configured-provider-preferred",
+                "fixture": "integration_tests/testdata/scripts/tools-sync-configured-provider-preferred.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "integration",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/sync-dryrun",
+                "fixture": "integration_tests/testdata/scripts/sync-dryrun.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -93,9 +158,41 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/tools-provider-lifecycle",
+                "fixture": "integration_tests/testdata/scripts/tools-provider-lifecycle.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "integration",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/install-group",
+                "fixture": "integration_tests/testdata/scripts/install-group.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -133,9 +230,42 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/tools-provider-lifecycle",
+                "fixture": "integration_tests/testdata/scripts/tools-provider-lifecycle.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "integration",
+              "role": "regression",
+              "reference": "Rejects purge when no installed provider can be proven.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/tools-remove-purge-no-provider",
+                "fixture": "integration_tests/testdata/scripts/tools-remove-purge-no-provider.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -173,9 +303,41 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/tools-provider-lifecycle",
+                "fixture": "integration_tests/testdata/scripts/tools-provider-lifecycle.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "integration",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/upgrade-no-args",
+                "fixture": "integration_tests/testdata/scripts/upgrade-no-args.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -213,9 +375,42 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/upgrade-all-success",
+                "fixture": "integration_tests/testdata/scripts/upgrade-all-success.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "integration",
+              "role": "regression",
+              "reference": "Preserves quarantine behavior during bulk upgrades.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/upgrade-all-quarantine",
+                "fixture": "integration_tests/testdata/scripts/upgrade-all-quarantine.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -253,9 +448,41 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/sync-all-claim-install",
+                "fixture": "integration_tests/testdata/scripts/sync-all-claim-install.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "integration",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/sync-all-group-flag",
+                "fixture": "integration_tests/testdata/scripts/sync-all-group-flag.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -293,9 +520,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/sync-all-claim-install",
+                "fixture": "integration_tests/testdata/scripts/sync-all-claim-install.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -333,9 +576,41 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/tools-ignore",
+                "fixture": "integration_tests/testdata/scripts/tools-ignore.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "integration",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/tools-ignore-processing",
+                "fixture": "integration_tests/testdata/scripts/tools-ignore-processing.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -373,9 +648,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/groups-management",
+                "fixture": "integration_tests/testdata/scripts/groups-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -413,9 +704,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/tools-provider-scope",
+                "fixture": "integration_tests/testdata/scripts/tools-provider-scope.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -453,9 +760,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/tools-reinstall-default",
+                "fixture": "integration_tests/testdata/scripts/tools-reinstall-default.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -493,9 +816,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/tools-maintenance",
+                "fixture": "integration_tests/testdata/scripts/tools-maintenance.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -533,9 +872,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/refresh-metadata",
+                "fixture": "integration_tests/testdata/scripts/refresh-metadata.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -573,9 +928,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/consolidate-to-brew",
+                "fixture": "integration_tests/testdata/scripts/consolidate-to-brew.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -613,9 +984,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/tools-provider-scope",
+                "fixture": "integration_tests/testdata/scripts/tools-provider-scope.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -654,7 +1041,7 @@
         {
           "level": "integration",
           "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
+          "reason": "Existing wrapper-based fallback fixtures do not execute the production omni command path directly.",
           "target_stage": "Stage 4"
         },
         {
@@ -693,9 +1080,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/tools-provider-lifecycle",
+                "fixture": "integration_tests/testdata/scripts/tools-provider-lifecycle.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -733,9 +1136,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/tools-maintenance",
+                "fixture": "integration_tests/testdata/scripts/tools-maintenance.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -757,9 +1176,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/tools-heal-taps-dryrun",
+                "fixture": "integration_tests/testdata/scripts/tools-heal-taps-dryrun.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -805,9 +1240,42 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/import-node-success",
+                "fixture": "integration_tests/testdata/scripts/import-node-success.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "integration",
+              "role": "regression",
+              "reference": "Preserves non-interactive import failure without an explicit group.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/import-no-group-noninteractive",
+                "fixture": "integration_tests/testdata/scripts/import-no-group-noninteractive.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -845,9 +1313,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/tools-provider-lifecycle",
+                "fixture": "integration_tests/testdata/scripts/tools-provider-lifecycle.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -869,9 +1353,42 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-sync-creates-links",
+                "fixture": "integration_tests/testdata/scripts/dots-sync-creates-links.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "integration",
+              "role": "regression",
+              "reference": "Preserves repair of links created by the legacy stow layout.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-sync-repair-stow-migration",
+                "fixture": "integration_tests/testdata/scripts/dots-sync-repair-stow-migration.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -949,9 +1466,41 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-add-success",
+                "fixture": "integration_tests/testdata/scripts/dots-add-success.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "integration",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-add-no-repo",
+                "fixture": "integration_tests/testdata/scripts/dots-add-no-repo.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -989,9 +1538,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-groups",
+                "fixture": "integration_tests/testdata/scripts/dots-groups.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1029,9 +1594,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-variant",
+                "fixture": "integration_tests/testdata/scripts/dots-variant.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1069,9 +1650,41 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-remove-success",
+                "fixture": "integration_tests/testdata/scripts/dots-remove-success.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "integration",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-remove-purge",
+                "fixture": "integration_tests/testdata/scripts/dots-remove-purge.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1109,9 +1722,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-resolve-use-repo",
+                "fixture": "integration_tests/testdata/scripts/dots-resolve-use-repo.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1149,9 +1778,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-resolve-use-local",
+                "fixture": "integration_tests/testdata/scripts/dots-resolve-use-local.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1269,9 +1914,42 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-ignore-existing",
+                "fixture": "integration_tests/testdata/scripts/dots-ignore-existing.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "integration",
+              "role": "regression",
+              "reference": "Preserves safe ejection of an already-synced ignored path.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-ignore-eject-synced",
+                "fixture": "integration_tests/testdata/scripts/dots-ignore-eject-synced.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1309,9 +1987,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-enable-disable",
+                "fixture": "integration_tests/testdata/scripts/dots-enable-disable.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1349,9 +2043,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-enable-disable",
+                "fixture": "integration_tests/testdata/scripts/dots-enable-disable.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1389,9 +2099,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-pull-push",
+                "fixture": "integration_tests/testdata/scripts/dots-pull-push.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1429,9 +2155,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-commit",
+                "fixture": "integration_tests/testdata/scripts/dots-commit.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1469,9 +2211,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-pull-push",
+                "fixture": "integration_tests/testdata/scripts/dots-pull-push.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1509,9 +2267,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-reminder-service",
+                "fixture": "integration_tests/testdata/scripts/dots-reminder-service.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1549,9 +2323,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-reminder-service",
+                "fixture": "integration_tests/testdata/scripts/dots-reminder-service.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1573,9 +2363,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-reminder-service",
+                "fixture": "integration_tests/testdata/scripts/dots-reminder-service.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1597,9 +2403,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-reminder-service",
+                "fixture": "integration_tests/testdata/scripts/dots-reminder-service.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1621,9 +2443,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-watch-service",
+                "fixture": "integration_tests/testdata/scripts/dots-watch-service.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1685,9 +2523,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-watch-service",
+                "fixture": "integration_tests/testdata/scripts/dots-watch-service.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1709,9 +2563,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-watch-service",
+                "fixture": "integration_tests/testdata/scripts/dots-watch-service.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1733,9 +2603,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-history",
+                "fixture": "integration_tests/testdata/scripts/dots-history.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1757,9 +2643,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/groups-management",
+                "fixture": "integration_tests/testdata/scripts/groups-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1797,9 +2699,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/groups-management",
+                "fixture": "integration_tests/testdata/scripts/groups-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1837,9 +2755,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/groups-management",
+                "fixture": "integration_tests/testdata/scripts/groups-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1877,9 +2811,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/groups-management",
+                "fixture": "integration_tests/testdata/scripts/groups-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -1925,9 +2875,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/hosts-management",
+                "fixture": "integration_tests/testdata/scripts/hosts-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1965,9 +2931,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/hosts-management",
+                "fixture": "integration_tests/testdata/scripts/hosts-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -1989,9 +2971,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/hosts-management",
+                "fixture": "integration_tests/testdata/scripts/hosts-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -2029,9 +3027,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/hosts-management",
+                "fixture": "integration_tests/testdata/scripts/hosts-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -2069,9 +3083,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/settings-management",
+                "fixture": "integration_tests/testdata/scripts/settings-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -2109,9 +3139,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/settings-management",
+                "fixture": "integration_tests/testdata/scripts/settings-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -2149,9 +3195,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/settings-management",
+                "fixture": "integration_tests/testdata/scripts/settings-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -2189,9 +3251,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/settings-management",
+                "fixture": "integration_tests/testdata/scripts/settings-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -2229,9 +3307,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/settings-maintenance",
+                "fixture": "integration_tests/testdata/scripts/settings-maintenance.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -2253,9 +3347,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/settings-extract",
+                "fixture": "integration_tests/testdata/scripts/settings-extract.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -2277,9 +3387,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/init-import-config",
+                "fixture": "integration_tests/testdata/scripts/init-import-config.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -2316,10 +3442,87 @@
       ],
       "requirements": [
         {
+          "level": "unit",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "unit",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsSyncAllRunsOneGlobalAPMInstall",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Prevents package-owned standalone duplicates from reaching APM mutation.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsSyncAllBlocksOwnedExactDuplicateBeforeMutation",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Fails closed on an unowned template before APM mutation.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsSyncAllRejectsInvalidUnmarkedTemplateBeforeMutation",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsManifestlessRealAPMLifecycle",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-onboarding",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "integration",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIAgentsTabSyncsMCPThroughRealAPM",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-onboarding",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -2540,10 +3743,72 @@
       ],
       "requirements": [
         {
+          "level": "unit",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "unit",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsMigrateWriteCreatesOnlyMarkedTemplate",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Prevents migration from overwriting a user-managed template.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsMigrateWriteRefusesUnmarkedTemplate",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Prevents migration writes through a template symlink.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsMigrateWriteRejectsTemplateSymlink",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsMigrationRealAPMLifecycle",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-onboarding",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -2661,9 +3926,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/doctor",
+                "fixture": "integration_tests/testdata/scripts/doctor.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -2701,9 +3982,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/doctor-fix",
+                "fixture": "integration_tests/testdata/scripts/doctor-fix.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -2746,13 +4043,15 @@
           "evidence": [
             {
               "type": "integration",
+              "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestApp_ListTools_ReflectsDBState",
+                "test": "TestCLI/list-empty",
+                "fixture": "integration_tests/testdata/scripts/list-empty.txtar",
                 "tags": [
-                  "docker"
+                  "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-cli-rest",
                 "os": [
                   "linux"
                 ]
@@ -2760,13 +4059,13 @@
             },
             {
               "type": "integration",
+              "role": "supplemental",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestCLI/config-migration-stale-tracked-list",
-                "fixture": "integration_tests/testdata/scripts/config-migration-stale-tracked-list.txtar",
+                "test": "TestCLI/logical-tools-story",
+                "fixture": "integration_tests/testdata/scripts/logical-tools-story.txtar",
                 "tags": [
-                  "docker",
-                  "testscript"
+                  "integration"
                 ],
                 "lane": "docker-cli-rest",
                 "os": [
@@ -2824,13 +4123,15 @@
           "evidence": [
             {
               "type": "integration",
+              "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestDotsListReportsReincludedSubfolderDrift",
+                "test": "TestCLI/dots-status-entries",
+                "fixture": "integration_tests/testdata/scripts/dots-status-entries.txtar",
                 "tags": [
-                  "docker"
+                  "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-cli-ad",
                 "os": [
                   "linux"
                 ]
@@ -3013,9 +4314,36 @@
       "requirements": [
         {
           "level": "component",
-          "status": "gap",
-          "reason": "Existing model coverage has not yet been linked to this flow.",
-          "target_stage": "Stage 3"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "component",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestModel_Init",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "component",
+              "role": "regression",
+              "reference": "Preserves repair navigation after a startup failure.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestStartupErrorDoesNotMaskRepairSettingsTab",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -3060,9 +4388,49 @@
       "requirements": [
         {
           "level": "component",
-          "status": "gap",
-          "reason": "Existing model coverage has not yet been linked to this flow.",
-          "target_stage": "Stage 3"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "component",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestFlow_UC01_CursorNavigation",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "component",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestFlow_UC03_PageNavigation",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "component",
+              "role": "regression",
+              "reference": "Preserves the first navigation key as cursor reveal after a tab switch.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestCursorHidden_NavigationRevealsWithoutMoving_ToolsTab",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -3086,9 +4454,35 @@
       "requirements": [
         {
           "level": "component",
-          "status": "gap",
-          "reason": "Existing model coverage has not yet been linked to this flow.",
-          "target_stage": "Stage 3"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "component",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestModel_FilterMode",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "component",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestFlow2_UC132_BlurredSearchSlashRefocusesInput",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -3112,9 +4506,35 @@
       "requirements": [
         {
           "level": "component",
-          "status": "gap",
-          "reason": "Existing model coverage has not yet been linked to this flow.",
-          "target_stage": "Stage 3"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "component",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestFlow_UC64_MouseWheelScroll",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "component",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestAgentsMouseWheelMovesCursor",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -3138,9 +4558,35 @@
       "requirements": [
         {
           "level": "component",
-          "status": "gap",
-          "reason": "Existing model coverage has not yet been linked to this flow.",
-          "target_stage": "Stage 3"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "component",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestFlow_UC65_WindowSize",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "component",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestFlow2_UC136_WindowSizeMsgWithFilePicker",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -3164,9 +4610,36 @@
       "requirements": [
         {
           "level": "component",
-          "status": "gap",
-          "reason": "Existing model coverage has not yet been linked to this flow.",
-          "target_stage": "Stage 3"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "component",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestRenderSettings_OnlySelectedRowShowsDetail",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "component",
+              "role": "regression",
+              "reference": "Preserves selected-row details when the agents cursor moves.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestAgentsDetailsFollowTheCursor",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -3190,9 +4663,36 @@
       "requirements": [
         {
           "level": "component",
-          "status": "gap",
-          "reason": "Existing model coverage has not yet been linked to this flow.",
-          "target_stage": "Stage 3"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "component",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestFlow_UC22_KeysIgnoredWhileLoading",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "component",
+              "role": "regression",
+              "reference": "Preserves loading-gate release when one refresh leg fails.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestToolRefresh_ClearsLoadingWhenTheLastLegFails",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -3216,9 +4716,35 @@
       "requirements": [
         {
           "level": "component",
-          "status": "gap",
-          "reason": "Existing model coverage has not yet been linked to this flow.",
-          "target_stage": "Stage 3"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "component",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestModel_ProgressDoneMsg_Error",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "component",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestRowErrorSummaryNormalizesUnsafeOutput",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -3412,9 +4938,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "No verified semantic integration evidence is linked yet.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-list-entries",
+                "fixture": "integration_tests/testdata/scripts/dots-list-entries.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -3445,9 +4987,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "No verified semantic integration evidence is linked yet.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/dots-variant",
+                "fixture": "integration_tests/testdata/scripts/dots-variant.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-ad",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -3476,9 +5034,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "No verified semantic integration evidence is linked yet.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/groups-management",
+                "fixture": "integration_tests/testdata/scripts/groups-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -3508,9 +5082,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "No verified semantic integration evidence is linked yet.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/hosts-management",
+                "fixture": "integration_tests/testdata/scripts/hosts-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -3540,9 +5130,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "No verified semantic integration evidence is linked yet.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/settings-management",
+                "fixture": "integration_tests/testdata/scripts/settings-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -3572,9 +5178,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "No verified semantic integration evidence is linked yet.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/settings-maintenance",
+                "fixture": "integration_tests/testdata/scripts/settings-maintenance.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -3604,9 +5226,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "No verified semantic integration evidence is linked yet.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/settings-management",
+                "fixture": "integration_tests/testdata/scripts/settings-management.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -3636,9 +5274,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "No verified semantic integration evidence is linked yet.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/providers",
+                "fixture": "integration_tests/testdata/scripts/providers.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -3668,9 +5322,25 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "No verified semantic integration evidence is linked yet.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLI/search",
+                "fixture": "integration_tests/testdata/scripts/search.txtar",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-cli-rest",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -3682,4 +5352,3 @@
     }
   ]
 }
-

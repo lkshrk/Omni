@@ -12,7 +12,10 @@ DEV_CACHE   ?= $(DEV_DIR)/cache
 DEV_GOCACHE ?= $(DEV_DIR)/go-build
 TEST_SAFE   := bash scripts/run-test-safe.sh
 TEST_PACKAGES ?= ./...
+TEST_FLAGS  ?= -race -trimpath
 INTEGRATION_PACKAGES ?= ./integration_tests/... ./internal/provider/... ./internal/apm/... ./internal/app/... ./internal/cli/...
+INTEGRATION_IMAGE ?= omni-integration-test:local
+INTEGRATION_LANE ?= full
 ARGS        ?= --help
 DOCKER      ?= docker
 
@@ -99,7 +102,7 @@ test: test-scripts test-unit
 
 ## test-unit: run unit tests with race detector
 test-unit:
-	$(TEST_SAFE) go test -race -trimpath $(TEST_PACKAGES)
+	$(TEST_SAFE) go test $(TEST_FLAGS) $(TEST_PACKAGES)
 
 ## test-unit-fast: run unit tests without the race detector, for quick local iteration
 test-unit-fast:
@@ -130,12 +133,51 @@ test-package-managers:
 ## test-all: run unit tests locally and integration tests in Docker
 test-all: test test-integration
 
-## test-integration-build: run the isolated integration test Docker build stage
+## test-integration-build: build the isolated integration test environment image
 test-integration-build:
-	docker buildx build -f Dockerfile.test --target integration-test --build-arg "TEST_PACKAGES=$(INTEGRATION_PACKAGES)" $(DOCKER_TEST_CACHE) --output=type=cacheonly .
+	$(DOCKER) buildx build -f Dockerfile.test --target integration-test $(DOCKER_TEST_CACHE) --load --tag "$(INTEGRATION_IMAGE)" .
 
 ## test-integration: run integration-tagged tests inside the isolated Docker environment
 test-integration: test-integration-build
+	@set -eu; \
+	lane="$(INTEGRATION_LANE)"; \
+	case "$$lane" in ''|*[!a-z0-9-]*) echo "invalid integration lane: $$lane" >&2; exit 2 ;; esac; \
+	repo_root=$$(cd "$(CURDIR)" && pwd -P); \
+	tmp_root="$$repo_root/.tmp"; \
+	if [ -e "$$tmp_root" ]; then [ -d "$$tmp_root" ] && [ ! -L "$$tmp_root" ] || { echo "refusing unsafe repo .tmp" >&2; exit 2; }; fi; \
+	mkdir -p "$$tmp_root"; \
+	safe_root=$$(cd "$$tmp_root" && pwd -P); \
+	[ "$$safe_root" = "$$repo_root/.tmp" ] || { echo "repo .tmp escaped checkout" >&2; exit 2; }; \
+	evidence_root="$$safe_root/test-evidence"; \
+	if [ -e "$$evidence_root" ]; then [ -d "$$evidence_root" ] && [ ! -L "$$evidence_root" ] || { echo "refusing unsafe test-evidence directory" >&2; exit 2; }; fi; \
+	mkdir -p "$$evidence_root"; \
+	evidence_root=$$(cd "$$evidence_root" && pwd -P); \
+	[ "$$evidence_root" = "$$safe_root/test-evidence" ] || { echo "test-evidence escaped repo .tmp" >&2; exit 2; }; \
+	evidence="$$evidence_root/docker-$$lane"; \
+	if [ -e "$$evidence" ]; then [ -d "$$evidence" ] && [ ! -L "$$evidence" ] || { echo "refusing unsafe lane evidence directory" >&2; exit 2; }; fi; \
+	mkdir -p "$$evidence"; \
+	evidence=$$(cd "$$evidence" && pwd -P); \
+	[ "$$evidence" = "$$evidence_root/docker-$$lane" ] || { echo "lane evidence escaped test-evidence root" >&2; exit 2; }; \
+	jsonl="$$evidence/go-test.jsonl"; \
+	meta="$$evidence/meta.json"; \
+	gate="$$evidence/gate.json"; \
+	find "$$evidence" -maxdepth 1 -type f \( -name go-test.jsonl -o -name meta.json -o -name gate.json \) -delete; \
+	image_id=$$($(DOCKER) image inspect --format '{{.Id}}' "$(INTEGRATION_IMAGE)"); \
+	container=$$($(DOCKER) create \
+		--network none \
+		--env "TEST_PACKAGES=$(INTEGRATION_PACKAGES)" \
+		--env "TEST_LANE=$(INTEGRATION_LANE)" \
+		--env "TEST_IMAGE_REF=$(INTEGRATION_IMAGE)" \
+		--env "TEST_IMAGE_ID=$$image_id" \
+		--env "OMNI_TEST_APPROVED_TOOLS=apm,claude,codex,grok,cowsay" \
+		"$(INTEGRATION_IMAGE)" \
+		sh -c 'set +e; go_bin=$$(command -v go); binary_sha256=$$(sha256sum "$$go_bin" | cut -d " " -f 1); bash scripts/run-test-safe.sh go test -count=1 -tags=integration -race -trimpath -json $$TEST_PACKAGES > /tmp/test-results.jsonl 2>&1; status=$$?; [ "$$status" -eq 0 ] && result=pass || result=fail; printf '\''{"schema_version":1,"lane":"docker-%s","goos":"linux","tags":["integration"],"count":1}\n'\'' "$$TEST_LANE" > /tmp/test-meta.json; printf '\''{"schema_version":1,"kind":"container_gate","lane":"docker-%s","goos":"linux","image_ref":"%s","image_id":"%s","binary_sha256":"%s","command_id":"go-test-integration","exit_code":%s,"status":"%s","events":"go-test.jsonl"}\n'\'' "$$TEST_LANE" "$$TEST_IMAGE_REF" "$$TEST_IMAGE_ID" "$$binary_sha256" "$$status" "$$result" > /tmp/test-gate.json; exit "$$status"'); \
+	trap '$(DOCKER) rm -f "$$container" >/dev/null 2>&1 || true' EXIT HUP INT TERM; \
+	if $(DOCKER) start -a "$$container"; then status=0; else status=$$?; fi; \
+	if ! $(DOCKER) cp "$$container:/tmp/test-results.jsonl" "$$jsonl"; then [ "$$status" -ne 0 ] || status=1; fi; \
+	if ! $(DOCKER) cp "$$container:/tmp/test-meta.json" "$$meta"; then [ "$$status" -ne 0 ] || status=1; fi; \
+	if ! $(DOCKER) cp "$$container:/tmp/test-gate.json" "$$gate"; then [ "$$status" -ne 0 ] || status=1; fi; \
+	exit "$$status"
 
 ## docs-build: build the documentation site in a minimal Docker image
 docs-build:

@@ -46,6 +46,14 @@ const (
 	CriticalityLow      Criticality = "low"
 )
 
+type EvidenceRole string
+
+const (
+	EvidencePrimary      EvidenceRole = "primary"
+	EvidenceRegression   EvidenceRole = "regression"
+	EvidenceSupplemental EvidenceRole = "supplemental"
+)
+
 type ExemptionRule string
 
 const (
@@ -85,8 +93,10 @@ type Requirement struct {
 	Evidence    []Evidence `json:"evidence,omitempty"`
 }
 type Evidence struct {
-	Type     Level    `json:"type"`
-	Selector Selector `json:"selector"`
+	Type      Level        `json:"type"`
+	Role      EvidenceRole `json:"role"`
+	Reference string       `json:"reference,omitempty"`
+	Selector  Selector     `json:"selector"`
 }
 type Selector struct {
 	Package string   `json:"package,omitempty"`
@@ -451,6 +461,15 @@ func (v *validator) evidence(prefix string, required Level, evidence Evidence) {
 	} else if evidence.Type != required {
 		v.add("%s evidence type %q must exactly match requirement %q", prefix, evidence.Type, required)
 	}
+	switch evidence.Role {
+	case EvidencePrimary, EvidenceSupplemental:
+	case EvidenceRegression:
+		if strings.TrimSpace(evidence.Reference) == "" {
+			v.add("%s regression evidence requires reference", prefix)
+		}
+	default:
+		v.add("%s uses unknown evidence role %q", prefix, evidence.Role)
+	}
 	sel := evidence.Selector
 	if strings.TrimSpace(sel.Package) == "" || strings.TrimSpace(sel.Test) == "" || strings.TrimSpace(sel.Lane) == "" || len(sel.OS) == 0 || sel.Tags == nil {
 		v.add("%s required evidence needs package, test, lane, nonempty os, and explicit tags", prefix)
@@ -656,6 +675,7 @@ var validLanes = map[string]bool{
 	"script-tests": true, "unit-app": true, "unit-cli": true, "unit-tui": true, "unit-remaining": true,
 	"apm-platform-contracts": true, "onboarding-unit": true, "docker-cli-ad": true, "docker-cli-rest": true,
 	"docker-non-cli": true, "docker-providers": true, "docker-apm": true, "docker-onboarding": true,
+	"docker-full": true,
 }
 
 func validLane(lane string) bool { return validLanes[lane] }

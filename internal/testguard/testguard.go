@@ -18,6 +18,7 @@ import (
 	"reflect"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,35 +27,44 @@ import (
 )
 
 const (
-	isolatedEnv = "OMNI_TEST_ISOLATED"
-	rootEnv     = "OMNI_TEST_ROOT"
-	nonceEnv    = "OMNI_TEST_NONCE"
-	markerName  = ".omni-test-sandbox"
+	isolatedEnv      = "OMNI_TEST_ISOLATED"
+	rootEnv          = "OMNI_TEST_ROOT"
+	nonceEnv         = "OMNI_TEST_NONCE"
+	approvedToolsEnv = "OMNI_TEST_APPROVED_TOOLS"
+	commandChildEnv  = "OMNI_TEST_COMMAND_CHILD"
+	markerName       = ".omni-test-sandbox"
 )
+
+const testscriptCommandChild = "testscript"
 
 var approvedTestTools = []string{
 	"go", "bash", "sh", "git", "stow", "python3", "node", "npm",
-	"awk", "basename", "cat", "chmod", "cp", "cut", "date", "dirname", "du", "echo", "env", "find", "grep", "head",
+	"awk", "basename", "cat", "chmod", "cmp", "cp", "cut", "date", "dirname", "du", "echo", "env", "find", "grep", "head",
 	"ln", "ls", "make", "mkdir", "mktemp", "mv", "od", "printenv", "pwd", "readlink", "realpath", "rm",
-	"printf", "sed", "sleep", "sort", "stat", "tail", "tee", "touch", "tr", "uname", "wc", "which", "xargs",
+	"printf", "sed", "seq", "sleep", "sort", "stat", "tail", "tee", "test", "touch", "tr", "uname", "wc", "which", "xargs",
 	"cc", "gcc", "clang", "as", "ld", "pkg-config",
+}
+
+var optionalTestTools = map[string]struct{}{
+	"apm": {}, "claude": {}, "codex": {}, "grok": {}, "cowsay": {},
 }
 
 // Sandbox is a disposable, process-local test environment.
 type Sandbox struct {
-	Root       string
-	Home       string
-	Config     string
-	Data       string
-	Cache      string
-	State      string
-	Tmp        string
-	Work       string
-	Bin        string
-	OmniConfig string
-	OmniCache  string
-	OmniState  string
-	nonce      string
+	Root          string
+	Home          string
+	Config        string
+	Data          string
+	Cache         string
+	State         string
+	Tmp           string
+	Work          string
+	Bin           string
+	OmniConfig    string
+	OmniCache     string
+	OmniState     string
+	nonce         string
+	approvedTools []string
 }
 
 var (
@@ -94,7 +104,20 @@ func EnsureSafeEnv() error {
 		return nil
 	}
 	ensureOnce.Do(func() {
+		commandChild := os.Getenv(commandChildEnv)
+		if commandChild != "" && commandChild != testscriptCommandChild {
+			ensureErr = fmt.Errorf("unsafe test sandbox: unknown %s value %q", commandChildEnv, commandChild)
+			return
+		}
+		if commandChild != "" && !Isolated() {
+			ensureErr = fmt.Errorf("unsafe test sandbox: %s requires an isolated test environment", commandChildEnv)
+			return
+		}
 		if Isolated() {
+			if commandChild == testscriptCommandChild {
+				_, ensureErr = sandboxFromEnv()
+				return
+			}
 			if runningUnderGoTest() {
 				var parent *Sandbox
 				parent, ensureErr = sandboxParentFromEnv()
@@ -192,6 +215,11 @@ func (s *Sandbox) initialize() error {
 	if err := validateRootCandidate(s.Root); err != nil {
 		return err
 	}
+	approved, err := parseApprovedTools(os.Getenv(approvedToolsEnv))
+	if err != nil {
+		return err
+	}
+	s.approvedTools = approved
 	for _, dir := range s.directories() {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("creating test sandbox directory %q: %w", dir, err)
@@ -207,9 +235,12 @@ func (s *Sandbox) initialize() error {
 }
 
 func (s *Sandbox) installApprovedTools() error {
-	for _, name := range approvedTestTools {
+	for _, name := range append(append([]string(nil), approvedTestTools...), s.approvedTools...) {
 		source, err := exec.LookPath(name)
 		if err != nil {
+			if slices.Contains(s.approvedTools, name) {
+				return fmt.Errorf("approved optional test tool %q is unavailable: %w", name, err)
+			}
 			continue
 		}
 		resolved, err := filepath.EvalSymlinks(source)
@@ -228,6 +259,28 @@ func (s *Sandbox) installApprovedTools() error {
 		}
 	}
 	return nil
+}
+
+func parseApprovedTools(value string) ([]string, error) {
+	if value == "" {
+		return nil, nil
+	}
+	var tools []string
+	seen := make(map[string]struct{})
+	for _, name := range strings.Split(value, ",") {
+		if name == "" || strings.TrimSpace(name) != name {
+			return nil, fmt.Errorf("invalid %s value %q", approvedToolsEnv, value)
+		}
+		if _, ok := optionalTestTools[name]; !ok {
+			return nil, fmt.Errorf("unknown %s tool %q", approvedToolsEnv, name)
+		}
+		if _, ok := seen[name]; ok {
+			return nil, fmt.Errorf("duplicate %s tool %q", approvedToolsEnv, name)
+		}
+		seen[name] = struct{}{}
+		tools = append(tools, name)
+	}
+	return tools, nil
 }
 
 func copyApprovedTool(source, target string) error {
@@ -304,6 +357,9 @@ func (s *Sandbox) SanitizedEnv(extra ...string) []string {
 			putEnv(env, key, value, runtime.GOOS == "windows")
 		}
 	}
+	if value := os.Getenv(commandChildEnv); value == testscriptCommandChild {
+		putEnv(env, commandChildEnv, value, runtime.GOOS == "windows")
+	}
 	for _, entry := range extra {
 		if key, value, ok := strings.Cut(entry, "="); ok && key != "" && !isProtectedEnvKey(key, runtime.GOOS == "windows") {
 			putEnv(env, key, value, runtime.GOOS == "windows")
@@ -325,7 +381,7 @@ func (s *Sandbox) SanitizedEnv(extra ...string) []string {
 }
 
 func (s *Sandbox) envMap() map[string]string {
-	return map[string]string{
+	env := map[string]string{
 		isolatedEnv:             "1",
 		rootEnv:                 s.Root,
 		nonceEnv:                s.nonce,
@@ -370,6 +426,10 @@ func (s *Sandbox) envMap() map[string]string {
 		"NO_PROXY":              "localhost,127.0.0.1,::1",
 		"no_proxy":              "localhost,127.0.0.1,::1",
 	}
+	if len(s.approvedTools) > 0 {
+		env[approvedToolsEnv] = strings.Join(s.approvedTools, ",")
+	}
+	return env
 }
 
 func (s *Sandbox) shellPath() string {
@@ -426,7 +486,7 @@ func falseCommand() string {
 
 func isProtectedEnvKey(key string, windows bool) bool {
 	switch normalizeEnvKey(key, windows) {
-	case isolatedEnv, rootEnv, nonceEnv, "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+	case isolatedEnv, rootEnv, nonceEnv, approvedToolsEnv, commandChildEnv, "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
 		"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME",
 		"OMNI_CONFIG", "OMNI_CACHE_DIR", "OMNI_STATE_DIR", "TMPDIR", "TMP", "TEMP", "PATH",
 		"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy",
@@ -511,6 +571,11 @@ func sandboxParentFromEnv() (*Sandbox, error) {
 		return nil, fmt.Errorf("unsafe test sandbox: %s and %s are required", rootEnv, nonceEnv)
 	}
 	sandbox := newSandbox(root, nonce)
+	approved, err := parseApprovedTools(os.Getenv(approvedToolsEnv))
+	if err != nil {
+		return nil, err
+	}
+	sandbox.approvedTools = approved
 	if err := validateSandboxIdentity(sandbox); err != nil {
 		return nil, err
 	}
@@ -948,12 +1013,24 @@ func runningUnderGoTest() bool {
 	if info, ok := debug.ReadBuildInfo(); ok && testBinaryBuildPath(info.Path) {
 		return true
 	}
+	if testRunnerArgs(os.Args[1:]) {
+		return true
+	}
 	// Fallback for unusual test toolchains that omit the standard build path.
 	return registeredTestFlags(flag.Lookup)
 }
 
 func testBinaryBuildPath(path string) bool {
 	return strings.HasSuffix(path, ".test")
+}
+
+func testRunnerArgs(args []string) bool {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-test.") {
+			return true
+		}
+	}
+	return false
 }
 
 func registeredTestFlags(lookup func(string) *flag.Flag) bool {

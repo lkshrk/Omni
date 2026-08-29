@@ -110,12 +110,28 @@ jobs:
           sudo apt-get install -y stow
 
       - name: Race tests
+        shell: bash
         run: |
+          set -o pipefail
           packages='${{ matrix.packages }}'
           if [ "$packages" = remaining ]; then
             packages=$(go list ./... | grep -Ev '/internal/(app|cli|tui)(/|$)' | tr '\n' ' ')
           fi
-          make test-unit TEST_PACKAGES="$packages"
+          evidence_dir="$RUNNER_TEMP/omni-test-evidence/unit-${{ matrix.name }}"
+          mkdir -p "$evidence_dir"
+          cat >"$evidence_dir/meta.json" <<'JSON'
+          {"schema_version":1,"lane":"unit-${{ matrix.name }}","goos":"linux","tags":[],"count":1}
+          JSON
+          make test-unit TEST_PACKAGES="$packages" TEST_FLAGS="-race -trimpath -count=1 -json" \
+            | tee "$evidence_dir/go-test.jsonl"
+
+      - name: Upload flow evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flow-evidence-unit-${{ matrix.name }}
+          path: ${{ runner.temp }}/omni-test-evidence/unit-${{ matrix.name }}
+          if-no-files-found: error
 
   apm-platform-contracts:
     name: APM Platform Contracts (${{ matrix.os }})
@@ -206,6 +222,7 @@ jobs:
         run: make test-integration
         env:
           INTEGRATION_PACKAGES: ${{ matrix.packages }}
+          INTEGRATION_LANE: ${{ matrix.name }}
           DOCKER_TEST_CACHE: >-
             --cache-from type=gha,scope=integration-cli-ad
             --cache-from type=gha,scope=integration-tests
@@ -214,3 +231,44 @@ jobs:
             --cache-from type=gha,scope=integration-apm
             --cache-from type=gha,scope=integration-onboarding
             --cache-to type=gha,scope=${{ matrix.cache }},mode=max
+
+      - name: Upload integration test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flow-evidence-docker-${{ matrix.name }}
+          path: .tmp/test-evidence/docker-${{ matrix.name }}
+          if-no-files-found: error
+
+  flow-evidence:
+    name: Flow Evidence
+    if: always()
+    needs: [unit-tests, integration]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download flow evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: flow-evidence-*
+          path: ${{ runner.temp }}/downloaded-evidence
+
+      - name: Verify declared flow evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/combined-evidence"
+          mkdir "$evidence"
+          for artifact in "$RUNNER_TEMP"/downloaded-evidence/flow-evidence-*; do
+            test -d "$artifact"
+            lane="${artifact##*/flow-evidence-}"
+            mv "$artifact" "$evidence/$lane"
+          done
+          go run ./scripts/flow-evidence -catalog test/flows.json -evidence "$evidence"

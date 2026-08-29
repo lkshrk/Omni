@@ -59,7 +59,7 @@ func TestValidateChecksActionsEvidenceAndParity(t *testing.T) {
 			{Level: LevelCLIBlackBox, Status: StatusGap, Reason: "CLI pending", TargetStage: "Stage 5"},
 			{Level: LevelTUIBlackBox, Status: StatusGap, Reason: "TUI pending", TargetStage: "Stage 5"},
 			{Level: LevelParity, Status: StatusRequired, Evidence: []Evidence{{
-				Type:     LevelParity,
+				Type: LevelParity, Role: EvidencePrimary,
 				Selector: Selector{Package: "example.test/internal/sample", Test: "TestFlow", Tags: []string{}, Lane: "unit-remaining", OS: []string{"linux"}},
 			}}},
 		},
@@ -76,7 +76,7 @@ func TestValidateRejectsDuplicateActionAndMissingReference(t *testing.T) {
 		Requirements: []Requirement{
 			{Level: LevelCLIBlackBox, Status: StatusGap, Reason: "pending", TargetStage: "Stage 5"},
 			{Level: LevelIntegration, Status: StatusRequired, Evidence: []Evidence{{
-				Type:     LevelIntegration,
+				Type: LevelIntegration, Role: EvidencePrimary,
 				Selector: Selector{Package: "example.test/internal/missing", Test: "TestMissing", Tags: []string{}, Lane: "unit-remaining", OS: []string{"linux"}},
 			}}},
 		},
@@ -142,7 +142,7 @@ func TestValidateTestscriptSelectorMatchesExecutableFixture(t *testing.T) {
 		Surfaces: Surfaces{CLI: boolPtr(true), TUI: boolPtr(false)},
 		Requirements: []Requirement{
 			{Level: LevelIntegration, Status: StatusRequired, Evidence: []Evidence{{
-				Type:     LevelIntegration,
+				Type: LevelIntegration, Role: EvidencePrimary,
 				Selector: Selector{Package: "example.test/integration_tests", Test: "TestCLI/list", Fixture: "integration_tests/testdata/scripts/list.txtar", Tags: []string{"testscript"}, Lane: "integration", OS: []string{"linux"}},
 			}}},
 			{Level: LevelCLIBlackBox, Status: StatusGap, Reason: "binary pending", TargetStage: "Stage 5"},
@@ -231,9 +231,43 @@ func TestValidateRejectsInheritedEvidenceAndUnverifiableSelectors(t *testing.T) 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			flow := cliOnlyFlow("tools.list", []string{"tools", "list"})
-			flow.Requirements = append([]Requirement{{Level: LevelIntegration, Status: StatusRequired, Evidence: []Evidence{{Type: test.typeName, Selector: test.selector}}}}, flow.Requirements...)
+			flow.Requirements = append([]Requirement{{Level: LevelIntegration, Status: StatusRequired, Evidence: []Evidence{{Type: test.typeName, Role: EvidencePrimary, Selector: test.selector}}}}, flow.Requirements...)
 			err := Validate(validCatalog(flow), nil, root)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate() error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestValidateEvidenceRoles(t *testing.T) {
+	root := testModule(t)
+	dir := filepath.Join(root, "internal", "sample")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sample_test.go"), []byte("package sample\nimport \"testing\"\nfunc TestFlow(t *testing.T) {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	selector := Selector{Package: "example.test/internal/sample", Test: "TestFlow", Tags: []string{}, Lane: "unit-remaining", OS: []string{"linux"}}
+	for _, test := range []struct {
+		name      string
+		role      EvidenceRole
+		reference string
+		want      string
+	}{
+		{name: "unknown", role: "historical", want: "unknown evidence role"},
+		{name: "regression without reference", role: EvidenceRegression, want: "regression evidence requires reference"},
+		{name: "regression with reference", role: EvidenceRegression, reference: "Fixes prior orphan classification regression"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			flow := cliOnlyFlow("tools.list", []string{"tools", "list"})
+			flow.Requirements = append([]Requirement{{Level: LevelIntegration, Status: StatusRequired, Evidence: []Evidence{{Type: LevelIntegration, Role: test.role, Reference: test.reference, Selector: selector}}}}, flow.Requirements...)
+			err := Validate(validCatalog(flow), nil, root)
+			if test.want == "" && err != nil {
+				t.Fatal(err)
+			}
+			if test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)) {
 				t.Fatalf("Validate() error = %v, want %q", err, test.want)
 			}
 		})

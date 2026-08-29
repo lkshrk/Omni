@@ -6,6 +6,31 @@ if [ "$#" -eq 0 ]; then
 	exit 2
 fi
 
+approved_tools="${OMNI_TEST_APPROVED_TOOLS:-}"
+approved_tool_names=()
+if [ -n "$approved_tools" ]; then
+	case "$approved_tools" in ,* | *, | *,,*)
+		echo "invalid OMNI_TEST_APPROVED_TOOLS value: $approved_tools" >&2
+		exit 2
+		;;
+	esac
+	IFS=',' read -r -a approved_tool_names <<<"$approved_tools"
+	seen=,
+	for tool in "${approved_tool_names[@]}"; do
+		case "$tool" in apm | claude | codex | grok | cowsay) ;; *)
+			echo "unknown OMNI_TEST_APPROVED_TOOLS tool: $tool" >&2
+			exit 2
+		;;
+		esac
+		case "$seen" in *,"$tool",*)
+			echo "duplicate OMNI_TEST_APPROVED_TOOLS tool: $tool" >&2
+			exit 2
+		;;
+		esac
+		seen="$seen$tool,"
+	done
+fi
+
 go_root="${GOROOT:-$(go env GOROOT)}"
 build_go_cache="${OMNI_TEST_BUILD_GOCACHE:-$(go env GOCACHE)}"
 build_go_modcache="${OMNI_TEST_BUILD_GOMODCACHE:-$(go env GOMODCACHE)}"
@@ -107,10 +132,17 @@ link_tool() {
 
 ln -s "$go_root/bin/go" "$bin/go"
 for tool in bash sh git stow python3 node npm \
-	awk basename cat chmod cp cut date dirname du echo env find grep head ln ls make mkdir mktemp mv \
-	od printf printenv pwd readlink realpath rm sed sleep sort stat tail tee touch tr uname wc which xargs \
+	awk basename cat chmod cmp cp cut date dirname du echo env find grep head ln ls make mkdir mktemp mv \
+	od printf printenv pwd readlink realpath rm sed seq sleep sort stat tail tee test touch tr uname wc which xargs \
 	cc gcc clang as ld pkg-config; do
 	link_tool "$tool"
+done
+for tool in "${approved_tool_names[@]}"; do
+	link_tool "$tool"
+	if [ ! -x "$bin/$tool" ]; then
+		echo "approved optional test tool is unavailable: $tool" >&2
+		exit 2
+	fi
 done
 
 for required in go bash sh git; do
@@ -166,6 +198,9 @@ safe_env=(
 	"NO_PROXY=localhost,127.0.0.1,::1"
 	"no_proxy=localhost,127.0.0.1,::1"
 )
+if [ -n "$approved_tools" ]; then
+	safe_env+=("OMNI_TEST_APPROVED_TOOLS=$approved_tools")
+fi
 
 # Preserve only non-secret build and terminal controls needed by Go/C toolchains.
 for key in CI GITHUB_ACTIONS TERM COLORTERM LANG LC_ALL LC_CTYPE TZ \

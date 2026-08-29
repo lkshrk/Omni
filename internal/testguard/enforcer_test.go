@@ -64,11 +64,25 @@ func TestMakeTestTargetsUseSafeRunner(t *testing.T) {
 	}
 	makefile := string(data)
 	for _, want := range []string{
+		`evidence_root="$$safe_root/test-evidence"`,
+		"refusing unsafe repo .tmp",
+		"repo .tmp escaped checkout",
+		"refusing unsafe test-evidence directory",
+		"test-evidence escaped repo .tmp",
+		"refusing unsafe lane evidence directory",
+		"lane evidence escaped test-evidence root",
+	} {
+		if !strings.Contains(makefile, want) {
+			t.Fatalf("integration evidence path safety is missing %q", want)
+		}
+	}
+	for _, want := range []string{
 		"TEST_SAFE   := bash scripts/run-test-safe.sh",
 		"TEST_PACKAGES ?= ./...",
+		"TEST_FLAGS  ?= -race -trimpath",
 		"test: test-scripts test-unit",
 		"$(TEST_SAFE) bash scripts/test-release.sh",
-		"$(TEST_SAFE) go test -race -trimpath $(TEST_PACKAGES)",
+		"$(TEST_SAFE) go test $(TEST_FLAGS) $(TEST_PACKAGES)",
 		"$(TEST_SAFE) go test -trimpath ./...",
 	} {
 		if !strings.Contains(makefile, want) {
@@ -92,6 +106,106 @@ func TestMakeTestTargetsUseSafeRunner(t *testing.T) {
 			if strings.Contains(block, forbidden) {
 				t.Fatalf("Makefile %s target contains forbidden global cleanup %q", target, forbidden)
 			}
+		}
+	}
+}
+
+func TestDockerIntegrationRunsFreshContainerAndExportsEvidence(t *testing.T) {
+	root := repoRoot(t)
+	dockerfile, err := os.ReadFile(filepath.Join(root, "Dockerfile.test"))
+	if err != nil {
+		t.Fatalf("reading Dockerfile.test: %v", err)
+	}
+	if strings.Contains(string(dockerfile), "go test -count=1") {
+		t.Fatal("Dockerfile.test must build the environment without running tests during image build")
+	}
+	for _, want := range []string{"USER omni", "RUN go mod vendor", "ENV GOFLAGS=-mod=vendor"} {
+		if !strings.Contains(string(dockerfile), want) {
+			t.Fatalf("Dockerfile.test is missing runtime environment contract %q", want)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatalf("reading Makefile: %v", err)
+	}
+	makefile := string(data)
+	build := makeTargetBlock(makefile, "test-integration-build")
+	run := makeTargetBlock(makefile, "test-integration")
+	if strings.Contains(makefile, "INTEGRATION_EVIDENCE_DIR") {
+		t.Fatal("integration evidence root must not be caller-overridable")
+	}
+	validateAt := strings.Index(run, `if [ -e "$$tmp_root" ]`)
+	createAt := strings.Index(run, `mkdir -p "$$tmp_root"`)
+	if validateAt < 0 || createAt < 0 || validateAt > createAt {
+		t.Fatal("integration evidence root is created before its non-symlink validation")
+	}
+	for _, pair := range [][2]string{
+		{`if [ -e "$$evidence_root" ]`, `mkdir -p "$$evidence_root"`},
+		{`if [ -e "$$evidence" ]`, `mkdir -p "$$evidence"`},
+	} {
+		if guard, create := strings.Index(run, pair[0]), strings.Index(run, pair[1]); guard < 0 || create < 0 || guard > create {
+			t.Fatalf("integration evidence path %q is created before validation", pair[1])
+		}
+	}
+	for _, want := range []string{"--load", "--tag \"$(INTEGRATION_IMAGE)\""} {
+		if !strings.Contains(build, want) {
+			t.Fatalf("integration image build is missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"$(DOCKER) create", "$(DOCKER) start -a", "$(DOCKER) cp", "$(DOCKER) rm -f",
+		"scripts/run-test-safe.sh go test -count=1 -tags=integration -race -trimpath -json",
+		"go-test.jsonl", "meta.json", "gate.json", "container_gate", "$(DOCKER) image inspect",
+		"OMNI_TEST_APPROVED_TOOLS=apm,claude,codex,grok,cowsay",
+		"--network none",
+	} {
+		if !strings.Contains(run, want) {
+			t.Fatalf("integration container run is missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"--mount", "--volume", "/var/run/docker.sock", "builder prune", "cacheonly"} {
+		if strings.Contains(build+run, forbidden) {
+			t.Fatalf("integration targets contain forbidden host coupling or cache-only execution %q", forbidden)
+		}
+	}
+
+	workflow, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatalf("reading CI workflow: %v", err)
+	}
+	for _, want := range []string{
+		"INTEGRATION_LANE: ${{ matrix.name }}",
+		"name: flow-evidence-docker-${{ matrix.name }}",
+		"path: .tmp/test-evidence/docker-${{ matrix.name }}",
+		"if-no-files-found: error",
+	} {
+		if !strings.Contains(string(workflow), want) {
+			t.Fatalf("CI Docker evidence contract is missing %q", want)
+		}
+	}
+}
+
+func TestCIUnitLanesUploadFlowEvidence(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatalf("reading CI workflow: %v", err)
+	}
+	workflow := string(data)
+	for _, want := range []string{
+		`TEST_FLAGS="-race -trimpath -count=1 -json"`,
+		`| tee "$evidence_dir/go-test.jsonl"`,
+		`{"schema_version":1,"lane":"unit-${{ matrix.name }}","goos":"linux","tags":[],"count":1}`,
+		`if: always()`,
+		`name: flow-evidence-unit-${{ matrix.name }}`,
+		`if-no-files-found: error`,
+		`flow-evidence:`,
+		`needs: [unit-tests, integration]`,
+		`pattern: flow-evidence-*`,
+		`go run ./scripts/flow-evidence -catalog test/flows.json -evidence "$evidence"`,
+	} {
+		if !strings.Contains(workflow, want) {
+			t.Fatalf("CI unit evidence is missing %q", want)
 		}
 	}
 }
@@ -217,6 +331,44 @@ func TestSafeRunnerUsesOnlyApprovedTools(t *testing.T) {
 	cmd.Env = append(os.Environ(), "PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("safe runner tool allowlist failed: %v\n%s", err, out)
+	}
+}
+
+func TestSafeRunnerPreservesFixedOptionalTools(t *testing.T) {
+	root := repoRoot(t)
+	fakeBin := t.TempDir()
+	for _, name := range []string{"apm", "brew"} {
+		if err := os.WriteFile(filepath.Join(fakeBin, name), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command("bash", filepath.Join(root, "scripts", "run-test-safe.sh"), "bash", "-c", `
+		set -eu
+		test "$OMNI_TEST_APPROVED_TOOLS" = apm
+		case "$(command -v apm)" in "$OMNI_TEST_ROOT/bin/"*) ;; *) exit 1 ;; esac
+		! command -v brew >/dev/null 2>&1
+	`)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(),
+		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"OMNI_TEST_APPROVED_TOOLS=apm",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("safe runner optional tool opt-in failed: %v\n%s", err, out)
+	}
+}
+
+func TestSafeRunnerRejectsUnknownOptionalTools(t *testing.T) {
+	root := repoRoot(t)
+	for _, value := range []string{"brew", "apm,", "apm,apm"} {
+		t.Run(value, func(t *testing.T) {
+			cmd := exec.Command("bash", filepath.Join(root, "scripts", "run-test-safe.sh"), "true")
+			cmd.Dir = root
+			cmd.Env = append(os.Environ(), "OMNI_TEST_APPROVED_TOOLS="+value)
+			if out, err := cmd.CombinedOutput(); err == nil {
+				t.Fatalf("safe runner accepted %q: %s", value, out)
+			}
+		})
 	}
 }
 

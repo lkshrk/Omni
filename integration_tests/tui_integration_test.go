@@ -694,12 +694,6 @@ func integrationRepoRoot(t *testing.T) string {
 	}
 }
 
-// Agent CLIs must not run for real: they bootstrap state into the isolated HOME, which surfaces as dots candidates and shifts cursor-sensitive assertions.
-var minimalTestPATH = strings.Join([]string{
-	"/usr/bin", "/bin", "/usr/sbin", "/sbin",
-	"/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin",
-}, string(os.PathListSeparator))
-
 var agentCLIStubs = []string{"claude", "codex", "grok", "cursor", "gemini", "opencode", "cline"}
 
 func stubAgentCLIDir(t *testing.T, home string) string {
@@ -727,7 +721,7 @@ func isolatedTUIEnv(t *testing.T, home, cache string) []string {
 		"OMNI_HOSTNAME=testhost",
 		"OMNI_TEST_ISOLATED=1",
 		"TERM=xterm-256color",
-		"PATH="+stubDir+string(os.PathListSeparator)+minimalTestPATH,
+		"PATH="+stubDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
 }
 

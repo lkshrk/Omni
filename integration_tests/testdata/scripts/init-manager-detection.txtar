@@ -10,7 +10,7 @@
 # available.
 exec chmod 755 bin/pnpm bin/npm bin/pip3 bin/apt bin/apk bin/dnf bin/pacman bin/zypper bin/brew bin/pip bin/extract-testscript-bin
 exec bin/extract-testscript-bin
-env PATH=$WORK/bin:/usr/bin:/bin:/usr/sbin:/sbin
+env PATH=$WORK/bin:$PATH
 
 stdin init-input
 

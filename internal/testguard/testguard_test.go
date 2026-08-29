@@ -86,6 +86,15 @@ func TestTestBinaryDetectionUsesBuildPathNotExecutableName(t *testing.T) {
 	}
 }
 
+func TestTestRunnerArgs(t *testing.T) {
+	if !testRunnerArgs([]string{"-test.paniconexit0", "-test.count=1"}) {
+		t.Fatal("generated go test arguments were not detected")
+	}
+	if testRunnerArgs([]string{"--config", "settings.json"}) {
+		t.Fatal("ordinary production arguments were detected as go test arguments")
+	}
+}
+
 func TestSandboxPATHContainsOnlyApprovedTools(t *testing.T) {
 	sandbox, err := CreateSandbox()
 	if err != nil {
@@ -101,7 +110,7 @@ func TestSandboxPATHContainsOnlyApprovedTools(t *testing.T) {
 		t.Fatalf("sandbox tool roots overridden: PATH=%q SHELL=%q", values["PATH"], values["SHELL"])
 	}
 	t.Setenv("PATH", sandbox.Bin)
-	for _, name := range []string{"go", "sh", "git", "echo", "printf"} {
+	for _, name := range []string{"go", "sh", "git", "echo", "printf", "cmp", "seq", "test"} {
 		path, err := exec.LookPath(name)
 		if err != nil || !EntryPathInRoot(path, sandbox.Bin) {
 			t.Fatalf("approved available tool %q missing: %v", name, err)
@@ -114,6 +123,55 @@ func TestSandboxPATHContainsOnlyApprovedTools(t *testing.T) {
 		if _, err := os.Lstat(filepath.Join(sandbox.Bin, name)); !os.IsNotExist(err) {
 			t.Fatalf("dangerous tool %q exposed in sandbox bin: %v", name, err)
 		}
+	}
+}
+
+func TestOptionalApprovedToolsAreFixedExplicitAndPreserved(t *testing.T) {
+	fakeBin := t.TempDir()
+	for _, name := range []string{"apm", "brew"} {
+		if err := os.WriteFile(filepath.Join(fakeBin, name), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(approvedToolsEnv, "apm")
+
+	parent, err := CreateSandbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = parent.Cleanup() })
+	if _, err := os.Stat(filepath.Join(parent.Bin, "apm")); err != nil {
+		t.Fatalf("explicitly approved apm missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(parent.Bin, "brew")); !os.IsNotExist(err) {
+		t.Fatalf("package manager exposed by optional tool opt-in: %v", err)
+	}
+	values := envValues(parent.SanitizedEnv())
+	if values[approvedToolsEnv] != "apm" {
+		t.Fatalf("approved tools env=%q, want apm", values[approvedToolsEnv])
+	}
+
+	t.Setenv("PATH", parent.Bin)
+	child, err := CreateSandbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = child.Cleanup() })
+	if _, err := os.Stat(filepath.Join(child.Bin, "apm")); err != nil {
+		t.Fatalf("approved apm was not preserved into child sandbox: %v", err)
+	}
+}
+
+func TestOptionalApprovedToolsRejectUnknownAndMalformedValues(t *testing.T) {
+	for _, value := range []string{"brew", "apm,brew", "apm,", ",apm", "apm,,grok", "apm,apm", " apm"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv(approvedToolsEnv, value)
+			if sandbox, err := CreateSandbox(); err == nil {
+				_ = sandbox.Cleanup()
+				t.Fatalf("CreateSandbox accepted %q", value)
+			}
+		})
 	}
 }
 
@@ -444,6 +502,69 @@ func TestSanitizedEnvLaunchesValidatedChild(t *testing.T) {
 	}
 	if len(roots) != 2 {
 		t.Fatalf("test processes reused roots: %#v", roots)
+	}
+}
+
+func TestCopiedTestBinaryForksUnlessMarkedTestscriptChild(t *testing.T) {
+	parent, err := CreateSandbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = parent.Cleanup() })
+	copied := filepath.Join(t.TempDir(), "omni")
+	if err := copyExecutable(os.Args[0], copied); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(t *testing.T, env []string) string {
+		t.Helper()
+		cmd := exec.Command(copied, "-test.v", "-test.run=^TestGuardInitHelper$") //nolint:gosec
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("copied test binary failed: %v\n%s", err, out)
+		}
+		return outputValue(string(out), "CHILD_ROOT=")
+	}
+
+	unmarkedRoot := run(t, parent.SanitizedEnv())
+	if unmarkedRoot == parent.Root || !PathInRoot(unmarkedRoot, parent.Root) {
+		t.Fatalf("unmarked copied test root=%q, want child of %q", unmarkedRoot, parent.Root)
+	}
+	markedEnv := append(parent.SanitizedEnv(), commandChildEnv+"="+testscriptCommandChild)
+	if markedRoot := run(t, markedEnv); markedRoot != parent.Root {
+		t.Fatalf("marked testscript child root=%q, want reused %q", markedRoot, parent.Root)
+	}
+}
+
+func TestTestscriptCommandChildMarkerFailsClosed(t *testing.T) {
+	parent, err := CreateSandbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = parent.Cleanup() })
+	for _, scenario := range []struct {
+		name  string
+		value string
+		home  string
+	}{
+		{name: "unknown marker", value: "other"},
+		{name: "invalid parent", value: testscriptCommandChild, home: string(filepath.Separator)},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			env := append(parent.SanitizedEnv(), commandChildEnv+"="+scenario.value)
+			if scenario.home != "" {
+				env = replaceEnv(env, "HOME", scenario.home)
+			}
+			cmd := exec.Command(os.Args[0], "-test.run=^TestGuardInitHelper$") //nolint:gosec
+			cmd.Env = env
+			if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "unsafe test sandbox") {
+				t.Fatalf("scenario accepted: err=%v\n%s", err, out)
+			}
+		})
+	}
+	if !isProtectedEnvKey(commandChildEnv, false) {
+		t.Fatal("testscript command child marker is not protected")
 	}
 }
 

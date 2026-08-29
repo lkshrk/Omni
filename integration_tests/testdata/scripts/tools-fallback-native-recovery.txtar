@@ -1,7 +1,7 @@
 # tools sync recovers a failed fallback through native install once the package becomes available
 exec chmod 755 bin/apt-get bin/dpkg-query bin/apt-mark bin/sudo bin/bun bin/pnpm bin/npm bin/uv bin/pip3 bin/pip bin/extract-testscript-bin
 exec bin/extract-testscript-bin
-env PATH=$WORK/bin:/usr/bin:/bin:/usr/sbin:/sbin
+env PATH=$WORK/bin:$PATH
 
 exec omni --config settings.json hosts ensure testhost
 exec omni-seed-package-availability rg apt ripgrep false 'no candidate'

@@ -216,13 +216,19 @@ func isolateAgentsAPMIntegration(t *testing.T) (root, home, state string) {
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "xdg-state"))
 	t.Setenv("APM_E2E_TESTS", "1")
-	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	gitConfig := filepath.Join(root, "gitconfig")
+	if err := os.WriteFile(gitConfig, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", gitConfig)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("GIT_TERMINAL_PROMPT", "0")
 	for _, name := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"} {
 		t.Setenv(name, "http://127.0.0.1:1")
 	}
-	t.Setenv("NO_PROXY", "127.0.0.1,localhost")
+	for _, name := range []string{"NO_PROXY", "no_proxy"} {
+		t.Setenv(name, "localhost,127.0.0.1,::1")
+	}
 	return root, home, state
 }
 

@@ -16,8 +16,7 @@ import (
 )
 
 func TestTUIAgentsTabSyncsMCPThroughRealAPM(t *testing.T) {
-	apmBin, err := exec.LookPath("apm")
-	if err != nil {
+	if _, err := exec.LookPath("apm"); err != nil {
 		t.Fatalf("integration tests require apm on PATH: %v", err)
 	}
 	bin := buildOmniBinary(t)
@@ -25,9 +24,7 @@ func TestTUIAgentsTabSyncsMCPThroughRealAPM(t *testing.T) {
 	home := filepath.Join(root, "home")
 	cache := filepath.Join(root, "cache")
 	configPath := filepath.Join(root, "settings.json")
-	env := append(isolatedTUIEnv(t, home, cache),
-		"PATH="+filepath.Join(home, ".test-stub-bin")+string(os.PathListSeparator)+filepath.Dir(apmBin)+string(os.PathListSeparator)+minimalTestPATH,
-	)
+	env := isolatedTUIEnv(t, home, cache)
 
 	if err := config.Save(configPath, &config.RootConfig{
 		Version: config.CurrentVersion,

@@ -38,7 +38,7 @@ RUN pip3 install --break-system-packages cowsay==6.1 git+https://github.com/micr
 
 WORKDIR /app
 
-RUN adduser -D -u 10001 omni && chown omni:omni /app
+RUN adduser -D -u 10001 omni && mkdir -p /app/.tmp && chown -R omni:omni /app
 
 RUN git config --system user.email "ci@omni" && \
     git config --system user.name "omni-ci"
@@ -59,7 +59,6 @@ RUN --mount=type=cache,target=/app/.tmp,uid=10001,gid=10001 \
 
 COPY --chown=omni:omni . .
 
-ARG TEST_PACKAGES="./integration_tests/... ./internal/provider/... ./internal/apm/... ./internal/app/... ./internal/cli/..."
-RUN --mount=type=cache,target=/home/omni/.cache/go-build,uid=10001,gid=10001 \
-    --mount=type=cache,target=/app/.tmp,uid=10001,gid=10001 \
-    go test -count=1 -tags=integration -race -trimpath $TEST_PACKAGES
+# Nested black-box builds use the copied dependency source without network access.
+RUN go mod vendor
+ENV GOFLAGS=-mod=vendor
