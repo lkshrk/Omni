@@ -318,6 +318,7 @@ func (s *Sandbox) directories() map[string]string {
 		"CARGO_HOME": filepath.Join(s.Data, "cargo"), "RUSTUP_HOME": filepath.Join(s.Data, "rustup"),
 		"GOCACHE": filepath.Join(s.Cache, "go-build"), "GOMODCACHE": filepath.Join(s.Cache, "go-mod"),
 		"NPM_CONFIG_CACHE": filepath.Join(s.Cache, "npm"), "NPM_CONFIG_PREFIX": filepath.Join(s.Data, "npm-global"),
+		"npm global lib": filepath.Join(s.Data, "npm-global", "lib"),
 	}
 }
 
@@ -335,7 +336,7 @@ func (s *Sandbox) SanitizedEnv(extra ...string) []string {
 	allowed := []string{
 		"PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "CI", "GITHUB_ACTIONS",
 		"TERM", "COLORTERM", "LANG", "LC_ALL", "LC_CTYPE", "TZ",
-		"GOFLAGS", "GOTOOLCHAIN", "GOSUMDB",
+		"GOTOOLCHAIN", "GOSUMDB",
 		"GOROOT", "GOEXPERIMENT", "CGO_ENABLED", "CC", "CXX", "AR", "PKG_CONFIG_PATH", "SDKROOT",
 		"MACOSX_DEPLOYMENT_TARGET", "DEVELOPER_DIR",
 	}

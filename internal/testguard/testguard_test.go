@@ -188,8 +188,23 @@ func TestNPMGlobalPrefixStaysInSandbox(t *testing.T) {
 	if info, err := os.Stat(prefix); err != nil || !info.IsDir() {
 		t.Fatalf("NPM_CONFIG_PREFIX is not an existing directory: %v", err)
 	}
+	if info, err := os.Stat(filepath.Join(prefix, "lib")); err != nil || !info.IsDir() {
+		t.Fatalf("NPM_CONFIG_PREFIX/lib is not an existing directory: %v", err)
+	}
 	if !isProtectedEnvKey("npm_config_prefix", true) {
 		t.Fatal("Windows case-insensitive npm prefix override was not protected")
+	}
+}
+
+func TestSanitizedEnvDropsInheritedGoFlags(t *testing.T) {
+	t.Setenv("GOFLAGS", "-coverprofile=/dev/null")
+	sandbox, err := CreateSandbox()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sandbox.Cleanup() })
+	if got := envValues(sandbox.SanitizedEnv())["GOFLAGS"]; got != "" {
+		t.Fatalf("GOFLAGS escaped into sandbox: %q", got)
 	}
 }
 

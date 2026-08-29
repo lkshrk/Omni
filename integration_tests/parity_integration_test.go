@@ -380,7 +380,7 @@ func runParityDotsUseRepoTUI(t *testing.T, bin string, sandbox *paritySandbox) {
 			return strings.Contains(text, "nvim") && strings.Contains(strings.ToLower(text), "conflict")
 		}, "TUI did not render the dots conflict")
 		writeTUIKeys(t, term, "u")
-		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
+		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
 			return strings.Contains(text, "confirm use repo")
 		}, "TUI did not arm use-repo confirmation")
 		writeTUIKeys(t, term, "u")

@@ -1,6 +1,7 @@
 package testguard
 
 import (
+	"fmt"
 	"go/build"
 	"go/parser"
 	"go/token"
@@ -154,9 +155,9 @@ func TestDockerIntegrationRunsFreshContainerAndExportsEvidence(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"$(DOCKER) create", "$(DOCKER) start -a", "$(DOCKER) cp", "$(DOCKER) rm -f",
+		"$(DOCKER_SAFE) create", "$(DOCKER_SAFE) start -a", "$(DOCKER_SAFE) cp", "$(DOCKER_SAFE) rm -f",
 		"scripts/run-test-safe.sh go test -count=1 -tags=integration -race -trimpath -json",
-		"go-test.jsonl", "meta.json", "gate.json", "container_gate", "$(DOCKER) image inspect",
+		"go-test.jsonl", "meta.json", "gate.json", "container_gate", "$(DOCKER_SAFE) image inspect",
 		"OMNI_TEST_APPROVED_TOOLS=apm,claude,codex,grok,cowsay",
 		"--network none",
 	} {
@@ -250,6 +251,97 @@ func TestSafeRunnerMarksEnvironmentIsolated(t *testing.T) {
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("safe runner should mark its environment isolated: %v\n%s", err, out)
+	}
+}
+
+func TestSafeRunnerDropsInheritedGoFlags(t *testing.T) {
+	root := repoRoot(t)
+	cmd := exec.Command("bash", filepath.Join(root, "scripts", "run-test-safe.sh"), "bash", "-c", `test -z "${GOFLAGS:-}"`)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "GOFLAGS=-coverprofile=/dev/null")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("safe runner inherited GOFLAGS: %v\n%s", err, out)
+	}
+}
+
+func TestSafeRunnerRejectsWritableGoTestFlags(t *testing.T) {
+	root := repoRoot(t)
+	outside := filepath.Join(t.TempDir(), "cover.out")
+	cmd := exec.Command("bash", filepath.Join(root, "scripts", "run-test-safe.sh"),
+		"go", "test", "-coverprofile="+outside, "./internal/testguard")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "refusing unsafe go test flag") {
+		t.Fatalf("safe runner accepted writable go test flag: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(outside); !os.IsNotExist(err) {
+		t.Fatalf("unsafe go test output was created: %v", err)
+	}
+}
+
+func TestSafeRunnerRejectsSymlinkedPackageManagerOutput(t *testing.T) {
+	root := repoRoot(t)
+	target := filepath.Join(t.TempDir(), "outside.test")
+	if err := os.WriteFile(target, []byte("preserve"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(os.TempDir(), fmt.Sprintf("omni-pm-test.escape-%d", os.Getpid()))
+	_ = os.Remove(output)
+	if err := os.Symlink(target, output); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(output) })
+	cmd := exec.Command("bash", filepath.Join(root, "scripts", "run-test-safe.sh"),
+		"go", "test", "-c", "-o", output, "./internal/testguard")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "refusing symlink go test output") {
+		t.Fatalf("safe runner accepted symlinked output: %v\n%s", err, out)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil || string(content) != "preserve" {
+		t.Fatalf("symlink target changed: %q, %v", content, err)
+	}
+}
+
+func TestDockerSafeRunnerRejectsRemoteDaemonAndStripsCredentials(t *testing.T) {
+	root := repoRoot(t)
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "docker.log")
+	fake := filepath.Join(dir, "docker")
+	script := `#!/bin/sh
+printf '%s|%s|%s|%s|%s|%s|%s\n' "$DOCKER_CONFIG" "${DOCKER_CONTEXT:-}" "${DOCKER_AUTH_CONFIG:-}" "${DOCKER_CERT_PATH:-}" "${BUILDX_CONFIG:-}" "${BUILDKIT_HOST:-}" "$*" > "$DOCKER_TEST_LOG"
+`
+	if err := os.WriteFile(fake, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runner := filepath.Join(root, "scripts", "run-docker-safe.sh")
+	remote := exec.Command("bash", runner, fake, "version")
+	remote.Env = append(os.Environ(), "DOCKER_HOST=tcp://remote.example:2375", "DOCKER_TEST_LOG="+logPath)
+	if out, err := remote.CombinedOutput(); err == nil || !strings.Contains(string(out), "refusing non-local Docker daemon") {
+		t.Fatalf("remote Docker daemon was not rejected: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("Docker command ran after remote rejection: %v", err)
+	}
+
+	local := exec.Command("bash", runner, fake, "version")
+	local.Env = append(os.Environ(),
+		"DOCKER_HOST=tcp://127.0.0.1:2375", "DOCKER_CONFIG=/host/docker", "DOCKER_CONTEXT=production",
+		"DOCKER_AUTH_CONFIG=secret", "DOCKER_CERT_PATH=/host/certs", "DOCKER_TLS_VERIFY=1",
+		"BUILDX_CONFIG=/host/buildx", "BUILDKIT_HOST=tcp://remote.example:1234", "DOCKER_TEST_LOG="+logPath,
+	)
+	if out, err := local.CombinedOutput(); err != nil {
+		t.Fatalf("local Docker daemon was rejected: %v\n%s", err, out)
+	}
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := strings.Split(strings.TrimSpace(string(logged)), "|")
+	if len(fields) != 7 || !strings.HasPrefix(fields[0], "/tmp/omni-docker.") || fields[1] != "" || fields[2] != "" || fields[3] != "" || fields[4] != "" || fields[5] != "" || fields[6] != "version" {
+		t.Fatalf("unsafe Docker environment reached command: %q", logged)
+	}
+	if _, err := os.Stat(fields[0]); !os.IsNotExist(err) {
+		t.Fatalf("temporary Docker config was not removed: %v", err)
 	}
 }
 
@@ -372,20 +464,16 @@ func TestSafeRunnerRejectsUnknownOptionalTools(t *testing.T) {
 	}
 }
 
-func TestSafeRunnerBuildsDependenciesThenIsolatesTestChild(t *testing.T) {
+func TestSafeRunnerIsolatesGoBuildAndTestChild(t *testing.T) {
 	root := repoRoot(t)
 	cmd := exec.Command(
 		"bash", filepath.Join(root, "scripts", "run-test-safe.sh"),
 		"go", "test", "-count=1", "-run", "^TestDirectGoTestCreatesCompleteSandbox$",
-		"./internal/config", "./internal/testguard",
+		"./internal/testguard",
 	)
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(),
-		"OMNI_TEST_BUILD_GOCACHE=/tmp/omni-go-build",
-		"OMNI_TEST_BUILD_GOMODCACHE=/tmp/omni-go-mod",
-	)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("safe runner should build a dependency-bearing package before isolating test binaries: %v\n%s", err, out)
+		t.Fatalf("safe runner should isolate both build and test binaries: %v\n%s", err, out)
 	}
 }
 

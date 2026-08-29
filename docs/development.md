@@ -41,7 +41,9 @@ This runs only integration-tagged coverage with the race detector; the full
 unit suite remains in `make test`. Containers provide controlled external
 tools, permissions, HOME/config roots, Git, and real-binary/PTY execution.
 They use disposable filesystems with no host HOME, Docker socket, source mount,
-or network access during the test run.
+or network access during the test run. The host-side Docker wrapper rejects
+non-local daemons and strips Docker, Buildx, BuildKit, proxy, certificate, and
+credential configuration before building or launching containers.
 
 Do not run integration tests directly against the local machine. Dots and
 package-manager flows intentionally mutate files and package-manager state in

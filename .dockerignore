@@ -13,3 +13,15 @@ site/
 cover.out
 coverage.out
 .DS_Store
+.env
+.env.*
+**/.env
+**/.env.*
+*.pem
+**/*.pem
+*.key
+**/*.key
+id_rsa*
+**/id_rsa*
+id_ed25519*
+**/id_ed25519*

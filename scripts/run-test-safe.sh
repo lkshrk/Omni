@@ -6,6 +6,67 @@ if [ "$#" -eq 0 ]; then
 	exit 2
 fi
 
+validate_go_test_args() {
+	local expect="" compile=0 output="" arg resolved parent mode owner
+	shift 2
+	for arg in "$@"; do
+		if [ "$expect" = output ]; then
+			output="$arg"
+			expect=""
+			continue
+		fi
+		if [ -n "$expect" ]; then
+			expect=""
+			continue
+		fi
+		case "$arg" in
+		-race | -trimpath | -json | -short | -v | -failfast | -cover | -benchmem) ;;
+		-c) compile=1 ;;
+		-o) expect=output ;;
+		-count | -tags | -run | -skip | -parallel | -timeout | -shuffle | -p | -vet | -cpu | -bench | -benchtime | -list | -covermode | -coverpkg) expect=value ;;
+		-count=* | -tags=* | -run=* | -skip=* | -parallel=* | -timeout=* | -shuffle=* | -p=* | -vet=* | -cpu=* | -bench=* | -benchtime=* | -list=* | -covermode=* | -coverpkg=* | -mod=readonly | -mod=vendor) ;;
+		-*)
+			echo "refusing unsafe go test flag: $arg" >&2
+			return 2
+			;;
+		esac
+	done
+	if [ -n "$expect" ]; then
+		echo "missing value for go test flag" >&2
+		return 2
+	fi
+	if [ "$compile" -eq 1 ] && [ -z "$output" ]; then
+		echo "refusing go test -c without an explicit safe output" >&2
+		return 2
+	fi
+	if [ -n "$output" ]; then
+		parent="$(dirname "$output")"
+		resolved="$(cd "$parent" 2>/dev/null && pwd -P)/$(basename "$output")" || {
+			echo "refusing unresolved go test output: $output" >&2
+			return 2
+		}
+		if [ -L "$resolved" ]; then
+			echo "refusing symlink go test output: $output" >&2
+			return 2
+		fi
+		case "$resolved" in
+		"$root"/*) ;;
+		/tmp/omni-pm-test.* | /private/tmp/omni-pm-test.*)
+			mode="$(stat -c %a "$resolved" 2>/dev/null || stat -f %Lp "$resolved" 2>/dev/null || true)"
+			owner="$(stat -c %u "$resolved" 2>/dev/null || stat -f %u "$resolved" 2>/dev/null || true)"
+			if [ ! -f "$resolved" ] || [ "$mode" != 600 ] || [ "$owner" != "$(id -u)" ]; then
+				echo "refusing unowned go test output: $output" >&2
+				return 2
+			fi
+			;;
+		*)
+			echo "refusing go test output outside sandbox: $output" >&2
+			return 2
+			;;
+		esac
+	fi
+}
+
 approved_tools="${OMNI_TEST_APPROVED_TOOLS:-}"
 approved_tool_names=()
 if [ -n "$approved_tools" ]; then
@@ -32,21 +93,6 @@ if [ -n "$approved_tools" ]; then
 fi
 
 go_root="${GOROOT:-$(go env GOROOT)}"
-build_go_cache="${OMNI_TEST_BUILD_GOCACHE:-$(go env GOCACHE)}"
-build_go_modcache="${OMNI_TEST_BUILD_GOMODCACHE:-$(go env GOMODCACHE)}"
-for build_cache in "$build_go_cache" "$build_go_modcache"; do
-	case "$build_cache" in
-	/)
-		echo "refusing filesystem root as Go build cache" >&2
-		exit 2
-		;;
-	/*) ;;
-	*)
-		echo "refusing relative Go build cache: $build_cache" >&2
-		exit 2
-		;;
-	esac
-done
 root="$(mktemp -d /tmp/omni-test.XXXXXX)"
 chmod 700 "$root"
 root="$(cd "$root" && pwd -P)"
@@ -110,6 +156,7 @@ mkdir -p \
 	"$data/go" \
 	"$data/cargo" \
 	"$data/npm-global" \
+	"$data/npm-global/lib" \
 	"$data/rustup" \
 	"$cache/go-build" \
 	"$cache/go-mod" \
@@ -204,7 +251,7 @@ fi
 
 # Preserve only non-secret build and terminal controls needed by Go/C toolchains.
 for key in CI GITHUB_ACTIONS TERM COLORTERM LANG LC_ALL LC_CTYPE TZ \
-	GOFLAGS GOTOOLCHAIN GOPROXY GONOPROXY GONOSUMDB GOPRIVATE GOSUMDB \
+	GOTOOLCHAIN GOPROXY GONOPROXY GONOSUMDB GOPRIVATE GOSUMDB \
 	GOEXPERIMENT CGO_ENABLED CC CXX AR PKG_CONFIG_PATH SDKROOT \
 	MACOSX_DEPLOYMENT_TARGET DEVELOPER_DIR; do
 	if [ -n "${!key:-}" ]; then
@@ -214,12 +261,11 @@ done
 
 env -i "${safe_env[@]}" go telemetry off >/dev/null
 if [ "$1" = "go" ] && [ "${2:-}" = "test" ]; then
+	validate_go_test_args "$@"
 	# The Go driver may fetch only public build dependencies. Each compiled test
 	# binary immediately replaces these parent-only values through testguard init.
 	build_env=(
 		"${safe_env[@]}"
-		"GOCACHE=$build_go_cache"
-		"GOMODCACHE=$build_go_modcache"
 		"GOPROXY=https://proxy.golang.org"
 		"GOSUMDB=sum.golang.org"
 		"GOPRIVATE="

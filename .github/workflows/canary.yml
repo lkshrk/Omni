@@ -29,3 +29,18 @@ jobs:
 
       - name: Skills catalog and discovery schema canary
         run: make test-canary
+
+  package-managers:
+    name: Real Package Managers
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test providers in disposable distro containers
+        run: make test-package-managers

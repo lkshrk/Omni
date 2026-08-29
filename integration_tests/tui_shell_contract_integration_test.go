@@ -3,24 +3,108 @@
 package integration_test
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vttest"
+	"github.com/creack/pty"
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 )
 
 var selectedToolDetail = regexp.MustCompile(`details for tool-\d{2}`)
+
+type lockedPTYOutput struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (o *lockedPTYOutput) Write(p []byte) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.buf.Write(p)
+}
+
+func (o *lockedPTYOutput) snapshot() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.buf.String()
+}
+
+func TestTUIShellContractRedrawsAfterPTYResize(t *testing.T) {
+	bin := buildOmniBinary(t)
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	cache := filepath.Join(root, "cache")
+	configPath := filepath.Join(root, "settings.json")
+	if err := config.Save(configPath, &config.RootConfig{
+		Version: config.CurrentVersion,
+		Hosts:   map[string][]string{"testhost": {}},
+		Groups:  []*config.GroupConfig{{Name: "testhost", Special: "host"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "--config", configPath, "--cache-dir", cache)
+	cmd.Dir = root
+	cmd.Env = isolatedTUIEnv(t, home, cache)
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ptmx.Close() }()
+	var output lockedPTYOutput
+	go func() {
+		_, _ = io.Copy(&output, ptmx)
+	}()
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- cmd.Wait() }()
+	waitForPTYOutput(t, &output, 8*time.Second, 0, "Dashboard")
+	before := len(output.snapshot())
+	if err := pty.Setsize(ptmx, &pty.Winsize{Rows: 12, Cols: 60}); err != nil {
+		t.Fatal(err)
+	}
+	waitForPTYOutput(t, &output, 8*time.Second, before, "Dashboard")
+	_, _ = ptmx.Write([]byte{3, 3})
+	select {
+	case err := <-waitDone:
+		if err != nil {
+			t.Fatalf("resized TUI exit: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("resized TUI did not exit")
+	}
+}
+
+func waitForPTYOutput(t *testing.T, output *lockedPTYOutput, timeout time.Duration, offset int, want string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		raw := output.snapshot()
+		if len(raw) > offset && strings.Contains(ansi.Strip(raw[offset:]), want) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("PTY output after offset %d omitted %q", offset, want)
+}
 
 func TestTUIShellContractNavigatesWithTerminalKeysAndMouse(t *testing.T) {
 	bin := buildOmniBinary(t)
@@ -71,6 +155,10 @@ func TestTUIShellContractNavigatesWithTerminalKeysAndMouse(t *testing.T) {
 		waitForRequiredScreen(t, term, 3*time.Second, screenHas("Health Check", "Tool Updates"), "Tab did not wrap forward to Dashboard")
 		clickTUITab(t, term, "Tools")
 		waitForRequiredScreen(t, term, 4*time.Second, screenHas("tool-00", "tool-01"), "mouse click did not open Tools")
+		writeTUIKeys(t, term, "/", "tool-17")
+		waitForSelectedTool(t, term, "tool-17", "search did not filter to the matching tool")
+		sendTUIKey(term, uv.KeyEscape)
+		waitForRequiredScreen(t, term, 3*time.Second, screenHas("tool-00", "tool-01"), "Escape did not clear search")
 
 		sendTUIKey(term, uv.KeyHome)
 		first := waitForSelectedTool(t, term, "tool-00", "Home did not select the first tool")

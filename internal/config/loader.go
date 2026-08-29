@@ -693,6 +693,9 @@ func ToolSource(path, name string) (string, error) {
 }
 
 func toolSource(path, name string, stack *includePathStack) (string, bool, error) {
+	if err := testguard.RequireTempPath("config source read", path); err != nil {
+		return "", false, err
+	}
 	if err := stack.push(path); err != nil {
 		return "", false, err
 	}
@@ -1232,6 +1235,9 @@ func loadIncludesFrom(path string, cfg *RootConfig, stack *includePathStack) err
 		includePath := include
 		if !filepath.IsAbs(includePath) {
 			includePath = filepath.Join(baseDir, include)
+		}
+		if err := testguard.RequireTempPath("config include read", includePath); err != nil {
+			return err
 		}
 		data, err := os.ReadFile(includePath)
 		if err != nil {

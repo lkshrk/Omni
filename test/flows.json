@@ -58,9 +58,24 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIDashboardReconcileRecoversAfterInjectedInstallFailure",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "parity",
@@ -350,9 +365,24 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIAdminTerminalCompletesInteractiveBrewCaskUninstall",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "parity",
@@ -1157,9 +1187,39 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIFallbackProviderListSmoke",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "tui_blackbox",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIFallbackEditorPrefillsConfiguredGitHint",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "parity",
@@ -1518,9 +1578,39 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUISyncsDiscoveredDotCandidate",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "tui_blackbox",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIDashboardReconcileFixesDotIgnorePatterns",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "parity",
@@ -1901,6 +1991,21 @@
                   "linux"
                 ]
               }
+            },
+            {
+              "type": "tui_blackbox",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIDotConflictCancelThenUseRepo",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
             }
           ]
         },
@@ -2124,9 +2229,54 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIDotsIgnoreNamedPluginsDoesNotTriggerLegacyOnboarding",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "tui_blackbox",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIIncludesStaticIgnoredDotCandidate",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "tui_blackbox",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIDotsRootFileIgnoreCompletesPromptly",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "parity",
@@ -3220,9 +3370,24 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIAssignsHostGroupAndPersistsSetting",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "parity",
@@ -3318,6 +3483,21 @@
                   "integration"
                 ],
                 "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "tui_blackbox",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIAssignsHostGroupAndPersistsSetting",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
                 "os": [
                   "linux"
                 ]
@@ -3640,9 +3820,24 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIFirstRunCreatesHostAndReachesDashboard",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "parity",
@@ -3757,9 +3952,24 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIAgentsTabSyncsMCPThroughRealAPM",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "parity",
@@ -4662,9 +4872,54 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified real-binary PTY evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIConfiguredHostStartsDashboard",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "tui_blackbox",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIFirstRunCreatesHostAndReachesDashboard",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "tui_blackbox",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIShellContractNavigatesWithTerminalKeysAndMouse",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
@@ -4749,9 +5004,24 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified real-binary PTY evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIShellContractNavigatesWithTerminalKeysAndMouse",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "mutates": false
@@ -4801,9 +5071,24 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified real-binary PTY evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIShellContractNavigatesWithTerminalKeysAndMouse",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "mutates": false
@@ -4853,9 +5138,24 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified real-binary PTY evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIShellContractNavigatesWithTerminalKeysAndMouse",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "mutates": false
@@ -4905,9 +5205,24 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified real-binary PTY evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIShellContractRedrawsAfterPTYResize",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "mutates": false
@@ -4958,9 +5273,24 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified real-binary PTY evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIShellContractNavigatesWithTerminalKeysAndMouse",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "mutates": false
@@ -5011,9 +5341,24 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified real-binary PTY evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIShellContractShowsTransientInstallProgress",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "mutates": false
@@ -5063,9 +5408,24 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified real-binary PTY evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIDashboardReconcileRecoversAfterInjectedInstallFailure",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-non-cli",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "mutates": false

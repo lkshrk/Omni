@@ -18,17 +18,20 @@ INTEGRATION_IMAGE ?= omni-integration-test:local
 INTEGRATION_LANE ?= full
 ARGS        ?= --help
 DOCKER      ?= docker
+DOCKER_SAFE := bash scripts/run-docker-safe.sh "$(DOCKER)"
 
 define run_pm_test
-	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=$(2) go test -tags=pmcontainer -c ./internal/provider/$(1) -o "$(TMP_DIR)/pm-tests/$(1).test"
 	@set -eu; \
-	container=$$($(DOCKER) create $(4) \
+	test_binary=$$(mktemp /tmp/omni-pm-test.XXXXXX); \
+	trap 'rm -f "$$test_binary"' EXIT HUP INT TERM; \
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(2) $(TEST_SAFE) go test -tags=pmcontainer -c ./internal/provider/$(1) -o "$$test_binary"; \
+	container=$$($(DOCKER_SAFE) create $(4) \
 		-e OMNI_PMCONTAINER=1 \
 		-e OMNI_PMCONTAINER_PROVIDER=$(1) \
 		$(5) $(3) /$(1).test -test.v); \
-	trap '$(DOCKER) rm -f "$$container" >/dev/null 2>&1 || true' EXIT HUP INT TERM; \
-	$(DOCKER) cp "$(TMP_DIR)/pm-tests/$(1).test" "$$container:/$(1).test"; \
-	$(DOCKER) start -a "$$container"
+	trap '$(DOCKER_SAFE) rm -f "$$container" >/dev/null 2>&1 || true; rm -f "$$test_binary"' EXIT HUP INT TERM; \
+	$(DOCKER_SAFE) cp "$$test_binary" "$$container:/$(1).test"; \
+	$(DOCKER_SAFE) start -a "$$container"
 endef
 
 GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -121,7 +124,6 @@ test-canary:
 
 ## test-package-managers: run real package-manager provider tests in minimal distro containers
 test-package-managers:
-	@mkdir -p "$(TMP_DIR)/pm-tests"
 	$(call run_pm_test,apt,$$(go env GOARCH),debian:bookworm-slim)
 	$(call run_pm_test,apk,$$(go env GOARCH),alpine:3.20)
 	$(call run_pm_test,brew,$$(go env GOARCH),homebrew/brew:latest,,-e HOMEBREW_NO_AUTOREMOVE=1 -e HOMEBREW_NO_AUTO_UPDATE=1)
@@ -135,7 +137,7 @@ test-all: test test-integration
 
 ## test-integration-build: build the isolated integration test environment image
 test-integration-build:
-	$(DOCKER) buildx build -f Dockerfile.test --target integration-test $(DOCKER_TEST_CACHE) --load --tag "$(INTEGRATION_IMAGE)" .
+	$(DOCKER_SAFE) buildx build -f Dockerfile.test --target integration-test $(DOCKER_TEST_CACHE) --load --tag "$(INTEGRATION_IMAGE)" .
 
 ## test-integration: run integration-tagged tests inside the isolated Docker environment
 test-integration: test-integration-build
@@ -162,8 +164,8 @@ test-integration: test-integration-build
 	meta="$$evidence/meta.json"; \
 	gate="$$evidence/gate.json"; \
 	find "$$evidence" -maxdepth 1 -type f \( -name go-test.jsonl -o -name meta.json -o -name gate.json \) -delete; \
-	image_id=$$($(DOCKER) image inspect --format '{{.Id}}' "$(INTEGRATION_IMAGE)"); \
-	container=$$($(DOCKER) create \
+	image_id=$$($(DOCKER_SAFE) image inspect --format '{{.Id}}' "$(INTEGRATION_IMAGE)"); \
+	container=$$($(DOCKER_SAFE) create \
 		--network none \
 		--env "TEST_PACKAGES=$(INTEGRATION_PACKAGES)" \
 		--env "TEST_LANE=$(INTEGRATION_LANE)" \
@@ -172,16 +174,16 @@ test-integration: test-integration-build
 		--env "OMNI_TEST_APPROVED_TOOLS=apm,claude,codex,grok,cowsay" \
 		"$(INTEGRATION_IMAGE)" \
 		sh -c 'set +e; go_bin=$$(command -v go); binary_sha256=$$(sha256sum "$$go_bin" | cut -d " " -f 1); bash scripts/run-test-safe.sh go test -count=1 -tags=integration -race -trimpath -json $$TEST_PACKAGES > /tmp/test-results.jsonl 2>&1; status=$$?; [ "$$status" -eq 0 ] && result=pass || result=fail; printf '\''{"schema_version":1,"lane":"docker-%s","goos":"linux","tags":["integration"],"count":1}\n'\'' "$$TEST_LANE" > /tmp/test-meta.json; printf '\''{"schema_version":1,"kind":"container_gate","lane":"docker-%s","goos":"linux","image_ref":"%s","image_id":"%s","binary_sha256":"%s","command_id":"go-test-integration","exit_code":%s,"status":"%s","events":"go-test.jsonl"}\n'\'' "$$TEST_LANE" "$$TEST_IMAGE_REF" "$$TEST_IMAGE_ID" "$$binary_sha256" "$$status" "$$result" > /tmp/test-gate.json; exit "$$status"'); \
-	trap '$(DOCKER) rm -f "$$container" >/dev/null 2>&1 || true' EXIT HUP INT TERM; \
-	if $(DOCKER) start -a "$$container"; then status=0; else status=$$?; fi; \
-	if ! $(DOCKER) cp "$$container:/tmp/test-results.jsonl" "$$jsonl"; then [ "$$status" -ne 0 ] || status=1; fi; \
-	if ! $(DOCKER) cp "$$container:/tmp/test-meta.json" "$$meta"; then [ "$$status" -ne 0 ] || status=1; fi; \
-	if ! $(DOCKER) cp "$$container:/tmp/test-gate.json" "$$gate"; then [ "$$status" -ne 0 ] || status=1; fi; \
+	trap '$(DOCKER_SAFE) rm -f "$$container" >/dev/null 2>&1 || true' EXIT HUP INT TERM; \
+	if $(DOCKER_SAFE) start -a "$$container"; then status=0; else status=$$?; fi; \
+	if ! $(DOCKER_SAFE) cp "$$container:/tmp/test-results.jsonl" "$$jsonl"; then [ "$$status" -ne 0 ] || status=1; fi; \
+	if ! $(DOCKER_SAFE) cp "$$container:/tmp/test-meta.json" "$$meta"; then [ "$$status" -ne 0 ] || status=1; fi; \
+	if ! $(DOCKER_SAFE) cp "$$container:/tmp/test-gate.json" "$$gate"; then [ "$$status" -ne 0 ] || status=1; fi; \
 	exit "$$status"
 
 ## docs-build: build the documentation site in a minimal Docker image
 docs-build:
-	$(DOCKER) build -f Dockerfile.docs --target docs-build --output=type=cacheonly .
+	$(DOCKER_SAFE) build -f Dockerfile.docs --target docs-build --output=type=cacheonly .
 
 ## lint: run golangci-lint
 lint:

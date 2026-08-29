@@ -39,8 +39,9 @@ func TestTUIAdminTerminalCompletesInteractiveBrewCaskUninstall(t *testing.T) {
 		t.Fatalf("seed fake brew state: %v", err)
 	}
 	writeFakeInteractiveBrew(t, binDir)
-	env := append(isolatedTUIEnv(t, home, cache),
-		"PATH="+binDir+":/usr/bin:/bin",
+	env := isolatedTUIEnv(t, home, cache)
+	env = replaceIntegrationEnv(env, "PATH", binDir+string(os.PathListSeparator)+integrationEnvValue(env, "PATH"))
+	env = append(env,
 		"OMNI_TEST_BREW_STATE="+installedState,
 		"OMNI_TEST_BREW_MARKER="+completedMarker,
 		"OMNI_TEST_BREW_LOG="+commandLog,

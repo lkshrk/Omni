@@ -1,13 +1,52 @@
 package config_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
 )
+
+func TestConfigIncludesCannotReadOutsideTestSandbox(t *testing.T) {
+	outside := "/etc/passwd"
+	if runtime.GOOS == "windows" {
+		outside = filepath.Join(os.Getenv("SYSTEMROOT"), "win.ini")
+	}
+	root := t.TempDir()
+	relative, err := filepath.Rel(root, outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	symlink := filepath.Join(root, "outside.json")
+	symlinkOK := os.Symlink(outside, symlink) == nil
+
+	cases := map[string]string{"absolute": outside, "traversal": relative}
+	if symlinkOK {
+		cases["symlink"] = filepath.Base(symlink)
+	}
+	for name, include := range cases {
+		t.Run(name, func(t *testing.T) {
+			mainPath := filepath.Join(root, name+".json")
+			body, err := json.Marshal(map[string]any{"version": config.CurrentVersion, "$include": []string{include}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(mainPath, body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := config.Load(mainPath); err == nil || !strings.Contains(err.Error(), "unsafe test sandbox") {
+				t.Fatalf("Load() error = %v, want sandbox rejection", err)
+			}
+			if _, err := config.ToolSource(mainPath, "fixture"); err == nil || !strings.Contains(err.Error(), "unsafe test sandbox") {
+				t.Fatalf("ToolSource() error = %v, want sandbox rejection", err)
+			}
+		})
+	}
+}
 
 func TestLoad_MergesIncludeFragments(t *testing.T) {
 	dir := t.TempDir()
