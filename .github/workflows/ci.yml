@@ -209,6 +209,9 @@ jobs:
           - name: onboarding
             packages: -parallel=1 -run=^(TestAgentsMigrationRealAPMLifecycle|TestAgentsManifestlessRealAPMLifecycle|TestTUIAgentsTabSyncsMCPThroughRealAPM)$$ ./internal/app/... ./integration_tests/...
             cache: integration-onboarding
+          - name: realism
+            packages: -parallel=1 -timeout=180s -run=^(TestCLIBinary.*|TestTUIShellContract.*|TestCLIAndTUIProduceEquivalentSemanticState)$$ ./integration_tests/...
+            cache: integration-realism
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -230,6 +233,7 @@ jobs:
             --cache-from type=gha,scope=provider-tests
             --cache-from type=gha,scope=integration-apm
             --cache-from type=gha,scope=integration-onboarding
+            --cache-from type=gha,scope=integration-realism
             --cache-to type=gha,scope=${{ matrix.cache }},mode=max
 
       - name: Upload integration test evidence

@@ -24,9 +24,12 @@ make cli-dev ARGS='tools list'
 make -j2 test
 ```
 
-This runs shell regressions and `go test -race -trimpath ./...` concurrently,
-using a reset, stable isolated test root so unchanged packages reuse Go's test
-cache on repeat runs.
+This runs shell regressions and `go test -race -trimpath ./...` concurrently.
+Every process gets a unique disposable sandbox with isolated HOME, XDG, Omni,
+temporary, Git, package-manager, and language-tool roots. The runner sanitizes
+credentials and network proxy settings; tests fail before mutation when a
+writable path escapes the sandbox. Use `scripts/run-test-safe.sh` for focused
+local `go test` commands that can touch state.
 
 Integration tests must use the Docker-isolated target:
 
@@ -35,11 +38,20 @@ make test-integration
 ```
 
 This runs only integration-tagged coverage with the race detector; the full
-unit suite remains in `make test`.
+unit suite remains in `make test`. Containers provide controlled external
+tools, permissions, HOME/config roots, Git, and real-binary/PTY execution.
+They use disposable filesystems with no host HOME, Docker socket, source mount,
+or network access during the test run.
 
 Do not run integration tests directly against the local machine. Dots and
 package-manager flows intentionally mutate files and package-manager state in
 their isolated environments.
+
+`test/flows.json` is the machine-readable capability catalog. `make check-flows`
+validates command/action coverage and declared test selectors;
+`make gen-flows` refreshes the generated capability and gap tables in the
+[test matrix](test-matrix.md). CI accepts required evidence only from the exact
+declared lane, OS, tags, package, and test/subtest after an uncached passing run.
 
 `make test-canary` is reserved for opt-in live APM contract checks. It runs only
 `TestCanary*` tests behind the `canary` build tag in `internal/agent` and

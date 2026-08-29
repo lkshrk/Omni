@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -488,7 +489,7 @@ func (v *validator) evidence(prefix string, required Level, evidence Evidence) {
 	if sel.Package != "" && !v.goTestExists(sel.Package, sel.Test) {
 		v.add("%s references missing Go test %s.%s", prefix, sel.Package, sel.Test)
 	}
-	if strings.Contains(sel.Test, "/") && sel.Fixture == "" {
+	if strings.Contains(sel.Test, "/") && sel.Fixture == "" && !v.goSubtestExists(sel.Package, sel.Test) {
 		v.add("%s Go selector %q names an unverifiable subtest", prefix, sel.Test)
 	}
 	if !validLane(sel.Lane) {
@@ -542,6 +543,62 @@ func (v *validator) goTestExists(pkg, name string) bool {
 		baseName := strings.Split(name, "/")[0]
 		for _, decl := range file.Decls {
 			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Name.Name == baseName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (v *validator) goSubtestExists(pkg, name string) bool {
+	parts := strings.SplitN(name, "/", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	rel := strings.TrimPrefix(strings.TrimPrefix(pkg, v.module), "/")
+	dir, ok := v.repoPath(rel)
+	if !ok {
+		return false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, entry.Name()), nil, 0)
+		if err != nil {
+			continue
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || fn.Name.Name != parts[0] || fn.Body == nil {
+				continue
+			}
+			found := false
+			ast.Inspect(fn.Body, func(node ast.Node) bool {
+				if found {
+					return false
+				}
+				call, ok := node.(*ast.CallExpr)
+				if !ok || len(call.Args) == 0 {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				literal, literalOK := call.Args[0].(*ast.BasicLit)
+				if !ok || sel.Sel.Name != "Run" || !literalOK || literal.Kind != token.STRING {
+					return true
+				}
+				value, err := strconv.Unquote(literal.Value)
+				if err == nil && (value == parts[1] || strings.ReplaceAll(value, " ", "_") == parts[1]) {
+					found = true
+					return false
+				}
+				return true
+			})
+			if found {
 				return true
 			}
 		}
@@ -675,7 +732,8 @@ var validLanes = map[string]bool{
 	"script-tests": true, "unit-app": true, "unit-cli": true, "unit-tui": true, "unit-remaining": true,
 	"apm-platform-contracts": true, "onboarding-unit": true, "docker-cli-ad": true, "docker-cli-rest": true,
 	"docker-non-cli": true, "docker-providers": true, "docker-apm": true, "docker-onboarding": true,
-	"docker-full": true,
+	"docker-full":    true,
+	"docker-realism": true,
 }
 
 func validLane(lane string) bool { return validLanes[lane] }

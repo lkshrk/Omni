@@ -712,17 +712,36 @@ func stubAgentCLIDir(t *testing.T, home string) string {
 
 func isolatedTUIEnv(t *testing.T, home, cache string) []string {
 	stubDir := stubAgentCLIDir(t, home)
-	return append(os.Environ(),
-		"HOME="+home,
-		"XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
-		"XDG_CACHE_HOME="+filepath.Join(home, ".cache"),
-		"XDG_DATA_HOME="+filepath.Join(home, ".local", "share"),
-		"OMNI_CACHE_DIR="+cache,
-		"OMNI_HOSTNAME=testhost",
-		"OMNI_TEST_ISOLATED=1",
-		"TERM=xterm-256color",
-		"PATH="+stubDir+string(os.PathListSeparator)+os.Getenv("PATH"),
-	)
+	root := filepath.Dir(home)
+	for _, dir := range []string{cache, filepath.Join(home, ".local", "state"), filepath.Join(root, "tmp")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create isolated TUI root: %v", err)
+		}
+	}
+	env := os.Environ()
+	for key, value := range map[string]string{
+		"HOME":               home,
+		"USERPROFILE":        home,
+		"APPDATA":            filepath.Join(home, "AppData", "Roaming"),
+		"LOCALAPPDATA":       filepath.Join(home, "AppData", "Local"),
+		"XDG_CONFIG_HOME":    filepath.Join(home, ".config"),
+		"XDG_CACHE_HOME":     filepath.Join(home, ".cache"),
+		"XDG_DATA_HOME":      filepath.Join(home, ".local", "share"),
+		"XDG_STATE_HOME":     filepath.Join(home, ".local", "state"),
+		"OMNI_CONFIG":        filepath.Join(home, ".config", "omni", "settings.json"),
+		"OMNI_CACHE_DIR":     cache,
+		"OMNI_STATE_DIR":     filepath.Join(home, ".local", "state", "omni"),
+		"TMPDIR":             filepath.Join(root, "tmp"),
+		"TMP":                filepath.Join(root, "tmp"),
+		"TEMP":               filepath.Join(root, "tmp"),
+		"OMNI_HOSTNAME":      "testhost",
+		"OMNI_TEST_ISOLATED": "1",
+		"TERM":               "xterm-256color",
+		"PATH":               stubDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+	} {
+		env = replaceIntegrationEnv(env, key, value)
+	}
+	return env
 }
 
 func initDotsRepo(t *testing.T, repo string, env []string) {
@@ -738,6 +757,11 @@ func initDotsRepo(t *testing.T, repo string, env []string) {
 
 func runCommand(t *testing.T, dir string, env []string, name string, args ...string) {
 	t.Helper()
+	_ = runCommandOutput(t, dir, env, name, args...)
+}
+
+func runCommandOutput(t *testing.T, dir string, env []string, name string, args ...string) string {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -747,6 +771,7 @@ func runCommand(t *testing.T, dir string, env []string, name string, args ...str
 	if err != nil {
 		t.Fatalf("%s %s: %v\n%s", name, strings.Join(args, " "), err, out)
 	}
+	return strings.TrimSpace(string(out))
 }
 
 func runOmniCommand(t *testing.T, bin, dir string, env []string, args ...string) {

@@ -154,6 +154,45 @@ func TestValidateTestscriptSelectorMatchesExecutableFixture(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsOnlyLiteralGoSubtestSelectors(t *testing.T) {
+	root := testModule(t)
+	dir := filepath.Join(root, "internal", "sample")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	source := `package sample
+import "testing"
+func TestFlow(t *testing.T) {
+	t.Run("literal case", func(t *testing.T) {})
+	name := "dynamic case"
+	t.Run(name, func(t *testing.T) {})
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "sample_test.go"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	flow := Flow{
+		ID: "tools.list", Capability: "tools", Title: "List tools",
+		Criticality: CriticalityHigh, CriticalityReason: "inventory",
+		Surfaces: Surfaces{CLI: boolPtr(true), TUI: boolPtr(false)}, Mutates: boolPtr(false),
+		CLICommands: [][]string{{"tools", "list"}},
+		Requirements: []Requirement{
+			{Level: LevelIntegration, Status: StatusRequired, Evidence: []Evidence{{
+				Type: LevelIntegration, Role: EvidencePrimary,
+				Selector: Selector{Package: "example.test/internal/sample", Test: "TestFlow/literal_case", Tags: []string{}, Lane: "unit-remaining", OS: []string{"linux"}},
+			}}},
+			{Level: LevelCLIBlackBox, Status: StatusGap, Reason: "binary pending", TargetStage: "Stage 5"},
+		},
+	}
+	if err := Validate(validCatalog(flow), nil, root); err != nil {
+		t.Fatal(err)
+	}
+	flow.Requirements[0].Evidence[0].Selector.Test = "TestFlow/dynamic_case"
+	if err := Validate(validCatalog(flow), nil, root); err == nil || !strings.Contains(err.Error(), "unverifiable subtest") {
+		t.Fatalf("Validate() error = %v, want unverifiable subtest", err)
+	}
+}
+
 func TestValidateRejectsDuplicateNonActionCLICommands(t *testing.T) {
 	first := cliOnlyFlow("tools.list", []string{"tools", "list"})
 	second := cliOnlyFlow("tools.inventory", []string{"tools", "list"})
