@@ -4339,6 +4339,41 @@ func TestFallbackEditorPastePersistsActiveField(t *testing.T) {
 	}
 }
 
+func TestFallbackEditorRepoOnlySaveUsesResolvedFlow(t *testing.T) {
+	t.Parallel()
+	tool := &app.ToolView{Name: "fixture", Provider: "system", Tracked: true}
+	state := fallbackEditorStateForTool(tool, nil, map[string]string{"fixture": "https://github.com/owner/repo"})
+	if fallbackEditorAdvancedFieldsChanged(tool.Name, state) {
+		t.Fatal("repo-only editor state was classified as manual")
+	}
+	state.fields[fallbackFieldRepo] = "other/project"
+	if fallbackEditorAdvancedFieldsChanged(tool.Name, state) {
+		t.Fatal("repo-only source edit was classified as manual")
+	}
+	state.fields[fallbackFieldAssetPattern] = "fixture-{version}-{os}-{arch}.tar.gz"
+	if !fallbackEditorAdvancedFieldsChanged(tool.Name, state) {
+		t.Fatal("advanced recipe edit did not select manual spec flow")
+	}
+}
+
+func TestFallbackEditorUnchangedResolvedFallbackReResolvesWithoutLosingMetadata(t *testing.T) {
+	t.Parallel()
+	tool := &app.ToolView{Name: "fixture", Provider: "system", Tracked: true}
+	state := fallbackEditorStateForTool(tool, map[string]config.FallbackSpec{"fixture": {
+		Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "owner", Repo: "repo"},
+		Status: config.FallbackStatusUnverified,
+		Binary: "fixture",
+		Recipe: config.FallbackRecipe{Type: config.FallbackRecipeGitHubReleaseAsset, AssetName: "fixture-linux.tar.gz", AssetDownloadURL: "https://example.invalid/fixture"},
+	}}, nil)
+	if fallbackEditorAdvancedFieldsChanged(tool.Name, state) {
+		t.Fatal("unchanged resolved fallback was classified as manual")
+	}
+	state.fields[fallbackFieldBinary] = "other"
+	if !fallbackEditorAdvancedFieldsChanged(tool.Name, state) {
+		t.Fatal("edited resolved fallback did not select manual spec flow")
+	}
+}
+
 func TestRenderFallbackEditorPopup_LongCommandsFitNarrowFrame(t *testing.T) {
 	t.Parallel()
 	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}

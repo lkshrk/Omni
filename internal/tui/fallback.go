@@ -35,8 +35,9 @@ type fallbackEditorField struct {
 }
 
 type fallbackEditorState struct {
-	fields map[fallbackEditorFieldID]string
-	cursor int
+	fields         map[fallbackEditorFieldID]string
+	originalFields map[fallbackEditorFieldID]string
+	cursor         int
 }
 
 var fallbackEditorFields = []fallbackEditorField{
@@ -136,8 +137,14 @@ func (m *Model) doSaveFallbackEditor(name string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	fallback := m.fallbackSpecFromEditor()
 	repo := strings.TrimSpace(m.fallbackEditor.fields[fallbackFieldRepo])
+	resolve := !fallbackEditorAdvancedFieldsChanged(name, m.fallbackEditor)
 	return func() tea.Msg {
-		err := a.SaveToolFallbackFromGitHubSpec(ctx, name, repo, fallback)
+		var err error
+		if resolve {
+			err = a.SaveToolFallbackFromGitHub(ctx, name, repo)
+		} else {
+			err = a.SaveToolFallbackFromGitHubSpec(ctx, name, repo, fallback)
+		}
 		var fallbacks map[string]app.FallbackSpec
 		if err == nil {
 			scope, scopeErr := a.ToolScopeDisplayState(ctx)
@@ -252,10 +259,12 @@ func fallbackEditorStateForTool(t *app.ToolView, fallbacks map[string]app.Fallba
 		state.fields[fallbackFieldRepo] = git
 	}
 	if fallbacks == nil || t == nil {
+		state.originalFields = cloneFallbackEditorFields(state.fields)
 		return state
 	}
 	fallback, ok := fallbacks[t.Name]
 	if !ok {
+		state.originalFields = cloneFallbackEditorFields(state.fields)
 		return state
 	}
 	if fallback.Source.Type == app.FallbackSourceGitHub {
@@ -270,7 +279,32 @@ func fallbackEditorStateForTool(t *app.ToolView, fallbacks map[string]app.Fallba
 	state.fields[fallbackFieldUpgrade] = fallback.Commands.Upgrade
 	state.fields[fallbackFieldVersion] = fallback.Commands.Version
 	state.fields[fallbackFieldReleaseChannel] = fallback.ReleaseChannel
+	state.originalFields = cloneFallbackEditorFields(state.fields)
 	return state
+}
+
+func fallbackEditorAdvancedFieldsChanged(name string, state fallbackEditorState) bool {
+	if state.originalFields == nil {
+		defaults := fallbackEditorStateForTool(&app.ToolView{Name: name}, nil, nil)
+		state.originalFields = defaults.fields
+	}
+	for _, field := range fallbackEditorFields {
+		if field.id == fallbackFieldRepo {
+			continue
+		}
+		if strings.TrimSpace(state.fields[field.id]) != strings.TrimSpace(state.originalFields[field.id]) {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneFallbackEditorFields(fields map[fallbackEditorFieldID]string) map[fallbackEditorFieldID]string {
+	clone := make(map[fallbackEditorFieldID]string, len(fields))
+	for key, value := range fields {
+		clone[key] = value
+	}
+	return clone
 }
 
 func (m *Model) focusFallbackEditorField() {
