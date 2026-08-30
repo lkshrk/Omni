@@ -646,7 +646,6 @@ func TestGlobalUpdateRefreshesRemoteGitPackage(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
-	runGit(t, root, "config", "--global", "http.sslVerify", "false")
 	if err := os.MkdirAll(filepath.Dir(remote), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -665,7 +664,16 @@ func TestGlobalUpdateRefreshesRemoteGitPackage(t *testing.T) {
 	t.Cleanup(server.Close)
 	credentialFile := filepath.Join(root, "git-credentials")
 	writeFile(t, credentialFile, "https://omni-test:test-token@"+strings.TrimPrefix(server.URL, "https://")+"\n")
-	runGit(t, root, "config", "--global", "credential.helper", "store --file="+credentialFile)
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "http.sslVerify")
+	t.Setenv("GIT_CONFIG_VALUE_0", "false")
+	t.Setenv("GIT_CONFIG_KEY_1", "credential.helper")
+	t.Setenv("GIT_CONFIG_VALUE_1", "store --file="+credentialFile)
+	credential := exec.Command("git", "credential", "fill")
+	credential.Stdin = strings.NewReader("protocol=https\nhost=" + strings.TrimPrefix(server.URL, "https://") + "\n\n")
+	if output, err := credential.Output(); err != nil || !bytes.Contains(output, []byte("username=omni-test\n")) {
+		t.Fatalf("sandbox git credential unavailable: %v", err)
+	}
 	gitURL := server.URL + "/owner/fixture"
 	writeFile(t, filepath.Join(home, ".apm", "apm.yml"), "name: update-integration\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm:\n    - git: "+gitURL+"\n      ref: main\n  mcp: []\n")
 	client := apm.New(commandexec.New(), apm.Global)

@@ -16,7 +16,10 @@ func newAgentsReadinessApp(t *testing.T, available bool, responses ...executor.M
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("USERPROFILE", home)
+	configHome := filepath.Join(home, "config")
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("APPDATA", configHome)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
 	configPath := filepath.Join(home, "config", "omni", "settings.json")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
@@ -251,10 +254,14 @@ func TestAgentsOutdatedInvokesAPMForReadyWorkspace(t *testing.T) {
 func writeDefaultMigrationSnapshot(t *testing.T, a *App, host string) string {
 	t.Helper()
 	dir := filepath.Join(filepath.Dir(a.ConfigPath), ".omni-apm-migration-backup-test")
+	hostJSON, err := json.Marshal(host)
+	if err != nil {
+		t.Fatal(err)
+	}
 	mustWriteBundleFile(t, filepath.Join(dir, "omni-config-000.json"), `{
   "agents": {"mcp_servers": [{"name":"independent","transport":"stdio","command":"independent-mcp"}]},
   "groups": [{"name":"g","mcp_servers":["independent"]}],
-  "hosts": {"`+host+`" :["g"]}
+  "hosts": {`+string(hostJSON)+` :["g"]}
 }`)
 	mustWriteBundleFile(t, filepath.Join(dir, "paths.json"), `{"omni-config-000.json":"/tmp/settings.json"}`)
 	return dir
@@ -268,10 +275,18 @@ func writeSuppressedMigrationSnapshot(t *testing.T, a *App) {
 	mustWriteBundleFile(t, filepath.Join(ownerRoot, "mcp.json"), `{"mcpServers":{"owned":{"type":"stdio","command":"node","args":["${PLUGIN_ROOT}/server.js"]}}}`)
 	mustWriteBundleFile(t, filepath.Join(ownerRoot, "server.js"), "process.exit(0)\n")
 	original := filepath.Join(t.TempDir(), "bundle-a")
+	originalJSON, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandJSON, err := json.Marshal("node " + filepath.Join(original, "server.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	mustWriteBundleFile(t, filepath.Join(snapshot, "omni-config-000.json"), `{
   "agents": {
-    "plugins": [{"name":"bundle-a","path":"`+original+`"}],
-    "mcp_servers": [{"name":"owned","transport":"stdio","command":"node `+original+`/server.js"}]
+    "plugins": [{"name":"bundle-a","path":`+string(originalJSON)+`}],
+    "mcp_servers": [{"name":"owned","transport":"stdio","command":`+string(commandJSON)+`}]
   },
   "groups": [{"name":"g","plugins":["bundle-a"],"mcp_servers":["owned"]}],
   "hosts": {"h":["g"]}
