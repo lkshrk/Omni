@@ -155,6 +155,9 @@ test-integration: test-integration-build
 	mkdir -p "$$evidence_root"; \
 	evidence_root=$$(cd "$$evidence_root" && pwd -P); \
 	[ "$$evidence_root" = "$$safe_root/test-evidence" ] || { echo "test-evidence escaped repo .tmp" >&2; exit 2; }; \
+	lane_lock="$$evidence_root/.docker-$$lane.lock"; \
+	mkdir "$$lane_lock" 2>/dev/null || { echo "integration lane already running: $$lane" >&2; exit 2; }; \
+	trap 'rmdir "$$lane_lock" >/dev/null 2>&1 || true' EXIT HUP INT TERM; \
 	evidence="$$evidence_root/docker-$$lane"; \
 	if [ -e "$$evidence" ]; then [ -d "$$evidence" ] && [ ! -L "$$evidence" ] || { echo "refusing unsafe lane evidence directory" >&2; exit 2; }; fi; \
 	mkdir -p "$$evidence"; \
@@ -174,7 +177,7 @@ test-integration: test-integration-build
 		--env "OMNI_TEST_APPROVED_TOOLS=apm,claude,codex,grok,cowsay" \
 		"$(INTEGRATION_IMAGE)" \
 		sh -c 'set +e; go_bin=$$(command -v go); binary_sha256=$$(sha256sum "$$go_bin" | cut -d " " -f 1); bash scripts/run-test-safe.sh go test -count=1 -tags=integration -race -trimpath -json $$TEST_PACKAGES > /tmp/test-results.jsonl 2>&1; status=$$?; [ "$$status" -eq 0 ] && result=pass || result=fail; printf '\''{"schema_version":1,"lane":"docker-%s","goos":"linux","tags":["integration"],"count":1}\n'\'' "$$TEST_LANE" > /tmp/test-meta.json; printf '\''{"schema_version":1,"kind":"container_gate","lane":"docker-%s","goos":"linux","image_ref":"%s","image_id":"%s","binary_sha256":"%s","command_id":"go-test-integration","exit_code":%s,"status":"%s","events":"go-test.jsonl"}\n'\'' "$$TEST_LANE" "$$TEST_IMAGE_REF" "$$TEST_IMAGE_ID" "$$binary_sha256" "$$status" "$$result" > /tmp/test-gate.json; exit "$$status"'); \
-	trap '$(DOCKER_SAFE) rm -f "$$container" >/dev/null 2>&1 || true' EXIT HUP INT TERM; \
+	trap '$(DOCKER_SAFE) rm -f "$$container" >/dev/null 2>&1 || true; rmdir "$$lane_lock" >/dev/null 2>&1 || true' EXIT HUP INT TERM; \
 	if $(DOCKER_SAFE) start -a "$$container"; then status=0; else status=$$?; fi; \
 	if ! $(DOCKER_SAFE) cp "$$container:/tmp/test-results.jsonl" "$$jsonl"; then [ "$$status" -ne 0 ] || status=1; fi; \
 	if ! $(DOCKER_SAFE) cp "$$container:/tmp/test-meta.json" "$$meta"; then [ "$$status" -ne 0 ] || status=1; fi; \

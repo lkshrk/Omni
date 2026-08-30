@@ -159,6 +159,7 @@ func TestDockerIntegrationRunsFreshContainerAndExportsEvidence(t *testing.T) {
 		"scripts/run-test-safe.sh go test -count=1 -tags=integration -race -trimpath -json",
 		"go-test.jsonl", "meta.json", "gate.json", "container_gate", "$(DOCKER_SAFE) image inspect",
 		"OMNI_TEST_APPROVED_TOOLS=apm,claude,codex,grok,cowsay",
+		"integration lane already running", "lane_lock",
 		"--network none",
 	} {
 		if !strings.Contains(run, want) {
