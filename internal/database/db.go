@@ -1401,23 +1401,49 @@ func (db *DB) ListDiscovered(ctx context.Context) ([]*ToolCache, error) {
 	return tools, nil
 }
 
-// ReconcileTracked — Marks the desired keys tracked and every previously tracked key outside that set untracked.
+// ReconcileTracked — Marks desired keys tracked and removes stale tracked aliases that cannot be honest discoveries.
 func (db *DB) ReconcileTracked(ctx context.Context, desired []*ToolCache) error {
+	type toolKey struct {
+		name, provider, pkg string
+	}
+	desiredKeys := make(map[toolKey]struct{}, len(desired))
+	for _, t := range desired {
+		if t == nil {
+			continue
+		}
+		if err := requirePackage(t.Name, t.Provider, t.Package); err != nil {
+			return err
+		}
+		desiredKeys[toolKey{t.Name, t.Provider, t.Package}] = struct{}{}
+	}
+
 	// One transaction so the per-tool UPDATE loop costs one fsync rather than N.
 	return db.bun.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.NewUpdate().
-			Model((*ToolCache)(nil)).
-			Set("tracked = FALSE").
-			Where("tracked = TRUE").
-			Exec(ctx); err != nil {
-			return fmt.Errorf("marking stale tracked tools untracked: %w", err)
+		var tracked []*ToolCache
+		if err := tx.NewSelect().Model(&tracked).Where("tracked = TRUE").Scan(ctx); err != nil {
+			return fmt.Errorf("listing tracked tools for reconciliation: %w", err)
+		}
+		for _, t := range tracked {
+			if _, keep := desiredKeys[toolKey{t.Name, t.Provider, t.Package}]; keep {
+				continue
+			}
+			if !t.Installed || t.InstalledWith != "" && t.InstalledWith != t.Provider {
+				if _, err := tx.NewDelete().Model((*ToolCache)(nil)).
+					Where("name = ? AND provider = ? AND package = ?", t.Name, t.Provider, t.Package).
+					Exec(ctx); err != nil {
+					return fmt.Errorf("deleting stale tracked tool %s/%s: %w", t.Provider, t.Name, err)
+				}
+				continue
+			}
+			if _, err := tx.NewUpdate().Model((*ToolCache)(nil)).Set("tracked = FALSE").
+				Where("name = ? AND provider = ? AND package = ?", t.Name, t.Provider, t.Package).
+				Exec(ctx); err != nil {
+				return fmt.Errorf("untracking stale tool %s/%s: %w", t.Provider, t.Name, err)
+			}
 		}
 		for _, t := range desired {
 			if t == nil {
 				continue
-			}
-			if err := requirePackage(t.Name, t.Provider, t.Package); err != nil {
-				return err
 			}
 			if _, err := tx.NewUpdate().
 				Model((*ToolCache)(nil)).

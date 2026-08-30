@@ -42,8 +42,15 @@ func (a *App) SetTool(name, providerName, packageName, installWith string) error
 	if err != nil {
 		return err
 	}
+	a.installedStateMu.Lock()
+	defer a.installedStateMu.Unlock()
+	release, err := a.lockInstalledStateFile(false)
+	if err != nil {
+		return err
+	}
+	defer release()
 
-	return a.withConfig(func(cfg *config.RootConfig) error {
+	if err := a.withConfig(func(cfg *config.RootConfig) error {
 		if cfg.Tools == nil {
 			cfg.Tools = make(map[string]config.ToolSpec)
 		}
@@ -52,7 +59,15 @@ func (a *App) SetTool(name, providerName, packageName, installWith string) error
 		setDefaultToolProviderCandidate(&spec, entry)
 		cfg.Tools[name] = spec
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return err
+	}
+	tools, _ := a.currentResolvedToolEntries(context.Background(), cfg)
+	return a.reconcileResolvedTools(context.Background(), tools)
 }
 
 func inheritedToolProviderOptions(spec config.ToolSpec, providerName string) map[string]string {

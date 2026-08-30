@@ -47,15 +47,8 @@ func TestCLIAndTUIToolsPinProviderProduceEquivalentSemanticState(t *testing.T) {
 		waitForRequiredScreen(t, term, 4*time.Second, screenHas("this tool on this host", "this tool everywhere", "pip"), "TUI did not open provider scope picker")
 		writeTUIKeys(t, term, "j", " ")
 	}, func(s *paritySandbox) bool {
-		cfg, err := config.Load(s.configPath)
-		if err != nil {
-			return false
-		}
-		spec, ok := cfg.Tools["black"]
-		return ok && len(spec.Providers) > 0 && spec.Providers[0].Provider == "pip" && spec.Provider == "" && spec.Package == "" && spec.InstallWith == ""
+		return providerMutationPinSettled(s)
 	})
-	settleProviderMutationDiscovery(t, bin, cli)
-	settleProviderMutationDiscovery(t, bin, tui)
 	assertProviderMutationParity(t, cli, tui)
 }
 
@@ -266,4 +259,35 @@ func providerMutationSettled(s *paritySandbox, provider string) bool {
 	defer db.Close()
 	tool, err := db.Get(context.Background(), "black", provider, "black")
 	return err == nil && tool.Installed && tool.InstalledWith == provider && !tool.Outdated
+}
+
+func providerMutationPinSettled(s *paritySandbox) bool {
+	cfg, err := config.Load(s.configPath)
+	if err != nil {
+		return false
+	}
+	spec, ok := cfg.Tools["black"]
+	if !ok || len(spec.Providers) == 0 || spec.Providers[0].Provider != "pip" || spec.Provider != "" || spec.Package != "" || spec.InstallWith != "" {
+		return false
+	}
+	db, err := database.Open(filepath.Join(s.cache, "omni.db"))
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+	rows, err := db.List(context.Background())
+	if err != nil {
+		return false
+	}
+	black := 0
+	for _, row := range rows {
+		if row.Name != "black" {
+			continue
+		}
+		black++
+		if row.Provider != "pip" || row.Package != "black" || !row.Tracked || !row.Installed || row.InstalledWith != "pip" {
+			return false
+		}
+	}
+	return black == 1
 }

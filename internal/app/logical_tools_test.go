@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
@@ -70,6 +71,54 @@ func TestSetTool_PromotesProviderToDefault(t *testing.T) {
 	want := []config.ToolInstallSpec{{Provider: "uv", Package: "black"}, {Provider: "pip"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("providers = %+v, want %+v", got, want)
+	}
+}
+
+func TestSetToolConvergesTrackedCacheAcrossStaleProviderHistories(t *testing.T) {
+	for _, history := range []struct {
+		name          string
+		installed     bool
+		installedWith string
+	}{
+		{name: "missing tracked row"},
+		{name: "wrong-provider tracked alias", installed: true, installedWith: "pip"},
+	} {
+		t.Run(history.name, func(t *testing.T) {
+			a, cfgPath := newImportApp(t,
+				&stubProvider{name: "pip", available: true},
+				&stubProvider{name: "uv", available: true},
+			)
+			if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+				Tools:  map[string]config.ToolSpec{"black": {Providers: []config.ToolInstallSpec{{Provider: "uv"}}}},
+				Groups: []*config.GroupConfig{{Name: "dev", Tools: []config.ToolEntry{{Name: "black"}}}},
+			}); err != nil {
+				t.Fatalf("save config: %v", err)
+			}
+			ctx := context.Background()
+			if err := a.DB().Upsert(ctx, &database.ToolCache{
+				Name: "black", Provider: "uv", Package: "black", Tracked: true,
+				Installed: history.installed, InstalledWith: history.installedWith,
+			}); err != nil {
+				t.Fatalf("seed stale tracked row: %v", err)
+			}
+			if err := a.DB().UpsertDiscovered(ctx, "black", "pip", "pip", "1.0.0"); err != nil {
+				t.Fatalf("seed pip discovery: %v", err)
+			}
+
+			if err := a.SetTool("black", "pip", "black", ""); err != nil {
+				t.Fatalf("SetTool: %v", err)
+			}
+			if _, err := a.DB().Get(ctx, "black", "uv", "black"); !errors.Is(err, sql.ErrNoRows) {
+				t.Fatalf("stale uv row error = %v, want sql.ErrNoRows", err)
+			}
+			got, err := a.DB().Get(ctx, "black", "pip", "black")
+			if err != nil {
+				t.Fatalf("get canonical pip row: %v", err)
+			}
+			if !got.Tracked || !got.Installed || got.InstalledWith != "pip" {
+				t.Fatalf("canonical pip row = tracked:%v installed:%v with:%q, want true/true/pip", got.Tracked, got.Installed, got.InstalledWith)
+			}
+		})
 	}
 }
 

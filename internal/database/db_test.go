@@ -3,6 +3,7 @@ package database_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1154,7 +1155,7 @@ func TestReconcileTracked_UntracksStalePackageRows(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 
-	_ = db.Upsert(ctx, &database.ToolCache{Name: "ripgrep", Provider: "brew", Package: "ripgrep"})
+	_ = db.Upsert(ctx, &database.ToolCache{Name: "ripgrep", Provider: "brew", Package: "ripgrep", Installed: true, InstalledWith: "brew"})
 	_ = db.Upsert(ctx, &database.ToolCache{Name: "ripgrep", Provider: "brew", Package: "ripgrep-all"})
 
 	if err := db.ReconcileTracked(ctx, []*database.ToolCache{{
@@ -1177,6 +1178,46 @@ func TestReconcileTracked_UntracksStalePackageRows(t *testing.T) {
 	}
 	if !currentRow.Tracked {
 		t.Fatal("desired package row should stay tracked")
+	}
+}
+
+func TestReconcileTracked_DeletesStaleMissingRows(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	if err := db.Upsert(ctx, &database.ToolCache{Name: "black", Provider: "uv", Package: "black", Tracked: true}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	if err := db.ReconcileTracked(ctx, nil); err != nil {
+		t.Fatalf("ReconcileTracked: %v", err)
+	}
+	if _, err := db.Get(ctx, "black", "uv", "black"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("Get stale missing row error = %v, want sql.ErrNoRows", err)
+	}
+}
+
+func TestReconcileTracked_DeletesStaleWrongProviderAliasAndRetracksDesired(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	if err := db.Upsert(ctx, &database.ToolCache{Name: "black", Provider: "uv", Package: "black", Installed: true, InstalledWith: "pip", Tracked: true}); err != nil {
+		t.Fatalf("Upsert stale alias: %v", err)
+	}
+	if err := db.UpsertDiscovered(ctx, "black", "pip", "pip", "1.0.0"); err != nil {
+		t.Fatalf("Upsert desired row: %v", err)
+	}
+
+	if err := db.ReconcileTracked(ctx, []*database.ToolCache{{Name: "black", Provider: "pip", Package: "black"}}); err != nil {
+		t.Fatalf("ReconcileTracked: %v", err)
+	}
+	if _, err := db.Get(ctx, "black", "uv", "black"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("Get stale alias error = %v, want sql.ErrNoRows", err)
+	}
+	desired, err := db.Get(ctx, "black", "pip", "black")
+	if err != nil {
+		t.Fatalf("Get desired row: %v", err)
+	}
+	if !desired.Tracked {
+		t.Fatal("desired row should be retracked")
 	}
 }
 
