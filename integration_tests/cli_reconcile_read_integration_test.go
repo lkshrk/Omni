@@ -20,7 +20,8 @@ func TestCLIBinaryReconcileConvergesToolDotsAndBackupState(t *testing.T) {
 	if !strings.Contains(out, "Reconcile complete") || !strings.Contains(out, "syncing tools") || !strings.Contains(out, "syncing dotfiles") {
 		t.Fatalf("reconcile output omitted lifecycle stages: %s", out)
 	}
-	if raw, err := os.ReadFile(state); err != nil || (strings.TrimSpace(string(raw)) != "1.0.0" && strings.TrimSpace(string(raw)) != "1.1.0") {
+	// The plan is computed before sync: a newly installed tool is not retroactively added to this run's upgrade phase.
+	if raw, err := os.ReadFile(state); err != nil || strings.TrimSpace(string(raw)) != "1.0.0" {
 		t.Fatalf("reconciled provider state = %q, %v", raw, err)
 	}
 	target := filepath.Join(home, ".config", "nvim", "init.lua")
