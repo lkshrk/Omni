@@ -5,12 +5,30 @@ package integration_test
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
 )
+
+func TestCLIBinaryInitCreatesAnIsolatedHostConfig(t *testing.T) {
+	root, home, cache, env := newCLIBinarySandbox(t)
+	configPath := filepath.Join(home, ".config", "omni", "settings.json")
+
+	out := runOmniOutput(t, buildOmniBinary(t), root, env, "--cache-dir", cache, "init", "--no-import")
+	if !strings.Contains(out, "Created host \"testhost\"") {
+		t.Fatalf("init output missing host creation: %s", out)
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("load initialized config: %v", err)
+	}
+	if _, ok := cfg.Hosts["testhost"]; !ok {
+		t.Fatalf("initialized hosts = %#v", cfg.Hosts)
+	}
+}
 
 func TestCLIBinaryBootstrapDiscoversAndPersistsDefaultConfig(t *testing.T) {
 	root, home, cache, env := newCLIBinarySandbox(t)
@@ -128,6 +146,103 @@ func TestCLIBinaryDotsSyncResolvesConflictInsideSandbox(t *testing.T) {
 	}
 }
 
+func TestCLIBinaryDotsStatusReportsManagedFileDrift(t *testing.T) {
+	root, home, cache, env := newCLIBinarySandbox(t)
+	repo := filepath.Join(root, "dots")
+	configPath := filepath.Join(root, "settings.json")
+	target := filepath.Join(home, ".config", "fixture", "settings.toml")
+	initDotsRepo(t, repo, env)
+	writeIntegrationFile(t, filepath.Join(repo, "dotfiles", "fixture", ".config", "fixture", "settings.toml"), "managed = true\n")
+	writeIntegrationFile(t, target, "managed = false\n")
+	if err := config.Save(configPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{DotsRepo: repo},
+		Hosts:    map[string][]string{"testhost": {}},
+		Groups: []*config.GroupConfig{{
+			Name: "testhost", Special: "host",
+			Dots: []config.DotEntry{{Name: "fixture", Path: filepath.Dir(target)}},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var result struct {
+		Entries []struct {
+			Name   string `json:"name"`
+			Health string `json:"health"`
+		} `json:"entries"`
+	}
+	out := runOmniOutput(t, buildOmniBinary(t), root, env, "--config", configPath, "--cache-dir", cache, "dots", "status", "fixture", "--format", "json")
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode dots status: %v\n%s", err, out)
+	}
+	if len(result.Entries) != 1 || result.Entries[0].Name != "fixture" || result.Entries[0].Health != "conflict" {
+		t.Fatalf("dots status did not report drift: %+v", result.Entries)
+	}
+}
+
+func TestCLIBinaryAgentsSyncDeploysMCPThroughRealAPM(t *testing.T) {
+	if _, err := exec.LookPath("apm"); err != nil {
+		t.Fatalf("integration tests require apm on PATH: %v", err)
+	}
+	root, home, cache, env := newCLIBinarySandbox(t)
+	configPath := filepath.Join(root, "settings.json")
+	if err := config.Save(configPath, &config.RootConfig{Version: config.CurrentVersion}); err != nil {
+		t.Fatal(err)
+	}
+	writeIntegrationFile(t, filepath.Join(home, ".apm", "apm.yml"), `name: omni-cli
+version: 1.0.0
+targets: [codex]
+dependencies:
+  apm: []
+  mcp:
+    - name: omni-cli
+      registry: false
+      transport: http
+      url: https://example.invalid/mcp
+`)
+
+	runOmniCommand(t, buildOmniBinary(t), root, env, "--config", configPath, "--cache-dir", cache, "agents", "sync")
+	for path, wants := range map[string][]string{
+		filepath.Join(home, ".apm", "apm.lock.yaml"): {"codex", "omni-cli"},
+		filepath.Join(home, ".codex", "config.toml"): {"omni-cli", "https://example.invalid/mcp"},
+	} {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read deployed APM state %s: %v", path, err)
+		}
+		for _, want := range wants {
+			if !strings.Contains(string(content), want) {
+				t.Fatalf("%s missing %q:\n%s", path, want, content)
+			}
+		}
+	}
+}
+
+func TestCLIBinaryAgentsAddDelegatesPackageAndSkillsToAPM(t *testing.T) {
+	root, _, cache, env, logPath := agentsCommandBinaryFixture(t)
+	out := runOmniOutput(t, buildOmniBinary(t), root, env, "--cache-dir", cache, "agents", "add", "owner/pkg", "--skill", "alpha", "--skill", "beta")
+	assertFileContains(t, logPath, "install -g owner/pkg --skill alpha --skill beta")
+	if !strings.Contains(out, "declare it in the host template") || !strings.Contains(out, "git: owner/pkg") {
+		t.Fatalf("agents add omitted persistence hint: %s", out)
+	}
+}
+
+func TestCLIBinaryAgentsUpdateAllDelegatesGlobalConfirmationToAPM(t *testing.T) {
+	root, _, cache, env, logPath := agentsCommandBinaryFixture(t)
+	runOmniCommand(t, buildOmniBinary(t), root, env, "--cache-dir", cache, "agents", "update")
+	assertFileContains(t, logPath, "update -g --yes")
+}
+
+func TestCLIBinaryAgentsRemoveDelegatesEveryPackageToAPM(t *testing.T) {
+	root, _, cache, env, logPath := agentsCommandBinaryFixture(t)
+	out := runOmniOutput(t, buildOmniBinary(t), root, env, "--cache-dir", cache, "agents", "remove", "owner/one", "owner/two")
+	assertFileContains(t, logPath, "uninstall -g owner/one owner/two")
+	if !strings.Contains(out, "also remove it from the host template") {
+		t.Fatalf("agents remove omitted persistence hint: %s", out)
+	}
+}
+
 func TestCLIBinaryDoctorDryRunPreservesConfig(t *testing.T) {
 	root, _, cache, env, configPath, original := doctorBinaryFixture(t)
 	out := runOmniOutput(t, buildOmniBinary(t), root, env, "--config", configPath, "--cache-dir", cache, "doctor", "--fix", "--dry-run")
@@ -136,6 +251,14 @@ func TestCLIBinaryDoctorDryRunPreservesConfig(t *testing.T) {
 	}
 	if got, err := os.ReadFile(configPath); err != nil || string(got) != original {
 		t.Fatalf("doctor dry-run changed config: %v\n%s", err, got)
+	}
+}
+
+func TestCLIBinaryDoctorReportsPinnedAPM(t *testing.T) {
+	root, _, cache, env, configPath, _ := doctorBinaryFixture(t)
+	out := runOmniOutput(t, buildOmniBinary(t), root, env, "--config", configPath, "--cache-dir", cache, "doctor")
+	if !strings.Contains(out, "APM version") || !strings.Contains(out, "apm 0.29.0") {
+		t.Fatalf("doctor omitted pinned APM health: %s", out)
 	}
 }
 
@@ -229,6 +352,36 @@ func newCLIBinarySandbox(t *testing.T) (root, home, cache string, env []string) 
 	}
 	env = isolatedTUIEnv(t, home, cache)
 	return root, home, cache, env
+}
+
+func agentsCommandBinaryFixture(t *testing.T) (root, home, cache string, env []string, logPath string) {
+	t.Helper()
+	root, home, cache, env = newCLIBinarySandbox(t)
+	binDir := filepath.Join(root, "bin")
+	logPath = filepath.Join(root, "apm.log")
+	writeExecutable(t, filepath.Join(binDir, "apm"), `#!/bin/sh
+set -eu
+if [ "${1:-}" = "--version" ]; then
+  echo 'Agent Package Manager (APM) CLI version 0.29.0'
+  exit 0
+fi
+printf '%s\n' "$*" >> "$OMNI_TEST_APM_LOG"
+printf 'ok\n'
+`)
+	env = replaceIntegrationEnv(env, "PATH", binDir+string(os.PathListSeparator)+integrationEnvValue(env, "PATH"))
+	env = append(env, "OMNI_TEST_APM_LOG="+logPath)
+	return root, home, cache, env, logPath
+}
+
+func assertFileContains(t *testing.T, path, want string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if !strings.Contains(string(raw), want) {
+		t.Fatalf("%s missing %q:\n%s", path, want, raw)
+	}
 }
 
 func replaceIntegrationEnv(env []string, key, value string) []string {

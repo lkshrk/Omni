@@ -31,4 +31,23 @@ func TestFlowCatalogMatchesActionRegistryAndStaticEvidence(t *testing.T) {
 	if err := testflow.Validate(catalog, actions, root); err != nil {
 		t.Fatal(err)
 	}
+	gapCeiling := map[testflow.Level]int{
+		testflow.LevelIntegration: 22,
+		testflow.LevelCLIBlackBox: 78,
+		testflow.LevelTUIBlackBox: 47,
+		testflow.LevelParity:      50,
+	}
+	gaps := make(map[testflow.Level]int)
+	for _, flow := range catalog.Flows {
+		for _, requirement := range flow.Requirements {
+			if requirement.Status == testflow.StatusGap {
+				gaps[requirement.Level]++
+			}
+		}
+	}
+	for level, ceiling := range gapCeiling {
+		if gaps[level] > ceiling {
+			t.Errorf("%s flow gaps increased from %d to %d", level, ceiling, gaps[level])
+		}
+	}
 }

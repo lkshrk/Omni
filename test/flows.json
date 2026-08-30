@@ -69,7 +69,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -376,7 +376,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -386,9 +386,24 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUIToolDeleteProduceEquivalentSemanticState",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "parity": {
@@ -473,9 +488,24 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUIToolUpdateProduceEquivalentSemanticState",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "parity": {
@@ -540,9 +570,24 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIToolsUpgradeAllInvokesEveryOutdatedTool",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "parity",
@@ -1198,7 +1243,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -1213,7 +1258,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -1589,7 +1634,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -1604,7 +1649,22 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "tui_blackbox",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIDotsSyncRepairsBrokenManagedLink",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -1614,9 +1674,24 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUIDotsSyncProduceEquivalentSemanticState",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "parity": {
@@ -2001,7 +2076,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -2082,9 +2157,24 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUIDotsUseLocalProduceEquivalentSemanticState",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "parity": {
@@ -2240,7 +2330,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -2255,7 +2345,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -2270,7 +2360,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -3381,7 +3471,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -3497,7 +3587,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -3814,9 +3904,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryInitCreatesAnIsolatedHostConfig",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -3831,7 +3936,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -3936,7 +4041,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-onboarding",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -3946,9 +4051,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryAgentsSyncDeploysMCPThroughRealAPM",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -3963,7 +4083,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -3973,9 +4093,24 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUIAgentsSyncProduceEquivalentAPMState",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "parity": {
@@ -3995,15 +4130,45 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryAgentsAddDelegatesPackageAndSkillsToAPM",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryAgentsAddDelegatesPackageAndSkillsToAPM",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -4059,15 +4224,45 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryAgentsUpdateAllDelegatesGlobalConfirmationToAPM",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryAgentsUpdateAllDelegatesGlobalConfirmationToAPM",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -4099,15 +4294,45 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryAgentsRemoveDelegatesEveryPackageToAPM",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryAgentsRemoveDelegatesEveryPackageToAPM",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -4413,9 +4638,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDoctorReportsPinnedAPM",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -4666,9 +4906,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "The current testscript runs the in-process command harness, not an independently built binary.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDotsStatusReportsManagedFileDrift",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -4883,7 +5138,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -4898,7 +5153,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -4913,7 +5168,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -5015,7 +5270,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -5082,7 +5337,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -5149,7 +5404,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -5284,7 +5539,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -5352,7 +5607,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]
@@ -5419,7 +5674,7 @@
                 "tags": [
                   "integration"
                 ],
-                "lane": "docker-non-cli",
+                "lane": "docker-realism",
                 "os": [
                   "linux"
                 ]

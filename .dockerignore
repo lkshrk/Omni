@@ -9,6 +9,7 @@
 .taskless/
 .codex/
 bin/
+vendor/
 site/
 cover.out
 coverage.out
