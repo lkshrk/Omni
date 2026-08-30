@@ -94,9 +94,24 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUIReconcileProduceEquivalentSemanticState",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "parity": {
@@ -4440,9 +4455,24 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIGroupsEditToolsPersistsToolMembership",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -4458,9 +4488,24 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryGroupsEditDotsPersistsExactMembership",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -5702,15 +5747,45 @@
       "requirements": [
         {
           "level": "integration",
-          "status": "gap",
-          "reason": "Existing tests have not yet been linked to this flow with verified semantic assertions.",
-          "target_stage": "Stage 4"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "integration",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIAgentsUpdateInvokesSelectedPackage",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIAgentsUpdateInvokesSelectedPackage",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
