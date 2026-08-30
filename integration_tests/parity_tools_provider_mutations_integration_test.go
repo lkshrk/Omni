@@ -40,6 +40,7 @@ func TestCLIAndTUIToolsPinProviderProduceEquivalentSemanticState(t *testing.T) {
 	seedProviderMutationParity(t, bin, cli)
 	seedProviderMutationParity(t, bin, tui)
 	runOmniCommand(t, bin, cli.root, cli.env, "--config", cli.configPath, "--cache-dir", cli.cache, "tools", "set", "black", "--provider", "pip", "--package", "black", "--install-with", "pip", "--global")
+	runOmniCommand(t, bin, cli.root, cli.env, "--config", cli.configPath, "--cache-dir", cli.cache, "tools", "list", "black", "--format", "json")
 	runProviderMutationTUI(t, bin, tui, func(term *vttest.Terminal) {
 		writeTUIKeys(t, term, "p")
 		waitForRequiredScreen(t, term, 4*time.Second, screenHas("this tool on this host", "this tool everywhere", "pip"), "TUI did not open provider scope picker")
@@ -120,7 +121,7 @@ case "${1:-}" in
     case "${2:-}" in
       install) : > "$state/$3" ;;
       uninstall) rm -f "$state/$3" ;;
-      list) [ -f "$state/black" ] && echo 'black v1.0.0' ;;
+      list) if [ -f "$state/black" ]; then echo 'black v1.0.0'; fi ;;
     esac
     ;;
   pip) [ "${2:-}" = "show" ] && [ -f "$state/${3:-}" ] && printf 'Name: %s\nVersion: 1.0.0\n' "$3" ;;
@@ -141,8 +142,19 @@ func preflightProviderMutationRow(t *testing.T, bin string, s *paritySandbox) {
 	if err := json.Unmarshal([]byte(out), &rows); err != nil {
 		t.Fatalf("decode provider preflight: %v\n%s", err, out)
 	}
-	if len(rows) != 1 || rows[0].Name != "black" || rows[0].Provider != "uv" || rows[0].InstalledWith != "pip" || !rows[0].Installed || !rows[0].Tracked {
-		t.Fatalf("provider preflight rows = %#v, want one uv/pip out-of-sync row", rows)
+	canonical, discovered := 0, 0
+	for _, row := range rows {
+		switch {
+		case row.Name == "black" && row.Provider == "uv" && row.InstalledWith == "pip" && row.Installed && row.Tracked:
+			canonical++
+		case row.Name == "black" && row.Provider == "pip" && row.InstalledWith == "pip" && row.Installed && !row.Tracked:
+			discovered++
+		default:
+			t.Fatalf("unexpected provider preflight row: %#v (all rows: %#v)", row, rows)
+		}
+	}
+	if canonical != 1 || discovered > 1 {
+		t.Fatalf("provider preflight rows = %#v, want one canonical uv/pip row and at most one honest pip discovery", rows)
 	}
 }
 
@@ -152,7 +164,16 @@ func runProviderMutationTUI(t *testing.T, bin string, s *paritySandbox, act func
 		writeTUIKeys(t, term, "\t")
 		waitForRequiredScreen(t, term, 10*time.Second, screenHas("black", "uv", "pip"), "TUI did not preserve uv/pip ownership")
 		writeTUIKeys(t, term, "j")
-		waitForRequiredScreen(t, term, 4*time.Second, func(text string) bool { return strings.Contains(text, ">") && strings.Contains(text, "black") }, "TUI did not select black")
+		waitForRequiredScreen(t, term, 4*time.Second, func(text string) bool { return strings.Contains(text, ">") && strings.Contains(text, "black") }, "TUI did not reveal black rows")
+		writeTUIKeys(t, term, "j")
+		waitForRequiredScreen(t, term, 4*time.Second, func(text string) bool {
+			for _, line := range strings.Split(text, "\n") {
+				if strings.Contains(line, ">") && strings.Contains(line, "black") && strings.Contains(line, "[dev]") {
+					return true
+				}
+			}
+			return false
+		}, "TUI did not select canonical tracked black row")
 		act(term)
 		return waitForRequiredScreen(t, term, 12*time.Second, func(string) bool { return done(s) }, "TUI provider mutation did not settle")
 	})
