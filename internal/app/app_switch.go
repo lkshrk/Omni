@@ -54,7 +54,7 @@ func (a *App) Switch(ctx context.Context, name, fromProvider, toProvider string)
 			return fmt.Errorf("tool %q with provider %q not found in config", name, fromProvider)
 		}
 		install = a.resolveInstallSpec(ctx, name, spec)
-		if !installSpecMatchesProvider(install, fromProvider) {
+		if !switchSourceMatchesProvider(install, fromProvider) {
 			return fmt.Errorf("tool %q with provider %q not found in config", name, fromProvider)
 		}
 		pkg = install.EffectivePackage(name)
@@ -98,9 +98,9 @@ func (a *App) Switch(ctx context.Context, name, fromProvider, toProvider string)
 			candidate.Source = authored.Source
 			candidate.Recipe = authored.Recipe
 		}
-		if fromProvider != targetProvider {
+		if install.Provider != targetProvider {
 			spec.Providers = slices.DeleteFunc(spec.Providers, func(existing config.ToolInstallSpec) bool {
-				return existing.Provider == fromProvider
+				return existing.Provider == install.Provider
 			})
 		}
 		setDefaultToolProviderCandidate(&spec, candidate)
@@ -139,6 +139,14 @@ func (a *App) Switch(ctx context.Context, name, fromProvider, toProvider string)
 	}
 
 	return result, nil
+}
+
+func switchSourceMatchesProvider(install config.ToolInstallSpec, providerName string) bool {
+	if installSpecMatchesProvider(install, providerName) {
+		return true
+	}
+	ecosystem, ok := provider.BuiltinEcosystemFor(install.Provider)
+	return ok && ecosystem == providerName
 }
 
 func (a *App) switchTarget(toProvider string) (targetProvider, targetInstallWith, opProvider string, prov provider.Provider, err error) {

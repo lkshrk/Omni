@@ -331,6 +331,74 @@ func TestSwitch_RemovesOnlySourceCandidateAndRefreshesToFixedPoint(t *testing.T)
 	}
 }
 
+func TestSwitch_SourceCandidateUsesConfiguredProviderForFamilyAndConcreteCallers(t *testing.T) {
+	for _, tc := range []struct {
+		name, caller, configured, target, unrelated string
+		installWith                                 string
+	}{
+		{name: "system family", caller: "system", configured: "brew", target: "apt", unrelated: "cargo"},
+		{name: "system concrete", caller: "brew", configured: "brew", target: "apt", unrelated: "cargo"},
+		{name: "node family", caller: "node", configured: "npm", target: "pnpm", unrelated: "brew"},
+		{name: "node concrete", caller: "npm", configured: "npm", target: "pnpm", unrelated: "brew"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("OMNI_HOSTNAME", "testhost")
+			sourceName := tc.configured
+			if tc.installWith != "" {
+				sourceName = tc.installWith
+			}
+			source := &managerInstallStub{stubProvider: stubProvider{name: sourceName, available: true, installed: []provider.InstalledTool{{Tool: provider.Tool{Name: "fixture", Provider: sourceName, Package: "fixture"}, Version: "1.0.0"}}}}
+			target := &managerInstallStub{stubProvider: stubProvider{name: tc.target, available: true}}
+			a, cfgPath := newImportApp(t, source, target)
+			if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+				Tools: map[string]config.ToolSpec{"fixture": {Providers: []config.ToolInstallSpec{
+					{Provider: tc.configured, Package: "fixture", InstallWith: tc.installWith},
+					{Provider: tc.unrelated, Package: "fixture-alt"},
+				}}},
+				Groups: []*config.GroupConfig{testHostToolGroup("fixture")},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := a.Switch(context.Background(), "fixture", tc.caller, tc.target); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := config.Load(cfgPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			providers := cfg.Tools["fixture"].Providers
+			wantProvider, wantInstallWith := tc.target, ""
+			if len(providers) != 2 || providers[0].Provider != wantProvider || providers[0].InstallWith != wantInstallWith || providers[1].Provider != tc.unrelated {
+				t.Fatalf("provider candidates = %#v", providers)
+			}
+		})
+	}
+}
+
+func TestSwitch_SameTargetPreservesCandidateAndUnrelatedFallback(t *testing.T) {
+	brew := &stubProvider{name: "brew", available: true, installed: []provider.InstalledTool{{Tool: provider.Tool{Name: "fixture", Provider: "brew", Package: "fixture"}, Version: "1.0.0"}}}
+	a, cfgPath := newImportApp(t, brew)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{"fixture": {Providers: []config.ToolInstallSpec{
+			{Provider: "brew", Package: "fixture"}, {Provider: "cargo", Package: "fixture-alt"},
+		}}},
+		Groups: []*config.GroupConfig{testHostToolGroup("fixture")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Switch(context.Background(), "fixture", "brew", "brew"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers := cfg.Tools["fixture"].Providers
+	if len(providers) != 2 || providers[0].Provider != "brew" || providers[1].Provider != "cargo" {
+		t.Fatalf("same-target candidates = %#v", providers)
+	}
+}
+
 func TestSwitch_PersistsResolvedConcreteOwner(t *testing.T) {
 	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
