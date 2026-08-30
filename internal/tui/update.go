@@ -107,8 +107,8 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 
 	case toolsLoadedMsg:
 		cmds = append(cmds, m.handleToolsLoadedMsg(msg)...)
-		if msg.err == nil {
-			observeTestTools(msg.tools)
+		if msg.err == nil && !msg.noConfig && !msg.noHost {
+			observeTestTools(m.allTools)
 		}
 
 	case setupImportDoneMsg:
@@ -242,7 +242,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	case doctorDoneMsg:
 		cmds = append(cmds, m.handleDoctorDoneMsg(msg)...)
 		if msg.err == nil {
-			observeTestDoctor(msg.result)
+			observeTestDoctor(m.doctorResult)
 		}
 
 	case fixIgnoreDoneMsg:
@@ -276,9 +276,10 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		cmds = append(cmds, m.handleSearchResultsMsg(msg)...)
 
 	case dotsLoadedMsg:
+		accepted := msg.gen == m.dotsOpGen
 		cmds = append(cmds, m.handleDotsLoadedMsg(msg)...)
-		if msg.err == nil {
-			observeTestDots(msg.entries, msg.gitStatus)
+		if accepted {
+			observeTestDots(m.dotsEntries, m.dotsGitStatus)
 		}
 
 	case dotsPeekLoadedMsg:
@@ -294,9 +295,10 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		cmds = append(cmds, m.handleDotsPreparedMsg(msg)...)
 
 	case dotsSyncedMsg:
+		accepted := msg.gen == m.dotsOpGen
 		cmds = append(cmds, m.handleDotsSyncedMsg(msg)...)
-		if msg.err == nil || len(msg.entries) > 0 {
-			observeTestDots(msg.entries, msg.gitStatus)
+		if accepted {
+			observeTestDots(m.dotsEntries, m.dotsGitStatus)
 		}
 
 	case dotsDiscoveredMsg:

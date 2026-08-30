@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,6 +12,11 @@ import (
 )
 
 const testObservationEnv = "OMNI_TEST_TUI_OBSERVATION"
+
+var (
+	createTestObservationTemp = os.CreateTemp
+	renameTestObservation     = os.Rename
+)
 
 type testObservation struct {
 	Tools  []testToolObservation `json:"tools,omitempty"`
@@ -68,39 +74,62 @@ func observeTestDoctor(result *app.DoctorResult) {
 
 func updateTestObservation(update func(*testObservation)) {
 	path := os.Getenv(testObservationEnv)
-	if path == "" || !testguard.Isolated() || testguard.RequireTempEntryPath("TUI test observation", path) != nil {
+	if path == "" {
 		return
+	}
+	if !testguard.Isolated() {
+		panic("TUI test observation requires an isolated test sandbox")
+	}
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			panic(fmt.Sprintf("unsafe TUI test observation target %q", path))
+		}
+		if err := testguard.RequireTempPath("TUI test observation", path); err != nil {
+			panic(err)
+		}
+	} else if os.IsNotExist(err) {
+		if err := testguard.RequireTempEntryPath("TUI test observation", path); err != nil {
+			panic(err)
+		}
+	} else {
+		panic(err)
 	}
 	var packet testObservation
 	if raw, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(raw, &packet)
+		if err := json.Unmarshal(raw, &packet); err != nil {
+			panic(fmt.Errorf("decode TUI test observation: %w", err))
+		}
+	} else if !os.IsNotExist(err) {
+		panic(err)
 	}
 	update(&packet)
 	raw, err := json.Marshal(packet)
 	if err != nil {
-		return
+		panic(err)
 	}
 	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".tui-observation-*")
+	tmp, err := createTestObservationTemp(dir, ".tui-observation-*")
 	if err != nil {
-		return
+		panic(err)
 	}
 	tmpPath := tmp.Name()
 	defer func() { _ = os.Remove(tmpPath) }()
 	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
-		return
+		panic(err)
 	}
 	if _, err := tmp.Write(raw); err != nil {
 		_ = tmp.Close()
-		return
+		panic(err)
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
-		return
+		panic(err)
 	}
 	if err := tmp.Close(); err != nil {
-		return
+		panic(err)
 	}
-	_ = os.Rename(tmpPath, path)
+	if err := renameTestObservation(tmpPath, path); err != nil {
+		panic(err)
+	}
 }
