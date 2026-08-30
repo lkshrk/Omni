@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -2358,6 +2359,9 @@ func syncDir(path string) error {
 		return err
 	}
 	defer func() { _ = dir.Close() }()
+	if runtime.GOOS == "windows" {
+		return nil
+	}
 	return dir.Sync()
 }
 

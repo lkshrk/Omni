@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/vttest"
+
+	"github.com/lkshrk/omni/internal/config"
 )
 
 func TestCLIAndTUISetupProduceEquivalentConfig(t *testing.T) {
@@ -29,7 +31,22 @@ func TestCLIAndTUISetupProduceEquivalentConfig(t *testing.T) {
 				writeTUIKeys(t, term, "\r")
 				waitForRequiredScreen(t, term, 8*time.Second, screenHas("Enable dotfile sync?"), "TUI did not advance to dotfile setup")
 				writeTUIKeys(t, term, "n")
-				return waitForRequiredScreen(t, term, 12*time.Second, screenHas("Dashboard", "Tools"), "TUI did not finish setup")
+				return waitForRequiredScreen(t, term, 12*time.Second, func(text string) bool {
+					if !screenHas("Dashboard", "Tools")(text) {
+						return false
+					}
+					cfg, err := config.Load(sandbox.configPath)
+					if err != nil {
+						return false
+					}
+					_, host := cfg.Hosts["testhost"]
+					for _, group := range cfg.Groups {
+						if group != nil && group.Name == "testhost" && group.Special == "host" {
+							return host
+						}
+					}
+					return false
+				}, "TUI did not finish setup")
 			})
 		},
 		observe: observeSetupParityConfig,
