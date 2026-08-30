@@ -383,6 +383,8 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			cmds = append(cmds, setStatus(&m, "✗ APM repair failed: "+msg.err.Error(), true))
 		} else if msg.readinessErr != nil {
 			m.agentsReadinessErr = msg.readinessErr
+			var repair *app.APMRepairError
+			m.agentsReadinessRepair = errors.As(msg.readinessErr, &repair)
 			cmds = append(cmds, setStatus(&m, "✗ APM readiness recheck failed: "+msg.readinessErr.Error(), true))
 		} else {
 			m.agentsReadinessErr = nil

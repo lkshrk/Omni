@@ -229,6 +229,25 @@ func TestAgentsRepairFailureStaysActionable(t *testing.T) {
 	}
 }
 
+func TestAgentsSuccessfulRepairWithNonRepairableRecheckRoutesRToRecheck(t *testing.T) {
+	m := agentsRowsModel(t)
+	m.app = app.New(filepath.Join(t.TempDir(), "settings.json"))
+	m.ctx = context.Background()
+	m.apmRunning = true
+	m.agentsReadinessRepair = true
+	next := drive(m, agentsRepairDoneMsg{report: app.APMInstallFixReport{Upgraded: "uv tool install"}, readinessErr: os.ErrPermission})
+	if next.apmRunning || next.agentsReadinessRepair || !errors.Is(next.agentsReadinessErr, os.ErrPermission) {
+		t.Fatalf("recheck state running=%v repairable=%v err=%v", next.apmRunning, next.agentsReadinessRepair, next.agentsReadinessErr)
+	}
+	if guidance := agentsReadinessGuidance(next); !strings.Contains(guidance, "R recheck") || strings.Contains(guidance, "repair pinned") {
+		t.Fatalf("recheck guidance = %q", guidance)
+	}
+	_, cmds := next.handleAgentsGlobalActionKeyMsg(tea.KeyPressMsg{Code: 'R', Text: "R"})
+	if next.apmRunning || !next.agentsReadinessPending || len(cmds) != 1 {
+		t.Fatalf("R routing running=%v pending=%v cmds=%d", next.apmRunning, next.agentsReadinessPending, len(cmds))
+	}
+}
+
 func TestDashboardAgentsReadinessPendingOrFailedIsNeverHealthy(t *testing.T) {
 	m := agentsRowsModel(t)
 	m.agentsReadinessPending = true
