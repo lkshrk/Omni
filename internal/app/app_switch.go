@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -97,6 +98,11 @@ func (a *App) Switch(ctx context.Context, name, fromProvider, toProvider string)
 			candidate.Source = authored.Source
 			candidate.Recipe = authored.Recipe
 		}
+		if fromProvider != targetProvider {
+			spec.Providers = slices.DeleteFunc(spec.Providers, func(existing config.ToolInstallSpec) bool {
+				return existing.Provider == fromProvider
+			})
+		}
 		setDefaultToolProviderCandidate(&spec, candidate)
 		cfg.Tools[name] = spec
 		return nil
@@ -116,6 +122,7 @@ func (a *App) Switch(ctx context.Context, name, fromProvider, toProvider string)
 		Installed:     true,
 		InstalledWith: installedOwner,
 		Version:       sql.NullString{String: ver, Valid: ver != ""},
+		Tracked:       true,
 		LastChecked:   time.Now(),
 	}); err != nil {
 		return result, fmt.Errorf("upserting switch cache for %s/%s: %w", targetProvider, name, err)

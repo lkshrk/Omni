@@ -278,6 +278,59 @@ func TestSwitch_UpdatesDB(t *testing.T) {
 	}
 }
 
+func TestSwitch_RemovesOnlySourceCandidateAndRefreshesToFixedPoint(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	brew := &stubProvider{name: "brew", available: true, installed: []provider.InstalledTool{{
+		Tool: provider.Tool{Name: "black", Provider: "brew", Package: "black"}, Version: "1.0.0",
+	}}}
+	pnpm := &managerInstallStub{stubProvider: stubProvider{name: "pnpm", available: true}}
+	a, cfgPath := newImportApp(t, brew, pnpm)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{ProviderPriority: []string{"brew", "pnpm"}},
+		Tools: map[string]config.ToolSpec{"black": {Providers: []config.ToolInstallSpec{
+			{Provider: "brew", Package: "black"},
+			{Provider: "apt", Package: "python3-black"},
+		}}},
+		Groups: []*config.GroupConfig{testHostToolGroup("black")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SwitchWithState(context.Background(), "black", "brew", "pnpm"); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := a.RefreshInstalled(context.Background(), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers := cfg.Tools["black"].Providers
+	if len(providers) != 2 || providers[0].Provider != "pnpm" || providers[1].Provider != "apt" {
+		t.Fatalf("provider candidates = %#v, want pnpm then preserved apt", providers)
+	}
+	db, err := database.Open(a.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	rows, err := db.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var black []*database.ToolCache
+	for _, row := range rows {
+		if row.Name == "black" {
+			black = append(black, row)
+		}
+	}
+	if len(black) != 1 || black[0].Provider != "pnpm" || !black[0].Tracked {
+		t.Fatalf("fixed-point cache = %#v", black)
+	}
+}
+
 func TestSwitch_PersistsResolvedConcreteOwner(t *testing.T) {
 	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}

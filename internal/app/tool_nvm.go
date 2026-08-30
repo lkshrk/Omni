@@ -107,17 +107,18 @@ func (a *App) NvmManagedSystemToolNames(ctx context.Context) (map[string]bool, e
 
 // MigrateNvmManagedTool — The Node runtime is removed from config; other tools switch to the effective node package manager.
 func (a *App) MigrateNvmManagedTool(ctx context.Context, name string) (*SwitchResult, error) {
-	result, err := a.MigrateNvmManagedToolWithState(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-	if result != nil {
-		return result.Result, nil
-	}
-	return nil, nil
+	return a.migrateNvmManagedTool(ctx, name)
 }
 
 func (a *App) MigrateNvmManagedToolWithState(ctx context.Context, name string) (*ProviderRepairStateResult, error) {
+	result, err := a.migrateNvmManagedTool(ctx, name)
+	if err != nil {
+		return &ProviderRepairStateResult{Result: result}, err
+	}
+	return a.providerRepairState(ctx, result)
+}
+
+func (a *App) migrateNvmManagedTool(ctx context.Context, name string) (*SwitchResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return nil, err
@@ -132,16 +133,12 @@ func (a *App) MigrateNvmManagedToolWithState(ctx context.Context, name string) (
 	}
 
 	if name == "node" {
-		state, err := a.RemoveNvmRuntimeFromConfigWithState(ctx, name, fromProvider)
-		if err != nil {
-			return nil, err
-		}
-		return &ProviderRepairStateResult{Tools: state.Tools}, nil
+		return nil, a.removeNvmRuntimeFromConfig(ctx, name, fromProvider)
 	}
 	settings, _ := a.LoadSettings()
 	_, nodeManager := a.effectiveManagersFromSettings(settings)
 	target := defaultNodeManagerLabel(nodeManager)
-	return a.SwitchWithState(ctx, name, fromProvider, target)
+	return a.Switch(ctx, name, fromProvider, target)
 }
 
 func (a *App) MigrateAllNvmManagedTools(ctx context.Context) (*NvmManagedMigrationBatchResult, error) {
