@@ -309,9 +309,18 @@ func runParityDotsTUIAction(t *testing.T, bin string, sandbox *paritySandbox, ac
 	runTUI(t, bin, sandbox.root, sandbox.env, []string{"--config", sandbox.configPath, "--cache-dir", sandbox.cache}, func(term *vttest.Terminal) string {
 		waitForRequiredScreen(t, term, 6*time.Second, screenHas("Dashboard", "Tools"), "TUI did not render main tabs")
 		writeTUIKeys(t, term, "\t", "\t")
-		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
-			return strings.Contains(text, "nvim")
-		}, "TUI did not render the dots entry")
+		if action == "l" {
+			waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
+				lower := strings.ToLower(text)
+				return strings.Contains(text, "nvim") && strings.Contains(lower, "conflict") && strings.Contains(lower, "sync: partial, sync failed")
+			}, "TUI launch sync did not settle on the dots conflict")
+			writeTUIKeys(t, term, "j")
+			waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
+				return strings.Contains(text, "> ! • nvim") && strings.Contains(strings.ToLower(text), "l use local")
+			}, "TUI did not select the actionable dots conflict")
+		} else {
+			waitForRequiredScreen(t, term, 8*time.Second, screenHas("nvim"), "TUI did not render the dots entry")
+		}
 		writeTUIKeys(t, term, action)
 		if strings.HasPrefix(confirmation, "confirm") {
 			waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
