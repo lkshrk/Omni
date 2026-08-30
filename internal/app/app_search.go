@@ -1461,7 +1461,7 @@ func discoverCLIToolAllowed(cliSets map[string]map[string]bool, providerName, to
 	return cliSet[strings.ToLower(toolName)]
 }
 
-func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootConfig, progress func(RefreshDiscoveredProgressEvent)) ([]database.DiscoveredUpsert, []string) {
+func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootConfig, progress func(RefreshDiscoveredProgressEvent)) ([]database.DiscoveredUpsert, []database.DiscoveredProviderScope) {
 	configuredNames := make(map[string]struct{})
 	for name := range cfg.Tools {
 		configuredNames[name] = struct{}{}
@@ -1482,7 +1482,7 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 
 	// Providers are processed serially after the availability pass, so no lock is needed.
 	var discovered []database.DiscoveredUpsert
-	scannedSet := make(map[string]struct{})
+	scannedSet := make(map[database.DiscoveredProviderScope]struct{})
 	// Per-provider errors are skipped so one bad provider does not prevent discovering the rest.
 	disabled := make(map[string]struct{})
 	for _, name := range a.effectiveSettings(cfg).DisabledProviders {
@@ -1517,7 +1517,11 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 			if err != nil {
 				continue
 			}
-			scannedSet[configProvider] = struct{}{}
+			for _, entry := range entries {
+				if entry.ConcreteManager != "" {
+					scannedSet[database.DiscoveredProviderScope{Provider: configProvider, InstalledWith: entry.ConcreteManager}] = struct{}{}
+				}
+			}
 			for name, entry := range entries {
 				if _, ok := configuredNames[name]; ok {
 					continue
@@ -1549,7 +1553,7 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 				continue // best-effort: skip providers whose baseline can't be read/recorded
 			}
 		}
-		scannedSet[configProvider] = struct{}{}
+		scannedSet[database.DiscoveredProviderScope{Provider: configProvider, InstalledWith: p.Name()}] = struct{}{}
 		for _, t := range installed {
 			if _, ok := configuredNames[t.Name]; ok {
 				continue // already in config; skip
@@ -1572,11 +1576,16 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 			})
 		}
 	}
-	scannedProviders := make([]string, 0, len(scannedSet))
-	for name := range scannedSet {
-		scannedProviders = append(scannedProviders, name)
+	scannedProviders := make([]database.DiscoveredProviderScope, 0, len(scannedSet))
+	for scope := range scannedSet {
+		scannedProviders = append(scannedProviders, scope)
 	}
-	sort.Strings(scannedProviders)
+	sort.Slice(scannedProviders, func(i, j int) bool {
+		if scannedProviders[i].Provider != scannedProviders[j].Provider {
+			return scannedProviders[i].Provider < scannedProviders[j].Provider
+		}
+		return scannedProviders[i].InstalledWith < scannedProviders[j].InstalledWith
+	})
 	return collapseSharedStoreDuplicates(discovered, ecosystemProviders), scannedProviders
 }
 

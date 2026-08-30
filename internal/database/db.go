@@ -1476,18 +1476,29 @@ func (db *DB) PruneDiscovered(ctx context.Context, cutoff time.Time) error {
 	return nil
 }
 
-func (db *DB) PruneDiscoveredProviders(ctx context.Context, cutoff time.Time, providers []string) error {
-	if len(providers) == 0 {
+type DiscoveredProviderScope struct {
+	Provider      string
+	InstalledWith string
+}
+
+func (db *DB) PruneDiscoveredProviders(ctx context.Context, cutoff time.Time, scopes []DiscoveredProviderScope) error {
+	if len(scopes) == 0 {
 		return nil
 	}
-	_, err := db.bun.NewDelete().
-		Model((*ToolCache)(nil)).
-		Where("tracked = FALSE").
-		Where("last_checked < ?", cutoff).
-		Where("provider IN (?)", bun.List(providers)).
-		Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("pruning discovered tools for providers %v: %w", providers, err)
-	}
-	return nil
+	return db.bun.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		for _, scope := range scopes {
+			if scope.Provider == "" || scope.InstalledWith == "" {
+				continue
+			}
+			if _, err := tx.NewDelete().Model((*ToolCache)(nil)).
+				Where("tracked = FALSE").
+				Where("last_checked < ?", cutoff).
+				Where("provider = ?", scope.Provider).
+				Where("installed_with = ?", scope.InstalledWith).
+				Exec(ctx); err != nil {
+				return fmt.Errorf("pruning discovered tools for %s/%s: %w", scope.Provider, scope.InstalledWith, err)
+			}
+		}
+		return nil
+	})
 }

@@ -1081,6 +1081,35 @@ func (s *failingListInstalledStub) ListInstalled(context.Context) ([]provider.In
 	return nil, errors.New("inventory failed")
 }
 
+func TestRefreshDiscoveredPrunesSuccessfulEffectiveManagerAndPreservesFailedFillIn(t *testing.T) {
+	t.Parallel()
+	bun := &listInstalledStub{stubProvider: stubProvider{name: "bun", available: true}}
+	npm := &failingListInstalledStub{stubProvider: stubProvider{name: "npm", available: true}}
+	a, cfgPath := newImportApp(t, bun, npm)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  map[string]config.ToolSpec{"node-anchor": {Provider: "node", InstallWith: "bun"}},
+		Groups: []*config.GroupConfig{{Tools: groupTools("node-anchor")}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DB().UpsertDiscoveredBatch(context.Background(), []database.DiscoveredUpsert{
+		{Name: "stale-bun", Provider: "bun", InstalledWith: "bun", Version: "1.0.0"},
+		{Name: "stale-npm", Provider: "npm", InstalledWith: "npm", Version: "1.0.0"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.RefreshDiscovered(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := a.DB().ListDiscovered(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Name != "stale-npm" {
+		t.Fatalf("discovered rows = %+v, want successful Bun pruned and failed npm fill-in preserved", rows)
+	}
+}
+
 func TestRefreshDiscoveredPrunesSuccessfulProviderAndPreservesFailedProvider(t *testing.T) {
 	t.Parallel()
 	brew := &listInstalledStub{stubProvider: stubProvider{name: "brew", available: true}}

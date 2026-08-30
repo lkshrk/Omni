@@ -17,7 +17,7 @@ func TestPruneDiscoveredProvidersPrunesOnlySuccessfulProvider(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.PruneDiscoveredProviders(ctx, time.Now().Add(time.Second), []string{"brew"}); err != nil {
+	if err := db.PruneDiscoveredProviders(ctx, time.Now().Add(time.Second), []database.DiscoveredProviderScope{{Provider: "brew", InstalledWith: "brew"}}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := db.ListDiscovered(ctx)
