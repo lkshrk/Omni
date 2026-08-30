@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -27,6 +28,8 @@ type mgr struct {
 	filterByPkg          bool     // whether listGlobal accepts a package name to narrow output
 	emptyExitNonZero     bool     // listGlobal exits non-zero when no globals are installed (bun)
 }
+
+var exactNPMVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
 
 // supported is ordered by auto-detect preference (bun → pnpm → npm).
 var supported = []mgr{
@@ -241,7 +244,7 @@ func (p *Provider) IsInstalledWithManager(ctx context.Context, tool provider.Too
 }
 
 func (p *Provider) isInstalledWith(ctx context.Context, tool provider.Tool, m *mgr) (bool, string, error) {
-	pkg := tool.EffectivePackage()
+	pkg, requiredVersion := splitPackageSpec(tool.EffectivePackage())
 	args := m.listGlobal
 	if m.filterByPkg {
 		args = with(m.listGlobal, pkg)
@@ -251,7 +254,20 @@ func (p *Provider) isInstalledWith(ctx context.Context, tool provider.Tool, m *m
 		return false, "", nil // non-zero exit = not installed
 	}
 	ver := parseVersion(stdout, pkg)
-	return ver != "", ver, nil
+	return ver != "" && (requiredVersion == "" || ver == requiredVersion), ver, nil
+}
+
+func splitPackageSpec(spec string) (name, version string) {
+	idx := strings.LastIndex(spec, "@")
+	if idx <= 0 || idx == len(spec)-1 || !exactNPMVersion.MatchString(spec[idx+1:]) {
+		return spec, ""
+	}
+	return spec[:idx], spec[idx+1:]
+}
+
+func (p *Provider) ExactVersionPin(tool provider.Tool) (string, string, bool) {
+	name, version := splitPackageSpec(tool.EffectivePackage())
+	return name, version, version != ""
 }
 
 func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool, error) {

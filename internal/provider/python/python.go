@@ -246,19 +246,34 @@ func (p *Provider) IsInstalledWithManager(ctx context.Context, tool provider.Too
 }
 
 func (p *Provider) isInstalledWith(ctx context.Context, tool provider.Tool, b *backend) (bool, string, error) {
+	pkg, requiredVersion := pythonPackageIdentity(tool.EffectivePackage())
 	if b.usesTool {
 		m, err := p.uvInstalledMap(ctx, b)
 		if err != nil {
 			return false, "", nil
 		}
-		ver, ok := m[strings.ToLower(tool.EffectivePackage())]
-		return ok, ver, nil
+		ver, ok := m[strings.ToLower(pkg)]
+		return ok && (requiredVersion == "" || ver == requiredVersion), ver, nil
 	}
-	stdout, _, err := p.exec.Run(ctx, b.binary, "show", tool.EffectivePackage())
+	stdout, _, err := p.exec.Run(ctx, b.binary, "show", pkg)
 	if err != nil {
 		return false, "", nil
 	}
-	return true, parsePipShowVersion(stdout), nil
+	ver := parsePipShowVersion(stdout)
+	return requiredVersion == "" || ver == requiredVersion, ver, nil
+}
+
+func pythonPackageIdentity(spec string) (name, exactVersion string) {
+	name, exactVersion, pinned := strings.Cut(spec, "==")
+	if !pinned || name == "" || exactVersion == "" || strings.HasPrefix(exactVersion, "=") {
+		return spec, ""
+	}
+	return name, exactVersion
+}
+
+func (p *Provider) ExactVersionPin(tool provider.Tool) (string, string, bool) {
+	name, version := pythonPackageIdentity(tool.EffectivePackage())
+	return name, version, version != ""
 }
 
 func backendByName(name string) *backend {

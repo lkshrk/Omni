@@ -66,15 +66,28 @@ func (p *Provider) PrivilegeCommand(action provider.PrivilegeAction, tool provid
 }
 
 func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, string, error) {
-	stdout, _, err := p.exec.Run(ctx, "dpkg-query", "--showformat=${Version}", "--show", tool.EffectivePackage())
+	pkg, requiredVersion, pinned := aptPackageIdentity(tool.EffectivePackage())
+	stdout, _, err := p.exec.Run(ctx, "dpkg-query", "--showformat=${Version}", "--show", pkg)
 	if err != nil {
 		return false, "", nil // non-zero exit → not installed
 	}
 	version := strings.TrimSpace(stdout)
-	if version == "" {
+	if version == "" || pinned && version != requiredVersion {
 		return false, "", nil
 	}
 	return true, version, nil
+}
+
+func (p *Provider) ExactVersionPin(tool provider.Tool) (string, string, bool) {
+	return aptPackageIdentity(tool.EffectivePackage())
+}
+
+func aptPackageIdentity(spec string) (name, exactVersion string, ok bool) {
+	name, exactVersion, ok = strings.Cut(spec, "=")
+	if !ok || name == "" || exactVersion == "" || strings.HasPrefix(exactVersion, "=") {
+		return spec, "", false
+	}
+	return name, exactVersion, true
 }
 
 func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool, error) {

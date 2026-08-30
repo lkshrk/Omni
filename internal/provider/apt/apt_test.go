@@ -50,6 +50,16 @@ func TestInstall_Success(t *testing.T) {
 	}
 }
 
+func TestInstall_PreservesPinnedSpec(t *testing.T) {
+	p, m := newAPT(executor.MockCall{})
+	if err := p.Install(context.Background(), tool("rbw=1.13.2-7")); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if got := m.Calls[0].Args[2]; got != "rbw=1.13.2-7" {
+		t.Fatalf("install package = %q, want pinned spec", got)
+	}
+}
+
 func TestInstall_Error(t *testing.T) {
 	p, _ := newAPT(executor.MockCall{Err: errors.New("exit 1"), Stderr: "E: Unable to locate package"})
 	err := p.Install(context.Background(), tool("badpkg"))
@@ -86,6 +96,16 @@ func TestUpgrade_Success(t *testing.T) {
 	}
 }
 
+func TestUpgrade_PreservesPinnedSpec(t *testing.T) {
+	p, m := newAPT(executor.MockCall{})
+	if err := p.Upgrade(context.Background(), tool("rbw=1.13.2-7")); err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	if got := m.Calls[0].Args[3]; got != "rbw=1.13.2-7" {
+		t.Fatalf("upgrade package = %q, want pinned spec", got)
+	}
+}
+
 func TestUpgrade_Error(t *testing.T) {
 	p, _ := newAPT(executor.MockCall{Err: errors.New("exit 1"), Stderr: "E: Unable to locate package"})
 	if err := p.Upgrade(context.Background(), tool("badpkg")); err == nil {
@@ -108,10 +128,41 @@ func TestDescription(t *testing.T) {
 }
 
 func TestIsInstalled_Found(t *testing.T) {
-	p, _ := newAPT(executor.MockCall{Stdout: "14.1.1-1+b4"})
+	p, m := newAPT(executor.MockCall{Stdout: "14.1.1-1+b4"})
 	ok, ver, err := p.IsInstalled(context.Background(), tool("ripgrep"))
 	if err != nil || !ok || ver != "14.1.1-1+b4" {
 		t.Errorf("IsInstalled() = (%v, %q, %v), want (true, 14.1.1-1+b4, nil)", ok, ver, err)
+	}
+	if got := m.Calls[0].Args[2]; got != "ripgrep" {
+		t.Fatalf("query package = %q, want unpinned package", got)
+	}
+}
+
+func TestIsInstalled_PinnedVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		installed string
+		want      bool
+	}{
+		{name: "matching", installed: "1.13.2-7", want: true},
+		{name: "mismatched", installed: "1.13.2-6", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, m := newAPT(executor.MockCall{Stdout: tc.installed})
+			ok, version, err := p.IsInstalled(context.Background(), tool("rbw=1.13.2-7"))
+			if err != nil || ok != tc.want {
+				t.Fatalf("IsInstalled() = (%v, %q, %v), want installed=%v", ok, version, err, tc.want)
+			}
+			if got := m.Calls[0].Args[2]; got != "rbw" {
+				t.Fatalf("query package = %q, want base package", got)
+			}
+			if tc.want && version != tc.installed {
+				t.Fatalf("version = %q, want %q", version, tc.installed)
+			}
+			if !tc.want && version != "" {
+				t.Fatalf("mismatched pin version = %q, want empty", version)
+			}
+		})
 	}
 }
 

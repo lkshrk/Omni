@@ -145,6 +145,18 @@ func TestInstall_HintedNpmUsesNpmArgs(t *testing.T) {
 	m.AssertCalled(t, "npm install -g prettier")
 }
 
+func TestInstall_PreservesPinnedSpec(t *testing.T) {
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "npm --version", Response: executor.MockCall{Stdout: "10.2.4"}},
+		executor.MatchRule{Pattern: "npm install -g", Response: executor.MockCall{}},
+	)
+	p := node.New(m, "npm")
+	if err := p.Install(context.Background(), tool("@anthropic-ai/claude-code@2.1.251")); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	m.AssertCalled(t, "npm install -g @anthropic-ai/claude-code@2.1.251")
+}
+
 func TestUninstall_PnpmArgs(t *testing.T) {
 	m := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "pnpm --version", Response: executor.MockCall{Stdout: "8.0.0"}},
@@ -193,6 +205,45 @@ func TestIsInstalled_NotFound(t *testing.T) {
 	ok, _, err := p.IsInstalled(context.Background(), tool("nonexistent"))
 	if err != nil || ok {
 		t.Errorf("expected (false, nil), got (%v, _, %v)", ok, err)
+	}
+}
+
+func TestIsInstalled_PinnedVersion(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		spec      string
+		installed string
+		want      bool
+		query     string
+	}{
+		{name: "matching", spec: "typescript@5.3.3", installed: "typescript@5.3.3", want: true, query: "typescript"},
+		{name: "mismatched", spec: "typescript@5.3.3", installed: "typescript@5.2.0", query: "typescript"},
+		{name: "scoped matching", spec: "@scope/tool@1.2.3", installed: "@scope/tool@1.2.3", want: true, query: "@scope/tool"},
+		{name: "scoped unpinned", spec: "@scope/tool", installed: "@scope/tool@1.2.3", want: true, query: "@scope/tool"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := executor.NewMatchMock(
+				executor.MatchRule{Pattern: "pnpm --version", Response: executor.MockCall{Stdout: "8.0.0"}},
+				executor.MatchRule{Pattern: "pnpm ls -g --depth=0 " + tt.query, Response: executor.MockCall{Stdout: listOutput(tt.installed)}},
+			)
+			ok, ver, err := node.New(m, "pnpm").IsInstalled(context.Background(), tool(tt.spec))
+			if err != nil || ok != tt.want || ver == "" {
+				t.Fatalf("IsInstalled() = (%v, %q, %v), want (%v, installed version, nil)", ok, ver, err, tt.want)
+			}
+			m.AssertCalled(t, "pnpm ls -g --depth=0 "+tt.query)
+		})
+	}
+}
+
+func TestExactVersionPin_IgnoresTagsRangesAndGitSpecs(t *testing.T) {
+	p := node.New(&executor.MockExecutor{}, "npm")
+	for _, spec := range []string{"typescript@latest", "typescript@^5.0.0", "git+ssh://git@github.com/acme/tool.git"} {
+		t.Run(spec, func(t *testing.T) {
+			name, version, pinned := p.ExactVersionPin(tool(spec))
+			if pinned || name != spec || version != "" {
+				t.Fatalf("ExactVersionPin(%q) = (%q, %q, %v), want unchanged/unpinned", spec, name, version, pinned)
+			}
+		})
 	}
 }
 
@@ -375,6 +426,18 @@ func TestUpgrade_NpmInstallsLatestTagForScopedPackage(t *testing.T) {
 		t.Fatalf("Upgrade: %v", err)
 	}
 	m.AssertCalled(t, "npm install -g @scope/toolkit@latest")
+}
+
+func TestUpgrade_PreservesPinnedSpec(t *testing.T) {
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "npm --version", Response: executor.MockCall{Stdout: "10.2.4"}},
+		executor.MatchRule{Pattern: "npm install -g @scope/toolkit@1.2.3", Response: executor.MockCall{}},
+	)
+	p := node.New(m, "npm")
+	if err := p.Upgrade(context.Background(), tool("@scope/toolkit@1.2.3")); err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	m.AssertCalled(t, "npm install -g @scope/toolkit@1.2.3")
 }
 
 func TestUpgrade_Error(t *testing.T) {

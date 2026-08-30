@@ -668,6 +668,275 @@ func TestRefreshProviderInstalled_BulkPath_MarksInstalled(t *testing.T) {
 	}
 }
 
+func TestRefreshProviderInstalled_ExactPinsRecheckBulkCandidates(t *testing.T) {
+	t.Parallel()
+	runExactPinBulkRefreshRegression(t, true)
+}
+
+func TestRefreshProviderInstalled_UnpinnedBulkHitSkipsPerToolRecheck(t *testing.T) {
+	t.Parallel()
+	runUnpinnedBulkRefreshRegression(t, true)
+}
+
+func TestExactPinRefreshPreservesBulkMetadata(t *testing.T) {
+	t.Parallel()
+	const (
+		name = "parsec"
+		pkg  = "parsec@150-103a"
+	)
+	for _, tt := range []struct {
+		name    string
+		refresh func(*app.App) error
+	}{
+		{name: "full", refresh: func(a *app.App) error { return a.RefreshInstalled(context.Background(), nil) }},
+		{name: "provider", refresh: func(a *app.App) error { return a.RefreshProviderInstalled(context.Background(), "npm") }},
+	} {
+		tt := tt
+		for _, bulkVersion := range []string{"150-103a", ""} {
+			bulkVersion := bulkVersion
+			t.Run(tt.name+"/"+bulkVersion, func(t *testing.T) {
+				t.Parallel()
+				state := &exactPinCheckState{installedVersion: "150-103a"}
+				prov := &exactPinMetadataStub{
+					metadataCheckingStub: metadataCheckingStub{
+						stubProvider: stubProvider{name: "npm", available: true},
+						metadata: map[string]provider.InstalledMetadata{"parsec": {
+							Version: bulkVersion,
+							Privilege: provider.PrivilegePlan{
+								Requirement: provider.PrivilegeMaybe,
+								Reason:      "requires package cleanup",
+							},
+						}},
+					},
+					checkState: state,
+				}
+				a, cfgPath := newImportApp(t, prov)
+				if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+					Tools:  logicalToolSpecs(logicalToolPackage(name, "npm", pkg)),
+					Groups: []*config.GroupConfig{{Tools: groupTools(name)}},
+				}); err != nil {
+					t.Fatalf("save config: %v", err)
+				}
+				if err := tt.refresh(a); err != nil {
+					t.Fatalf("refresh: %v", err)
+				}
+				got, err := a.DB().Get(context.Background(), name, "npm", pkg)
+				if err != nil {
+					t.Fatalf("Get: %v", err)
+				}
+				if !got.Installed || got.Package != pkg || got.Privilege != string(provider.PrivilegeMaybe) || got.PrivilegeReason.String != "requires package cleanup" {
+					t.Fatalf("cache installed=%v package=%q privilege=%q reason=%q", got.Installed, got.Package, got.Privilege, got.PrivilegeReason.String)
+				}
+				wantCalls := 0
+				if bulkVersion == "" {
+					wantCalls = 1
+				}
+				if state.calls != wantCalls {
+					t.Fatalf("per-tool checks = %d, want %d", state.calls, wantCalls)
+				}
+			})
+		}
+	}
+}
+
+func TestExactPinRefreshBypassesCachedOwnerBulkShortcuts(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name          string
+		pkg           string
+		owner         string
+		wantInstalled bool
+		wantCalls     int
+		ownerProv     func() (provider.Provider, func() (int, []string))
+		refresh       func(*app.App) error
+	}{
+		{
+			name:          "full npm owner",
+			pkg:           "@anthropic-ai/claude-code@2.1.251",
+			owner:         "npm",
+			wantInstalled: true,
+			ownerProv: func() (provider.Provider, func() (int, []string)) {
+				state := &exactPinCheckState{installedVersion: "2.1.250"}
+				p := &exactPinBulkStub{
+					bulkCheckingStub: bulkCheckingStub{stubProvider: stubProvider{name: "npm", available: true}, bulk: map[string]string{"@anthropic-ai/claude-code": "2.1.251"}},
+					checkState:       state,
+				}
+				return p, func() (int, []string) { return state.calls, state.packages }
+			},
+			refresh: func(a *app.App) error { return a.RefreshInstalled(context.Background(), nil) },
+		},
+		{
+			name:      "provider uv owner",
+			pkg:       "example==1.2.3",
+			owner:     "uv",
+			wantCalls: 1,
+			ownerProv: func() (provider.Provider, func() (int, []string)) {
+				p := &pythonPinOwnerStub{stubProvider: stubProvider{name: "uv", available: true}, installedVersion: "1.2.2"}
+				return p, func() (int, []string) { return p.calls, p.packages }
+			},
+			refresh: func(a *app.App) error { return a.RefreshProviderInstalled(context.Background(), "brew") },
+		},
+		{
+			name:          "provider npm owner bulk mismatch",
+			pkg:           "@anthropic-ai/claude-code@2.1.251",
+			owner:         "npm",
+			wantInstalled: false,
+			ownerProv: func() (provider.Provider, func() (int, []string)) {
+				state := &exactPinCheckState{installedVersion: "2.1.251"}
+				p := &exactPinBulkStub{
+					bulkCheckingStub: bulkCheckingStub{stubProvider: stubProvider{name: "npm", available: true}, bulk: map[string]string{"@anthropic-ai/claude-code": "2.1.250"}},
+					checkState:       state,
+				}
+				return p, func() (int, []string) { return state.calls, state.packages }
+			},
+			refresh: func(a *app.App) error { return a.RefreshProviderInstalled(context.Background(), "brew") },
+		},
+		{
+			name:          "provider npm owner bulk unknown",
+			pkg:           "@anthropic-ai/claude-code@2.1.251",
+			owner:         "npm",
+			wantInstalled: true,
+			wantCalls:     1,
+			ownerProv: func() (provider.Provider, func() (int, []string)) {
+				state := &exactPinCheckState{installedVersion: "2.1.251"}
+				p := &exactPinBulkStub{
+					bulkCheckingStub: bulkCheckingStub{stubProvider: stubProvider{name: "npm", available: true}, bulk: map[string]string{"@anthropic-ai/claude-code": ""}},
+					checkState:       state,
+				}
+				return p, func() (int, []string) { return state.calls, state.packages }
+			},
+			refresh: func(a *app.App) error { return a.RefreshProviderInstalled(context.Background(), "brew") },
+		},
+		{
+			name:          "provider npm owner metadata mismatch",
+			pkg:           "parsec@150-103a",
+			owner:         "npm",
+			wantInstalled: false,
+			ownerProv: func() (provider.Provider, func() (int, []string)) {
+				state := &exactPinCheckState{installedVersion: "150-103a"}
+				p := &exactPinMetadataStub{
+					metadataCheckingStub: metadataCheckingStub{
+						stubProvider: stubProvider{name: "npm", available: true},
+						metadata:     map[string]provider.InstalledMetadata{"parsec": {Version: "149-1"}},
+					},
+					checkState: state,
+				}
+				return p, func() (int, []string) { return state.calls, state.packages }
+			},
+			refresh: func(a *app.App) error { return a.RefreshProviderInstalled(context.Background(), "brew") },
+		},
+		{
+			name:          "provider npm owner metadata unknown",
+			pkg:           "parsec@150-103a",
+			owner:         "npm",
+			wantInstalled: true,
+			wantCalls:     1,
+			ownerProv: func() (provider.Provider, func() (int, []string)) {
+				state := &exactPinCheckState{installedVersion: "150-103a"}
+				p := &exactPinMetadataStub{
+					metadataCheckingStub: metadataCheckingStub{
+						stubProvider: stubProvider{name: "npm", available: true},
+						metadata:     map[string]provider.InstalledMetadata{"parsec": {Version: ""}},
+					},
+					checkState: state,
+				}
+				return p, func() (int, []string) { return state.calls, state.packages }
+			},
+			refresh: func(a *app.App) error { return a.RefreshProviderInstalled(context.Background(), "brew") },
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ownerProv, observed := tt.ownerProv()
+			route := &bulkCheckingStub{stubProvider: stubProvider{name: "brew", available: true}, bulk: map[string]string{"example": "1.2.3", "@anthropic-ai/claude-code": "2.1.251"}}
+			a, cfgPath := newImportApp(t, route, ownerProv)
+			if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+				Tools:  logicalToolSpecs(logicalToolPackage("tool", "brew", tt.pkg)),
+				Groups: []*config.GroupConfig{{Tools: groupTools("tool")}},
+			}); err != nil {
+				t.Fatalf("save config: %v", err)
+			}
+			if err := a.DB().Upsert(context.Background(), &database.ToolCache{
+				Name: "tool", Provider: "brew", Package: tt.pkg, Installed: true, InstalledWith: tt.owner, LastChecked: time.Now(),
+			}); err != nil {
+				t.Fatalf("seed cache: %v", err)
+			}
+			if err := tt.refresh(a); err != nil {
+				t.Fatalf("refresh: %v", err)
+			}
+			got, err := a.DB().Get(context.Background(), "tool", "brew", tt.pkg)
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			calls, packages := observed()
+			if got.Installed != tt.wantInstalled || got.Package != tt.pkg || calls != tt.wantCalls || calls > 0 && (len(packages) != 1 || packages[0] != tt.pkg) {
+				t.Fatalf("cache installed=%v package=%q calls=%d checked=%v", got.Installed, got.Package, calls, packages)
+			}
+		})
+	}
+}
+
+func TestExactPinRefreshUsesProviderSpecificAlternateSpecs(t *testing.T) {
+	t.Parallel()
+	const (
+		name       = "tool"
+		primaryPkg = "primary-tool"
+		alternate  = "@scope/alternate"
+		pinnedAlt  = alternate + "@2.0.0"
+	)
+	for _, mode := range []struct {
+		name    string
+		refresh func(*app.App) error
+	}{
+		{name: "full", refresh: func(a *app.App) error { return a.RefreshInstalled(context.Background(), nil) }},
+		{name: "provider", refresh: func(a *app.App) error { return a.RefreshProviderInstalled(context.Background(), "brew") }},
+	} {
+		mode := mode
+		for _, version := range []string{"2.0.0", "1.9.0", ""} {
+			version := version
+			t.Run(mode.name+"/"+version, func(t *testing.T) {
+				t.Parallel()
+				state := &exactPinCheckState{installedVersion: "2.0.0"}
+				brew := &bulkCheckingStub{stubProvider: stubProvider{name: "brew", available: true}, bulk: map[string]string{}}
+				npm := &exactPinBulkStub{
+					bulkCheckingStub: bulkCheckingStub{stubProvider: stubProvider{name: "npm", available: true}, bulk: map[string]string{alternate: version}},
+					checkState:       state,
+				}
+				a, cfgPath := newImportApp(t, brew, npm)
+				if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+					Tools: map[string]config.ToolSpec{name: {Providers: []config.ToolInstallSpec{
+						{Provider: "brew", Package: primaryPkg},
+						{Provider: "npm", Package: pinnedAlt},
+					}}},
+					Groups: []*config.GroupConfig{{Tools: groupTools(name)}},
+				}); err != nil {
+					t.Fatalf("save config: %v", err)
+				}
+				if err := mode.refresh(a); err != nil {
+					t.Fatalf("refresh: %v", err)
+				}
+				got, err := a.DB().Get(context.Background(), name, "brew", primaryPkg)
+				if err != nil {
+					t.Fatalf("Get: %v", err)
+				}
+				wantInstalled := version == "2.0.0" || version == ""
+				if got.Installed != wantInstalled || got.Package != primaryPkg || wantInstalled && got.InstalledWith != "npm" {
+					t.Fatalf("cache installed=%v owner=%q package=%q, want installed=%v owner=npm package=%q", got.Installed, got.InstalledWith, got.Package, wantInstalled, primaryPkg)
+				}
+				wantCalls := 0
+				if version == "" {
+					wantCalls = 1
+				}
+				if state.calls != wantCalls {
+					t.Fatalf("alternate per-tool checks = %d, want %d", state.calls, wantCalls)
+				}
+			})
+		}
+	}
+}
+
 func TestRefreshProviderInstalledWithProgress_ReportsEachTool(t *testing.T) {
 	t.Parallel()
 	prov := &bulkCheckingStub{

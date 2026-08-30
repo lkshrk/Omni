@@ -50,6 +50,14 @@ type namedProvider struct {
 
 func (p namedProvider) Name() string { return p.name }
 
+func (p namedProvider) ExactVersionPin(tool Tool) (string, string, bool) {
+	detector, ok := p.Provider.(ExactPinDetector)
+	if !ok {
+		return "", "", false
+	}
+	return detector.ExactVersionPin(tool)
+}
+
 func (p namedProvider) ListInstalled(ctx context.Context) ([]InstalledTool, error) {
 	tools, err := p.Provider.ListInstalled(ctx)
 	if err != nil {

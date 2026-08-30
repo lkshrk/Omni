@@ -172,6 +172,11 @@ type MultiManagerBulkChecker interface {
 	InstalledByManager(ctx context.Context) (map[string]InstalledEntry, error)
 }
 
+// ExactPinDetector describes provider-specific exact-version syntax without making bulk scanners parse it.
+type ExactPinDetector interface {
+	ExactVersionPin(tool Tool) (basePackage, requiredVersion string, ok bool)
+}
+
 // SelfPackageUpgradeChecker — Optional. Some environments (PEP 668) forbid a manager upgrading its own package.
 type SelfPackageUpgradeChecker interface {
 	SelfPackageName() string

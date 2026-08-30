@@ -132,6 +132,19 @@ func TestInstall_Pip3(t *testing.T) {
 	m.AssertCalled(t, "pip3 install black")
 }
 
+func TestInstall_Pip3PreservesExactVersionSpec(t *testing.T) {
+	m := executor.NewMatchMock(
+		pip3OK(),
+		executor.MatchRule{Pattern: "pip3 install black==24.1.0", Response: executor.MockCall{}},
+	)
+	p := New(m, "pip3")
+	spec := provider.Tool{Name: "black", Provider: "python", Package: "black==24.1.0"}
+	if err := p.Install(context.Background(), spec); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	m.AssertCalled(t, "pip3 install black==24.1.0")
+}
+
 func TestInstall_Error(t *testing.T) {
 	m := executor.NewMatchMock(
 		uvOK(),
@@ -294,6 +307,30 @@ func TestIsInstalled_UV_NotFound(t *testing.T) {
 	}
 }
 
+func TestIsInstalled_UV_ExactVersion(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		version string
+		want    bool
+	}{
+		{name: "matching", version: "23.12.1", want: true},
+		{name: "mismatched", version: "24.1.0", want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := executor.NewMatchMock(
+				uvOK(),
+				executor.MatchRule{Pattern: "uv tool list", Response: executor.MockCall{Stdout: uvToolListOutput}},
+			)
+			p := New(m, "uv")
+			spec := provider.Tool{Name: "black", Provider: "python", Package: "black==" + tt.version}
+			ok, ver, err := p.IsInstalled(context.Background(), spec)
+			if err != nil || ok != tt.want || ver != "23.12.1" {
+				t.Fatalf("IsInstalled() = (%v, %q, %v), want (%v, 23.12.1, nil)", ok, ver, err, tt.want)
+			}
+		})
+	}
+}
+
 func TestIsInstalled_Pip3_Found(t *testing.T) {
 	m := executor.NewMatchMock(
 		uvMissing(),
@@ -323,6 +360,34 @@ func TestIsInstalled_Pip3_NotFound(t *testing.T) {
 	ok, _, err := p.IsInstalled(context.Background(), tool("nonexistent"))
 	if err != nil || ok {
 		t.Errorf("IsInstalled() = (%v, _, %v), want (false, nil)", ok, err)
+	}
+}
+
+func TestIsInstalled_Pip3_ExactVersionUsesBaseIdentity(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		version string
+		want    bool
+	}{
+		{name: "matching", version: "23.12.1", want: true},
+		{name: "mismatched", version: "24.1.0", want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := executor.NewMatchMock(
+				pip3OK(),
+				executor.MatchRule{
+					Pattern:  "pip3 show black",
+					Response: executor.MockCall{Stdout: "Name: black\nVersion: 23.12.1\n"},
+				},
+			)
+			p := New(m, "pip3")
+			spec := provider.Tool{Name: "black", Provider: "python", Package: "black==" + tt.version}
+			ok, ver, err := p.IsInstalled(context.Background(), spec)
+			if err != nil || ok != tt.want || ver != "23.12.1" {
+				t.Fatalf("IsInstalled() = (%v, %q, %v), want (%v, 23.12.1, nil)", ok, ver, err, tt.want)
+			}
+			m.AssertCalled(t, "pip3 show black")
+		})
 	}
 }
 

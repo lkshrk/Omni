@@ -60,6 +60,43 @@ func (b *bulkCheckingStub) InstalledMap(_ context.Context) (map[string]string, e
 	return b.bulk, nil
 }
 
+type exactPinCheckState struct {
+	installedVersion string
+	calls            int
+	managers         []string
+	packages         []string
+}
+
+func testExactVersionPin(tool provider.Tool) (string, string, bool) {
+	spec := tool.EffectivePackage()
+	i := strings.LastIndex(spec, "@")
+	if i <= 0 || i == len(spec)-1 {
+		return spec, "", false
+	}
+	return spec[:i], spec[i+1:], true
+}
+
+func (s *exactPinCheckState) check(tool provider.Tool, manager string) (bool, string, error) {
+	s.calls++
+	s.managers = append(s.managers, manager)
+	s.packages = append(s.packages, tool.EffectivePackage())
+	_, required, pinned := testExactVersionPin(tool)
+	return !pinned || s.installedVersion == required, s.installedVersion, nil
+}
+
+type exactPinBulkStub struct {
+	bulkCheckingStub
+	checkState *exactPinCheckState
+}
+
+func (s *exactPinBulkStub) ExactVersionPin(tool provider.Tool) (string, string, bool) {
+	return testExactVersionPin(tool)
+}
+
+func (s *exactPinBulkStub) IsInstalled(_ context.Context, tool provider.Tool) (bool, string, error) {
+	return s.checkState.check(tool, "")
+}
+
 type metadataCheckingStub struct {
 	stubProvider
 	metadata map[string]provider.InstalledMetadata
@@ -67,6 +104,19 @@ type metadataCheckingStub struct {
 
 func (b *metadataCheckingStub) InstalledMetadataMap(_ context.Context) (map[string]provider.InstalledMetadata, error) {
 	return b.metadata, nil
+}
+
+type exactPinMetadataStub struct {
+	metadataCheckingStub
+	checkState *exactPinCheckState
+}
+
+func (s *exactPinMetadataStub) ExactVersionPin(tool provider.Tool) (string, string, bool) {
+	return testExactVersionPin(tool)
+}
+
+func (s *exactPinMetadataStub) IsInstalled(_ context.Context, tool provider.Tool) (bool, string, error) {
+	return s.checkState.check(tool, "")
 }
 
 type bulkConcreteStub struct {
@@ -703,6 +753,156 @@ type multiManagerStub struct {
 
 func (s *multiManagerStub) InstalledByManager(_ context.Context) (map[string]provider.InstalledEntry, error) {
 	return s.entries, nil
+}
+
+type exactPinMultiStub struct {
+	multiManagerStub
+	checkState *exactPinCheckState
+}
+
+func (s *exactPinMultiStub) ExactVersionPin(tool provider.Tool) (string, string, bool) {
+	return testExactVersionPin(tool)
+}
+
+func (s *exactPinMultiStub) IsInstalled(_ context.Context, tool provider.Tool) (bool, string, error) {
+	return s.checkState.check(tool, "")
+}
+
+func (s *exactPinMultiStub) IsInstalledWithManager(_ context.Context, tool provider.Tool, manager string) (bool, string, error) {
+	return s.checkState.check(tool, manager)
+}
+
+type pythonPinOwnerStub struct {
+	stubProvider
+	installedVersion string
+	calls            int
+	packages         []string
+}
+
+func (s *pythonPinOwnerStub) ExactVersionPin(tool provider.Tool) (string, string, bool) {
+	name, version, ok := strings.Cut(tool.EffectivePackage(), "==")
+	return name, version, ok && name != "" && version != ""
+}
+
+func (s *pythonPinOwnerStub) IsInstalled(_ context.Context, tool provider.Tool) (bool, string, error) {
+	s.calls++
+	s.packages = append(s.packages, tool.EffectivePackage())
+	_, required, _ := s.ExactVersionPin(tool)
+	return s.installedVersion == required, s.installedVersion, nil
+}
+
+func runExactPinBulkRefreshRegression(t *testing.T, providerOnly bool) {
+	t.Helper()
+	const (
+		name = "claude"
+		pkg  = "@anthropic-ai/claude-code@2.1.251"
+		base = "@anthropic-ai/claude-code"
+	)
+	tests := []struct {
+		name           string
+		installed      string
+		multi          bool
+		wantInstalled  bool
+		wantCalls      int
+		wantManagerArg string
+	}{
+		{name: "simple match", installed: "2.1.251", wantInstalled: true},
+		{name: "simple mismatch", installed: "2.1.250", wantInstalled: false},
+		{name: "multi match", installed: "2.1.251", multi: true, wantInstalled: true},
+		{name: "multi mismatch", installed: "2.1.250", multi: true, wantInstalled: false},
+		{name: "simple unknown", installed: "", wantInstalled: true, wantCalls: 1},
+		{name: "multi unknown", installed: "", multi: true, wantInstalled: true, wantCalls: 1, wantManagerArg: "npm"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			queriedVersion := tt.installed
+			if queriedVersion == "" {
+				queriedVersion = "2.1.251"
+			}
+			state := &exactPinCheckState{installedVersion: queriedVersion}
+			var prov provider.Provider
+			if tt.multi {
+				prov = &exactPinMultiStub{
+					multiManagerStub: multiManagerStub{
+						stubProvider: stubProvider{name: "npm", available: true},
+						entries:      map[string]provider.InstalledEntry{base: {Version: tt.installed, ConcreteManager: "npm"}},
+					},
+					checkState: state,
+				}
+			} else {
+				prov = &exactPinBulkStub{
+					bulkCheckingStub: bulkCheckingStub{stubProvider: stubProvider{name: "npm", available: true}, bulk: map[string]string{base: tt.installed}},
+					checkState:       state,
+				}
+			}
+			a, cfgPath := newImportApp(t, prov)
+			if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+				Tools:  logicalToolSpecs(logicalToolPackage(name, "npm", pkg)),
+				Groups: []*config.GroupConfig{{Tools: groupTools(name)}},
+			}); err != nil {
+				t.Fatalf("save config: %v", err)
+			}
+			var err error
+			if providerOnly {
+				err = a.RefreshProviderInstalled(context.Background(), "npm")
+			} else {
+				err = a.RefreshInstalled(context.Background(), nil)
+			}
+			if err != nil {
+				t.Fatalf("refresh installed: %v", err)
+			}
+			got, err := a.DB().Get(context.Background(), name, "npm", pkg)
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			if got.Installed != tt.wantInstalled || got.Package != pkg {
+				t.Fatalf("cache installed=%v package=%q, want %v %q", got.Installed, got.Package, tt.wantInstalled, pkg)
+			}
+			if state.calls != tt.wantCalls || state.calls > 0 && (state.packages[0] != pkg || state.managers[0] != tt.wantManagerArg) {
+				t.Fatalf("checks calls=%d packages=%v managers=%v", state.calls, state.packages, state.managers)
+			}
+		})
+	}
+}
+
+func runUnpinnedBulkRefreshRegression(t *testing.T, providerOnly bool) {
+	t.Helper()
+	state := &exactPinCheckState{installedVersion: "2.1.251"}
+	prov := &exactPinBulkStub{
+		bulkCheckingStub: bulkCheckingStub{stubProvider: stubProvider{name: "npm", available: true}, bulk: map[string]string{"@anthropic-ai/claude-code": "2.1.251"}},
+		checkState:       state,
+	}
+	a, cfgPath := newImportApp(t, prov)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalToolPackage("claude", "npm", "@anthropic-ai/claude-code")),
+		Groups: []*config.GroupConfig{{Tools: groupTools("claude")}},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	var err error
+	if providerOnly {
+		err = a.RefreshProviderInstalled(context.Background(), "npm")
+	} else {
+		err = a.RefreshInstalled(context.Background(), nil)
+	}
+	if err != nil {
+		t.Fatalf("refresh installed: %v", err)
+	}
+	if state.calls != 0 {
+		t.Fatalf("per-tool checks = %d, want 0", state.calls)
+	}
+}
+
+func TestRefreshInstalled_ExactPinsRecheckBulkCandidates(t *testing.T) {
+	t.Parallel()
+	runExactPinBulkRefreshRegression(t, false)
+}
+
+func TestRefreshInstalled_UnpinnedBulkHitSkipsPerToolRecheck(t *testing.T) {
+	t.Parallel()
+	runUnpinnedBulkRefreshRegression(t, false)
 }
 
 func TestRefreshInstalled_MultiManagerPath_UsesFullSlashPackage(t *testing.T) {
