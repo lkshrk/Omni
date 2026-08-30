@@ -1765,9 +1765,18 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [{
+            "type": "parity",
+            "role": "primary",
+            "selector": {
+              "package": "github.com/lkshrk/omni/integration_tests",
+              "test": "TestCLIAndTUIToolsDeleteSpecProduceEquivalentSemanticState",
+              "tags": ["integration"],
+              "lane": "docker-realism",
+              "os": ["linux"]
+            }
+          }]
         }
       ],
       "parity": {
