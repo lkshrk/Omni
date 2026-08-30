@@ -229,6 +229,29 @@
       ],
       "requirements": [
         {
+          "level": "unit",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "unit",
+              "role": "primary",
+              "selector": {"package": "github.com/lkshrk/omni/internal/provider/apt", "test": "TestInstall_PreservesPinnedSpec", "tags": [], "lane": "unit-remaining", "os": ["linux"]}
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Preserves scoped npm exact-version install specifications.",
+              "selector": {"package": "github.com/lkshrk/omni/internal/provider/node", "test": "TestInstall_PreservesPinnedSpec", "tags": [], "lane": "unit-remaining", "os": ["linux"]}
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Preserves Python exact-version install specifications.",
+              "selector": {"package": "github.com/lkshrk/omni/internal/provider/python", "test": "TestInstall_Pip3PreservesExactVersionSpec", "tags": [], "lane": "unit-remaining", "os": ["linux"]}
+            }
+          ]
+        },
+        {
           "level": "integration",
           "status": "required",
           "evidence": [
@@ -283,6 +306,18 @@
                 "os": [
                   "linux"
                 ]
+              }
+            },
+            {
+              "type": "cli_blackbox",
+              "role": "regression",
+              "reference": "Exact pins install with the full specification, query by base identity, and become missing on version mismatch.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryExactVersionPackageSpecsAreIdempotent",
+                "tags": ["integration"],
+                "lane": "docker-realism",
+                "os": ["linux"]
               }
             }
           ]
@@ -478,6 +513,29 @@
         "tools.update"
       ],
       "requirements": [
+        {
+          "level": "unit",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "unit",
+              "role": "primary",
+              "selector": {"package": "github.com/lkshrk/omni/internal/provider/apt", "test": "TestUpgrade_PreservesPinnedSpec", "tags": [], "lane": "unit-remaining", "os": ["linux"]}
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Preserves scoped npm exact-version upgrade specifications.",
+              "selector": {"package": "github.com/lkshrk/omni/internal/provider/node", "test": "TestUpgrade_PreservesPinnedSpec", "tags": [], "lane": "unit-remaining", "os": ["linux"]}
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Preserves Python exact-version upgrade specifications.",
+              "selector": {"package": "github.com/lkshrk/omni/internal/provider/python", "test": "TestUpgrade_UVPreservesExplicitVersionSpec", "tags": [], "lane": "unit-remaining", "os": ["linux"]}
+            }
+          ]
+        },
         {
           "level": "integration",
           "status": "required",
@@ -1431,6 +1489,53 @@
       ],
       "requirements": [
         {
+          "level": "unit",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "unit",
+              "role": "primary",
+              "selector": {"package": "github.com/lkshrk/omni/internal/app", "test": "TestRefreshInstalled_ExactPinsRecheckBulkCandidates", "tags": [], "lane": "unit-app", "os": ["linux"]}
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Exact pins use base package identity and reject installed version mismatches across APT, npm, and Python providers.",
+              "selector": {"package": "github.com/lkshrk/omni/internal/app", "test": "TestRefreshProviderInstalled_ExactPinsRecheckBulkCandidates", "tags": [], "lane": "unit-app", "os": ["linux"]}
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Bulk exact-pin refresh preserves metadata and cached-owner semantics.",
+              "selector": {"package": "github.com/lkshrk/omni/internal/app", "test": "TestExactPinRefreshPreservesBulkMetadata", "tags": [], "lane": "unit-app", "os": ["linux"]}
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "APT exact pins query the base identity and reject version mismatches.",
+              "selector": {"package": "github.com/lkshrk/omni/internal/provider/apt", "test": "TestIsInstalled_PinnedVersion", "tags": [], "lane": "unit-remaining", "os": ["linux"]}
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Scoped npm exact pins query the base identity and reject version mismatches.",
+              "selector": {"package": "github.com/lkshrk/omni/internal/provider/node", "test": "TestIsInstalled_PinnedVersion", "tags": [], "lane": "unit-remaining", "os": ["linux"]}
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Python family exact pins query the base identity and reject version mismatches.",
+              "selector": {"package": "github.com/lkshrk/omni/internal/provider/python", "test": "TestIsInstalled_Pip3_ExactVersionUsesBaseIdentity", "tags": [], "lane": "unit-remaining", "os": ["linux"]}
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Concrete pip exact pins query the base identity and reject version mismatches.",
+              "selector": {"package": "github.com/lkshrk/omni/internal/provider/pip", "test": "TestIsInstalled_ExactVersionUsesBaseIdentity", "tags": [], "lane": "unit-remaining", "os": ["linux"]}
+            }
+          ]
+        },
+        {
           "level": "integration",
           "status": "required",
           "evidence": [
@@ -1469,6 +1574,18 @@
                 "os": [
                   "linux"
                 ]
+              }
+            },
+            {
+              "type": "cli_blackbox",
+              "role": "regression",
+              "reference": "Exact pins remain idempotent across matching and mismatched installed versions after refresh.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryExactVersionPackageSpecsAreIdempotent",
+                "tags": ["integration"],
+                "lane": "docker-realism",
+                "os": ["linux"]
               }
             }
           ]
@@ -1531,6 +1648,35 @@
         "tools.consolidate"
       ],
       "requirements": [
+        {
+          "level": "unit",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "unit",
+              "role": "primary",
+              "selector": {"package": "github.com/lkshrk/omni/internal/app", "test": "TestConsolidate_CurrentSchemaUsesTargetCandidateAndConcreteCache", "tags": [], "lane": "unit-app", "os": ["linux"]}
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "A config-save failure preserves the source and cleans only newly installed targets.",
+              "selector": {"package": "github.com/lkshrk/omni/internal/app", "test": "TestConsolidate_ConfigSaveFailurePreservesPreexistingTarget", "tags": [], "lane": "unit-app", "os": ["linux"]}
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "A later tool failure never removes a preexisting consolidation target.",
+              "selector": {"package": "github.com/lkshrk/omni/internal/app", "test": "TestConsolidate_LaterToolFailurePreservesPreexistingTarget", "tags": [], "lane": "unit-app", "os": ["linux"]}
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Failed source uninstall remains visible as an untracked installed row.",
+              "selector": {"package": "github.com/lkshrk/omni/internal/app", "test": "TestConsolidate_FailedUninstallKeepsRefreshedUntrackedSource", "tags": [], "lane": "unit-app", "os": ["linux"]}
+            }
+          ]
+        },
         {
           "level": "integration",
           "status": "required",

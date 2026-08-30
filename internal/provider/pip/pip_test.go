@@ -45,6 +45,28 @@ func TestIsInstalled_Found(t *testing.T) {
 	}
 }
 
+func TestIsInstalled_ExactVersionUsesBaseIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		version string
+		want    bool
+	}{
+		{name: "matching", version: "1.2.3", want: true},
+		{name: "mismatched", version: "1.2.2", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, m := newPip(executor.MockCall{Stdout: "Name: example\nVersion: " + tc.version + "\n"})
+			ok, version, err := p.IsInstalled(context.Background(), tool("example==1.2.3"))
+			if err != nil || ok != tc.want || version != tc.version {
+				t.Fatalf("IsInstalled() = (%v, %q, %v), want (%v, %q, nil)", ok, version, err, tc.want, tc.version)
+			}
+			if got := m.Calls[0].Args; len(got) != 2 || got[0] != "show" || got[1] != "example" {
+				t.Fatalf("pip show args = %v, want base package identity", got)
+			}
+		})
+	}
+}
+
 func TestIsInstalled_NotFound(t *testing.T) {
 	p, _ := newPip(executor.MockCall{Err: errors.New("exit 1"), Stderr: "not found"})
 	ok, _, err := p.IsInstalled(context.Background(), tool("nonexistent"))

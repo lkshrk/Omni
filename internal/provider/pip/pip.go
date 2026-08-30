@@ -117,11 +117,26 @@ func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 }
 
 func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, string, error) {
-	stdout, _, err := p.exec.Run(ctx, p.bin, "show", tool.EffectivePackage())
+	pkg, requiredVersion := pipPackageIdentity(tool.EffectivePackage())
+	stdout, _, err := p.exec.Run(ctx, p.bin, "show", pkg)
 	if err != nil {
 		return false, "", nil // non-zero exit → not installed
 	}
-	return true, parsePipShowVersion(stdout), nil
+	version := parsePipShowVersion(stdout)
+	return requiredVersion == "" || version == requiredVersion, version, nil
+}
+
+func (p *Provider) ExactVersionPin(tool provider.Tool) (string, string, bool) {
+	name, version := pipPackageIdentity(tool.EffectivePackage())
+	return name, version, version != ""
+}
+
+func pipPackageIdentity(spec string) (name, exactVersion string) {
+	name, exactVersion, pinned := strings.Cut(spec, "==")
+	if !pinned || name == "" || exactVersion == "" || strings.HasPrefix(exactVersion, "=") {
+		return spec, ""
+	}
+	return name, exactVersion
 }
 
 // pipListEntry is one entry from `pip list --not-required --format=json`.
