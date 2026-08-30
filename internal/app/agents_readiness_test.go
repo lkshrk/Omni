@@ -64,8 +64,11 @@ func TestAgentsReadinessStates(t *testing.T) {
 			writeFile(t, path, "name: staged\n")
 		}, want: AgentsReadinessTemplateOnly},
 		{name: "live incomplete", setup: func(t *testing.T, home string) {
-			writeAgentsWorkspaceFile(t, home, "apm.yml", "name: live\n")
+			writeAgentsWorkspaceFile(t, home, "apm.yml", "name: live\ndependencies:\n  apm:\n    - git: https://github.com/acme/tool.git\n")
 		}, want: AgentsReadinessLiveIncomplete},
+		{name: "empty manifest needs no lock", setup: func(t *testing.T, home string) {
+			writeAgentsWorkspaceFile(t, home, "apm.yml", "name: live\ndependencies:\n  apm: []\n  mcp: []\n")
+		}, want: AgentsReadinessReady},
 		{name: "lock only", setup: func(t *testing.T, home string) {
 			writeAgentsWorkspaceFile(t, home, "apm.lock.yaml", "dependencies: []\n")
 		}, want: AgentsReadinessLockOnly},

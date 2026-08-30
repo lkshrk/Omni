@@ -126,7 +126,7 @@ func (a *App) CompleteAgentsOnboarding(ctx context.Context, host string) (Agents
 
 func cleanAgentsMigrationSync(result AgentsSyncAllResult) bool {
 	return result.Warning == "" && len(result.Notices) == 0 && strings.TrimSpace(result.Stderr) == "" &&
-		!strings.Contains(result.Output, "[!]") && !strings.Contains(result.Output, "Rejected")
+		!strings.Contains(result.Output, "Rejected")
 }
 
 func (a *App) prepareAgentsOnboarding(ctx context.Context, host string) (AgentsOnboardingResult, string, error) {
@@ -203,14 +203,15 @@ func inspectAgentsReadiness() (AgentsReadiness, error) {
 		return r, nil
 	}
 	templateExists, templateErr := readableRegularYAML(r.TemplatePath, &apmManifest{})
-	manifestExists, manifestErr := readableRegularYAML(r.ManifestPath, &apmManifest{})
+	var manifest apmManifest
+	manifestExists, manifestErr := readableRegularYAML(r.ManifestPath, &manifest)
 	lockExists, lockErr := readableRegularYAML(r.LockPath, &apmLockfile{})
 	if first := firstNonNil(templateErr, manifestErr, lockErr); first != nil {
 		r.State, r.CTA, r.Details = AgentsReadinessInvalid, AgentsCTARetry, []string{first.Error()}
 		return r, nil
 	}
 	switch {
-	case manifestExists && lockExists:
+	case manifestExists && (lockExists || agentsManifestEmpty(manifest)):
 		r.State = AgentsReadinessReady
 	case !templateExists && !manifestExists && !lockExists:
 		r.State, r.CTA = AgentsReadinessEmpty, AgentsCTAMigrate
@@ -222,6 +223,10 @@ func inspectAgentsReadiness() (AgentsReadiness, error) {
 		r.State, r.CTA, r.Details = AgentsReadinessLiveIncomplete, AgentsCTASync, []string{"APM live manifest exists without a readable lockfile"}
 	}
 	return r, nil
+}
+
+func agentsManifestEmpty(manifest apmManifest) bool {
+	return len(manifest.Dependencies.APM) == 0 && len(manifest.Dependencies.MCP) == 0 && len(manifest.Dependencies.LSP) == 0
 }
 
 func validateAPMWorkspaceDir(dir string) error {
