@@ -122,8 +122,18 @@ func runParityToolSyncAllTUI(t *testing.T, bin string, sandbox *paritySandbox) {
 type parityUpdateAllState struct {
 	Config   any
 	Versions map[string]string
-	Cache    map[string]string
+	Cache    map[string]parityUpdateCacheState
 	Upgrades []string
+}
+
+type parityUpdateCacheState struct {
+	Installed     bool
+	Outdated      bool
+	Tracked       bool
+	Provider      string
+	Package       string
+	InstalledWith string
+	Version       string
 }
 
 func observeParityToolUpdateAll(t *testing.T, sandbox *paritySandbox) any {
@@ -131,7 +141,7 @@ func observeParityToolUpdateAll(t *testing.T, sandbox *paritySandbox) any {
 	state := parityUpdateAllState{
 		Config:   normalizedParityConfig(t, sandbox),
 		Versions: make(map[string]string, 2),
-		Cache:    make(map[string]string, 2),
+		Cache:    make(map[string]parityUpdateCacheState, 2),
 	}
 	db, err := database.Open(filepath.Join(sandbox.cache, "omni.db"))
 	if err != nil {
@@ -148,7 +158,10 @@ func observeParityToolUpdateAll(t *testing.T, sandbox *paritySandbox) any {
 		if err != nil {
 			t.Fatalf("read %s cache: %v", name, err)
 		}
-		state.Cache[name] = tool.Version.String
+		state.Cache[name] = parityUpdateCacheState{
+			Installed: tool.Installed, Outdated: tool.Outdated, Tracked: tool.Tracked,
+			Provider: tool.Provider, Package: tool.Package, InstalledWith: tool.InstalledWith, Version: tool.Version.String,
+		}
 	}
 	if raw, err := os.ReadFile(filepath.Join(sandbox.root, "brew.log")); err == nil {
 		for _, line := range strings.Split(string(raw), "\n") {
