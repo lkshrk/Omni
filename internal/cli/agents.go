@@ -142,7 +142,7 @@ func newAPMAgentsTargetsCmd(state *rootState) *cobra.Command {
 
 func newAPMAgentsOutdatedCmd(state *rootState) *cobra.Command {
 	return apmLeaf(state, "outdated", "Show outdated global APM dependencies", cobra.NoArgs, func([]string) []string {
-		return []string{"outdated", "-g"}
+		return []string{"outdated", "-g", "--parallel-checks", "4"}
 	})
 }
 

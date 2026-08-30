@@ -37,6 +37,23 @@ func TestCLIAndTUIAgentsRemoveProduceEquivalentAPMState(t *testing.T) {
 	})
 }
 
+func TestCLIAndTUIAgentsRefreshProduceEquivalentAPMState(t *testing.T) {
+	bin := buildOmniBinary(t)
+	runParityFlow(t, bin, parityFlow{seed: seedAgentsActionsParity, runCLI: func(t *testing.T, bin string, s *paritySandbox) {
+		runOmniCommand(t, bin, s.root, s.env, "--config", s.configPath, "--cache-dir", s.cache, "agents", "outdated")
+	}, runTUI: func(t *testing.T, bin string, s *paritySandbox) {
+		runAgentsActionsTUI(t, bin, s, func(term *vttest.Terminal) {
+			before := countAgentsAction(s, "|outdated -g --parallel-checks 4")
+			sendAgentsActionsKeyUntil(t, term, "R", func(string) bool { return countAgentsAction(s, "|outdated -g --parallel-checks 4") > before }, "TUI did not refresh agents")
+		}, func(s *paritySandbox) bool { return countAgentsAction(s, "|outdated -g --parallel-checks 4") >= 2 })
+	}, observe: observeAgentsActionsParity, readTUI: readAgentsActionsThroughCLI})
+}
+
+func countAgentsAction(s *paritySandbox, want string) int {
+	raw, _ := os.ReadFile(filepath.Join(s.root, "apm.log"))
+	return strings.Count(string(raw), want)
+}
+
 func seedAgentsActionsParity(t *testing.T, sandbox *paritySandbox) {
 	t.Helper()
 	if err := config.Save(sandbox.configPath, &config.RootConfig{
@@ -76,7 +93,7 @@ if [ "${1:-}" = "--version" ]; then
 fi
 printf '%s|%s\n' "$PWD" "$*" >> "${OMNI_TEST_APM_LOG:?}"
 case "$*" in
-  outdated*) echo '[✓] All dependencies are up-to-date' ;;
+	  outdated*) touch "${OMNI_TEST_APM_STATE:?}/refreshed"; echo '[✓] All dependencies are up-to-date' ;;
   'update -g --yes') touch "${OMNI_TEST_APM_STATE:?}/updated"; echo '[✓] updated' ;;
   'uninstall -g https://github.com/acme/tool') touch "${OMNI_TEST_APM_STATE:?}/removed"; echo '[✓] removed' ;;
   *) echo "delegated: $*" ;;
@@ -151,12 +168,13 @@ func sendAgentsActionsKeyUntil(t *testing.T, term *vttest.Terminal, key string, 
 }
 
 type agentsActionsState struct {
-	Config   any
-	Manifest string
-	Lock     string
-	Actions  []string
-	Updated  bool
-	Removed  bool
+	Config    any
+	Manifest  string
+	Lock      string
+	Actions   []string
+	Updated   bool
+	Removed   bool
+	Refreshed bool
 }
 
 func observeAgentsActionsParity(t *testing.T, sandbox *paritySandbox) any {
@@ -185,6 +203,8 @@ func observeAgentsActionsParity(t *testing.T, sandbox *paritySandbox) any {
 	_, removeErr := os.Stat(filepath.Join(sandbox.root, "apm-state", "removed"))
 	state.Updated = updateErr == nil
 	state.Removed = removeErr == nil
+	_, refreshErr := os.Stat(filepath.Join(sandbox.root, "apm-state", "refreshed"))
+	state.Refreshed = refreshErr == nil
 	return state
 }
 

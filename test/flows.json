@@ -778,6 +778,21 @@
                   "linux"
                 ]
               }
+            },
+            {
+              "type": "tui_blackbox",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIToolsSyncInstallsConfiguredTool",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
             }
           ]
         },
@@ -6079,9 +6094,24 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI uses apm outdated -g while TUI adds --parallel-checks 4; exact delegated semantics differ.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUIAgentsRefreshProduceEquivalentAPMState",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "parity": {
