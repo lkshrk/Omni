@@ -30,6 +30,8 @@ func TestCLIAndTUIReadOnlyQueriesProduceEquivalentSemanticObservations(t *testin
 	configPath := filepath.Join(root, "settings.json")
 	observationPath := filepath.Join(root, "tui-observation.json")
 	env := append(isolatedTUIEnv(t, home, cache), "OMNI_TEST_TUI_OBSERVATION="+observationPath)
+	writeIntegrationFile(t, filepath.Join(home, ".apm", "apm.yml"), "name: parity\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm: []\n  mcp: []\n")
+	writeIntegrationFile(t, filepath.Join(home, ".apm", "apm.lock.yaml"), "dependencies: []\n")
 	repo := filepath.Join(home, "dotfiles")
 	initDotsRepo(t, repo, env)
 	source := filepath.Join(repo, "dotfiles", "nvim", ".config", "nvim", "init.lua")

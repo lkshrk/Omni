@@ -103,6 +103,8 @@ func newParitySandbox(t *testing.T, root string) *paritySandbox {
 	t.Helper()
 	home := filepath.Join(root, "home")
 	cache := filepath.Join(root, "cache")
+	writeIntegrationFile(t, filepath.Join(home, ".apm", "apm.yml"), "name: parity\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm: []\n  mcp: []\n")
+	writeIntegrationFile(t, filepath.Join(home, ".apm", "apm.lock.yaml"), "dependencies: []\n")
 	return &paritySandbox{
 		root:       root,
 		home:       home,
