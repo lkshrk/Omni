@@ -737,7 +737,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIToolsUpgradeAllInvokesEveryOutdatedTool",
+                "test": "TestCLIAndTUIToolUpdateAllProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -855,21 +855,6 @@
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
                 "test": "TestCLIAndTUIToolSyncAllProduceEquivalentSemanticState",
-                "tags": [
-                  "integration"
-                ],
-                "lane": "docker-realism",
-                "os": [
-                  "linux"
-                ]
-              }
-            },
-            {
-              "type": "tui_blackbox",
-              "role": "supplemental",
-              "selector": {
-                "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIToolsSyncInstallsConfiguredTool",
                 "tags": [
                   "integration"
                 ],
@@ -1075,7 +1060,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIToolsIgnorePersistsGlobalToolScope",
+                "test": "TestCLIAndTUIToolsIgnoreProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -1913,21 +1898,6 @@
                   "linux"
                 ]
               }
-            },
-            {
-              "type": "tui_blackbox",
-              "role": "supplemental",
-              "selector": {
-                "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIFallbackEditorPrefillsConfiguredGitHint",
-                "tags": [
-                  "integration"
-                ],
-                "lane": "docker-realism",
-                "os": [
-                  "linux"
-                ]
-              }
             }
           ]
         },
@@ -2014,7 +1984,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIToolsDeleteSpecRemovesMissingTrackedTool",
+                "test": "TestCLIAndTUIToolsDeleteSpecProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -2441,21 +2411,6 @@
                   "linux"
                 ]
               }
-            },
-            {
-              "type": "tui_blackbox",
-              "role": "supplemental",
-              "selector": {
-                "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIDotsSyncRepairsBrokenManagedLink",
-                "tags": [
-                  "integration"
-                ],
-                "lane": "docker-realism",
-                "os": [
-                  "linux"
-                ]
-              }
             }
           ]
         },
@@ -2547,7 +2502,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIDotsRefreshDetectsBrokenLinkWithoutMutatingIt",
+                "test": "TestCLIAndTUIDotsRefreshPreserveEquivalentBrokenLinkState",
                 "tags": [
                   "integration"
                 ],
@@ -2749,7 +2704,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIDotsEditGroupsPersistsHostMembership",
+                "test": "TestCLIAndTUIDotsEditGroupsProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -2955,7 +2910,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIDotsDeleteKeepsLocalCopyAndRemovesManagedPackage",
+                "test": "TestCLIAndTUIDotsLifecycleDeleteProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -3474,7 +3429,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIDotsIgnoreUntracksEntryAndKeepsLocalCopy",
+                "test": "TestCLIAndTUIDotsLifecycleIgnoreProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -3575,7 +3530,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIDotsEnableRestoresManagedLinkAndPersistsSetting",
+                "test": "TestCLIAndTUIDotsLifecycleEnableProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -3676,7 +3631,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIDotsDisableKeepsLocalFileAndPersistsSetting",
+                "test": "TestCLIAndTUIDotsLifecycleDisableProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -3866,7 +3821,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIDotsCommitPersistsLocalGitCommitWithoutPush",
+                "test": "TestCLIAndTUIDotsGitCommitProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -4056,7 +4011,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIDotsReminderInstallsSandboxService",
+                "test": "TestCLIAndTUIDotsReminderProduceEquivalentServiceState",
                 "tags": ["integration"],
                 "lane": "docker-realism",
                 "os": ["linux"]
@@ -4314,7 +4269,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIDotsWatchInstallsSandboxServiceAfterDoctorSettles",
+                "test": "TestCLIAndTUIDotsWatchProduceEquivalentServiceState",
                 "tags": ["integration"],
                 "lane": "docker-realism",
                 "os": ["linux"]
@@ -4639,7 +4594,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIGroupsCreatePersistsNewGroup",
+                "test": "TestCLIAndTUIGroupCreateProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -4740,7 +4695,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIGroupsRenamePersistsNewName",
+                "test": "TestCLIAndTUIGroupRenameProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -4841,7 +4796,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIGroupsDeleteRemovesEmptyGroup",
+                "test": "TestCLIAndTUIGroupDeleteProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -5051,7 +5006,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIHostsCreatePersistsFreshHost",
+                "test": "TestCLIAndTUIHostCreateProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -5207,7 +5162,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIHostsDeleteRemovesSelectedHost",
+                "test": "TestCLIAndTUIHostDeleteProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -5308,7 +5263,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIAssignsHostGroupAndPersistsSetting",
+                "test": "TestCLIAndTUIHostEditGroupsProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -5425,21 +5380,6 @@
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
                 "test": "TestCLIAndTUIProduceEquivalentSemanticState/settings.auto_import_persists_the_same_effective_setting",
-                "tags": [
-                  "integration"
-                ],
-                "lane": "docker-realism",
-                "os": [
-                  "linux"
-                ]
-              }
-            },
-            {
-              "type": "tui_blackbox",
-              "role": "supplemental",
-              "selector": {
-                "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIAssignsHostGroupAndPersistsSetting",
                 "tags": [
                   "integration"
                 ],
@@ -5641,7 +5581,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUISettingsResetPreservesInventoryAndClearsSettings",
+                "test": "TestCLIAndTUISettingsResetProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -5742,7 +5682,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUISettingsResetCacheRemovesCachedToolState",
+                "test": "TestCLIAndTUISettingsResetCacheProduceEquivalentSemanticState",
                 "tags": [
                   "integration"
                 ],
@@ -5953,7 +5893,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIFirstRunCreatesHostAndReachesDashboard",
+                "test": "TestCLIAndTUISetupProduceEquivalentConfig",
                 "tags": [
                   "integration"
                 ],
@@ -6073,7 +6013,7 @@
               "role": "supplemental",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIAgentsTabSyncsMCPThroughRealAPM",
+                "test": "TestCLIAndTUIAgentsSyncProduceEquivalentAPMState",
                 "tags": [
                   "integration"
                 ],
@@ -6094,7 +6034,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestCLIBinaryAgentsSyncDeploysMCPThroughRealAPM",
+                "test": "TestCLIAndTUIAgentsSyncProduceEquivalentAPMState",
                 "tags": [
                   "integration"
                 ],
@@ -6115,7 +6055,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIAgentsTabSyncsMCPThroughRealAPM",
+                "test": "TestCLIAndTUIAgentsSyncProduceEquivalentAPMState",
                 "tags": [
                   "integration"
                 ],
@@ -6569,7 +6509,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIAgentsRefreshRunsAnotherOutdatedCheck",
+                "test": "TestCLIAndTUIAgentsRefreshProduceEquivalentAPMState",
                 "tags": [
                   "integration"
                 ],
@@ -7329,7 +7269,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIDotsRefreshDetectsBrokenLinkWithoutMutatingIt",
+                "test": "TestCLIAndTUIReadOnlyQueriesProduceEquivalentSemanticObservations",
                 "tags": [
                   "integration"
                 ],
@@ -7690,21 +7630,6 @@
               "role": "supplemental",
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
-                "test": "TestTUIFirstRunCreatesHostAndReachesDashboard",
-                "tags": [
-                  "integration"
-                ],
-                "lane": "docker-realism",
-                "os": [
-                  "linux"
-                ]
-              }
-            },
-            {
-              "type": "tui_blackbox",
-              "role": "supplemental",
-              "selector": {
-                "package": "github.com/lkshrk/omni/integration_tests",
                 "test": "TestTUIShellContractNavigatesWithTerminalKeysAndMouse",
                 "tags": [
                   "integration"
@@ -7740,7 +7665,7 @@
               "role": "primary",
               "selector": {
                 "package": "github.com/lkshrk/omni/internal/tui",
-                "test": "TestFlow_UC01_CursorNavigation",
+                "test": "TestModel_CursorNavigation",
                 "tags": [],
                 "lane": "unit-tui",
                 "os": [
@@ -7753,7 +7678,7 @@
               "role": "supplemental",
               "selector": {
                 "package": "github.com/lkshrk/omni/internal/tui",
-                "test": "TestFlow_UC03_PageNavigation",
+                "test": "TestModel_PageNavigation",
                 "tags": [],
                 "lane": "unit-tui",
                 "os": [
