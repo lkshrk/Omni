@@ -190,7 +190,7 @@
             "role": "primary",
             "selector": {
               "package": "github.com/lkshrk/omni/integration_tests",
-              "test": "TestTUIToolsSyncPaletteMatchesCLIProviderState",
+              "test": "TestCLIAndTUIToolsSyncPaletteProduceEquivalentSemanticState",
               "tags": ["integration"],
               "lane": "docker-realism",
               "os": ["linux"]
@@ -199,9 +199,18 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [{
+            "type": "parity",
+            "role": "primary",
+            "selector": {
+              "package": "github.com/lkshrk/omni/integration_tests",
+              "test": "TestCLIAndTUIToolsSyncPaletteProduceEquivalentSemanticState",
+              "tags": ["integration"],
+              "lane": "docker-realism",
+              "os": ["linux"]
+            }
+          }]
         }
       ],
       "parity": {
@@ -1181,15 +1190,33 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [{
+            "type": "tui_blackbox",
+            "role": "primary",
+            "selector": {
+              "package": "github.com/lkshrk/omni/integration_tests",
+              "test": "TestCLIAndTUIToolsPinProviderProduceEquivalentSemanticState",
+              "tags": ["integration"],
+              "lane": "docker-realism",
+              "os": ["linux"]
+            }
+          }]
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [{
+            "type": "parity",
+            "role": "primary",
+            "selector": {
+              "package": "github.com/lkshrk/omni/integration_tests",
+              "test": "TestCLIAndTUIToolsPinProviderProduceEquivalentSemanticState",
+              "tags": ["integration"],
+              "lane": "docker-realism",
+              "os": ["linux"]
+            }
+          }]
         }
       ],
       "parity": {
@@ -3540,7 +3567,7 @@
             "role": "primary",
             "selector": {
               "package": "github.com/lkshrk/omni/integration_tests",
-              "test": "TestTUIDotsPullPaletteMatchesRemoteState",
+              "test": "TestCLIAndTUIDotsPullPaletteProduceEquivalentSemanticState",
               "tags": ["integration"],
               "lane": "docker-realism",
               "os": ["linux"]
@@ -3549,9 +3576,18 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [{
+            "type": "parity",
+            "role": "primary",
+            "selector": {
+              "package": "github.com/lkshrk/omni/integration_tests",
+              "test": "TestCLIAndTUIDotsPullPaletteProduceEquivalentSemanticState",
+              "tags": ["integration"],
+              "lane": "docker-realism",
+              "os": ["linux"]
+            }
+          }]
         }
       ],
       "parity": {
@@ -3721,7 +3757,7 @@
             "role": "primary",
             "selector": {
               "package": "github.com/lkshrk/omni/integration_tests",
-              "test": "TestTUIDotsPushPaletteMatchesRemoteState",
+              "test": "TestCLIAndTUIDotsPushPaletteProduceEquivalentSemanticState",
               "tags": ["integration"],
               "lane": "docker-realism",
               "os": ["linux"]
@@ -3730,9 +3766,18 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [{
+            "type": "parity",
+            "role": "primary",
+            "selector": {
+              "package": "github.com/lkshrk/omni/integration_tests",
+              "test": "TestCLIAndTUIDotsPushPaletteProduceEquivalentSemanticState",
+              "tags": ["integration"],
+              "lane": "docker-realism",
+              "os": ["linux"]
+            }
+          }]
         }
       ],
       "parity": {
