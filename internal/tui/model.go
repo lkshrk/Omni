@@ -491,6 +491,7 @@ type Model struct {
 	filterOutsideAgents    string
 	agentsRowsKnown        bool
 	agentsRowsErr          error
+	agentsSyncActionable   int
 	agentsCursor           int
 	agentsRowsGen          int // bumped on every dispatch; stale completions are dropped
 	agentsOutdatedGen      int

@@ -167,26 +167,13 @@ func agentsDashboardViewFor(m Model) agentsDashboardView {
 	return agentsDashboardView{enabled: true, managedCount: len(m.agentsRows) + len(m.agentsMCPRows) + len(m.agentsLSPRows)}
 }
 func statusAgentsCounts(m Model) agentsDashCounts {
-	counts := agentsDashCounts{}
+	counts := agentsDashCounts{outOfSync: m.agentsSyncActionable}
 	for _, row := range m.agentsRows {
-		if agentsStatusNeedsSync(row.Status) {
-			counts.outOfSync++
-		}
 		if row.UpdateAvailable {
 			counts.outdated++
 		}
 	}
-	for _, rows := range [][]app.AgentsServiceRow{m.agentsMCPRows, m.agentsLSPRows} {
-		for _, row := range rows {
-			if agentsStatusNeedsSync(row.Status) {
-				counts.outOfSync++
-			}
-		}
-	}
 	return counts
-}
-func agentsStatusNeedsSync(status app.AgentsPackageStatus) bool {
-	return status == app.AgentsPackageMissing || status == app.AgentsPackageDrifted || status == app.AgentsPackageUnavailable
 }
 func statusAgentsOutdatedNames(m Model) []string {
 	var names []string
@@ -207,7 +194,9 @@ func statusAgentsAttentionDetails(m Model, _ agentsDashCounts, _ agentsDashboard
 	}
 	return []string{statusDetailLine(m, "~/.apm/apm.yml")}
 }
-func statusAgentsLoading(m Model) bool { return m.apmRunning }
+func statusAgentsLoading(m Model) bool {
+	return m.apmRunning || (!m.agentsRowsKnown && m.agentsRowsErr == nil)
+}
 
 func statusToolsActivityText(m Model) string {
 	if !statusToolsLoading(m) {
@@ -483,7 +472,7 @@ func dashboardReconcilePlanInput(m Model) app.DashboardReconcilePlanInput {
 		ToolsBusy:       statusReconcileToolPlanBusy(m),
 		UpgradeBusy:     len(m.upgradingKeys) > 0,
 		AgentsOutOfSync: statusAgentsCounts(m).OutOfSync(),
-		AgentsBusy:      m.apmRunning,
+		AgentsBusy:      m.apmRunning || !m.agentsRowsKnown,
 		DotsConfigured:  m.dotsSyncAvailCached.Configured,
 		DotsDisabled:    m.dotsSyncAvailCached.Reason == app.DotsSyncAvailabilityDisabled,
 		DotsBusy:        m.dotsLoading || m.dotsPreparing,

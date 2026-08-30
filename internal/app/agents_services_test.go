@@ -91,11 +91,11 @@ func TestAgentsStatusJoinsMCPAndLSPSurfaces(t *testing.T) {
 	if remote.Status != AgentsPackageInstalled || remote.Detail != "http" {
 		t.Fatalf("url-form row = %+v", remote)
 	}
-	if got := serviceRow(t, status.MCP, "ghost-binary").Status; got != AgentsPackageUnavailable {
-		t.Fatalf("absent command status = %q", got)
+	if row := serviceRow(t, status.MCP, "ghost-binary"); row.Status != AgentsPackageUnavailable || row.SyncActionable {
+		t.Fatalf("absent command row = %+v", row)
 	}
-	if got := serviceRow(t, status.MCP, "neverinstalled").Status; got != AgentsPackageMissing {
-		t.Fatalf("undeclared-in-lock status = %q", got)
+	if row := serviceRow(t, status.MCP, "neverinstalled"); row.Status != AgentsPackageMissing || !row.SyncActionable {
+		t.Fatalf("missing MCP row = %+v", row)
 	}
 	if got := serviceRow(t, status.MCP, "stray-server").Status; got != AgentsPackageOrphaned {
 		t.Fatalf("lock-only status = %q", got)
@@ -104,14 +104,17 @@ func TestAgentsStatusJoinsMCPAndLSPSurfaces(t *testing.T) {
 	if len(status.LSP) != 3 {
 		t.Fatalf("lsp rows = %#v", status.LSP)
 	}
-	if got := serviceRow(t, status.LSP, "gopls").Status; got != AgentsPackageUnavailable {
-		t.Fatalf("lsp absent command status = %q", got)
+	if row := serviceRow(t, status.LSP, "gopls"); row.Status != AgentsPackageUnavailable || row.SyncActionable {
+		t.Fatalf("LSP absent command row = %+v", row)
 	}
-	if got := serviceRow(t, status.LSP, "pyright").Status; got != AgentsPackageMissing {
-		t.Fatalf("lsp missing status = %q", got)
+	if row := serviceRow(t, status.LSP, "pyright"); row.Status != AgentsPackageMissing || !row.SyncActionable {
+		t.Fatalf("missing LSP row = %+v", row)
 	}
 	if got := serviceRow(t, status.LSP, "stray-lsp").Status; got != AgentsPackageOrphaned {
 		t.Fatalf("lsp orphan status = %q", got)
+	}
+	if status.SyncActionable != 2 {
+		t.Fatalf("sync actionable = %d, want two missing declared services", status.SyncActionable)
 	}
 }
 

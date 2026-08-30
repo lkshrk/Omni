@@ -120,6 +120,14 @@ func (m *Model) startDashboardRefresh(cmds *[]tea.Cmd) {
 }
 
 func (m *Model) startDashboardReconcile(cmds *[]tea.Cmd) {
+	if !m.agentsRowsKnown {
+		*cmds = append(*cmds, setStatus(m, "agent status is still loading", false))
+		return
+	}
+	if m.agentsRowsErr != nil {
+		*cmds = append(*cmds, setStatus(m, "cannot reconcile: "+m.agentsRowsErr.Error(), true))
+		return
+	}
 	if !statusDashboardReconcileActionable(*m) {
 		*cmds = append(*cmds, setStatus(m, "nothing to reconcile", false))
 		return

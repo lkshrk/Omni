@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
 )
@@ -73,6 +76,7 @@ func TestAgentDashboardDerivesLifecycleCountsFromAPMRows(t *testing.T) {
 	t.Parallel()
 	m := agentsSectionedModel(t)
 	m.apmOutput = "workspace healthy"
+	m = drive(m, agentsRowsMsg{status: app.AgentsStatus{Packages: m.agentsRows, MCP: m.agentsMCPRows, LSP: m.agentsLSPRows, SyncActionable: 2}})
 
 	if got := statusAgentsCounts(m); got.OutOfSync() != 2 || got.Outdated() != 0 {
 		t.Fatalf("agent counts = %#v, want two syncable package/service rows", got)
@@ -85,8 +89,29 @@ func TestAgentDashboardDerivesLifecycleCountsFromAPMRows(t *testing.T) {
 
 func TestDashboardReconcilePlansAgentSyncFromMissingRows(t *testing.T) {
 	m := agentsSectionedModel(t)
+	m = drive(m, agentsRowsMsg{status: app.AgentsStatus{Packages: m.agentsRows, MCP: m.agentsMCPRows, LSP: m.agentsLSPRows, SyncActionable: 2}})
 	if !statusDashboardPlanHasStep(m, app.ReconcileStepSyncAgents) {
 		t.Fatal("dashboard reconcile omitted sync for missing APM rows")
+	}
+}
+
+func TestDashboardReconcileWaitsForAgentRowsAndSurfacesLoadErrors(t *testing.T) {
+	m := baseModel(oneInstalledOutdated())
+	var cmds []tea.Cmd
+	m.startDashboardReconcile(&cmds)
+	if len(cmds) == 0 || m.dashboardReconcilePlanOpen || !strings.Contains(m.statusMsg, "still loading") {
+		t.Fatalf("unknown rows opened reconcile: open=%v status=%q cmds=%d", m.dashboardReconcilePlanOpen, m.statusMsg, len(cmds))
+	}
+	m.agentsRowsKnown = true
+	m.agentsRowsErr = errors.New("APM status failed")
+	cmds = nil
+	m.startDashboardReconcile(&cmds)
+	if len(cmds) == 0 || m.dashboardReconcilePlanOpen || !m.statusIsErr || !strings.Contains(m.statusMsg, "APM status failed") {
+		t.Fatalf("agent load error became clean: open=%v status=%q err=%v", m.dashboardReconcilePlanOpen, m.statusMsg, m.statusIsErr)
+	}
+	row := statusAgentsAttentionRow(m)
+	if !row.needsAttention || !strings.Contains(row.summary, "APM status failed") {
+		t.Fatalf("agent error row = %+v", row)
 	}
 }
 

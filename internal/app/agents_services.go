@@ -17,20 +17,22 @@ import (
 var agentsLSPTargets = []string{"claude", "copilot"}
 
 type AgentsServiceRow struct {
-	Name      string
-	Detail    string
-	Command   string
-	URLHost   string
-	Harnesses []string
-	Targets   []string
-	Status    AgentsPackageStatus
+	Name           string
+	Detail         string
+	Command        string
+	URLHost        string
+	Harnesses      []string
+	Targets        []string
+	Status         AgentsPackageStatus
+	SyncActionable bool
 }
 
 type AgentsStatus struct {
-	Packages []AgentsPackageRow
-	MCP      []AgentsServiceRow
-	LSP      []AgentsServiceRow
-	Notices  []string
+	Packages       []AgentsPackageRow
+	MCP            []AgentsServiceRow
+	LSP            []AgentsServiceRow
+	Notices        []string
+	SyncActionable int
 }
 
 // AgentsStatus reports every declared, locked, and harness-deployed agent surface; it reads files only, never the APM CLI.
@@ -54,11 +56,27 @@ func (a *App) AgentsStatus() (AgentsStatus, error) {
 		ownership = readAPMModuleManifests(dir, packages)
 	}
 	mcpRows, lspRows := reconcileAgentsOwnedChildren(packages, manifest, ownership, mcp, lsp)
+	syncActionable := 0
+	for i := range packages {
+		packages[i].SyncActionable = packages[i].Status == AgentsPackageMissing
+		if packages[i].SyncActionable {
+			syncActionable++
+		}
+	}
+	for _, rows := range [][]AgentsServiceRow{mcpRows, lspRows} {
+		for i := range rows {
+			rows[i].SyncActionable = rows[i].Status == AgentsPackageMissing
+			if rows[i].SyncActionable {
+				syncActionable++
+			}
+		}
+	}
 	return AgentsStatus{
-		Packages: packages,
-		MCP:      mcpRows,
-		LSP:      lspRows,
-		Notices:  harness.Notices,
+		Packages:       packages,
+		MCP:            mcpRows,
+		LSP:            lspRows,
+		Notices:        harness.Notices,
+		SyncActionable: syncActionable,
 	}, nil
 }
 
@@ -131,13 +149,14 @@ func joinAPMServices(in agentsServiceInput) []AgentsServiceRow {
 		declared[dep.name] = true
 		cfg := in.configs[dep.name]
 		row := AgentsServiceRow{
-			Name:      dep.name,
-			Detail:    dep.detail,
-			Command:   path.Base(firstNonEmpty(dep.command, cfg.Command)),
-			URLHost:   apmURLHost(firstNonEmpty(dep.url, cfg.URL)),
-			Harnesses: in.deployed[dep.name],
-			Targets:   in.targets,
-			Status:    AgentsPackageMissing,
+			Name:           dep.name,
+			Detail:         dep.detail,
+			Command:        path.Base(firstNonEmpty(dep.command, cfg.Command)),
+			URLHost:        apmURLHost(firstNonEmpty(dep.url, cfg.URL)),
+			Harnesses:      in.deployed[dep.name],
+			Targets:        in.targets,
+			Status:         AgentsPackageMissing,
+			SyncActionable: true,
 		}
 		if row.Command == "." {
 			row.Command = ""

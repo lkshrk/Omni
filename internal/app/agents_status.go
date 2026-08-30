@@ -62,6 +62,7 @@ type AgentsPackageRow struct {
 	Targets         []string
 	DeployedFiles   int
 	Status          AgentsPackageStatus
+	SyncActionable  bool
 	Provides        []AgentsProvidedChild
 	Issues          []string
 	lockEvidence    *agentsPackageLockEvidence

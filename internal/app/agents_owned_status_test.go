@@ -236,8 +236,11 @@ dependencies:
 		t.Fatalf("conflicting standalone status = %q", conflict.Status)
 	}
 	owner := ownedPackageRow(t, status.Packages, "bundle-a")
-	if owner.Status != AgentsPackageDrifted || !strings.Contains(strings.Join(owner.Issues, "\n"), "conflict") {
+	if owner.Status != AgentsPackageDrifted || owner.SyncActionable || !strings.Contains(strings.Join(owner.Issues, "\n"), "conflict") {
 		t.Fatalf("owner did not expose conflict: %+v", owner)
+	}
+	if status.SyncActionable != 0 {
+		t.Fatalf("ownership conflict reported %d actionable sync items", status.SyncActionable)
 	}
 }
 

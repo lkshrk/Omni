@@ -31,7 +31,7 @@ func TestCLIAndTUIReconcileProduceEquivalentCompositeState(t *testing.T) {
 func seedReconcileParity(t *testing.T, sandbox *paritySandbox) {
 	t.Helper()
 	paths := seedReconcileBinaryFixture(t, sandbox.root, sandbox.home, sandbox.configPath, &sandbox.env, true)
-	writeIntegrationFile(t, paths.state, "1.0.0\n")
+	writeIntegrationFile(t, paths.state, "1.1.0\n")
 	source := filepath.Join(paths.repo, "dotfiles", "nvim", ".config", "nvim", "init.lua")
 	target := filepath.Join(sandbox.home, ".config", "nvim", "init.lua")
 	writeIntegrationFile(t, source, "reconciled config\n")
@@ -74,14 +74,14 @@ func runReconcileParityTUI(t *testing.T, bin string, sandbox *paritySandbox) {
 		waitForRequiredScreen(t, term, 8*time.Second, screenHas("Dashboard", "Tools"), "TUI did not start for reconcile parity")
 		waitForRequiredScreen(t, term, 15*time.Second, func(text string) bool {
 			lower := strings.ToLower(text)
-			return strings.Contains(text, "fixture (1.1.0)") &&
+			return strings.Contains(text, "All tools up to date") &&
 				!strings.Contains(lower, "scanning") && !strings.Contains(lower, "refreshing") && !strings.Contains(lower, "checking")
 		}, "TUI reconcile inputs did not settle")
 		deadline := time.Now().Add(15 * time.Second)
 		for time.Now().Before(deadline) {
 			writeTUIKeys(t, term, "A")
 			plan, open := waitForScreen(term, 700*time.Millisecond, func(text string) bool { return strings.Contains(text, "Reconcile Plan") })
-			if open && screenHas("Upgrade tools", "Sync agents", "Commit dotfiles")(plan) {
+			if open && screenHas("Sync agents", "Commit dotfiles")(plan) {
 				writeTUIKeys(t, term, "\r")
 				completed, done := waitForScreen(term, 30*time.Second, func(text string) bool {
 					return reconcileParityDone(sandbox) && strings.Contains(strings.ToLower(text), "reconciled")

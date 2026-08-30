@@ -6922,6 +6922,7 @@ func dashboardDotsAppModel(t *testing.T, tools []*app.ToolView) (Model, string) 
 	m.app = appModel.app
 	m.ctx = appModel.ctx
 	m.setSettings(config.Settings{DotsRepo: repoDir})
+	m.agentsRowsKnown = true
 	return m, repoDir
 }
 
@@ -7413,6 +7414,7 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	t.Run("reconcile ignores non-auto-fixable provider mismatch", func(t *testing.T) {
 		m := baseModel([]*app.ToolView{{Name: "fd", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}})
 		m.mode = viewStatus
+		m.agentsRowsKnown = true
 		m.effectiveSystemManager = "brew"
 		got := drive(m, pressRune('A'))
 		if got.dashboardReconcilePlanOpen {

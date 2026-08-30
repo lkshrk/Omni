@@ -349,8 +349,11 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			m.agentsRowsErr = msg.err
 			if msg.err == nil {
 				m.agentsRows, m.agentsMCPRows, m.agentsLSPRows = msg.status.Packages, msg.status.MCP, msg.status.LSP
+				m.agentsSyncActionable = msg.status.SyncActionable
 				app.ApplyAgentsOutdated(m.agentsRows, m.agentsOutdatedResult)
 				m.agentsNotices = msg.status.Notices
+			} else {
+				m.agentsSyncActionable = 0
 			}
 			m.agentsCursor = clampIndex(m.agentsCursor, m.agentsRowCount())
 		}

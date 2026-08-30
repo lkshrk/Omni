@@ -714,6 +714,9 @@ func statusAgentsOverviewIcon(m Model) (string, lipgloss.Style) {
 	if statusAgentsLoading(m) {
 		return statusRowWorkingIcon(m, true)
 	}
+	if m.agentsRowsErr != nil {
+		return statusRowWarningIcon(m)
+	}
 	counts := statusAgentsCounts(m)
 	if counts.OutOfSync() > 0 || counts.Outdated() > 0 {
 		return statusRowWarningIcon(m)
@@ -771,6 +774,14 @@ func statusAgentsAttentionRow(m Model) statusListRow {
 			summary:   "Agents disabled for this host.",
 			details:   statusDetailLines(m, "Agents disabled for this host."),
 			muted:     true,
+		}
+	}
+	if m.agentsRowsErr != nil {
+		icon, iconStyle := statusRowWarningIcon(m)
+		return statusListRow{
+			section: statusSectionAttention, icon: icon, iconStyle: iconStyle, label: "Agents",
+			value: statusCountValue(m, 1, "issue", "issues", "in sync"), summary: m.agentsRowsErr.Error(),
+			details: statusAgentsAttentionDetails(m, counts, view), action: statusAction{kind: statusActionOpenAgents, desc: "open agents"}, needsAttention: true,
 		}
 	}
 	if counts.OutOfSync() == 0 {
