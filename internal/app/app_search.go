@@ -2255,10 +2255,47 @@ func (a *App) reconcileResolvedTools(ctx context.Context, tools []config.ToolEnt
 			Package:  t.EffectivePackage(),
 		})
 	}
-	if err := a.readDB().ReconcileTracked(ctx, desired); err != nil {
+	migrations, err := a.trackedAliasMigrations(ctx, desired)
+	if err != nil {
+		return err
+	}
+	if err := a.readDB().ReconcileTracked(ctx, desired, migrations...); err != nil {
 		return fmt.Errorf("reconciling tracked tools: %w", err)
 	}
 	return nil
+}
+
+func (a *App) trackedAliasMigrations(ctx context.Context, desired []*database.ToolCache) ([]database.TrackedAliasMigration, error) {
+	rows, err := a.readDB().List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing tracked tools for alias reconciliation: %w", err)
+	}
+	var migrations []database.TrackedAliasMigration
+	for _, row := range rows {
+		if row == nil || !row.Tracked || !row.Installed || row.InstalledWith == "" || row.InstalledWith == row.Provider {
+			continue
+		}
+		// Ecosystem rows intentionally retain concrete ownership (node/npm, python/uv, system/brew).
+		if a.knownEcosystemProvider(row.Provider) {
+			continue
+		}
+		providerEcosystem, providerOK := a.providerEcosystem(row.Provider)
+		ownerEcosystem, ownerOK := a.providerEcosystem(row.InstalledWith)
+		if !providerOK || !ownerOK || providerEcosystem != ownerEcosystem {
+			continue
+		}
+		for _, target := range desired {
+			if target == nil || target.Name != row.Name || target.Provider != row.InstalledWith {
+				continue
+			}
+			migrations = append(migrations, database.TrackedAliasMigration{
+				From: database.ToolCacheKey{Name: row.Name, Provider: row.Provider, Package: row.Package},
+				To:   database.ToolCacheKey{Name: target.Name, Provider: target.Provider, Package: target.Package},
+			})
+			break
+		}
+	}
+	return migrations, nil
 }
 
 func (a *App) Providers(ctx context.Context) ([]ProviderInfo, error) {

@@ -93,6 +93,17 @@ func seedProviderMutationParity(t *testing.T, bin string, s *paritySandbox) {
 
 func providerMutationFakePython(t *testing.T, root string, env []string) []string {
 	binDir := filepath.Join(root, "bin")
+	writeExecutable(t, filepath.Join(binDir, "python3"), `#!/bin/sh
+set -eu
+state="${OMNI_CACHE_DIR:?}/fake-pip"
+case "${1:-}:${2:-}" in
+  -c:*importlib.metadata*)
+    if [ -f "$state/black" ]; then echo '{"black":1}'; else echo '{}'; fi
+    ;;
+  -c:*sysconfig*) echo 0 ;;
+  *) exec /usr/bin/python3 "$@" ;;
+esac
+`)
 	writeExecutable(t, filepath.Join(binDir, "pip3"), `#!/bin/sh
 set -eu
 state="${OMNI_CACHE_DIR:?}/fake-pip"

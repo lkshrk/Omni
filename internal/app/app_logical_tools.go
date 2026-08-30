@@ -27,6 +27,16 @@ type NormalizedInstallOverride struct {
 	Host        string
 }
 
+type ConfigPersistedCacheReconcileError struct {
+	Err error
+}
+
+func (e *ConfigPersistedCacheReconcileError) Error() string {
+	return fmt.Sprintf("tool config persisted, but cache reconciliation failed; the next refresh will repair cache: %v", e.Err)
+}
+
+func (e *ConfigPersistedCacheReconcileError) Unwrap() error { return e.Err }
+
 type NormalizeInstallOverridesOptions struct {
 	IncludeDefaults    bool
 	IncludeCurrentHost bool
@@ -42,6 +52,7 @@ func (a *App) SetTool(name, providerName, packageName, installWith string) error
 	if err != nil {
 		return err
 	}
+	// Lock order matches lifecycle mutations: in-process installed state, cross-process file lock, config, then DB.
 	a.installedStateMu.Lock()
 	defer a.installedStateMu.Unlock()
 	release, err := a.lockInstalledStateFile(false)
@@ -64,10 +75,13 @@ func (a *App) SetTool(name, providerName, packageName, installWith string) error
 	}
 	cfg, err := a.loadConfig()
 	if err != nil {
-		return err
+		return &ConfigPersistedCacheReconcileError{Err: err}
 	}
 	tools, _ := a.currentResolvedToolEntries(context.Background(), cfg)
-	return a.reconcileResolvedTools(context.Background(), tools)
+	if err := a.reconcileResolvedTools(context.Background(), tools); err != nil {
+		return &ConfigPersistedCacheReconcileError{Err: err}
+	}
+	return nil
 }
 
 func inheritedToolProviderOptions(spec config.ToolSpec, providerName string) map[string]string {

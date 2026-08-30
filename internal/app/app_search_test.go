@@ -2,6 +2,8 @@ package app_test
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"slices"
 	"testing"
 
@@ -291,12 +293,8 @@ func TestListToolsAndRefreshUseActiveHostGroups(t *testing.T) {
 	if err := a.RefreshInstalled(ctx, nil); err != nil {
 		t.Fatalf("RefreshInstalled: %v", err)
 	}
-	docker, err := a.DB().Get(ctx, "docker", "brew", "docker")
-	if err != nil {
-		t.Fatalf("Get docker cache row: %v", err)
-	}
-	if docker.Tracked {
-		t.Fatal("docker should be untracked after Topaz refresh")
+	if _, err := a.DB().Get(ctx, "docker", "brew", "docker"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("stale missing docker cache row error = %v, want sql.ErrNoRows", err)
 	}
 	tools, err = a.ListTools(ctx, "")
 	if err != nil {

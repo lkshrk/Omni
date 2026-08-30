@@ -162,6 +162,15 @@ type oldEnvCleaner interface {
 
 // MigrateInstallation — installedWith may be a raw binary (uv, pip3) rather than a registered provider name; configProv always is one.
 func (a *App) MigrateInstallation(ctx context.Context, name, installedWith, configProv string) (res *SwitchResult, err error) {
+	// Lock order matches other lifecycle mutations: in-process installed state, then cross-process file lock.
+	a.installedStateMu.Lock()
+	defer a.installedStateMu.Unlock()
+	release, err := a.lockInstalledStateFile(false)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	// Every branch below reinstalls without going through App.Install, so an unpinned recipe records the
 	// release it landed on here; callers refresh installed state afterwards and read it back from config.
 	defer func() {

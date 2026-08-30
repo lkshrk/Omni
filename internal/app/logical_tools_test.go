@@ -79,8 +79,9 @@ func TestSetToolConvergesTrackedCacheAcrossStaleProviderHistories(t *testing.T) 
 		name          string
 		installed     bool
 		installedWith string
+		seedCanonical bool
 	}{
-		{name: "missing tracked row"},
+		{name: "missing tracked row", seedCanonical: true},
 		{name: "wrong-provider tracked alias", installed: true, installedWith: "pip"},
 	} {
 		t.Run(history.name, func(t *testing.T) {
@@ -98,11 +99,14 @@ func TestSetToolConvergesTrackedCacheAcrossStaleProviderHistories(t *testing.T) 
 			if err := a.DB().Upsert(ctx, &database.ToolCache{
 				Name: "black", Provider: "uv", Package: "black", Tracked: true,
 				Installed: history.installed, InstalledWith: history.installedWith,
+				Version: sql.NullString{String: "1.0.0", Valid: history.installed},
 			}); err != nil {
 				t.Fatalf("seed stale tracked row: %v", err)
 			}
-			if err := a.DB().UpsertDiscovered(ctx, "black", "pip", "pip", "1.0.0"); err != nil {
-				t.Fatalf("seed pip discovery: %v", err)
+			if history.seedCanonical {
+				if err := a.DB().UpsertDiscovered(ctx, "black", "pip", "pip", "1.0.0"); err != nil {
+					t.Fatalf("seed pip discovery: %v", err)
+				}
 			}
 
 			if err := a.SetTool("black", "pip", "black", ""); err != nil {
@@ -115,8 +119,73 @@ func TestSetToolConvergesTrackedCacheAcrossStaleProviderHistories(t *testing.T) 
 			if err != nil {
 				t.Fatalf("get canonical pip row: %v", err)
 			}
-			if !got.Tracked || !got.Installed || got.InstalledWith != "pip" {
-				t.Fatalf("canonical pip row = tracked:%v installed:%v with:%q, want true/true/pip", got.Tracked, got.Installed, got.InstalledWith)
+			if !got.Tracked || !got.Installed || got.InstalledWith != "pip" || got.Version.String != "1.0.0" {
+				t.Fatalf("canonical pip row = tracked:%v installed:%v with:%q version:%q, want true/true/pip/1.0.0", got.Tracked, got.Installed, got.InstalledWith, got.Version.String)
+			}
+		})
+	}
+}
+
+func TestSetToolReportsPersistedConfigWhenCacheReconciliationFails(t *testing.T) {
+	a, cfgPath := newImportApp(t, &stubProvider{name: "pip", available: true})
+	if err := a.DB().Close(); err != nil {
+		t.Fatalf("close cache DB: %v", err)
+	}
+
+	err := a.SetTool("black", "pip", "black", "")
+	var partial *app.ConfigPersistedCacheReconcileError
+	if !errors.As(err, &partial) {
+		t.Fatalf("SetTool error = %v, want ConfigPersistedCacheReconcileError", err)
+	}
+	if !strings.Contains(err.Error(), "next refresh will repair cache") {
+		t.Fatalf("SetTool error = %q, want repair guidance", err)
+	}
+	cfg, loadErr := config.Load(cfgPath)
+	if loadErr != nil {
+		t.Fatalf("load persisted config: %v", loadErr)
+	}
+	providers := cfg.Tools["black"].Providers
+	if len(providers) != 1 || providers[0].Provider != "pip" || providers[0].Package != "black" {
+		t.Fatalf("persisted providers = %+v, want pip/black despite cache error", providers)
+	}
+}
+
+func TestSetToolPreservesLegitimateEcosystemOwnershipAsDiscovered(t *testing.T) {
+	for _, tc := range []struct {
+		name, ecosystem, owner string
+	}{
+		{name: "prettier", ecosystem: "node", owner: "npm"},
+		{name: "ruff", ecosystem: "python", owner: "uv"},
+		{name: "git", ecosystem: "system", owner: "brew"},
+	} {
+		t.Run(tc.ecosystem+"_"+tc.owner, func(t *testing.T) {
+			a, cfgPath := newImportApp(t,
+				&stubProvider{name: tc.ecosystem, available: true},
+				&stubProvider{name: tc.owner, available: true},
+			)
+			if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+				Tools:  map[string]config.ToolSpec{tc.name: {Providers: []config.ToolInstallSpec{{Provider: tc.owner}}}},
+				Groups: []*config.GroupConfig{{Name: "dev", Tools: []config.ToolEntry{{Name: tc.name}}}},
+			}); err != nil {
+				t.Fatalf("save config: %v", err)
+			}
+			ctx := context.Background()
+			if err := a.DB().Upsert(ctx, &database.ToolCache{
+				Name: tc.name, Provider: tc.ecosystem, Package: tc.name,
+				Installed: true, InstalledWith: tc.owner, Tracked: true,
+			}); err != nil {
+				t.Fatalf("seed ecosystem row: %v", err)
+			}
+
+			if err := a.SetTool(tc.name, tc.owner, tc.name, ""); err != nil {
+				t.Fatalf("SetTool: %v", err)
+			}
+			got, err := a.DB().Get(ctx, tc.name, tc.ecosystem, tc.name)
+			if err != nil {
+				t.Fatalf("get ecosystem orphan: %v", err)
+			}
+			if got.Tracked || !got.Installed || got.InstalledWith != tc.owner {
+				t.Fatalf("ecosystem orphan = tracked:%v installed:%v with:%q, want false/true/%s", got.Tracked, got.Installed, got.InstalledWith, tc.owner)
 			}
 		})
 	}

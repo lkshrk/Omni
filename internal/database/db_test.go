@@ -1196,17 +1196,24 @@ func TestReconcileTracked_DeletesStaleMissingRows(t *testing.T) {
 	}
 }
 
-func TestReconcileTracked_DeletesStaleWrongProviderAliasAndRetracksDesired(t *testing.T) {
+func TestReconcileTracked_MigratesStaleAliasIntoAbsentDesiredRow(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
-	if err := db.Upsert(ctx, &database.ToolCache{Name: "black", Provider: "uv", Package: "black", Installed: true, InstalledWith: "pip", Tracked: true}); err != nil {
+	if err := db.Upsert(ctx, &database.ToolCache{
+		Name: "black", Provider: "uv", Package: "black", Installed: true, InstalledWith: "pip", Tracked: true,
+		Version: sql.NullString{String: "1.0.0", Valid: true}, Outdated: true,
+		LatestVersion: sql.NullString{String: "2.0.0", Valid: true},
+	}); err != nil {
 		t.Fatalf("Upsert stale alias: %v", err)
 	}
-	if err := db.UpsertDiscovered(ctx, "black", "pip", "pip", "1.0.0"); err != nil {
-		t.Fatalf("Upsert desired row: %v", err)
-	}
 
-	if err := db.ReconcileTracked(ctx, []*database.ToolCache{{Name: "black", Provider: "pip", Package: "black"}}); err != nil {
+	if err := db.ReconcileTracked(ctx,
+		[]*database.ToolCache{{Name: "black", Provider: "pip", Package: "black"}},
+		database.TrackedAliasMigration{
+			From: database.ToolCacheKey{Name: "black", Provider: "uv", Package: "black"},
+			To:   database.ToolCacheKey{Name: "black", Provider: "pip", Package: "black"},
+		},
+	); err != nil {
 		t.Fatalf("ReconcileTracked: %v", err)
 	}
 	if _, err := db.Get(ctx, "black", "uv", "black"); !errors.Is(err, sql.ErrNoRows) {
@@ -1216,8 +1223,66 @@ func TestReconcileTracked_DeletesStaleWrongProviderAliasAndRetracksDesired(t *te
 	if err != nil {
 		t.Fatalf("Get desired row: %v", err)
 	}
-	if !desired.Tracked {
-		t.Fatal("desired row should be retracked")
+	if !desired.Tracked || !desired.Installed || desired.InstalledWith != "pip" || desired.Version.String != "1.0.0" || !desired.Outdated || desired.LatestVersion.String != "2.0.0" {
+		t.Fatalf("migrated desired row = %+v, want preserved installed/update state", desired)
+	}
+}
+
+func TestReconcileTracked_DoesNotOverwriteExistingDesiredRowDuringAliasCleanup(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	if err := db.Upsert(ctx, &database.ToolCache{
+		Name: "black", Provider: "uv", Package: "black", Installed: true, InstalledWith: "pip",
+		Version: sql.NullString{String: "1.0.0", Valid: true},
+	}); err != nil {
+		t.Fatalf("Upsert stale alias: %v", err)
+	}
+	if err := db.UpsertDiscovered(ctx, "black", "pip", "pip", "2.0.0"); err != nil {
+		t.Fatalf("Upsert desired row: %v", err)
+	}
+	migration := database.TrackedAliasMigration{
+		From: database.ToolCacheKey{Name: "black", Provider: "uv", Package: "black"},
+		To:   database.ToolCacheKey{Name: "black", Provider: "pip", Package: "black"},
+	}
+	if err := db.ReconcileTracked(ctx, []*database.ToolCache{{Name: "black", Provider: "pip", Package: "black"}}, migration); err != nil {
+		t.Fatalf("ReconcileTracked: %v", err)
+	}
+	desired, err := db.Get(ctx, "black", "pip", "black")
+	if err != nil {
+		t.Fatalf("Get desired row: %v", err)
+	}
+	if !desired.Tracked || desired.Version.String != "2.0.0" {
+		t.Fatalf("desired row = tracked:%v version:%q, want true/2.0.0", desired.Tracked, desired.Version.String)
+	}
+	if _, err := db.Get(ctx, "black", "uv", "black"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("Get stale alias error = %v, want sql.ErrNoRows", err)
+	}
+}
+
+func TestReconcileTracked_PreservesInstalledEcosystemOwnerRowsAsOrphans(t *testing.T) {
+	for _, row := range []database.ToolCache{
+		{Name: "prettier", Provider: "node", Package: "prettier", InstalledWith: "npm"},
+		{Name: "ruff", Provider: "python", Package: "ruff", InstalledWith: "uv"},
+		{Name: "git", Provider: "system", Package: "git", InstalledWith: "brew"},
+	} {
+		t.Run(row.Provider+"_"+row.InstalledWith, func(t *testing.T) {
+			ctx := context.Background()
+			db := newTestDB(t)
+			row.Installed, row.Tracked = true, true
+			if err := db.Upsert(ctx, &row); err != nil {
+				t.Fatalf("Upsert: %v", err)
+			}
+			if err := db.ReconcileTracked(ctx, nil); err != nil {
+				t.Fatalf("ReconcileTracked: %v", err)
+			}
+			got, err := db.Get(ctx, row.Name, row.Provider, row.Package)
+			if err != nil {
+				t.Fatalf("Get preserved orphan: %v", err)
+			}
+			if got.Tracked || !got.Installed || got.InstalledWith != row.InstalledWith {
+				t.Fatalf("preserved orphan = tracked:%v installed:%v with:%q", got.Tracked, got.Installed, got.InstalledWith)
+			}
+		})
 	}
 }
 

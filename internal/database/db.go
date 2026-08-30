@@ -47,6 +47,14 @@ type ToolCache struct {
 	UpdateDateSource   string            `bun:"-"`
 }
 
+type ToolCacheKey struct {
+	Name, Provider, Package string
+}
+
+type TrackedAliasMigration struct {
+	From, To ToolCacheKey
+}
+
 // ToolMetadata — Cached independently from install/config state.
 type ToolMetadata struct {
 	bun.BaseModel `bun:"table:tool_metadata,alias:tm"`
@@ -1401,12 +1409,10 @@ func (db *DB) ListDiscovered(ctx context.Context) ([]*ToolCache, error) {
 	return tools, nil
 }
 
-// ReconcileTracked — Marks desired keys tracked and removes stale tracked aliases that cannot be honest discoveries.
-func (db *DB) ReconcileTracked(ctx context.Context, desired []*ToolCache) error {
-	type toolKey struct {
-		name, provider, pkg string
-	}
-	desiredKeys := make(map[toolKey]struct{}, len(desired))
+// ReconcileTracked marks desired keys tracked, applies explicit alias migrations, deletes stale missing rows,
+// and demotes other installed rows to honest discoveries. Provider compatibility policy belongs to the app.
+func (db *DB) ReconcileTracked(ctx context.Context, desired []*ToolCache, migrations ...TrackedAliasMigration) error {
+	desiredKeys := make(map[ToolCacheKey]struct{}, len(desired))
 	for _, t := range desired {
 		if t == nil {
 			continue
@@ -1414,7 +1420,20 @@ func (db *DB) ReconcileTracked(ctx context.Context, desired []*ToolCache) error 
 		if err := requirePackage(t.Name, t.Provider, t.Package); err != nil {
 			return err
 		}
-		desiredKeys[toolKey{t.Name, t.Provider, t.Package}] = struct{}{}
+		desiredKeys[ToolCacheKey{Name: t.Name, Provider: t.Provider, Package: t.Package}] = struct{}{}
+	}
+	migrationBySource := make(map[ToolCacheKey]ToolCacheKey, len(migrations))
+	for _, migration := range migrations {
+		if err := requirePackage(migration.From.Name, migration.From.Provider, migration.From.Package); err != nil {
+			return err
+		}
+		if err := requirePackage(migration.To.Name, migration.To.Provider, migration.To.Package); err != nil {
+			return err
+		}
+		if _, ok := desiredKeys[migration.To]; !ok {
+			return fmt.Errorf("tracked alias migration target %s/%s is not desired", migration.To.Provider, migration.To.Name)
+		}
+		migrationBySource[migration.From] = migration.To
 	}
 
 	// One transaction so the per-tool UPDATE loop costs one fsync rather than N.
@@ -1424,10 +1443,34 @@ func (db *DB) ReconcileTracked(ctx context.Context, desired []*ToolCache) error 
 			return fmt.Errorf("listing tracked tools for reconciliation: %w", err)
 		}
 		for _, t := range tracked {
-			if _, keep := desiredKeys[toolKey{t.Name, t.Provider, t.Package}]; keep {
+			key := ToolCacheKey{Name: t.Name, Provider: t.Provider, Package: t.Package}
+			if _, keep := desiredKeys[key]; keep {
 				continue
 			}
-			if !t.Installed || t.InstalledWith != "" && t.InstalledWith != t.Provider {
+			if target, migrate := migrationBySource[key]; migrate {
+				targetExists, err := tx.NewSelect().Model((*ToolCache)(nil)).
+					Where("name = ? AND provider = ? AND package = ?", target.Name, target.Provider, target.Package).
+					Exists(ctx)
+				if err != nil {
+					return fmt.Errorf("checking tracked alias target %s/%s: %w", target.Provider, target.Name, err)
+				}
+				if !targetExists {
+					migrated := *t
+					migrated.ID = 0
+					migrated.Name, migrated.Provider, migrated.Package = target.Name, target.Provider, target.Package
+					migrated.Tracked = true
+					if _, err := tx.NewInsert().Model(&migrated).Exec(ctx); err != nil {
+						return fmt.Errorf("migrating tracked tool %s/%s to %s: %w", t.Provider, t.Name, target.Provider, err)
+					}
+				}
+				if _, err := tx.NewDelete().Model((*ToolCache)(nil)).
+					Where("name = ? AND provider = ? AND package = ?", t.Name, t.Provider, t.Package).
+					Exec(ctx); err != nil {
+					return fmt.Errorf("deleting migrated tracked tool %s/%s: %w", t.Provider, t.Name, err)
+				}
+				continue
+			}
+			if !t.Installed {
 				if _, err := tx.NewDelete().Model((*ToolCache)(nil)).
 					Where("name = ? AND provider = ? AND package = ?", t.Name, t.Provider, t.Package).
 					Exec(ctx); err != nil {
