@@ -3,11 +3,15 @@
 package integration_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/vttest"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -19,7 +23,7 @@ func TestTUIDotsReminderInstallsSandboxService(t *testing.T) {
 	timer := filepath.Join(home, ".config", "systemd", "user", "omni-dots-reminder.timer")
 	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
 		openTUISettingsActions(t, term)
-		revealTUISettingsCursor(t, term)
+		batch16RevealSettingsCursor(t, term)
 		writeTUIKeys(t, term, "j", "j", "j", "j")
 		waitForRequiredScreen(t, term, 3*time.Second, screenHas("> Reminder Notifications"), "TUI did not select reminder settings")
 		writeTUIKeys(t, term, " ")
@@ -30,6 +34,164 @@ func TestTUIDotsReminderInstallsSandboxService(t *testing.T) {
 		}, "TUI did not install reminder service files")
 	})
 	assertFileContains(t, systemctlLog, "enable --now omni-dots-reminder.timer")
+}
+
+func TestCLIAndTUIDotsReminderProduceEquivalentServiceState(t *testing.T) {
+	cliBin, cliRoot, _, cliCache, cliConfig, cliEnv, _ := batch16DotsServiceFixture(t)
+	tuiBin, tuiRoot, tuiHome, tuiCache, tuiConfig, tuiEnv, _ := batch16DotsServiceFixture(t)
+	runOmniCommand(t, cliBin, cliRoot, cliEnv, "--config", cliConfig, "--cache-dir", cliCache, "dots", "reminder", "install")
+	installBatch16ReminderTUI(t, tuiBin, tuiRoot, tuiHome, tuiCache, tuiConfig, tuiEnv)
+	cli := batch16ReminderStatus(t, cliBin, cliRoot, cliEnv, cliConfig, cliCache)
+	tui := batch16ReminderStatus(t, tuiBin, tuiRoot, tuiEnv, tuiConfig, tuiCache)
+	if !reflect.DeepEqual(cli, tui) {
+		t.Fatalf("reminder service state differs\nCLI: %#v\nTUI: %#v", cli, tui)
+	}
+}
+
+func TestTUIDotsWatchInstallsSandboxServiceAfterDoctorSettles(t *testing.T) {
+	bin, root, home, cache, configPath, env, systemctlLog := batch16DotsServiceFixture(t)
+	service := filepath.Join(home, ".config", "systemd", "user", "omni-dots-watch.service")
+	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
+		openTUISettingsActions(t, term)
+		waitForRequiredScreen(t, term, 10*time.Second, func(text string) bool {
+			return strings.Contains(text, "Watch Sync") && !strings.Contains(text, "Running doctor") && !strings.Contains(text, "Refreshing doctor")
+		}, "TUI doctor activity did not settle")
+		batch16RevealSettingsCursor(t, term)
+		writeTUIKeys(t, term, "j", "j", "j", "j", "j", "j")
+		waitForRequiredScreen(t, term, 3*time.Second, screenHas("> Watch Sync", "space change"), "TUI did not expose actionable watch settings")
+		writeTUIKeys(t, term, " ")
+		return waitForRequiredScreen(t, term, 10*time.Second, func(string) bool {
+			_, err := os.Stat(service)
+			return err == nil
+		}, "TUI did not install watch service file")
+	})
+	assertFileContains(t, systemctlLog, "enable --now omni-dots-watch.service")
+}
+
+func TestCLIAndTUIDotsRefreshPreserveEquivalentBrokenLinkState(t *testing.T) {
+	cli := batch16BrokenDotsFixture(t)
+	tui := batch16BrokenDotsFixture(t)
+	runOmniCommand(t, cli.bin, cli.root, cli.env, "--config", cli.configPath, "--cache-dir", cli.cache, "dots", "discover", "--format", "json")
+	runOmniCommand(t, tui.bin, tui.root, tui.env, "--config", tui.configPath, "--cache-dir", tui.cache, "dots", "sync")
+	runTUI(t, tui.bin, tui.root, tui.env, []string{"--config", tui.configPath, "--cache-dir", tui.cache}, func(term *vttest.Terminal) string {
+		waitForRequiredScreen(t, term, 7*time.Second, screenHas("Dashboard", "Tools"), "TUI did not start")
+		writeTUIKeys(t, term, "\t", "\t")
+		waitForRequiredScreen(t, term, 8*time.Second, screenHas("nvim", "synced"), "TUI did not render synced dot state")
+		if err := os.Remove(tui.target); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(tui.root, "missing"), tui.target); err != nil {
+			t.Fatal(err)
+		}
+		writeTUIKeys(t, term, "R")
+		return waitForRequiredScreen(t, term, 8*time.Second, screenHas("nvim", "broken"), "TUI refresh lost broken dot state")
+	})
+	cliState := batch16ReadBrokenDotsState(t, cli)
+	tuiState := batch16ReadBrokenDotsState(t, tui)
+	if !reflect.DeepEqual(cliState, tuiState) {
+		t.Fatalf("dots.refresh state differs\nCLI: %#v\nTUI: %#v", cliState, tuiState)
+	}
+}
+
+type batch16ReminderObservation struct {
+	Platform  string        `json:"platform"`
+	Interval  time.Duration `json:"interval"`
+	Notify    bool          `json:"notify"`
+	Installed bool          `json:"installed"`
+}
+
+type batch16DotsFixture struct {
+	bin, root, cache, configPath, target string
+	env                                  []string
+}
+
+type batch16BrokenDotsState struct {
+	LinkTarget string
+	Config     *config.RootConfig
+}
+
+func batch16BrokenDotsFixture(t *testing.T) batch16DotsFixture {
+	t.Helper()
+	bin := batch16OmniBinary(t)
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	cache := filepath.Join(root, "cache")
+	configPath := filepath.Join(root, "settings.json")
+	env := isolatedTUIEnv(t, home, cache)
+	repo := filepath.Join(home, "dotfiles")
+	target := filepath.Join(home, ".config", "nvim", "init.lua")
+	source := filepath.Join(repo, "dotfiles", "nvim", ".config", "nvim", "init.lua")
+	initDotsRepo(t, repo, env)
+	writeIntegrationFile(t, source, "repo\n")
+	if err := config.Save(configPath, &config.RootConfig{
+		Version: config.CurrentVersion, Settings: config.Settings{DotsRepo: repo}, Hosts: map[string][]string{"testhost": {}},
+		Groups: []*config.GroupConfig{{Name: "testhost", Special: "host", Dots: []config.DotEntry{{Name: "nvim", Path: target}}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "dots", "sync")
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "missing"), target); err != nil {
+		t.Fatal(err)
+	}
+	return batch16DotsFixture{bin: bin, root: root, cache: cache, configPath: configPath, target: target, env: env}
+}
+
+func batch16ReadBrokenDotsState(t *testing.T, fixture batch16DotsFixture) batch16BrokenDotsState {
+	t.Helper()
+	link, err := os.Readlink(fixture.target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(fixture.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Settings.DotsRepo = ""
+	for _, group := range cfg.Groups {
+		for i := range group.Dots {
+			group.Dots[i].Path = "~/.config/nvim/init.lua"
+		}
+	}
+	return batch16BrokenDotsState{LinkTarget: filepath.Base(link), Config: cfg}
+}
+
+func installBatch16ReminderTUI(t *testing.T, bin, root, home, cache, configPath string, env []string) {
+	t.Helper()
+	service := filepath.Join(home, ".config", "systemd", "user", "omni-dots-reminder.service")
+	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
+		openTUISettingsActions(t, term)
+		batch16RevealSettingsCursor(t, term)
+		writeTUIKeys(t, term, "j", "j", "j", "j", " ")
+		return waitForRequiredScreen(t, term, 10*time.Second, func(string) bool {
+			_, err := os.Stat(service)
+			return err == nil
+		}, "TUI did not install reminder service")
+	})
+}
+
+func batch16ReminderStatus(t *testing.T, bin, root string, env []string, configPath, cache string) batch16ReminderObservation {
+	t.Helper()
+	out := runOmniOutput(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "dots", "reminder", "status", "--format", "json")
+	var status batch16ReminderObservation
+	if err := json.Unmarshal([]byte(out), &status); err != nil {
+		t.Fatal(err)
+	}
+	return status
+}
+
+func batch16RevealSettingsCursor(t *testing.T, term *vttest.Terminal) {
+	t.Helper()
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) {
+		sendTUIKey(term, uv.KeyHome)
+		if _, ok := waitForScreen(term, 500*time.Millisecond, screenHas("> Import Installed Tools")); ok {
+			return
+		}
+	}
+	t.Fatalf("TUI did not reveal the settings cursor; screen:\n%s", currentScreenText(term))
 }
 
 func batch16DotsServiceFixture(t *testing.T) (bin, root, home, cache, configPath string, env []string, systemctlLog string) {
