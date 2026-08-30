@@ -302,7 +302,7 @@ func TestAgentsPrepareOnboardingAutoStagesOnlyTemplate(t *testing.T) {
 	a, mock, home := newAgentsReadinessApp(t, true, pinnedVersionResponse())
 	writeDefaultMigrationSnapshot(t, a, "h")
 	got, err := a.AgentsPrepareOnboarding(context.Background(), "h")
-	if err != nil || !got.AutoStaged || got.Readiness.State != AgentsReadinessTemplateOnly {
+	if err != nil || got.Readiness.State != AgentsReadinessTemplateOnly {
 		t.Fatalf("result = %+v, err=%v", got, err)
 	}
 	if len(mock.Calls) != 1 {
@@ -340,7 +340,7 @@ func TestAgentsPrepareOnboardingRefusalsDoNotMutate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.AutoStaged || len(mock.Calls) != 1 {
+			if len(mock.Calls) != 1 {
 				t.Fatalf("result=%+v calls=%+v", got, mock.Calls)
 			}
 			template, _ := AgentsTemplatePath()
@@ -594,7 +594,7 @@ func TestEnsureAgentsReadyCapturesLiveLegacyConfigMigratesAndCleans(t *testing.T
 	}
 }
 
-func TestCompleteAgentsOnboardingLeavesAmbiguousSnapshotsUntouched(t *testing.T) {
+func TestCompleteAgentsOnboardingIgnoresOldSnapshots(t *testing.T) {
 	a, exec, _ := newAgentsStateMachineApp(t, apmVersionPin)
 	for _, suffix := range []string{"one", "two"} {
 		if err := os.Mkdir(filepath.Join(filepath.Dir(a.ConfigPath), ".omni-apm-migration-backup-"+suffix), 0o700); err != nil {
@@ -603,14 +603,40 @@ func TestCompleteAgentsOnboardingLeavesAmbiguousSnapshotsUntouched(t *testing.T)
 	}
 
 	result, err := a.CompleteAgentsOnboarding(t.Context(), "host")
-	if err != nil || result.Readiness.State != AgentsReadinessEmpty || len(result.Readiness.Details) == 0 {
+	if err != nil || result.Readiness.State != AgentsReadinessReady {
 		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if len(exec.calls) != 2 || exec.calls[0].Name != "apm" || exec.calls[1].Name != "apm" || exec.calls[1].Args[0] != "install" {
+		t.Fatalf("calls = %+v", exec.calls)
+	}
+	template, _ := AgentsTemplatePath()
+	if _, err := os.Stat(template); err != nil {
+		t.Fatalf("old snapshots blocked template staging: %v", err)
+	}
+}
+
+func TestEnsureAgentsReadyDoesNotCleanUnmigratedLegacyConfig(t *testing.T) {
+	a, exec, home := newAgentsStateMachineApp(t, apmVersionPin)
+	legacy := `{"agents":{"mcp_servers":[{"name":"legacy","transport":"stdio","command":"legacy"}]}}`
+	if err := os.WriteFile(a.ConfigPath, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeAgentsWorkspaceFile(t, home, "apm.yml", "name: live\n")
+	writeAgentsWorkspaceFile(t, home, "apm.lock.yaml", "dependencies: []\n")
+
+	result, err := a.EnsureAgentsReady(t.Context(), "host")
+	if err != nil || result.Readiness.State != AgentsReadinessReady {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	raw, err := os.ReadFile(a.ConfigPath)
+	if err != nil || string(raw) != legacy {
+		t.Fatalf("unmigrated legacy config changed: %q err=%v", raw, err)
 	}
 	if len(exec.calls) != 1 || exec.calls[0].Name != "apm" {
 		t.Fatalf("calls = %+v", exec.calls)
 	}
-	template, _ := AgentsTemplatePath()
-	if _, err := os.Stat(template); !os.IsNotExist(err) {
-		t.Fatalf("ambiguous onboarding wrote template: %v", err)
+	snapshots, err := filepath.Glob(filepath.Join(filepath.Dir(a.ConfigPath), snapshotGlob))
+	if err != nil || len(snapshots) != 0 {
+		t.Fatalf("snapshots=%v err=%v", snapshots, err)
 	}
 }

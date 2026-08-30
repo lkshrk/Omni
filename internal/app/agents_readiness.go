@@ -42,8 +42,7 @@ type AgentsReadiness struct {
 }
 
 type AgentsOnboardingResult struct {
-	Readiness  AgentsReadiness
-	AutoStaged bool
+	Readiness AgentsReadiness
 }
 
 // EnsureAgentsReady repairs APM and completes any safe, unambiguous onboarding work.
@@ -63,13 +62,14 @@ func (a *App) CompleteAgentsOnboarding(ctx context.Context, host string) (Agents
 		return AgentsOnboardingResult{}, err
 	}
 	result := AgentsOnboardingResult{Readiness: readiness}
+	var legacySnapshot string
 	switch readiness.State {
 	case AgentsReadinessReady:
-		return a.finishAgentsOnboarding(result)
+		return result, nil
 	case AgentsReadinessLockOnly, AgentsReadinessInvalid:
 		return result, nil
 	case AgentsReadinessEmpty:
-		result, err = a.prepareAgentsOnboarding(ctx, host)
+		result, legacySnapshot, err = a.prepareAgentsOnboarding(ctx, host)
 		if err != nil || result.Readiness.State == AgentsReadinessEmpty {
 			return result, err
 		}
@@ -88,69 +88,29 @@ func (a *App) CompleteAgentsOnboarding(ctx context.Context, host string) (Agents
 		result.Readiness.Details = append(result.Readiness.Details, "APM onboarding did not produce a complete manifest and lockfile")
 		return result, nil
 	}
-	return a.finishAgentsOnboarding(result)
-}
-
-func (a *App) finishAgentsOnboarding(result AgentsOnboardingResult) (AgentsOnboardingResult, error) {
-	hasLegacy, err := config.HasRemovedAgentConfig(a.ConfigPath)
-	if err != nil || !hasLegacy {
-		return result, err
-	}
-	snapshots, err := a.defaultSnapshotDirs()
-	if err != nil {
-		return result, err
-	}
-	if len(snapshots) > 1 {
-		result.Readiness.Details = []string{fmt.Sprintf("%d migration snapshots found; keep one before legacy config cleanup", len(snapshots))}
-		return result, nil
-	}
-	if len(snapshots) == 0 {
-		if _, err := config.CaptureLegacyAgentsSnapshot(a.ConfigPath); err != nil {
+	if legacySnapshot != "" {
+		if err := config.CleanupLegacyAgentsConfigFromSnapshot(a.ConfigPath, legacySnapshot); err != nil {
 			return result, err
 		}
 	}
-	return result, config.CleanupLegacyAgentsConfig(a.ConfigPath)
+	return result, nil
 }
 
-func (a *App) prepareAgentsOnboarding(ctx context.Context, host string) (AgentsOnboardingResult, error) {
-	snapshots, err := a.defaultSnapshotDirs()
-	if err != nil {
-		return AgentsOnboardingResult{}, err
-	}
-	if len(snapshots) > 1 {
-		readiness, inspectErr := inspectAgentsReadiness()
-		readiness.Details = []string{fmt.Sprintf("%d migration snapshots found; keep one or migrate explicitly with --snapshot", len(snapshots))}
-		return AgentsOnboardingResult{Readiness: readiness}, inspectErr
-	}
-	if len(snapshots) == 1 {
-		return a.AgentsPrepareOnboarding(ctx, host)
-	}
+func (a *App) prepareAgentsOnboarding(ctx context.Context, host string) (AgentsOnboardingResult, string, error) {
 	hasLegacy, err := config.HasRemovedAgentConfig(a.ConfigPath)
 	if err != nil {
-		return AgentsOnboardingResult{}, err
+		return AgentsOnboardingResult{}, "", err
 	}
 	if hasLegacy {
-		if _, err := config.CaptureLegacyAgentsSnapshot(a.ConfigPath); err != nil {
-			return AgentsOnboardingResult{}, err
+		snapshot, err := config.CaptureLegacyAgentsSnapshot(a.ConfigPath)
+		if err != nil {
+			return AgentsOnboardingResult{}, "", err
 		}
-		return a.AgentsPrepareOnboarding(ctx, host)
+		result, err := a.agentsPrepareOnboarding(ctx, host, snapshot)
+		return result, snapshot, err
 	}
-	return a.stageEmptyAgentsOnboarding(ctx)
-}
-
-func (a *App) defaultSnapshotDirs() ([]string, error) {
-	if a.ConfigPath == "" {
-		return nil, fmt.Errorf("no config path")
-	}
-	resolved, err := filepath.EvalSymlinks(a.ConfigPath)
-	if err != nil {
-		return nil, fmt.Errorf("resolve config path: %w", err)
-	}
-	matches, err := filepath.Glob(filepath.Join(filepath.Dir(resolved), snapshotGlob))
-	if err != nil {
-		return nil, err
-	}
-	return matches, nil
+	result, err := a.stageEmptyAgentsOnboarding(ctx)
+	return result, "", err
 }
 
 func (a *App) stageEmptyAgentsOnboarding(ctx context.Context) (AgentsOnboardingResult, error) {
@@ -177,7 +137,7 @@ func (a *App) stageEmptyAgentsOnboarding(ctx context.Context) (AgentsOnboardingR
 		readiness, err = commitAgentsOnboardingLocked(lockCtx, a.StateDir, agentBundlePlan{}, nil, agentsMigrationMarker+"\n"+manifest)
 		return err
 	})
-	return AgentsOnboardingResult{Readiness: readiness, AutoStaged: readiness.State == AgentsReadinessTemplateOnly}, err
+	return AgentsOnboardingResult{Readiness: readiness}, err
 }
 
 // AgentsReadiness probes the pinned APM contract before inspecting its workspace.
@@ -281,6 +241,10 @@ func firstNonNil(errs ...error) error {
 // AgentsPrepareOnboarding stages a unique safe legacy snapshot only while all APM state is empty.
 // It never invokes APM, installs packages, creates a lockfile, or overwrites existing state.
 func (a *App) AgentsPrepareOnboarding(ctx context.Context, host string) (AgentsOnboardingResult, error) {
+	return a.agentsPrepareOnboarding(ctx, host, "")
+}
+
+func (a *App) agentsPrepareOnboarding(ctx context.Context, host, snapshotDir string) (AgentsOnboardingResult, error) {
 	readiness, err := a.AgentsReadiness(ctx)
 	if err != nil || readiness.State != AgentsReadinessEmpty {
 		return AgentsOnboardingResult{Readiness: readiness}, err
@@ -307,10 +271,13 @@ func (a *App) AgentsPrepareOnboarding(ctx context.Context, host string) (AgentsO
 		if err := lockCtx.Err(); err != nil {
 			return err
 		}
-		snapshot, err := a.defaultSnapshotDir()
-		if err != nil {
-			result.Readiness.Details = []string{err.Error()}
-			return nil
+		snapshot := snapshotDir
+		if snapshot == "" {
+			snapshot, err = a.defaultSnapshotDir()
+			if err != nil {
+				result.Readiness.Details = []string{err.Error()}
+				return nil
+			}
 		}
 		if err := lockCtx.Err(); err != nil {
 			return err
@@ -333,7 +300,6 @@ func (a *App) AgentsPrepareOnboarding(ctx context.Context, host string) (AgentsO
 		if err != nil {
 			return err
 		}
-		result.AutoStaged = result.Readiness.State == AgentsReadinessTemplateOnly
 		return nil
 	})
 	return result, err
