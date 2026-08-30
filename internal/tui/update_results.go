@@ -456,7 +456,7 @@ func (m *Model) handleCreateGroupDoneMsg(msg createGroupDoneMsg) []tea.Cmd {
 		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
 		return cmds
 	}
-	cmds = append(cmds, setStatus(m, "✓ group "+msg.name+" created", false))
+	cmds = append(cmds, setStatus(m, "✓ group "+msg.name+" created (not assigned; edit host groups to activate)", false))
 	refreshed := false
 	if msg.groupNames != nil {
 		m.groupNames = msg.groupNames

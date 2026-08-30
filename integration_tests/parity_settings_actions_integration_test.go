@@ -4,10 +4,10 @@ package integration_test
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"slices"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -37,8 +37,7 @@ func TestCLIAndTUISettingsProviderProduceEquivalentSemanticState(t *testing.T) {
 }
 
 type parityProviderSettingsState struct {
-	Priority, Disabled string
-	Hosts, Groups      int
+	Config string
 }
 
 func observeParityProviderSettings(t *testing.T, sandbox *paritySandbox) any {
@@ -47,10 +46,16 @@ func observeParityProviderSettings(t *testing.T, sandbox *paritySandbox) any {
 	if err != nil {
 		t.Fatal(err)
 	}
-	effective := cfg.EffectiveSettings("testhost")
-	disabled := append([]string(nil), effective.DisabledProviders...)
-	sort.Strings(disabled)
-	return parityProviderSettingsState{Priority: strings.Join(effective.ProviderPriority, ","), Disabled: strings.Join(disabled, ","), Hosts: len(cfg.Hosts), Groups: len(cfg.Groups)}
+	sort.Strings(cfg.Settings.DisabledProviders)
+	for host, settings := range cfg.HostSettings {
+		sort.Strings(settings.DisabledProviders)
+		cfg.HostSettings[host] = settings
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parityProviderSettingsState{Config: string(raw)}
 }
 
 func TestCLIAndTUISettingsResetProduceEquivalentSemanticState(t *testing.T) {
