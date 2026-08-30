@@ -36,7 +36,7 @@ func TestCLIAndTUIDotsPullPaletteProduceEquivalentSemanticState(t *testing.T) {
 			runOmniCommand(t, bin, s.root, s.env, "--config", s.configPath, "--cache-dir", s.cache, "dots", "pull")
 		},
 		runTUI: func(t *testing.T, bin string, s *paritySandbox) {
-			runPaletteTUI(t, bin, s, "dots pull", func() bool { return paletteDotsHeadsMatch(t, s) })
+			runPaletteTUI(t, bin, s, "dots pull", func() bool { return paletteDotsHeadsMatch(t, s) && paletteDotsTargetReady(s, "remote change\n") })
 		},
 		observe: observePaletteDotsState,
 		readTUI: readPaletteDotsThroughCLI,
@@ -160,6 +160,16 @@ func paletteDotsHeadsMatch(t *testing.T, s *paritySandbox) bool {
 	t.Helper()
 	repo, remote := filepath.Join(s.home, "dotfiles"), filepath.Join(s.root, "remote.git")
 	return runCommandOutput(t, repo, s.env, "git", "rev-parse", "HEAD") == runCommandOutput(t, remote, s.env, "git", "rev-parse", "refs/heads/main")
+}
+
+func paletteDotsTargetReady(s *paritySandbox, content string) bool {
+	target := filepath.Join(s.home, ".config", "nvim", "init.lua")
+	info, err := os.Lstat(target)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	raw, err := os.ReadFile(target)
+	return err == nil && string(raw) == content
 }
 
 func readPaletteDotsThroughCLI(t *testing.T, bin string, s *paritySandbox) {
