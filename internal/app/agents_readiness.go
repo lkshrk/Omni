@@ -142,15 +142,15 @@ func (a *App) prepareAgentsOnboarding(ctx context.Context, host string) (AgentsO
 		result, err := a.agentsPrepareOnboarding(ctx, host, snapshot)
 		return result, snapshot, err
 	}
-	result, err := a.stageEmptyAgentsOnboarding(ctx)
+	plan, rendered, err := a.recoverNativePluginPlan(ctx)
+	if err != nil {
+		return AgentsOnboardingResult{}, "", err
+	}
+	result, err := a.stageEmptyAgentsOnboarding(ctx, plan, rendered)
 	return result, "", err
 }
 
-func (a *App) stageEmptyAgentsOnboarding(ctx context.Context) (AgentsOnboardingResult, error) {
-	manifest, _, err := renderAPMTemplatePlan(agentBundlePlan{})
-	if err != nil {
-		return AgentsOnboardingResult{}, err
-	}
+func (a *App) stageEmptyAgentsOnboarding(ctx context.Context, plan agentBundlePlan, rendered string) (AgentsOnboardingResult, error) {
 	template, err := AgentsTemplatePath()
 	if err != nil {
 		return AgentsOnboardingResult{}, err
@@ -167,7 +167,7 @@ func (a *App) stageEmptyAgentsOnboarding(ctx context.Context) (AgentsOnboardingR
 		if err != nil || readiness.State != AgentsReadinessEmpty {
 			return err
 		}
-		readiness, err = commitAgentsOnboardingLocked(lockCtx, a.StateDir, agentBundlePlan{}, nil, agentsMigrationMarker+"\n"+manifest)
+		readiness, err = commitAgentsOnboardingLocked(lockCtx, a.StateDir, plan, nil, rendered)
 		return err
 	})
 	return AgentsOnboardingResult{Readiness: readiness}, err
