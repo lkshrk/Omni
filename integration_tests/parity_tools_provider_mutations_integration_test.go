@@ -31,7 +31,8 @@ func TestCLIAndTUIToolsReinstallDefaultProduceEquivalentSemanticState(t *testing
 		waitForRequiredScreen(t, term, 4*time.Second, func(text string) bool { return strings.Contains(strings.ToLower(text), "confirm reinstall") }, "TUI did not arm reinstall-default")
 		writeTUIKeys(t, term, "i")
 	}, func(s *paritySandbox) bool { return providerMutationSettled(s, "uv") })
-	runOmniCommand(t, bin, tui.root, tui.env, "--config", tui.configPath, "--cache-dir", tui.cache, "tools", "list", "black", "--format", "json")
+	settleProviderMutationDiscovery(t, bin, cli)
+	settleProviderMutationDiscovery(t, bin, tui)
 	assertProviderMutationParity(t, cli, tui)
 }
 
@@ -41,7 +42,6 @@ func TestCLIAndTUIToolsPinProviderProduceEquivalentSemanticState(t *testing.T) {
 	seedProviderMutationParity(t, bin, cli)
 	seedProviderMutationParity(t, bin, tui)
 	runOmniCommand(t, bin, cli.root, cli.env, "--config", cli.configPath, "--cache-dir", cli.cache, "tools", "set", "black", "--provider", "pip", "--package", "black", "--install-with", "pip", "--global")
-	runOmniCommand(t, bin, cli.root, cli.env, "--config", cli.configPath, "--cache-dir", cli.cache, "tools", "list", "black", "--format", "json")
 	runProviderMutationTUI(t, bin, tui, func(term *vttest.Terminal) {
 		writeTUIKeys(t, term, "p")
 		waitForRequiredScreen(t, term, 4*time.Second, screenHas("this tool on this host", "this tool everywhere", "pip"), "TUI did not open provider scope picker")
@@ -54,7 +54,8 @@ func TestCLIAndTUIToolsPinProviderProduceEquivalentSemanticState(t *testing.T) {
 		spec, ok := cfg.Tools["black"]
 		return ok && len(spec.Providers) > 0 && spec.Providers[0].Provider == "pip" && spec.Provider == "" && spec.Package == "" && spec.InstallWith == ""
 	})
-	runOmniCommand(t, bin, tui.root, tui.env, "--config", tui.configPath, "--cache-dir", tui.cache, "tools", "list", "black", "--format", "json")
+	settleProviderMutationDiscovery(t, bin, cli)
+	settleProviderMutationDiscovery(t, bin, tui)
 	assertProviderMutationParity(t, cli, tui)
 }
 
@@ -224,6 +225,21 @@ func observeProviderMutationParity(t *testing.T, s *paritySandbox) providerMutat
 	}
 	sort.Strings(state.ProviderTraces)
 	return state
+}
+
+func settleProviderMutationDiscovery(t *testing.T, bin string, s *paritySandbox) {
+	t.Helper()
+	var previous providerMutationState
+	for attempt := 0; attempt < 8; attempt++ {
+		runOmniCommand(t, bin, s.root, s.env, "--config", s.configPath, "--cache-dir", s.cache, "tools", "refresh")
+		runOmniCommand(t, bin, s.root, s.env, "--config", s.configPath, "--cache-dir", s.cache, "tools", "list", "black", "--format", "json")
+		current := observeProviderMutationParity(t, s)
+		if attempt > 0 && reflect.DeepEqual(current, previous) {
+			return
+		}
+		previous = current
+	}
+	t.Fatalf("provider discovery did not reach a fixed point after 8 authoritative reads; last state: %#v", previous)
 }
 
 func assertProviderMutationParity(t *testing.T, cli, tui *paritySandbox) {
