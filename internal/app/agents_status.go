@@ -322,6 +322,7 @@ func joinAPMPackages(manifest apmManifest, lock apmLockfile) []AgentsPackageRow 
 	rows := make([]AgentsPackageRow, 0, len(manifest.Dependencies.APM)+len(lock.Dependencies))
 	install := func(row *AgentsPackageRow, dep apmLockDep) {
 		row.Status = AgentsPackageInstalled
+		row.SyncActionable = false
 		row.Version = dep.Version
 		row.Commit = dep.ResolvedCommit
 		row.License = dep.DeclaredLicense
@@ -354,11 +355,12 @@ func joinAPMPackages(manifest apmManifest, lock apmLockfile) []AgentsPackageRow 
 			continue
 		}
 		row := AgentsPackageRow{
-			Name:    apmPackageName(dep),
-			Source:  apmPackageSource(dep.Git, dep.Path),
-			Ref:     dep.Ref,
-			Targets: dep.Targets,
-			Status:  AgentsPackageMissing,
+			Name:           apmPackageName(dep),
+			Source:         apmPackageSource(dep.Git, dep.Path),
+			Ref:            dep.Ref,
+			Targets:        dep.Targets,
+			Status:         AgentsPackageMissing,
+			SyncActionable: true,
 		}
 		lockDep, ok := claim(byRepoPath[apmPackageKey(dep.Git, dep.Path)], nil)
 		if !ok && dep.Path == "" {
@@ -383,21 +385,23 @@ func joinAPMPackages(manifest apmManifest, lock apmLockfile) []AgentsPackageRow 
 				name = "(unnamed)"
 			}
 			rows = append(rows, AgentsPackageRow{
-				Name:    name,
-				Source:  agentsUnrecognizedSource,
-				Targets: dep.Targets,
-				Status:  AgentsPackageMissing,
+				Name:           name,
+				Source:         agentsUnrecognizedSource,
+				Targets:        dep.Targets,
+				Status:         AgentsPackageMissing,
+				SyncActionable: true,
 			})
 			continue
 		}
 		pending = append(pending, nameJoin{row: len(rows), name: strings.ToLower(dep.Name)})
 		rows = append(rows, AgentsPackageRow{
-			Name:        dep.Name,
-			Source:      dep.Name + "@" + dep.Marketplace,
-			Ref:         dep.Ref,
-			Marketplace: dep.Marketplace,
-			Targets:     dep.Targets,
-			Status:      AgentsPackageMissing,
+			Name:           dep.Name,
+			Source:         dep.Name + "@" + dep.Marketplace,
+			Ref:            dep.Ref,
+			Marketplace:    dep.Marketplace,
+			Targets:        dep.Targets,
+			Status:         AgentsPackageMissing,
+			SyncActionable: true,
 		})
 	}
 

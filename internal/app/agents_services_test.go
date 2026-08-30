@@ -259,8 +259,9 @@ func TestAgentsStatusDetectsDeployedMCPDrift(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			rows := driftFixture(t, tc.lock, tc.claude)
-			if got := serviceRow(t, rows, "probe").Status; got != tc.want {
-				t.Fatalf("status = %q, want %q", got, tc.want)
+			row := serviceRow(t, rows, "probe")
+			if row.Status != tc.want || row.SyncActionable != (tc.want == AgentsPackageDrifted) {
+				t.Fatalf("row = %+v, want status %q actionable=%v", row, tc.want, tc.want == AgentsPackageDrifted)
 			}
 		})
 	}

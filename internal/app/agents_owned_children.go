@@ -437,6 +437,7 @@ func reconcileAgentsOwnedChildren(
 	}
 	keepTopLevel := make(map[string]bool, len(childrenByKey))
 	conflictDetail := make(map[string]string, len(childrenByKey))
+	blockedPackages := make(map[int]bool)
 	for key, children := range childrenByKey {
 		sort.Slice(children, func(i, j int) bool {
 			if children[i].Owner != children[j].Owner {
@@ -471,8 +472,9 @@ func reconcileAgentsOwnedChildren(
 		provided := make(map[string]bool)
 		for _, child := range children {
 			indexes := packageIndexes[strings.ToLower(child.Owner)]
-			status := agentsOwnedChildRuntimeStatus(child, mcpInput, lspInput)
+			status, actionable := agentsOwnedChildRuntimeStatus(child, mcpInput, lspInput)
 			for _, index := range indexes {
+				packages[index].SyncActionable = packages[index].SyncActionable || actionable
 				providedKey := fmt.Sprintf("%d\x00%s", index, key)
 				if !provided[providedKey] {
 					packages[index].Provides = append(packages[index].Provides, AgentsProvidedChild{
@@ -493,6 +495,7 @@ func reconcileAgentsOwnedChildren(
 					packages[index].Issues = append(packages[index].Issues, fmt.Sprintf("%s %s is %s", strings.ToUpper(string(child.Kind)), child.Name, status))
 				}
 				if ambiguous {
+					blockedPackages[index] = true
 					if len(owners) > 1 {
 						packages[index].Issues = append(packages[index].Issues, fmt.Sprintf("%s %s has multiple owners: %s", strings.ToUpper(string(child.Kind)), child.Name, strings.Join(owners, ", ")))
 					} else {
@@ -509,6 +512,11 @@ func reconcileAgentsOwnedChildren(
 			for _, index := range packageIndexes[strings.ToLower(collision.Child.Owner)] {
 				packages[index].Issues = append(packages[index].Issues, collision.Message)
 				agentsRollPackageStatus(&packages[index], AgentsPackageDrifted)
+				if collision.Exact {
+					packages[index].SyncActionable = true
+				} else {
+					blockedPackages[index] = true
+				}
 			}
 			if !collision.Exact {
 				keepTopLevel[key] = true
@@ -517,6 +525,9 @@ func reconcileAgentsOwnedChildren(
 		}
 	}
 
+	for index := range blockedPackages {
+		packages[index].SyncActionable = false
+	}
 	agentsFinalizePackageRows(packages)
 
 	return agentsPartitionOwnedRows(mcpRows, agentsChildMCP, childrenByKey, keepTopLevel, conflictDetail),
@@ -533,6 +544,7 @@ func agentsApplyUnavailableOwnership(packages []AgentsPackageRow, unavailable []
 			continue
 		}
 		packages[i].Issues = append(packages[i].Issues, "package ownership evidence unavailable")
+		packages[i].SyncActionable = false
 		agentsRollPackageStatus(&packages[i], AgentsPackageUnavailable)
 	}
 }
@@ -559,7 +571,7 @@ func agentsFinalizePackageRows(packages []AgentsPackageRow) {
 	})
 }
 
-func agentsOwnedChildRuntimeStatus(child agentsOwnedChild, mcpInput, lspInput agentsServiceInput) AgentsPackageStatus {
+func agentsOwnedChildRuntimeStatus(child agentsOwnedChild, mcpInput, lspInput agentsServiceInput) (AgentsPackageStatus, bool) {
 	in := mcpInput
 	decl := agentsServiceDecl{name: child.Name}
 	if child.Kind == agentsChildMCP && child.MCP != nil {
@@ -569,11 +581,11 @@ func agentsOwnedChildRuntimeStatus(child agentsOwnedChild, mcpInput, lspInput ag
 		in = lspInput
 		decl.command = child.LSP.Command
 	} else {
-		return AgentsPackageUnavailable
+		return AgentsPackageUnavailable, false
 	}
 	lockedName, locked := agentsEqualFoldString(in.locked, child.Name)
 	if !locked {
-		return AgentsPackageMissing
+		return AgentsPackageMissing, true
 	}
 	cfg := agentsEqualFoldConfig(in.configs, lockedName)
 	deployed := agentsEqualFoldHarnessConfig(in.configsOnClaude, lockedName)

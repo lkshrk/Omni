@@ -58,7 +58,6 @@ func (a *App) AgentsStatus() (AgentsStatus, error) {
 	mcpRows, lspRows := reconcileAgentsOwnedChildren(packages, manifest, ownership, mcp, lsp)
 	syncActionable := 0
 	for i := range packages {
-		packages[i].SyncActionable = packages[i].Status == AgentsPackageMissing
 		if packages[i].SyncActionable {
 			syncActionable++
 		}
@@ -162,7 +161,7 @@ func joinAPMServices(in agentsServiceInput) []AgentsServiceRow {
 			row.Command = ""
 		}
 		if locked[dep.name] {
-			row.Status = agentsServiceJoinedStatus(dep, cfg, in.configsOnClaude, in.resolves)
+			row.Status, row.SyncActionable = agentsServiceJoinedStatus(dep, cfg, in.configsOnClaude, in.resolves)
 		}
 		if row.Detail == "" {
 			row.Detail = agentsServiceDetail(cfg)
@@ -209,11 +208,11 @@ func joinAPMServices(in agentsServiceInput) []AgentsServiceRow {
 	return rows
 }
 
-func agentsServiceJoinedStatus(dep agentsServiceDecl, cfg apmServiceConfig, deployedConfigs map[string]harnessMCPConfig, resolves func(string) bool) AgentsPackageStatus {
+func agentsServiceJoinedStatus(dep agentsServiceDecl, cfg apmServiceConfig, deployedConfigs map[string]harnessMCPConfig, resolves func(string) bool) (AgentsPackageStatus, bool) {
 	if deployed, ok := deployedConfigs[dep.name]; ok && agentsServiceDrifted(cfg, deployed) {
-		return AgentsPackageDrifted
+		return AgentsPackageDrifted, true
 	}
-	return agentsServiceInstalledStatus(dep, cfg, resolves)
+	return agentsServiceInstalledStatus(dep, cfg, resolves), false
 }
 
 // One PATH walk per command per refresh: the MCP and LSP joins routinely name the same binaries.

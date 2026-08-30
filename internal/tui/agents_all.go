@@ -161,11 +161,15 @@ func (m *Model) doCheckAgentsOutdated() tea.Cmd {
 }
 
 func (m *Model) refreshAgents() []tea.Cmd {
-	if m.agentsOutdatedChecking {
-		return []tea.Cmd{setStatus(m, agentsUpdateCheckBusyStatus, false)}
-	}
+	m.agentsRowsKnown = false
+	m.agentsRowsErr = nil
+	m.agentsSyncActionable = 0
 	app.ApplyAgentsOutdated(m.agentsRows, app.AgentsOutdatedResult{})
-	return []tea.Cmd{m.doLoadAgentsRows(), m.doCheckAgentsOutdated()}
+	cmds := []tea.Cmd{m.doLoadAgentsRows()}
+	if m.agentsOutdatedChecking {
+		return append(cmds, setStatus(m, agentsUpdateCheckBusyStatus, false))
+	}
+	return append(cmds, m.doCheckAgentsOutdated())
 }
 
 // Returns the spinner plus the caller's work, or nil when there is no app to run against.

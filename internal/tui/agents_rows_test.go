@@ -281,11 +281,18 @@ func TestAgentsRowsReloadAfterAPMCommandDone(t *testing.T) {
 	m.app = app.New(filepath.Join(home, "settings.json"))
 	m.ctx = context.Background()
 	m.apmRunning = true
+	m.agentsRowsKnown = true
+	m.agentsSyncActionable = 9
+	m.agentsOutdatedChecking = true
+	outdatedGen := m.agentsOutdatedGen
 
 	updated, cmd := m.Update(apmCommandDoneMsg{command: "omni agents sync", stdout: "done"})
 	next := updated.(Model)
 	if next.apmRunning {
 		t.Fatal("still running")
+	}
+	if next.agentsRowsKnown || next.agentsSyncActionable != 0 || !next.agentsOutdatedChecking || next.agentsOutdatedGen != outdatedGen {
+		t.Fatalf("mutation refresh state known=%v actionable=%d checking=%v outdatedGen=%d", next.agentsRowsKnown, next.agentsSyncActionable, next.agentsOutdatedChecking, next.agentsOutdatedGen)
 	}
 	var rows agentsRowsMsg
 	for _, msg := range runBatchCmd(cmd) {
