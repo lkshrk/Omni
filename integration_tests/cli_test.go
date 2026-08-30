@@ -44,7 +44,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	os.Exit(testscript.RunMain(m, map[string]func() int{
+	code := testscript.RunMain(m, map[string]func() int{
 		"omni":                                func() int { cli.Execute(); return 0 },
 		"omni-assert-claude-mcp-header":       assertClaudeMcpHeaderMain,
 		"omni-assert-codex-mcp-header":        assertCodexMcpHeaderMain,
@@ -61,7 +61,14 @@ func TestMain(m *testing.M) {
 		"omni-corrupt-skill-metadata":         corruptSkillMetadataMain,
 		"omni-wellknown-skills":               wellKnownSkillsMain,
 		"omni-with-skills-catalog":            withSkillsCatalogMain,
-	}))
+	})
+	if err := cleanupOmniBinary(); err != nil {
+		fmt.Fprintf(os.Stderr, "clean integration binary: %v\n", err)
+		if code == 0 {
+			code = 2
+		}
+	}
+	os.Exit(code)
 }
 
 func rewriteStubServerURL(configPath, serverURL string) error {

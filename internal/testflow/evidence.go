@@ -61,6 +61,7 @@ type goTestEvent struct {
 	Test        string  `json:"Test"`
 	Elapsed     float64 `json:"Elapsed"`
 	Output      string  `json:"Output"`
+	OutputType  string  `json:"OutputType,omitempty"`
 	FailedBuild string  `json:"FailedBuild"`
 }
 

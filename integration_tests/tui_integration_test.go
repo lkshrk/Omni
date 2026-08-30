@@ -20,6 +20,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/testguard"
 )
 
 const tuiQuitTimeout = 3 * time.Second
@@ -676,6 +677,20 @@ func buildOmniBinary(t *testing.T) string {
 	return omniBinaryPath
 }
 
+func cleanupOmniBinary() error {
+	if omniBinaryPath == "" {
+		return nil
+	}
+	dir := filepath.Dir(omniBinaryPath)
+	if !strings.HasPrefix(filepath.Base(dir), "omni-integration-") {
+		return fmt.Errorf("refusing unexpected integration binary directory %q", dir)
+	}
+	if err := testguard.RequireTempPath("integration binary directory", dir); err != nil {
+		return err
+	}
+	return os.RemoveAll(dir)
+}
+
 func integrationRepoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -698,6 +713,9 @@ var agentCLIStubs = []string{"claude", "codex", "grok", "cursor", "gemini", "ope
 
 func stubAgentCLIDir(t *testing.T, home string) string {
 	t.Helper()
+	if err := testguard.RequireTempPath("TUI fixture HOME", home); err != nil {
+		t.Fatal(err)
+	}
 	dir := filepath.Join(home, ".test-stub-bin")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -746,6 +764,9 @@ func isolatedTUIEnv(t *testing.T, home, cache string) []string {
 
 func initDotsRepo(t *testing.T, repo string, env []string) {
 	t.Helper()
+	if err := testguard.RequireTempPath("integration dots repository", repo); err != nil {
+		t.Fatal(err)
+	}
 	runCommand(t, filepath.Dir(repo), env, "git", "init", repo)
 	runCommand(t, repo, env, "git", "config", "user.email", "t@t.com")
 	runCommand(t, repo, env, "git", "config", "user.name", "T")
@@ -762,6 +783,9 @@ func runCommand(t *testing.T, dir string, env []string, name string, args ...str
 
 func runCommandOutput(t *testing.T, dir string, env []string, name string, args ...string) string {
 	t.Helper()
+	if err := testguard.RequireTempPath("integration command working directory", dir); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)

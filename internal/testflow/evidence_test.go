@@ -43,6 +43,25 @@ func TestVerifyEvidenceRequiresExactTestscriptSubtest(t *testing.T) {
 	}
 }
 
+func TestVerifyEvidenceAcceptsTypedOutputTypeAndStillRejectsUnknownEventFields(t *testing.T) {
+	root := t.TempDir()
+	meta := evidenceMeta{SchemaVersion: 1, Lane: "unit-app", GOOS: "linux", Tags: []string{}, Count: 1}
+	writeLane(t, root, meta, []goTestEvent{
+		{Action: "output", Package: "example.test/app", Test: "TestFlow", Output: "running\n", OutputType: "stdout"},
+		{Action: "pass", Package: "example.test/app", Test: "TestFlow"},
+		{Action: "pass", Package: "example.test/app"},
+	}, nil)
+	selector := Selector{Package: "example.test/app", Test: "TestFlow", Lane: "unit-app", OS: []string{"linux"}, Tags: []string{}}
+	if _, err := VerifyEvidence(evidenceCatalog(selector), root); err != nil {
+		t.Fatalf("typed OutputType rejected: %v", err)
+	}
+
+	writeFile(t, filepath.Join(root, "unit-app", evidenceEventsFile), []byte("{\"Action\":\"pass\",\"Package\":\"example.test/app\",\"UnknownType\":\"stdout\"}\n"))
+	if _, err := VerifyEvidence(evidenceCatalog(selector), root); err == nil || !strings.Contains(err.Error(), `unknown field "UnknownType"`) {
+		t.Fatalf("unknown event field error = %v", err)
+	}
+}
+
 func TestVerifyEvidenceRejectsUntrustworthyGoOutput(t *testing.T) {
 	tests := []struct {
 		name   string
