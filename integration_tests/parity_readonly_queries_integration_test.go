@@ -62,8 +62,6 @@ esac
 
 	var cliTools []readOnlyToolObservation
 	decodeReadOnlyCLI(t, bin, root, env, &cliTools, "--config", configPath, "--cache-dir", cache, "tools", "list", "--format", "json")
-	var cliDots readOnlyDotsObservation
-	decodeReadOnlyCLI(t, bin, root, env, &cliDots, "--config", configPath, "--cache-dir", cache, "dots", "status", "--format", "json")
 	var cliDoctor app.DoctorResult
 	decodeReadOnlyCLI(t, bin, root, env, &cliDoctor, "--config", configPath, "--cache-dir", cache, "doctor", "--format", "json")
 
@@ -85,6 +83,8 @@ esac
 		}, "TUI did not publish the accepted dots status")
 	})
 
+	var cliDots readOnlyDotsObservation
+	decodeReadOnlyCLI(t, bin, root, env, &cliDots, "--config", configPath, "--cache-dir", cache, "dots", "status", "--format", "json")
 	packet, err := readOnlyObservationPacket(observationPath)
 	if err != nil {
 		t.Fatal(err)
