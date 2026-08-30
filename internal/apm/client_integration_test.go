@@ -190,6 +190,7 @@ func TestGlobalPluginMarketplaceLifecycle(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	writeFile(t, filepath.Join(pkg, "plugin.json"), `{"name":"fixture-plugin","version":"1.0.0","description":"Offline plugin fixture"}`)
+	writeFile(t, filepath.Join(pkg, "apm.yml"), "name: fixture-plugin\nversion: 1.0.0\ndependencies: {apm: [], mcp: []}\n")
 	writeFile(t, filepath.Join(pkg, "agents", "reviewer.md"), "---\nname: reviewer\ndescription: Reviews offline plugin fixtures\n---\n\nReview the fixture.\n")
 	writeFile(t, filepath.Join(pkg, "skills", "fixture-plugin", "SKILL.md"), "---\nname: fixture-plugin\ndescription: Offline plugin fixture\n---\n\nversion one\n")
 	writeFile(t, filepath.Join(market, "apm.yml"), `name: local-marketplace
@@ -484,6 +485,7 @@ func newMarketplaceIntegrationClient(t *testing.T) (context.Context, *apm.Client
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	writeFile(t, filepath.Join(pkg, "plugin.json"), `{"name":"fixture-plugin","version":"1.0.0","description":"Offline plugin fixture"}`)
+	writeFile(t, filepath.Join(pkg, "apm.yml"), "name: fixture-plugin\nversion: 1.0.0\ndependencies: {apm: [], mcp: []}\n")
 	writeFile(t, filepath.Join(pkg, "skills", "fixture-plugin", "SKILL.md"), "---\nname: fixture-plugin\ndescription: Offline plugin fixture\n---\n")
 	writeFile(t, filepath.Join(market, "apm.yml"), "name: local-marketplace\nversion: 1.0.0\nlicense: MIT\nmarketplace:\n  owner: {name: omni, url: https://example.invalid/omni}\n  outputs: {claude: {}, codex: {}}\n  packages:\n    - name: fixture-plugin\n      description: Offline plugin fixture\n      category: testing\n      source: ./packages/fixture-plugin\n      version: 1.0.0\n")
 	cmd := exec.CommandContext(ctx, "apm", "pack", "--marketplace=claude")
