@@ -762,11 +762,14 @@ func groupMembershipContentWidth(m Model) int {
 }
 
 func groupPickerContentWidth(m Model) int {
-	t, ok := m.groupPickerActionTool()
-	if !ok {
-		return popupContentWidth(m, lipgloss.Width("no tool selected"), 24, 40)
+	group := ""
+	if !m.pickerPurposeDotAdd {
+		t, ok := m.groupPickerActionTool()
+		if !ok {
+			return popupContentWidth(m, lipgloss.Width("no tool selected"), 24, 40)
+		}
+		group = m.toolGroups[toolKey(t.Name, t.Provider)]
 	}
-	group := m.toolGroups[toolKey(t.Name, t.Provider)]
 	width := 0
 	labelW, detailW := groupPickerColumnWidths(m, group)
 	for _, g := range m.pickerGroups {

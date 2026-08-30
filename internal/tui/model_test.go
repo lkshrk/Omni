@@ -3068,6 +3068,26 @@ func TestDotAddOpensGroupPicker(t *testing.T) {
 	}
 }
 
+func TestDotAddGroupPickerRendersTargetAndGroupChoicesWithoutTool(t *testing.T) {
+	t.Parallel()
+	m := dotsModel()
+	m.pickerGroups = []string{"testhost", "work", groupPickerNewSentinel}
+	m.openGroupPickerForDotAdd("/home/test/.config/zed", "~/.config/zed")
+	m.pickerGroups = []string{"testhost", "work", groupPickerNewSentinel}
+	out := renderGroupPicker(m)
+	for _, want := range []string{"testhost", "work", groupPickerNewSentinel} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("dot-add group picker missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "no tool selected") {
+		t.Fatalf("dot-add group picker still requires a tool:\n%s", out)
+	}
+	if got := popupTitleForGroupPickerTool(m, "Choose Group"); got != "Choose Group: ~/.config/zed" {
+		t.Fatalf("dot-add picker title = %q", got)
+	}
+}
+
 func TestPrioritizedPickerGroups_ActiveHostGroupsFirst(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "host")
 	m := baseModel(nil)

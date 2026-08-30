@@ -458,11 +458,14 @@ const groupPickerNewSentinel = "+ new group…"
 
 func renderGroupPicker(m Model) string {
 	p := m.palette
-	t, ok := m.groupPickerActionTool()
-	if !ok {
-		return p.styleHelp.Render("no tool selected")
+	group := ""
+	if !m.pickerPurposeDotAdd {
+		t, ok := m.groupPickerActionTool()
+		if !ok {
+			return p.styleHelp.Render("no tool selected")
+		}
+		group = m.toolGroups[toolKey(t.Name, t.Provider)]
 	}
-	group := m.toolGroups[toolKey(t.Name, t.Provider)]
 	var sb strings.Builder
 	contentW := groupPickerContentWidth(m)
 

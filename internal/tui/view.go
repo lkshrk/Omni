@@ -658,6 +658,9 @@ func popupTitleForSelectedTool(m Model, action string) string {
 }
 
 func popupTitleForGroupPickerTool(m Model, action string) string {
+	if m.pickerPurposeDotAdd {
+		return popupTitleForName(action, m.pickerDotAddRawPath)
+	}
 	if m.pickerActionToolSet {
 		return popupTitleForName(action, m.pickerActionTool.Name)
 	}
