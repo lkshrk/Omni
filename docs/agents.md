@@ -223,15 +223,13 @@ processes do not participate in Omni's lock.
 > confirming the expected files exist; every other audit finding must still
 > fail. Do not duplicate the files under `~/.apm/.agents`.
 
-## Pinned APM Build
+## APM Main Build
 
-Omni requires APM `0.29.0`, built from the immutable upstream `microsoft/apm`
-commit
-[`b75a02b1cfab3ffa5e1952916045b6d5374090ae`](https://github.com/microsoft/apm/commit/b75a02b1cfab3ffa5e1952916045b6d5374090ae).
-Installers use this exact source specification:
+Omni requires APM `0.29.0` from the upstream `microsoft/apm` `main` branch.
+Installers use this source specification:
 
 ```text
-git+https://github.com/microsoft/apm.git@b75a02b1cfab3ffa5e1952916045b6d5374090ae
+git+https://github.com/microsoft/apm.git@main
 ```
 
 The `lkshrk/apm` fork Omni previously required is retired. Its capabilities are
