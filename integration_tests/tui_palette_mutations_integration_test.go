@@ -51,7 +51,7 @@ func TestCLIAndTUIDotsPushPaletteProduceEquivalentSemanticState(t *testing.T) {
 		},
 		runTUI: func(t *testing.T, bin string, s *paritySandbox) {
 			runPaletteTUI(t, bin, s, "dots push", func() bool {
-				return paletteDotsHeadsMatch(t, s) && runCommandOutput(t, filepath.Join(s.home, "dotfiles"), s.env, "git", "status", "--porcelain") == ""
+				return runCommandOutput(t, filepath.Join(s.home, "dotfiles"), s.env, "git", "status", "--porcelain") == "" && paletteDotsHeadsMatch(t, s)
 			})
 		},
 		observe: observePaletteDotsState,

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -241,6 +242,15 @@ func (m *Model) handleDotsPulledMsg(msg dotsPulledMsg) []tea.Cmd {
 func (m *Model) handleDotsPushedMsg(msg dotsPushedMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
+	m.dotsPushRunning = false
+	if msg.gen != m.dotsOpGen {
+		if msg.err != nil {
+			cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		} else {
+			cmds = append(cmds, setStatus(m, "✓ pushed", false))
+		}
+		return cmds
+	}
 	if !m.finishDotsOperation(msg.gen) {
 		return cmds
 	}
@@ -609,18 +619,26 @@ func (m *Model) doDotsPull() tea.Cmd {
 
 func (m *Model) doDotsPush() tea.Cmd {
 	a := m.app
-	ctx, gen := m.currentDotsOperation()
-	// A push is commit+remote-update. Once it starts, a superseding TUI refresh must
-	// not cancel between those two mutations and leave only the local commit.
-	ctx = dotsPushContext(ctx)
+	ctx, cancel := m.newDotsPushContext()
+	gen := m.dotsOpGen
+	m.dotsPushRunning = true
 	return func() tea.Msg {
+		defer cancel()
 		result, err := a.DotsPushWithState(ctx, "")
 		entries, gitStatus, memberships := dotsSnapshotFromState(result)
 		return dotsPushedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }
 
-func dotsPushContext(ctx context.Context) context.Context { return context.WithoutCancel(ctx) }
+const dotsPushTimeout = 2 * time.Minute
+
+func (m *Model) newDotsPushContext() (context.Context, context.CancelFunc) {
+	parent := m.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(m.dotsStatusContext(parent), dotsPushTimeout)
+}
 
 func (m *Model) doDotsCommit() tea.Cmd {
 	a := m.app

@@ -53,48 +53,28 @@ func buildPalette(m Model) []palCmd {
 				name: paletteCommandName(dotsPull),
 				desc: dotsPull.Description,
 				run: func(m *Model) tea.Cmd {
-					m.mode = viewDots
-					if !m.dotsLoaded && !m.dotsLoading {
-						m.dotsLoaded = true
-					}
-					m.beginDotsOperation("Pulling…")
-					return tea.Batch(m.spinner.Tick, m.doDotsPull())
+					return m.runDotsPaletteCommand("Pulling…", m.doDotsPull)
 				},
 			},
 			palCmd{
 				name: paletteCommandName(dotsCommit),
 				desc: dotsCommit.Description,
 				run: func(m *Model) tea.Cmd {
-					m.mode = viewDots
-					if !m.dotsLoaded && !m.dotsLoading {
-						m.dotsLoaded = true
-					}
-					m.beginDotsOperation("Committing dots…")
-					return tea.Batch(m.spinner.Tick, m.doDotsCommit())
+					return m.runDotsPaletteCommand("Committing dots…", m.doDotsCommit)
 				},
 			},
 			palCmd{
 				name: paletteCommandName(dotsPush),
 				desc: dotsPush.Description,
 				run: func(m *Model) tea.Cmd {
-					m.mode = viewDots
-					if !m.dotsLoaded && !m.dotsLoading {
-						m.dotsLoaded = true
-					}
-					m.beginDotsOperation("Pushing…")
-					return tea.Batch(m.spinner.Tick, m.doDotsPush())
+					return m.runDotsPaletteCommand("Pushing…", m.doDotsPush)
 				},
 			},
 			palCmd{
 				name: paletteCommandName(dotsSync),
 				desc: dotsSync.Description,
 				run: func(m *Model) tea.Cmd {
-					m.mode = viewDots
-					if !m.dotsLoaded && !m.dotsLoading {
-						m.dotsLoaded = true
-					}
-					m.beginDotsOperation("Syncing dots…")
-					return tea.Batch(m.spinner.Tick, m.doDotsSyncOnly())
+					return m.runDotsPaletteCommand("Syncing dots…", m.doDotsSyncOnly)
 				},
 			},
 		)
@@ -132,6 +112,18 @@ func buildPalette(m Model) []palCmd {
 	}
 
 	return cmds
+}
+
+func (m *Model) runDotsPaletteCommand(status string, run func() tea.Cmd) tea.Cmd {
+	if m.dotsPushRunning {
+		return setStatus(m, "dots push in progress — wait for it to finish", false)
+	}
+	m.mode = viewDots
+	if !m.dotsLoaded && !m.dotsLoading {
+		m.dotsLoaded = true
+	}
+	m.beginDotsOperation(status)
+	return tea.Batch(m.spinner.Tick, run())
 }
 
 func appendAgentsPaletteCommands(m Model, cmds []palCmd) []palCmd {

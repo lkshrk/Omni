@@ -95,6 +95,10 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 	if m.loading {
 		return *m, tea.Batch(cmds...)
 	}
+	if m.dotsPushRunning {
+		cmds = append(cmds, setStatus(m, "dots push in progress — wait for it to finish", false))
+		return *m, tea.Batch(cmds...)
+	}
 
 	wasHidden := m.cursorHidden
 	// Tab-global keys act on the whole tab, so they must not turn the post-tab-switch "no selection" state into a selected first row.

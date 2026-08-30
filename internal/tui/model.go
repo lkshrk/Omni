@@ -436,6 +436,7 @@ type Model struct {
 	dotsOpGen              int  // increments for each async dots operation; stale results are dropped
 	dotsCtx                context.Context
 	dotsCancel             context.CancelFunc
+	dotsPushRunning        bool
 	dotsProgressCh         chan dotsProgressUpdate
 	dotsPendingNames       map[string]bool
 	dotsActiveName         string
