@@ -60,7 +60,13 @@ func TestCLIAndTUIDoctorFixProduceEquivalentSemanticState(t *testing.T) {
 
 func seedDoctorFixParity(t *testing.T, sandbox *paritySandbox) {
 	t.Helper()
-	writeExecutable(t, filepath.Join(sandbox.home, ".test-stub-bin", "apm"), "#!/bin/sh\n[ \"${1:-}\" = \"--version\" ] || exit 64\necho 'Agent Package Manager (APM) CLI version 0.29.0'\n")
+	writeExecutable(t, filepath.Join(sandbox.home, ".test-stub-bin", "apm"), `#!/bin/sh
+case "$*" in
+  --version) echo 'Agent Package Manager (APM) CLI version 0.29.0' ;;
+  'audit --ci --format json') echo '{"passed":true,"checks":[{"name":"lockfile-exists","passed":true,"message":"Lockfile present","details":[]}]}' ;;
+  *) exit 64 ;;
+esac
+`)
 	writeIntegrationFile(t, sandbox.configPath, `{
   "$include":["settings.d/dots.json"],
   "settings":{"disabled_providers":["apt","apk","dnf","pacman","zypper","brew","node","bun","pnpm","npm","python","uv","pip"]},
