@@ -94,9 +94,18 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "Current parity evidence does not yet compare the complete tool, APM workspace, dotfile link, and backup-commit outcome.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [{
+            "type": "parity",
+            "role": "primary",
+            "selector": {
+              "package": "github.com/lkshrk/omni/integration_tests",
+              "test": "TestCLIAndTUIReconcileProduceEquivalentCompositeState",
+              "tags": ["integration"],
+              "lane": "docker-realism",
+              "os": ["linux"]
+            }
+          }]
         }
       ],
       "parity": {
