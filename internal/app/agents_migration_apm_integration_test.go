@@ -166,7 +166,7 @@ dependencies:
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"deepwiki-rs", "shiplight"} {
+	for _, name := range []string{"smart-docs", "shiplight"} {
 		row := ownedPackageRow(t, status.Packages, name)
 		if row.Status != AgentsPackageInstalled || len(row.Provides) != 0 || strings.Contains(strings.Join(row.Issues, "\n"), "ownership evidence unavailable") {
 			t.Fatalf("manifestless package %s = %#v", name, row)
