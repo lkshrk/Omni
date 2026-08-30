@@ -121,6 +121,34 @@ func TestAgentsReadinessRejectsUnsafeOrUnreadableWorkspaceFiles(t *testing.T) {
 	}
 }
 
+func TestAgentsReadinessRejectsUnsafeWorkspaceDirectory(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		setup func(*testing.T, string)
+	}{
+		{name: "symlink", setup: func(t *testing.T, home string) {
+			target := t.TempDir()
+			if err := os.Symlink(target, filepath.Join(home, ".apm")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "non-directory", setup: func(t *testing.T, home string) {
+			if err := os.WriteFile(filepath.Join(home, ".apm"), []byte("not a directory\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			a, _, home := newAgentsReadinessApp(t, true, pinnedVersionResponse())
+			test.setup(t, home)
+			got, err := a.AgentsReadiness(context.Background())
+			if err != nil || got.State != AgentsReadinessInvalid || len(got.Details) == 0 {
+				t.Fatalf("readiness = %+v, err=%v", got, err)
+			}
+		})
+	}
+}
+
 func TestAPMRepairErrorsAreTypedWithoutHidingRuntimeErrors(t *testing.T) {
 	t.Run("missing", func(t *testing.T) {
 		a, _, _ := newAgentsReadinessApp(t, false)
@@ -305,5 +333,86 @@ func TestAgentsPrepareOnboardingRefusalsDoNotMutate(t *testing.T) {
 				t.Fatalf("refusal created template: %v", err)
 			}
 		})
+	}
+}
+
+func preparedOnboardingMigration(t *testing.T, a *App) (agentBundlePlan, []preparedAgentBundleWrapper, string) {
+	t.Helper()
+	writeSuppressedMigrationSnapshot(t, a)
+	snapshot, err := a.defaultSnapshotDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, rendered, err := a.planAgentsMigration("h", snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := prepareAgentBundleWrappers(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { discardPreparedAgentBundleWrappers(prepared) })
+	return plan, prepared, rendered
+}
+
+func TestCommitAgentsOnboardingLockedHonorsCancellationBeforePublish(t *testing.T) {
+	a, _, _ := newAgentsReadinessApp(t, true)
+	plan, prepared, rendered := preparedOnboardingMigration(t, a)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := commitAgentsOnboardingLocked(ctx, a.StateDir, plan, prepared, rendered); !errors.Is(err, context.Canceled) {
+		t.Fatalf("commit error = %v", err)
+	}
+	template, _ := AgentsTemplatePath()
+	if _, err := os.Stat(template); !os.IsNotExist(err) {
+		t.Fatalf("cancelled commit published template: %v", err)
+	}
+	assertNoPublishedMigrationWrappers(t, a.StateDir)
+}
+
+func TestCommitAgentsOnboardingLockedRechecksStateAfterWrapperPreparation(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		setup func(*testing.T, string)
+	}{
+		{name: "live manifest", setup: func(t *testing.T, home string) {
+			writeAgentsWorkspaceFile(t, home, "apm.yml", "name: raced\n")
+		}},
+		{name: "lockfile", setup: func(t *testing.T, home string) {
+			writeAgentsWorkspaceFile(t, home, "apm.lock.yaml", "dependencies: []\n")
+		}},
+		{name: "template", setup: func(t *testing.T, _ string) {
+			template, _ := AgentsTemplatePath()
+			writeFile(t, template, "name: raced\n")
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			a, _, home := newAgentsReadinessApp(t, true)
+			plan, prepared, rendered := preparedOnboardingMigration(t, a)
+			test.setup(t, home)
+			if _, err := commitAgentsOnboardingLocked(context.Background(), a.StateDir, plan, prepared, rendered); err == nil || !strings.Contains(err.Error(), "state changed") {
+				t.Fatalf("commit error = %v", err)
+			}
+			template, _ := AgentsTemplatePath()
+			if test.name == "template" {
+				if raw, err := os.ReadFile(template); err != nil || string(raw) != "name: raced\n" {
+					t.Fatalf("raced template changed: %q, err=%v", raw, err)
+				}
+			} else if _, err := os.Stat(template); !os.IsNotExist(err) {
+				t.Fatalf("raced commit published template: %v", err)
+			}
+			assertNoPublishedMigrationWrappers(t, a.StateDir)
+		})
+	}
+}
+
+func assertNoPublishedMigrationWrappers(t *testing.T, stateDir string) {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(stateDir, "agents-migration", "bundles", strings.Repeat("?", 64)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("published migration wrappers = %v", paths)
 	}
 }
