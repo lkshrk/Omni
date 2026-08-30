@@ -48,10 +48,26 @@ func (a *App) SetTool(name, providerName, packageName, installWith string) error
 			cfg.Tools = make(map[string]config.ToolSpec)
 		}
 		spec := cfg.Tools[name]
+		entry.Options = inheritedToolProviderOptions(spec, entry.Provider)
 		setDefaultToolProviderCandidate(&spec, entry)
 		cfg.Tools[name] = spec
 		return nil
 	})
+}
+
+func inheritedToolProviderOptions(spec config.ToolSpec, providerName string) map[string]string {
+	options := cloneOptionMap(spec.Options)
+	for _, candidate := range spec.Providers {
+		if candidate.Provider != providerName {
+			continue
+		}
+		if options == nil && len(candidate.Options) > 0 {
+			options = make(map[string]string, len(candidate.Options))
+		}
+		maps.Copy(options, candidate.Options)
+		break
+	}
+	return options
 }
 
 func (a *App) providerEntryFromLegacyArgs(providerName, packageName, installWith string, options map[string]string) (config.ToolInstallSpec, error) {
@@ -390,10 +406,12 @@ func (a *App) SetToolProviderScopeWithState(ctx context.Context, name string, op
 	if err != nil {
 		return nil, err
 	}
-	if scopeDisplay.ToolProviderPins == nil {
-		scopeDisplay.ToolProviderPins = make(map[string]string)
+	if opts.Kind == ToolProviderScopeHost {
+		if scopeDisplay.ToolProviderPins == nil {
+			scopeDisplay.ToolProviderPins = make(map[string]string)
+		}
+		scopeDisplay.ToolProviderPins[name] = opts.InstallWith
 	}
-	scopeDisplay.ToolProviderPins[name] = opts.InstallWith
 	return &ToolProviderScopeChange{Tools: tools, ScopeDisplay: scopeDisplay}, nil
 }
 

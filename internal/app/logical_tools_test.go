@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"database/sql"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -286,8 +287,8 @@ func TestSetToolProviderScopeWithStatePersistsToolProviderPin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetToolProviderScopeWithState: %v", err)
 	}
-	if got := change.ScopeDisplay.ToolProviderPins["prettier"]; got != "bun" {
-		t.Fatalf("provider pins = %v, want prettier pinned to bun", change.ScopeDisplay.ToolProviderPins)
+	if got := change.ScopeDisplay.ToolProviderPins["prettier"]; got != "" {
+		t.Fatalf("provider pins = %v, want no synthetic tool-wide pin", change.ScopeDisplay.ToolProviderPins)
 	}
 	reloaded, err := a.ToolScopeDisplayState(context.Background())
 	if err != nil {
@@ -308,6 +309,44 @@ func TestSetToolProviderScopeWithStatePersistsToolProviderPin(t *testing.T) {
 	}
 	if spec.Provider != "" || spec.Package != "" || spec.InstallWith != "" {
 		t.Fatalf("legacy fields = provider %q package %q install_with %q, want empty", spec.Provider, spec.Package, spec.InstallWith)
+	}
+}
+
+func TestSetToolProviderScopeWithStatePreservesCandidateAndLegacyOptions(t *testing.T) {
+	t.Parallel()
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Tools: map[string]config.ToolSpec{
+		"prettier": {
+			Providers: []config.ToolInstallSpec{
+				{Provider: "npm"},
+				{Provider: "bun", Options: map[string]string{"selected": "keep", "shared": "candidate"}},
+			},
+			Options: map[string]string{"legacy": "keep", "shared": "legacy"},
+		},
+	}}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	change, err := a.SetToolProviderScopeWithState(context.Background(), "prettier", app.ToolProviderScopeOptions{
+		Kind: app.ToolProviderScopeTool, ProviderName: "node", Package: "prettier", InstallWith: "bun",
+	})
+	if err != nil {
+		t.Fatalf("SetToolProviderScopeWithState: %v", err)
+	}
+	if got := change.ScopeDisplay.ToolProviderPins["prettier"]; got != "" {
+		t.Fatalf("returned provider pins = %v, want reload-equivalent canonical state", change.ScopeDisplay.ToolProviderPins)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := cfg.Tools["prettier"]
+	wantOptions := map[string]string{"legacy": "keep", "selected": "keep", "shared": "candidate"}
+	if got := spec.Providers[0]; got.Provider != "bun" || got.Package != "prettier" || !maps.Equal(got.Options, wantOptions) {
+		t.Fatalf("canonical default = %+v, want bun/prettier options %v", got, wantOptions)
+	}
+	if spec.Provider != "" || spec.Package != "" || spec.InstallWith != "" || spec.Options != nil {
+		t.Fatalf("legacy fields survived canonical pin: %+v", spec)
 	}
 }
 

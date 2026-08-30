@@ -73,6 +73,24 @@ func seedProviderMutationParity(t *testing.T, bin string, s *paritySandbox) {
 		Name: "black", Provider: "uv", Package: "black", Installed: true, InstalledWith: "pip", Tracked: true,
 		Version: sql.NullString{String: "1.0.0", Valid: true},
 	})
+	cfg, err := config.Load(s.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := cfg.Tools["black"]
+	spec.Options = map[string]string{"legacy": "keep", "shared": "legacy"}
+	for i := range spec.Providers {
+		switch spec.Providers[i].Provider {
+		case "pip":
+			spec.Providers[i].Options = map[string]string{"selected": "keep", "shared": "candidate"}
+		case "uv":
+			spec.Providers[i].Options = map[string]string{"uv": "keep"}
+		}
+	}
+	cfg.Tools["black"] = spec
+	if err := config.Save(s.configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
 	preflightProviderMutationRow(t, bin, s)
 }
 

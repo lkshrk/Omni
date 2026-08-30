@@ -438,6 +438,9 @@ func TestDoSetProviderScope_ToolSuccess(t *testing.T) {
 	if !strings.Contains(got.message, "ripgrep") {
 		t.Errorf("message %q does not contain tool name", got.message)
 	}
+	if got.toolProviderPins["ripgrep"] != "" {
+		t.Fatalf("toolProviderPins = %v, want reload-equivalent canonical state", got.toolProviderPins)
+	}
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
