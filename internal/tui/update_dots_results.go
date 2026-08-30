@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -623,6 +624,16 @@ func (m *Model) doDotsCommit() tea.Cmd {
 		result, err := a.DotsCommitWithState(ctx, "")
 		entries, gitStatus, memberships := dotsSnapshotFromState(result)
 		return dotsCommittedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
+	}
+}
+
+func (m *Model) doDotsReconcileBackup() tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		backupErr := a.DotsBackup(ctx, "dots: reconcile")
+		entries, gitStatus, memberships, refreshErr := refreshDotsSnapshot(a, ctx)
+		return dotsCommittedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: errors.Join(backupErr, refreshErr)}
 	}
 }
 

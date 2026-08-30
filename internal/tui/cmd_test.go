@@ -2979,6 +2979,70 @@ func TestStartDashboardDotsCommit_BlocksWhenCachedDotsSyncDisabled(t *testing.T)
 	}
 }
 
+func TestStartDashboardDotsBackupDoesNotMoveHead(t *testing.T) {
+	m, repoDir := newDotsModelForCmds(t)
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit("init")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "user.name", "Test")
+	runGit("config", "commit.gpgsign", "false")
+	runGit("config", "tag.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(repoDir, "tracked"), []byte("before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "tracked")
+	runGit("commit", "-m", "seed")
+	head := runGit("rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(repoDir, "tracked"), []byte("after\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cacheDotsAvailability(&m, app.DotsSyncAvailability{Configured: true, Reason: app.DotsSyncAvailabilityReady, RepoPath: repoDir})
+	m.dotsGitStatus = " M tracked"
+
+	var cmds []tea.Cmd
+	m.startDashboardDotsBackup(&cmds)
+	var result dotsCommittedMsg
+	found := false
+	for _, cmd := range cmds {
+		if cmd == nil {
+			continue
+		}
+		if msg, ok := cmd().(dotsCommittedMsg); ok {
+			result, found = msg, true
+		}
+	}
+	if !found || result.err != nil {
+		t.Fatalf("dashboard reconcile backup result = %#v, found=%v", result, found)
+	}
+	if got := runGit("rev-parse", "HEAD"); got != head {
+		t.Fatalf("dashboard reconcile moved HEAD from %s to %s", head, got)
+	}
+	if got := runGit("show", "-s", "--format=%s", "omni/backup"); got != "dots: reconcile" {
+		t.Fatalf("backup subject = %q", got)
+	}
+}
+
+func TestQueuedDashboardUpgradeSurvivesBackgroundSnapshotRefresh(t *testing.T) {
+	m := baseModel([]*app.ToolView{{Name: "fixture", Provider: "script", Installed: true, Outdated: true, Tracked: true}})
+	m.outdatedProviders = map[string]bool{"script": true}
+	m.outdatedSnapshotRefreshing = true
+	if statusDashboardUpgradeActionable(m) {
+		t.Fatal("fresh plan should wait for the background outdated snapshot")
+	}
+	if !m.dashboardReconcileStepActionable(dashboardReconcilePlanUpgradeTools) {
+		t.Fatal("already-selected reconcile upgrade was dropped during background refresh")
+	}
+}
+
 func TestHandleToolsLoadedMsg_LaunchDotsSyncDoesNotRecordUnchangedHistory(t *testing.T) {
 	m, repoDir := newDotsModelForCmds(t)
 	cmds := m.handleToolsLoadedMsg(toolsLoadedMsg{settings: config.Settings{DotsRepo: repoDir}, stowInstalled: true})

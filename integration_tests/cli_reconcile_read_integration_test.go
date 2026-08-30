@@ -12,7 +12,7 @@ import (
 )
 
 func TestCLIBinaryReconcileConvergesToolDotsAndBackupState(t *testing.T) {
-	root, home, cache, env, configPath, state, _, repo := reconcileBinaryFixture(t, true)
+	root, home, cache, env, configPath, state, logPath, repo := reconcileBinaryFixture(t, true)
 	repoFile := filepath.Join(repo, "dotfiles", "nvim", ".config", "nvim", "init.lua")
 	writeIntegrationFile(t, repoFile, "reconciled config\n")
 
@@ -20,10 +20,12 @@ func TestCLIBinaryReconcileConvergesToolDotsAndBackupState(t *testing.T) {
 	if !strings.Contains(out, "Reconcile complete") || !strings.Contains(out, "syncing tools") || !strings.Contains(out, "syncing dotfiles") {
 		t.Fatalf("reconcile output omitted lifecycle stages: %s", out)
 	}
-	// The plan is computed before sync: a newly installed tool is not retroactively added to this run's upgrade phase.
-	if raw, err := os.ReadFile(state); err != nil || strings.TrimSpace(string(raw)) != "1.0.0" {
+	// Reconcile converges sequentially: SyncAll installs, then UpgradeAll evaluates the refreshed state.
+	if raw, err := os.ReadFile(state); err != nil || strings.TrimSpace(string(raw)) != "1.1.0" {
 		t.Fatalf("reconciled provider state = %q, %v", raw, err)
 	}
+	assertFileContains(t, logPath, "install")
+	assertFileContains(t, logPath, "upgrade")
 	target := filepath.Join(home, ".config", "nvim", "init.lua")
 	if info, err := os.Lstat(target); err != nil || info.Mode()&os.ModeSymlink == 0 {
 		t.Fatalf("reconciled dot target is not a symlink: %v, %v", info, err)
@@ -79,9 +81,22 @@ func TestCLIBinaryToolsDeletePurgesProviderAndLogicalSpec(t *testing.T) {
 func reconcileBinaryFixture(t *testing.T, withDots bool) (root, home, cache string, env []string, configPath, state, logPath, repo string) {
 	t.Helper()
 	root, home, cache, env = newCLIBinarySandbox(t)
+	configPath = filepath.Join(root, "settings.json")
+	paths := seedReconcileBinaryFixture(t, root, home, configPath, &env, withDots)
+	return root, home, cache, env, configPath, paths.state, paths.logPath, paths.repo
+}
+
+type reconcileFixturePaths struct {
+	state   string
+	logPath string
+	repo    string
+}
+
+func seedReconcileBinaryFixture(t *testing.T, root, home, configPath string, env *[]string, withDots bool) reconcileFixturePaths {
+	t.Helper()
 	binDir := filepath.Join(root, "bin")
-	state = filepath.Join(root, "provider-state")
-	logPath = filepath.Join(root, "provider.log")
+	state := filepath.Join(root, "provider-state")
+	logPath := filepath.Join(root, "provider.log")
 	writeExecutable(t, filepath.Join(binDir, "fake-provider"), `#!/bin/sh
 set -eu
 printf '%s\n' "$1" >> "$FAKE_PROVIDER_LOG"
@@ -95,17 +110,17 @@ case "$1" in
   *) exit 64 ;;
 esac
 `)
-	env = replaceIntegrationEnv(env, "PATH", binDir+string(os.PathListSeparator)+integrationEnvValue(env, "PATH"))
-	env = append(env, "FAKE_PROVIDER_STATE="+state, "FAKE_PROVIDER_LOG="+logPath)
+	*env = replaceIntegrationEnv(*env, "PATH", binDir+string(os.PathListSeparator)+integrationEnvValue(*env, "PATH"))
+	*env = append(*env, "FAKE_PROVIDER_STATE="+state, "FAKE_PROVIDER_LOG="+logPath)
 	settings := config.Settings{DisabledProviders: []string{"apt", "apk", "dnf", "pacman", "zypper", "brew", "node", "bun", "pnpm", "npm", "python", "uv", "pip"}}
 	group := &config.GroupConfig{Name: "testhost", Special: "host", Tools: []config.ToolEntry{{Name: "fixture"}}}
+	var repo string
 	if withDots {
 		repo = filepath.Join(home, "dotfiles")
-		initDotsRepo(t, repo, env)
+		initDotsRepo(t, repo, *env)
 		settings.DotsRepo = repo
 		group.Dots = []config.DotEntry{{Name: "nvim", Path: filepath.Join(home, ".config", "nvim")}}
 	}
-	configPath = filepath.Join(root, "settings.json")
 	if err := config.Save(configPath, &config.RootConfig{
 		Version:  config.CurrentVersion,
 		Settings: settings,
@@ -125,5 +140,5 @@ esac
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return root, home, cache, env, configPath, state, logPath, repo
+	return reconcileFixturePaths{state: state, logPath: logPath, repo: repo}
 }

@@ -237,7 +237,7 @@ func (m *Model) startNextDashboardReconcileStep(cmds *[]tea.Cmd) {
 		case dashboardReconcilePlanSyncDots:
 			m.startDashboardDotsSync(cmds)
 		case dashboardReconcilePlanCommitDots:
-			m.startDashboardDotsCommit(cmds)
+			m.startDashboardDotsBackup(cmds)
 		case dashboardReconcilePlanFixIgnore:
 			m.startDashboardFixIgnore(cmds)
 		case dashboardReconcilePlanFixNvmManaged:
@@ -255,7 +255,7 @@ func (m *Model) dashboardReconcileStepActionable(kind dashboardReconcilePlanKind
 	case dashboardReconcilePlanSyncTools:
 		return statusDashboardToolSyncActionable(*m)
 	case dashboardReconcilePlanUpgradeTools:
-		return statusDashboardUpgradeActionable(*m)
+		return len(m.upgradingKeys) == 0 && statusToolCounts(*m).Updates > 0
 	case dashboardReconcilePlanSyncAgents:
 		return statusDashboardPlanHasStep(*m, app.ReconcileStepSyncAgents)
 	case dashboardReconcilePlanSyncDots:
@@ -341,6 +341,21 @@ func (m *Model) startDashboardDotsCommit(cmds *[]tea.Cmd) {
 	}
 	m.beginDotsOperation("Committing dots…")
 	*cmds = append(*cmds, m.spinner.Tick, m.doDotsCommit())
+}
+
+func (m *Model) startDashboardDotsBackup(cmds *[]tea.Cmd) {
+	availability := m.dotsSyncAvailability()
+	switch {
+	case m.dotsLoading:
+		return
+	case !availability.Configured:
+		*cmds = append(*cmds, setStatus(m, dashboardDotsUnavailableMessage("backing up", availability), true))
+		return
+	case strings.TrimSpace(m.dotsGitStatus) == "":
+		return
+	}
+	m.beginDotsOperation("Backing up dots…")
+	*cmds = append(*cmds, m.spinner.Tick, m.doDotsReconcileBackup())
 }
 
 func dashboardDotsUnavailableMessage(action string, availability app.DotsSyncAvailability) string {
