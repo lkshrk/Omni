@@ -124,7 +124,6 @@ func TestAgentsManifestlessRealAPMLifecycle(t *testing.T) {
 	root, home, state := isolateAgentsAPMIntegration(t)
 	deepwiki := filepath.Join(root, "repos", "local", "deepwiki-rs")
 	shiplight := filepath.Join(root, "repos", "ShiplightAI", "agent-skills-v2")
-	writeIntegrationFile(t, filepath.Join(deepwiki, "SKILL.md"), "---\nname: deepwiki-rs\ndescription: local DeepWiki root fixture\n---\n")
 	writeIntegrationFile(t, filepath.Join(deepwiki, "skills", "smart-docs", "SKILL.md"), "---\nname: smart-docs\ndescription: local DeepWiki fixture\n---\n")
 	writeIntegrationFile(t, filepath.Join(shiplight, "shiplight", "SKILL.md"), "---\nname: shiplight\ndescription: local Shiplight fixture\n---\n")
 	initIntegrationGitRepo(t, deepwiki)
@@ -144,6 +143,7 @@ dependencies:
   apm:
     - git: %s/local/deepwiki-rs
       ref: master
+      path: skills/smart-docs
     - git: %s/ShiplightAI/agent-skills-v2
       path: shiplight
   mcp:
