@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -17,8 +19,10 @@ import (
 
 type managerInstallStub struct {
 	stubProvider
-	installedByManager map[string][]provider.Tool
-	version            string
+	installedByManager   map[string][]provider.Tool
+	uninstalledByManager map[string][]provider.Tool
+	version              string
+	onInstall            func()
 }
 
 type consolidateInstallFailStub struct {
@@ -31,10 +35,28 @@ func (s *consolidateInstallFailStub) Install(_ context.Context, _ provider.Tool)
 }
 
 func (s *managerInstallStub) InstallWithManager(_ context.Context, tool provider.Tool, manager string) error {
+	if s.onInstall != nil {
+		s.onInstall()
+	}
 	if s.installedByManager == nil {
 		s.installedByManager = make(map[string][]provider.Tool)
 	}
 	s.installedByManager[manager] = append(s.installedByManager[manager], tool)
+	return nil
+}
+
+func (s *managerInstallStub) UninstallFrom(_ context.Context, tool provider.Tool, manager string) error {
+	if s.uninstalledByManager == nil {
+		s.uninstalledByManager = make(map[string][]provider.Tool)
+	}
+	s.uninstalledByManager[manager] = append(s.uninstalledByManager[manager], tool)
+	installed := s.installedByManager[manager]
+	for i := range installed {
+		if installed[i].EffectivePackage() == tool.EffectivePackage() {
+			s.installedByManager[manager] = append(installed[:i], installed[i+1:]...)
+			break
+		}
+	}
 	return nil
 }
 
@@ -49,6 +71,17 @@ func (s *managerInstallStub) IsInstalledWithManager(_ context.Context, tool prov
 		}
 	}
 	return false, "", nil
+}
+
+type consolidateUninstallFailStub struct {
+	stubProvider
+	err      error
+	attempts []provider.Tool
+}
+
+func (s *consolidateUninstallFailStub) Uninstall(_ context.Context, tool provider.Tool) error {
+	s.attempts = append(s.attempts, tool)
+	return s.err
 }
 
 func TestConsolidateToProvider_MigratesToolAndCleansOldCache(t *testing.T) {
@@ -326,6 +359,157 @@ func TestConsolidate_LegacyManagerSpecCanonicalizesToConcreteCandidates(t *testi
 	}
 	if tool.Providers[0].Provider != "npm" || tool.Providers[1].Provider != "pnpm" || tool.Providers[1].Package != "prettier-cli" || !reflect.DeepEqual(tool.Providers[1].Options, map[string]string{"legacy": "yes"}) {
 		t.Fatalf("canonical legacy candidates = %#v", tool.Providers)
+	}
+}
+
+func TestConsolidate_PipAliasAlreadyOnTargetDoesNotMigrate(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	python := &managerInstallStub{
+		stubProvider: stubProvider{name: "python", available: true},
+		installedByManager: map[string][]provider.Tool{
+			"pip": {{Name: "black", Provider: "python", Package: "black"}},
+		},
+	}
+	pip3 := &uninstallCaptureStub{stubProvider: stubProvider{name: "pip3", available: true}}
+	a, cfgPath := newImportApp(t, python, pip3)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"black": {Provider: "python", Package: "black", InstallWith: "pip3"},
+		},
+		Groups: []*config.GroupConfig{testHostToolGroup("black")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := a.Consolidate(ctx, "python", "pip", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Migrated) != 0 || len(pip3.uninstalled) != 0 || len(python.installedByManager["pip"]) != 1 {
+		t.Fatalf("pip3 alias caused migration: result=%+v installs=%#v uninstalls=%#v", result, python.installedByManager, pip3.uninstalled)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := cfg.Tools["black"]
+	if tool.Provider != "" || tool.InstallWith != "" || len(tool.Providers) != 1 || tool.Providers[0].Provider != "pip" {
+		t.Fatalf("pip alias canonical spec = %#v", tool)
+	}
+}
+
+func TestConsolidate_ConfigSaveFailureKeepsSourceAndCleansTarget(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	node := &managerInstallStub{stubProvider: stubProvider{name: "node", available: true}}
+	npm := &uninstallCaptureStub{stubProvider: stubProvider{name: "npm", available: true}}
+	pnpm := provider.Named("pnpm", &stubProvider{name: "node", available: true})
+	a, cfgPath := newImportApp(t, node, npm, pnpm)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{ProviderPriority: []string{"npm"}},
+		Tools: map[string]config.ToolSpec{
+			"prettier": {Providers: []config.ToolInstallSpec{{Provider: "npm", Package: "prettier"}}},
+		},
+		Groups: []*config.GroupConfig{testHostToolGroup("prettier")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	blocked := filepath.Join(t.TempDir(), "blocked")
+	if err := os.Mkdir(blocked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	node.onInstall = func() { a.ConfigPath = blocked }
+
+	if _, err := a.Consolidate(ctx, "node", "pnpm", nil); err == nil || !strings.Contains(err.Error(), "saving consolidate config") {
+		t.Fatalf("config save error = %v", err)
+	}
+	if len(npm.uninstalled) != 0 {
+		t.Fatalf("source uninstalled before config commit: %#v", npm.uninstalled)
+	}
+	if len(node.installedByManager["pnpm"]) != 0 || len(node.uninstalledByManager["pnpm"]) != 1 {
+		t.Fatalf("target compensation = installed %#v, uninstalled %#v", node.installedByManager, node.uninstalledByManager)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Tools["prettier"].Providers) != 1 || cfg.Tools["prettier"].Providers[0].Provider != "npm" {
+		t.Fatalf("source config changed after failed save: %#v", cfg.Tools["prettier"])
+	}
+}
+
+func TestConsolidate_FailedUninstallKeepsRefreshedUntrackedSource(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	node := &managerInstallStub{stubProvider: stubProvider{name: "node", available: true}}
+	uninstallErr := errors.New("npm uninstall failed")
+	npm := &consolidateUninstallFailStub{
+		stubProvider: stubProvider{name: "npm", available: true, installed: []provider.InstalledTool{{Tool: provider.Tool{Name: "prettier", Provider: "npm", Package: "prettier"}, Version: "1.4.0"}}},
+		err:          uninstallErr,
+	}
+	a, cfgPath := newImportApp(t, node, npm)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{ProviderPriority: []string{"npm"}},
+		Tools: map[string]config.ToolSpec{
+			"prettier": {Providers: []config.ToolInstallSpec{{Provider: "npm", Package: "prettier"}, {Provider: "pnpm", Package: "prettier"}}},
+		},
+		Groups: []*config.GroupConfig{testHostToolGroup("prettier")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{Name: "prettier", Provider: "npm", Package: "prettier", Installed: true, InstalledWith: "npm", Version: sql.NullString{String: "1.0.0", Valid: true}, Tracked: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := a.Consolidate(ctx, "node", "pnpm", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.UninstallWarnings) != 1 || !errors.Is(result.UninstallWarnings[0].Err, uninstallErr) {
+		t.Fatalf("uninstall warnings = %#v", result.UninstallWarnings)
+	}
+	source, err := a.DB().Get(ctx, "prettier", "npm", "prettier")
+	if err != nil || !source.Installed || source.Tracked || source.Version.String != "1.4.0" {
+		t.Fatalf("failed-uninstall source cache = %#v, err=%v", source, err)
+	}
+	target, err := a.DB().Get(ctx, "prettier", "pnpm", "prettier")
+	if err != nil || !target.Installed || !target.Tracked || target.InstalledWith != "pnpm" {
+		t.Fatalf("target cache = %#v, err=%v", target, err)
+	}
+}
+
+func TestConsolidate_PreservesUnrelatedSecondaryManagerCache(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	node := &managerInstallStub{stubProvider: stubProvider{name: "node", available: true}}
+	npm := &uninstallCaptureStub{stubProvider: stubProvider{name: "npm", available: true}}
+	a, cfgPath := newImportApp(t, node, npm)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{ProviderPriority: []string{"npm"}},
+		Tools: map[string]config.ToolSpec{
+			"prettier": {Providers: []config.ToolInstallSpec{{Provider: "npm", Package: "prettier"}, {Provider: "pnpm", Package: "prettier"}}},
+		},
+		Groups: []*config.GroupConfig{testHostToolGroup("prettier")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{Name: "prettier", Provider: "npm", Package: "prettier", Installed: true, InstalledWith: "npm", Tracked: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DB().UpsertDiscovered(ctx, "prettier", "bun", "bun", "1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := a.Consolidate(ctx, "node", "pnpm", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.DB().Get(ctx, "prettier", "npm", "prettier"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("removed npm source cache error = %v", err)
+	}
+	secondary, err := a.DB().Get(ctx, "prettier", "bun", "prettier")
+	if err != nil || !secondary.Installed || secondary.Tracked {
+		t.Fatalf("unrelated bun cache = %#v, err=%v", secondary, err)
 	}
 }
 

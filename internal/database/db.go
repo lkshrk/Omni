@@ -1364,6 +1364,21 @@ func (db *DB) MarkTracked(ctx context.Context, name, provider, pkg string) error
 	return db.MarkTrackedBatch(ctx, []TrackedTool{{Name: name, Provider: provider, Package: pkg}})
 }
 
+// MarkUntracked demotes one concrete cache identity after config stops owning it.
+func (db *DB) MarkUntracked(ctx context.Context, name, provider, pkg string) error {
+	if err := requirePackage(name, provider, pkg); err != nil {
+		return err
+	}
+	_, err := db.bun.NewUpdate().Model((*ToolCache)(nil)).
+		Set("tracked = FALSE").
+		Where("name = ? AND provider = ? AND package = ?", name, provider, pkg).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("marking tool untracked %s/%s: %w", provider, name, err)
+	}
+	return nil
+}
+
 type TrackedTool struct {
 	Name     string
 	Provider string
