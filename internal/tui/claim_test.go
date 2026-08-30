@@ -479,10 +479,10 @@ func TestDoSetProviderScope_PersistsPackageAlias(t *testing.T) {
 	}
 }
 
-func TestDoSetProviderScope_Error(t *testing.T) {
+func TestDoSetProviderScope_CreatesCanonicalToolLikeCLISet(t *testing.T) {
 	t.Parallel()
 	prov := &okProvider{name: "brew"}
-	a, _ := newCmdApp(t, prov, nil) // empty config — no tools
+	a, cfgPath := newCmdApp(t, prov, nil) // empty config — provider-tool scope creates the logical spec
 	m := modelForCmds(a)
 
 	msg := m.doSetProviderScope("notexist", scopeOption{kind: "provider-tool"}, &app.ToolView{Name: "notexist", Provider: "system", InstalledWith: "brew"})()
@@ -490,8 +490,16 @@ func TestDoSetProviderScope_Error(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected opCompleteMsg, got %T", msg)
 	}
-	if got.err == nil {
-		t.Error("expected error for tool not in config")
+	if got.err != nil {
+		t.Fatalf("provider-tool scope should create canonical spec: %v", got.err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := cfg.Tools["notexist"]
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "brew" || spec.Provider != "" || spec.InstallWith != "" {
+		t.Fatalf("created spec = %+v, want canonical Brew provider", spec)
 	}
 }
 

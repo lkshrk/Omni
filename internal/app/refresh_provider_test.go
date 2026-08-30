@@ -1075,6 +1075,41 @@ type listInstalledStub struct {
 	installed []provider.InstalledTool
 }
 
+type failingListInstalledStub struct{ stubProvider }
+
+func (s *failingListInstalledStub) ListInstalled(context.Context) ([]provider.InstalledTool, error) {
+	return nil, errors.New("inventory failed")
+}
+
+func TestRefreshDiscoveredPrunesSuccessfulProviderAndPreservesFailedProvider(t *testing.T) {
+	t.Parallel()
+	brew := &listInstalledStub{stubProvider: stubProvider{name: "brew", available: true}}
+	npm := &failingListInstalledStub{stubProvider: stubProvider{name: "npm", available: true}}
+	a, cfgPath := newImportApp(t, brew, npm)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("brew-anchor", "brew"), logicalTool("npm-anchor", "npm")),
+		Groups: []*config.GroupConfig{{Tools: groupTools("brew-anchor", "npm-anchor")}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DB().UpsertDiscoveredBatch(context.Background(), []database.DiscoveredUpsert{
+		{Name: "stale-brew", Provider: "brew", InstalledWith: "brew", Version: "1.0.0"},
+		{Name: "stale-npm", Provider: "node", InstalledWith: "npm", Version: "1.0.0"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.RefreshDiscovered(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := a.DB().ListDiscovered(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Name != "stale-npm" {
+		t.Fatalf("discovered rows = %+v, want failed npm preserved and successful empty Brew pruned", rows)
+	}
+}
+
 func (s *listInstalledStub) ListInstalled(_ context.Context) ([]provider.InstalledTool, error) {
 	return s.installed, nil
 }

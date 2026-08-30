@@ -3,9 +3,31 @@ package database_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/lkshrk/omni/internal/database"
 )
+
+func TestPruneDiscoveredProvidersPrunesOnlySuccessfulProvider(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	if err := db.UpsertDiscoveredBatch(ctx, []database.DiscoveredUpsert{
+		{Name: "stale-brew", Provider: "brew", InstalledWith: "brew", Version: "1.0.0"},
+		{Name: "stale-npm", Provider: "node", InstalledWith: "npm", Version: "1.0.0"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.PruneDiscoveredProviders(ctx, time.Now().Add(time.Second), []string{"brew"}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.ListDiscovered(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Name != "stale-npm" {
+		t.Fatalf("discovered rows = %+v, want only failed/unscanned npm row", rows)
+	}
+}
 
 func TestUpsertBatch_EmptyIsNoOp(t *testing.T) {
 	db := newTestDB(t)

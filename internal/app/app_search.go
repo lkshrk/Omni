@@ -1381,7 +1381,7 @@ func (a *App) RefreshDiscoveredWithProgress(ctx context.Context, progress func(R
 
 	cutoff := time.Now()
 	stop = profile.Start("app.refresh.discovered.scan")
-	discovered := a.discoverUntrackedInstalled(ctx, cfg, progress)
+	discovered, scannedProviders := a.discoverUntrackedInstalled(ctx, cfg, progress)
 	stop()
 
 	writeCtx := context.WithoutCancel(ctx)
@@ -1393,7 +1393,7 @@ func (a *App) RefreshDiscoveredWithProgress(ctx context.Context, progress func(R
 	stop()
 
 	stop = profile.Start("app.refresh.discovered.prune")
-	if err := a.readDB().PruneDiscovered(writeCtx, cutoff); err != nil {
+	if err := a.readDB().PruneDiscoveredProviders(writeCtx, cutoff, scannedProviders); err != nil {
 		stop()
 		return fmt.Errorf("pruning discovered tools: %w", err)
 	}
@@ -1415,7 +1415,7 @@ func (a *App) previewDiscovered(ctx context.Context) ([]*database.ToolCache, err
 	if err != nil {
 		return nil, err
 	}
-	discovered := a.discoverUntrackedInstalled(ctx, cfg, nil)
+	discovered, _ := a.discoverUntrackedInstalled(ctx, cfg, nil)
 	out := make([]*database.ToolCache, 0, len(discovered))
 	for _, d := range discovered {
 		out = append(out, &database.ToolCache{
@@ -1461,7 +1461,7 @@ func discoverCLIToolAllowed(cliSets map[string]map[string]bool, providerName, to
 	return cliSet[strings.ToLower(toolName)]
 }
 
-func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootConfig, progress func(RefreshDiscoveredProgressEvent)) []database.DiscoveredUpsert {
+func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootConfig, progress func(RefreshDiscoveredProgressEvent)) ([]database.DiscoveredUpsert, []string) {
 	configuredNames := make(map[string]struct{})
 	for name := range cfg.Tools {
 		configuredNames[name] = struct{}{}
@@ -1477,11 +1477,12 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 	stop()
 	scope := a.discoveryProviderScope(ctx, cfg, ecosystemProviders)
 	if scope.empty() {
-		return nil
+		return nil, nil
 	}
 
 	// Providers are processed serially after the availability pass, so no lock is needed.
 	var discovered []database.DiscoveredUpsert
+	scannedSet := make(map[string]struct{})
 	// Per-provider errors are skipped so one bad provider does not prevent discovering the rest.
 	disabled := make(map[string]struct{})
 	for _, name := range a.effectiveSettings(cfg).DisabledProviders {
@@ -1514,8 +1515,9 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 		if mbc, ok := p.(provider.MultiManagerBulkChecker); ok {
 			entries, err := mbc.InstalledByManager(ctx)
 			if err != nil {
-				return nil
+				continue
 			}
+			scannedSet[configProvider] = struct{}{}
 			for name, entry := range entries {
 				if _, ok := configuredNames[name]; ok {
 					continue
@@ -1547,6 +1549,7 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 				continue // best-effort: skip providers whose baseline can't be read/recorded
 			}
 		}
+		scannedSet[configProvider] = struct{}{}
 		for _, t := range installed {
 			if _, ok := configuredNames[t.Name]; ok {
 				continue // already in config; skip
@@ -1569,7 +1572,12 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 			})
 		}
 	}
-	return collapseSharedStoreDuplicates(discovered, ecosystemProviders)
+	scannedProviders := make([]string, 0, len(scannedSet))
+	for name := range scannedSet {
+		scannedProviders = append(scannedProviders, name)
+	}
+	sort.Strings(scannedProviders)
+	return collapseSharedStoreDuplicates(discovered, ecosystemProviders), scannedProviders
 }
 
 func systemInventoryBaselineStateKey(providerName string) string {
