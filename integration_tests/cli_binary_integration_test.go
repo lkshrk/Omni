@@ -121,6 +121,12 @@ func TestCLIBinaryDotsSyncResolvesConflictInsideSandbox(t *testing.T) {
 	initDotsRepo(t, repo, env)
 	writeIntegrationFile(t, source, "managed = true\n")
 	writeIntegrationFile(t, target, "managed = false\n")
+	conflictTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, path := range []string{source, target} {
+		if err := os.Chtimes(path, conflictTime, conflictTime); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := config.Save(configPath, &config.RootConfig{
 		Version:  config.CurrentVersion,
 		Settings: config.Settings{DotsRepo: repo},
