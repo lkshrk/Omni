@@ -37,8 +37,17 @@ type fallbackEditorField struct {
 type fallbackEditorState struct {
 	fields         map[fallbackEditorFieldID]string
 	originalFields map[fallbackEditorFieldID]string
+	origin         fallbackEditorOrigin
 	cursor         int
 }
+
+type fallbackEditorOrigin uint8
+
+const (
+	fallbackEditorOriginRepoOnly fallbackEditorOrigin = iota
+	fallbackEditorOriginResolved
+	fallbackEditorOriginManual
+)
 
 var fallbackEditorFields = []fallbackEditorField{
 	{id: fallbackFieldRepo, label: "repo", placeholder: "owner/repo"},
@@ -137,7 +146,7 @@ func (m *Model) doSaveFallbackEditor(name string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	fallback := m.fallbackSpecFromEditor()
 	repo := strings.TrimSpace(m.fallbackEditor.fields[fallbackFieldRepo])
-	resolve := !fallbackEditorAdvancedFieldsChanged(name, m.fallbackEditor)
+	resolve := fallbackEditorShouldResolve(name, m.fallbackEditor)
 	return func() tea.Msg {
 		var err error
 		if resolve {
@@ -279,8 +288,17 @@ func fallbackEditorStateForTool(t *app.ToolView, fallbacks map[string]app.Fallba
 	state.fields[fallbackFieldUpgrade] = fallback.Commands.Upgrade
 	state.fields[fallbackFieldVersion] = fallback.Commands.Version
 	state.fields[fallbackFieldReleaseChannel] = fallback.ReleaseChannel
+	if fallback.Recipe.AssetDownloadURL != "" && fallback.Recipe.TagName != "" {
+		state.origin = fallbackEditorOriginResolved
+	} else {
+		state.origin = fallbackEditorOriginManual
+	}
 	state.originalFields = cloneFallbackEditorFields(state.fields)
 	return state
+}
+
+func fallbackEditorShouldResolve(name string, state fallbackEditorState) bool {
+	return state.origin != fallbackEditorOriginManual && !fallbackEditorAdvancedFieldsChanged(name, state)
 }
 
 func fallbackEditorAdvancedFieldsChanged(name string, state fallbackEditorState) bool {
