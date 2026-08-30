@@ -31,7 +31,7 @@ func TestTUIAgentsWrongVersionRepairsAutomatically(t *testing.T) {
 
 func TestTUIAgentsMissingLockSyncsAutomatically(t *testing.T) {
 	fixture := newAgentsReadinessPTYFixture(t, "0.29.0", false)
-	writeIntegrationFile(t, filepath.Join(fixture.home, ".apm", "apm.yml"), "name: live\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm: []\n")
+	writeIntegrationFile(t, filepath.Join(fixture.home, ".apm", "apm.yml"), "name: live\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm:\n    - git: https://github.com/acme/tool.git\n")
 	runTUI(t, fixture.bin, fixture.root, fixture.env, []string{"--config", fixture.configPath, "--cache-dir", fixture.cache}, func(term *vttest.Terminal) string {
 		openAgentsReadinessTab(t, term)
 		return waitForRequiredScreen(t, term, 15*time.Second, func(string) bool {

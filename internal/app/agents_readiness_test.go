@@ -206,7 +206,7 @@ func TestAgentsOutdatedDoesNotInvokeAPMWithoutCompleteWorkspace(t *testing.T) {
 	}{
 		{name: "missing"},
 		{name: "live incomplete", setup: func(t *testing.T, home string) {
-			writeAgentsWorkspaceFile(t, home, "apm.yml", "name: live\n")
+			writeAgentsWorkspaceFile(t, home, "apm.yml", "name: live\ndependencies:\n  apm:\n    - git: https://github.com/acme/tool.git\n")
 		}},
 		{name: "lock only", setup: func(t *testing.T, home string) {
 			writeAgentsWorkspaceFile(t, home, "apm.lock.yaml", "dependencies: []\n")
