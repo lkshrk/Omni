@@ -18,6 +18,31 @@ const apmPackagePin = "git+https://github.com/microsoft/apm.git@b75a02b1cfab3ffa
 
 const apmVersionFixHint = "run 'omni doctor --fix' to upgrade apm-cli"
 
+type APMRepairKind string
+
+const (
+	APMRepairMissing            APMRepairKind = "missing"
+	APMRepairVersionMismatch    APMRepairKind = "version-mismatch"
+	APMRepairVersionUnparseable APMRepairKind = "version-unparseable"
+)
+
+// APMRepairError marks failures Omni can repair without hiding execution, context, or permission errors.
+type APMRepairError struct {
+	Kind      APMRepairKind
+	Installed string
+	Required  string
+	Err       error
+}
+
+func (e *APMRepairError) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return "APM needs repair"
+}
+
+func (e *APMRepairError) Unwrap() error { return e.Err }
+
 var apmVersionPattern = regexp.MustCompile(`(?:^|\s)(\d+\.\d+\.\d+(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?)(?:\s|$)`)
 
 // APMVersion reports the installed apm-cli version as a dotted triple.
@@ -35,7 +60,8 @@ func (a *App) APMVersion(ctx context.Context) (string, error) {
 	output := strings.TrimSpace(stdout + " " + stderr)
 	version := parseAPMVersion(output)
 	if version == "" {
-		return "", fmt.Errorf("apm --version reported no recognisable version: %q", output)
+		return "", &APMRepairError{Kind: APMRepairVersionUnparseable, Required: apmVersionPin,
+			Err: fmt.Errorf("apm --version reported no recognisable version: %q", output)}
 	}
 	return version, nil
 }
@@ -71,7 +97,8 @@ func (a *App) doctorAPMVersion(ctx context.Context, result *DoctorResult, _ *con
 
 func pinnedAPMError(version string, err error) error {
 	if err == nil && !apmVersionPinned(version) {
-		return fmt.Errorf("apm %s is unsupported; omni requires exactly %s: %s", version, apmVersionPin, apmVersionFixHint)
+		return &APMRepairError{Kind: APMRepairVersionMismatch, Installed: version, Required: apmVersionPin,
+			Err: fmt.Errorf("apm %s is unsupported; omni requires exactly %s: %s", version, apmVersionPin, apmVersionFixHint)}
 	}
 	return err
 }

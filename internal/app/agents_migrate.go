@@ -266,43 +266,10 @@ func (a *App) AgentsMigrateWrite(host, snapshotDir string) (string, error) {
 }
 
 func (a *App) agentsMigrate(host, snapshotDir string, write bool, writeTemplate func(string, []byte) (string, error)) (string, error) {
-	if host == "" {
-		return "", fmt.Errorf("host is required")
-	}
-	if snapshotDir == "" {
-		found, err := a.defaultSnapshotDir()
-		if err != nil {
-			return "", err
-		}
-		snapshotDir = found
-	}
-	decls, evidence, err := config.LegacyAgentsFromSnapshot(snapshotDir, host)
+	plan, rendered, err := a.planAgentsMigration(host, snapshotDir)
 	if err != nil {
 		return "", err
 	}
-	if a.StateDir == "" {
-		if err := a.resolveStateDir(); err != nil {
-			return "", err
-		}
-	}
-	plan, err := planAgentBundles(decls, evidence, a.StateDir)
-	if err != nil {
-		return "", err
-	}
-	manifest, cmds, err := renderAPMTemplatePlan(plan)
-	if err != nil {
-		return "", err
-	}
-	var out strings.Builder
-	out.WriteString(agentsMigrationMarker + "\n")
-	out.WriteString(manifest)
-	for _, cmd := range cmds {
-		out.WriteString("# " + cmd + "\n")
-	}
-	for _, suppressed := range plan.Suppressed {
-		out.WriteString("# suppressed: " + suppressed + "\n")
-	}
-	rendered := out.String()
 	if !write {
 		return rendered, nil
 	}
@@ -327,6 +294,47 @@ func (a *App) agentsMigrate(host, snapshotDir string, write bool, writeTemplate 
 		rendered += "# warning: " + warning + "\n"
 	}
 	return rendered, nil
+}
+
+func (a *App) planAgentsMigration(host, snapshotDir string) (agentBundlePlan, string, error) {
+	if host == "" {
+		return agentBundlePlan{}, "", fmt.Errorf("host is required")
+	}
+	if snapshotDir == "" {
+		found, err := a.defaultSnapshotDir()
+		if err != nil {
+			return agentBundlePlan{}, "", err
+		}
+		snapshotDir = found
+	}
+	decls, evidence, err := config.LegacyAgentsFromSnapshot(snapshotDir, host)
+	if err != nil {
+		return agentBundlePlan{}, "", err
+	}
+	if a.StateDir == "" {
+		if err := a.resolveStateDir(); err != nil {
+			return agentBundlePlan{}, "", err
+		}
+	}
+	plan, err := planAgentBundles(decls, evidence, a.StateDir)
+	if err != nil {
+		return agentBundlePlan{}, "", err
+	}
+	manifest, cmds, err := renderAPMTemplatePlan(plan)
+	if err != nil {
+		return agentBundlePlan{}, "", err
+	}
+	var out strings.Builder
+	out.WriteString(agentsMigrationMarker + "\n")
+	out.WriteString(manifest)
+	for _, cmd := range cmds {
+		out.WriteString("# " + cmd + "\n")
+	}
+	for _, suppressed := range plan.Suppressed {
+		out.WriteString("# suppressed: " + suppressed + "\n")
+	}
+	rendered := out.String()
+	return plan, rendered, nil
 }
 
 type agentsMigrationTemplateIdentity struct {
@@ -365,13 +373,17 @@ func inspectAgentsMigrationTemplate(path string) (agentsMigrationTemplateIdentit
 }
 
 func commitAgentMigration(templatePath, stateDir string, plan agentBundlePlan, prepared []preparedAgentBundleWrapper, identity agentsMigrationTemplateIdentity, rendered string, writeTemplate func(string, []byte) (string, error)) (string, error) {
-	_ = stateDir
-	_ = plan
 	lock, err := config.AcquireWriteLock(templatePath)
 	if err != nil {
 		return "", fmt.Errorf("lock agents migration: %w", err)
 	}
 	defer func() { _ = lock.Close() }()
+	return commitAgentMigrationLocked(templatePath, stateDir, plan, prepared, identity, rendered, writeTemplate)
+}
+
+func commitAgentMigrationLocked(templatePath, stateDir string, plan agentBundlePlan, prepared []preparedAgentBundleWrapper, identity agentsMigrationTemplateIdentity, rendered string, writeTemplate func(string, []byte) (string, error)) (string, error) {
+	_ = stateDir
+	_ = plan
 	current, err := inspectAgentsMigrationTemplate(templatePath)
 	if err != nil {
 		return "", err

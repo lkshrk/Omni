@@ -67,7 +67,8 @@ func (a *App) forgetAPMProbes() {
 }
 
 func errAPMNotInstalled() error {
-	return fmt.Errorf("%w: %s", apm.ErrNotInstalled, apm.InstallHint)
+	return &APMRepairError{Kind: APMRepairMissing, Required: apmVersionPin,
+		Err: fmt.Errorf("%w: %s", apm.ErrNotInstalled, apm.InstallHint)}
 }
 
 // RunAPM delegates lifecycle serialization and mutation safety to APM.
@@ -82,11 +83,12 @@ func (a *App) RunAPM(ctx context.Context, args ...string) (apm.Result, error) {
 }
 
 func (a *App) AgentsOutdated(ctx context.Context) (apm.OutdatedResult, error) {
-	if !a.APMAvailable() {
-		return apm.OutdatedResult{}, errAPMNotInstalled()
-	}
-	if err := a.requirePinnedAPM(ctx); err != nil {
+	readiness, err := a.AgentsReadiness(ctx)
+	if err != nil {
 		return apm.OutdatedResult{}, err
+	}
+	if readiness.State != AgentsReadinessReady {
+		return apm.OutdatedResult{}, nil
 	}
 	return a.APMClient(apm.Global).Outdated(ctx)
 }
