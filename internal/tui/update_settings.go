@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"slices"
+	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -123,7 +125,11 @@ func (m *Model) handleSettingsPriorityKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 			m.priorityDisabled[name] = !m.priorityDisabled[name]
 		}
 	case key.Matches(msg, m.keys.Confirm):
-		change := app.SetProviderLayout(m.priorityDraft, m.priorityDisabledList())
+		priority := m.priorityDraft
+		if slices.Equal(priority, m.providerPriorityDraft(m.settings.ProviderPriority)) {
+			priority = m.settings.ProviderPriority
+		}
+		change := app.SetProviderLayout(priority, m.priorityDisabledList())
 		if m.applySettingsChange(change) {
 			m.editingPriority = false
 			m.priorityHolding = false
@@ -139,11 +145,21 @@ func (m *Model) handleSettingsPriorityKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 // In the draft's own order, deterministic for persistence and tests.
 func (m Model) priorityDisabledList() []string {
 	out := make([]string, 0, len(m.priorityDisabled))
+	seen := make(map[string]bool, len(m.priorityDraft))
 	for _, name := range m.priorityDraft {
+		seen[name] = true
 		if m.priorityDisabled[name] {
 			out = append(out, name)
 		}
 	}
+	var extras []string
+	for name, disabled := range m.priorityDisabled {
+		if disabled && !seen[name] {
+			extras = append(extras, name)
+		}
+	}
+	sort.Strings(extras)
+	out = append(out, extras...)
 	return out
 }
 

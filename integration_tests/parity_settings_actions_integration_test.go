@@ -5,9 +5,13 @@ package integration_test
 import (
 	"context"
 	"path/filepath"
+	"slices"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/vttest"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -15,6 +19,39 @@ import (
 )
 
 var parityProviderPriority = []string{"brew", "apt", "apk", "dnf", "pacman", "zypper", "bun", "pnpm", "npm", "uv", "pip", "cargo"}
+
+func TestCLIAndTUISettingsProviderProduceEquivalentSemanticState(t *testing.T) {
+	bin := buildOmniBinary(t)
+	runParityFlow(t, bin, parityFlow{seed: seedParitySettingsActions, runCLI: func(t *testing.T, bin string, s *paritySandbox) {
+		runOmniCommand(t, bin, s.root, s.env, "--config", s.configPath, "--cache-dir", s.cache, "settings", "disable-provider", "brew")
+	}, runTUI: func(t *testing.T, bin string, s *paritySandbox) {
+		runParitySettingsTUI(t, bin, s, func(term *vttest.Terminal) {
+			sendTUIKey(term, uv.KeyHome)
+			writeTUIKeys(t, term, "j\r")
+			waitForRequiredScreen(t, term, 3*time.Second, screenHas("Provider Priority", "x on/off"), "TUI did not open provider editor")
+			writeTUIKeys(t, term, "x\r")
+		}, func(cfg *config.RootConfig) bool {
+			return slices.Contains(cfg.HostSettings["testhost"].DisabledProviders, "brew")
+		})
+	}, observe: observeParityProviderSettings, readTUI: readParitySettingsThroughCLI})
+}
+
+type parityProviderSettingsState struct {
+	Priority, Disabled string
+	Hosts, Groups      int
+}
+
+func observeParityProviderSettings(t *testing.T, sandbox *paritySandbox) any {
+	t.Helper()
+	cfg, err := config.Load(sandbox.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective := cfg.EffectiveSettings("testhost")
+	disabled := append([]string(nil), effective.DisabledProviders...)
+	sort.Strings(disabled)
+	return parityProviderSettingsState{Priority: strings.Join(effective.ProviderPriority, ","), Disabled: strings.Join(disabled, ","), Hosts: len(cfg.Hosts), Groups: len(cfg.Groups)}
+}
 
 func TestCLIAndTUISettingsResetProduceEquivalentSemanticState(t *testing.T) {
 	bin := buildOmniBinary(t)

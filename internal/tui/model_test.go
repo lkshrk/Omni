@@ -2706,12 +2706,20 @@ func TestModel_PriorityEditor_XTogglesDisables(t *testing.T) {
 	t.Parallel()
 
 	msgs := append(goToPriorityRow(), pressEnter(), pressRune('x'), pressEnter())
-	m := drive(baseModel(nil), msgs...)
+	base := baseModel(nil)
+	base.settings.DisabledProviders = []string{"system"}
+	m := drive(base, msgs...)
 	if m.editingPriority {
 		t.Fatal("editingPriority should be false after enter")
 	}
 	if !slices.Contains(m.settings.DisabledProviders, "brew") {
 		t.Errorf("DisabledProviders = %v, want 'brew' after x-toggle + confirm", m.settings.DisabledProviders)
+	}
+	if !slices.Contains(m.settings.DisabledProviders, "system") {
+		t.Errorf("DisabledProviders = %v, want existing non-priority provider preserved", m.settings.DisabledProviders)
+	}
+	if len(m.settings.ProviderPriority) != 0 {
+		t.Errorf("ProviderPriority = %v, want unchanged default order after x-toggle", m.settings.ProviderPriority)
 	}
 }
 

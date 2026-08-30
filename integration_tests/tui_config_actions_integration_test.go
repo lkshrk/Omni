@@ -23,7 +23,7 @@ func TestTUIGroupsCreatePersistsNewGroup(t *testing.T) {
 		writeTUIKeys(t, term, "created", "\r")
 		return waitForRequiredScreen(t, term, 8*time.Second, func(_ string) bool {
 			cfg, err := config.Load(configPath)
-			return err == nil && configHasGroup(cfg, "created") && slices.Contains(cfg.Hosts["testhost"], "created")
+			return err == nil && configHasGroup(cfg, "created") && !slices.Contains(cfg.Hosts["testhost"], "created")
 		}, "TUI did not persist the new group")
 	})
 }

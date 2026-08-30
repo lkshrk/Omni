@@ -63,8 +63,8 @@ func TestDoCreateGroup_Success(t *testing.T) {
 	if got.hostInfo == nil {
 		t.Fatal("hostInfo should be refreshed after group creation")
 	}
-	if groups := got.hostInfo.Hosts[shortHostname()].Groups; !slices.Contains(groups, "newgroup") {
-		t.Fatalf("new group should be assigned to current host, groups=%v", groups)
+	if groups := got.hostInfo.Hosts[shortHostname()].Groups; slices.Contains(groups, "newgroup") {
+		t.Fatalf("new empty group should not be assigned implicitly, groups=%v", groups)
 	}
 }
 

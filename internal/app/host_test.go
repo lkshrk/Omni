@@ -393,8 +393,8 @@ func TestHostGroupMutationsWithStateReturnUpdatedState(t *testing.T) {
 	if !slices.Contains(created.GroupNames, "newgroup") {
 		t.Fatalf("GroupNames = %v, want newgroup", created.GroupNames)
 	}
-	if got := created.HostInfo.Hosts["current"].Groups; !slices.Contains(got, "newgroup") {
-		t.Fatalf("current host groups = %v, want newgroup", got)
+	if got := created.HostInfo.Hosts["current"].Groups; slices.Contains(got, "newgroup") {
+		t.Fatalf("current host groups = %v, new empty group should be unassigned", got)
 	}
 
 	added, err := a.AddGroupToHostWithState(context.Background(), "other", "newgroup")

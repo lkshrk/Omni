@@ -3412,13 +3412,28 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI declares a group, while TUI creates it and assigns it to the active host; semantic outcomes currently differ.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUIGroupCreateProduceEquivalentSemanticState",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "parity": {
-        "semantic_state": "normalized group definition, active-host assignment, and tool/dot membership after groups.create",
+        "semantic_state": "normalized empty group definition with host assignments unchanged after groups.create",
         "rationale": "groups.create is mutable; parity compares resulting state, not adapter output."
       }
     },
@@ -4232,15 +4247,45 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "The TUI provider editor uses x to enable or disable a provider; provider-priority reorder evidence does not cover that mutation.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUISettingsProviderProduceEquivalentSemanticState",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI enable/disable and the TUI x-toggle do not yet have compared persisted provider state.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUISettingsProviderProduceEquivalentSemanticState",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "parity": {

@@ -765,10 +765,7 @@ func (a *App) CreateGroup(name string) error {
 
 func (a *App) CreateGroupWithState(ctx context.Context, name string) (*ToolGroupState, error) {
 	return a.toolGroupStateAfter(ctx, func() error {
-		if err := a.CreateGroup(name); err != nil {
-			return err
-		}
-		return a.AddGroupToHost(currentMachineGroupName(), name)
+		return a.CreateGroup(name)
 	})
 }
 

@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,24 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 )
+
+func TestCLIAndTUIGroupCreateProduceEquivalentSemanticState(t *testing.T) {
+	bin := buildOmniBinary(t)
+	runParityFlow(t, bin, parityFlow{seed: seedParityConfigActions, runCLI: runParityGroupCreateCLI, runTUI: runParityGroupCreateTUI, observe: observeParityConfig, readTUI: readParityGroupsThroughCLI})
+}
+
+func runParityGroupCreateCLI(t *testing.T, bin string, sandbox *paritySandbox) {
+	runOmniCommand(t, bin, sandbox.root, sandbox.env, "--config", sandbox.configPath, "--cache-dir", sandbox.cache, "groups", "create", "dev")
+}
+
+func runParityGroupCreateTUI(t *testing.T, bin string, sandbox *paritySandbox) {
+	runParityConfigTUI(t, bin, sandbox, func(term *vttest.Terminal) {
+		sendParityKeyUntil(t, term, "n", screenHas("New Group", "group name"), "TUI did not open group creation")
+		writeTUIKeys(t, term, "dev\r")
+	}, func(cfg *config.RootConfig) bool {
+		return configHasGroup(cfg, "dev") && !slices.Contains(cfg.Hosts["testhost"], "dev")
+	})
+}
 
 func TestCLIAndTUIGroupRenameProduceEquivalentSemanticState(t *testing.T) {
 	bin := buildOmniBinary(t)
