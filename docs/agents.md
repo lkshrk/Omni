@@ -131,6 +131,16 @@ any exact candidate has an unsupported source layout, the fixer removes none.
 
 ## Migrating a pre-APM host
 
+The TUI now completes safe migrations automatically: it installs or repairs the
+required APM build, captures live legacy declarations when necessary, writes
+the managed `apm.yml`, runs the global install, verifies the lockfile, removes
+retired config fields, and deletes the temporary migration snapshot after full
+success. Failed or partial runs retain their snapshot and resume on retry.
+Ambiguous or local bundle evidence is never guessed; Omni leaves it unchanged
+and asks for review.
+
+The commands below remain available for explicit preview and recovery.
+
 `omni agents migrate --host <name>` previews the apm.yml equivalent of the agent
 declarations a host had before the migration. Preview is the default;
 `--dry-run` is an explicit alias. Both print a deterministic plan, write
