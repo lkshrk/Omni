@@ -842,9 +842,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryToolsFinalMaintenanceFlows/tools.claim",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -1172,9 +1187,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryToolsFinalMaintenanceFlows/tools.reinstall_default",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -1385,9 +1415,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryToolsFinalMaintenanceFlows/tools.consolidate",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -1506,6 +1551,22 @@
                   "linux"
                 ]
               }
+            },
+            {
+              "type": "integration",
+              "role": "regression",
+              "reference": "Rejects insecure HTTP release metadata without changing fallback config.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryToolsFinalMaintenanceFlows/tools.fallback_unreachable_api",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
             }
           ]
         },
@@ -1519,6 +1580,22 @@
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
                 "test": "TestCLIBinaryToolsFinalMaintenanceFlows/tools.fallback",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "cli_blackbox",
+              "role": "regression",
+              "reference": "Rejects insecure HTTP release metadata without changing fallback config.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryToolsFinalMaintenanceFlows/tools.fallback_unreachable_api",
                 "tags": [
                   "integration"
                 ],
@@ -1683,9 +1760,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryToolsFinalMaintenanceFlows/tools.normalize_provider_overrides",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -1849,9 +1941,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryToolsFinalMaintenanceFlows/tools.import",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -1905,9 +2012,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryToolsFinalMaintenanceFlows/tools.switch_provider",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -3239,9 +3361,24 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUIDotsGitCommitProduceEquivalentSemanticState",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "parity": {

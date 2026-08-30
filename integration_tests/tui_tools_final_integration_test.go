@@ -49,12 +49,25 @@ func TestTUIToolsRefreshRechecksProviderState(t *testing.T) {
 	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
 		waitForRequiredScreen(t, term, 6*time.Second, screenHas("Dashboard", "Tools"), "TUI did not render main tabs")
 		writeTUIKeys(t, term, "\t")
-		waitForRequiredScreen(t, term, 8*time.Second, screenHas("omni-old-one", "omni-old-two"), "TUI did not render provider tools")
+		waitForRequiredScreen(t, term, 8*time.Second, screenHas("Updates", "omni-old-one", "omni-old-two"), "TUI did not render the initial outdated provider state")
 		before := exactLineCount(commandLog, "outdated --json=v2 --greedy")
-		writeTUIKeys(t, term, "R")
+		for _, name := range []string{"omni-old-one", "omni-old-two"} {
+			writeIntegrationFile(t, filepath.Join(providerState, name), "2.0.0\n")
+		}
+		deadline := time.Now().Add(8 * time.Second)
+		for exactLineCount(commandLog, "outdated --json=v2 --greedy") == before && time.Now().Before(deadline) {
+			writeTUIKeys(t, term, "R")
+			_, _ = waitForScreen(term, 500*time.Millisecond, func(_ string) bool {
+				return exactLineCount(commandLog, "outdated --json=v2 --greedy") > before
+			})
+		}
 		return waitForRequiredScreen(t, term, 12*time.Second, func(text string) bool {
-			return exactLineCount(commandLog, "outdated --json=v2 --greedy") > before && !strings.Contains(strings.ToLower(text), "refreshing")
-		}, "TUI refresh did not recheck provider state")
+			lower := strings.ToLower(text)
+			return exactLineCount(commandLog, "outdated --json=v2 --greedy") > before &&
+				bulkUpgradeCacheSettled(cache) &&
+				strings.Contains(text, "omni-old-one") && strings.Contains(text, "omni-old-two") && strings.Contains(text, "2.0.0") &&
+				!strings.Contains(text, "Updates ─") && !strings.Contains(lower, "update available") && !strings.Contains(lower, "refreshing")
+		}, "TUI refresh did not persist and render the changed provider state")
 	})
 }
 

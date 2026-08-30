@@ -4,6 +4,10 @@ package integration_test
 
 import (
 	"context"
+	"encoding/pem"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,51 +28,42 @@ func TestCLIBinaryToolsFinalMaintenanceFlows(t *testing.T) {
 		}
 	})
 
-	for _, flowID := range []string{"tools.claim", "tools.import"} {
-		flowID := flowID
-		t.Run(flowID, func(t *testing.T) {
-			root, _, cache, env, configPath := finalToolsFixture(t, &config.RootConfig{Hosts: map[string][]string{"testhost": {}}, Groups: []*config.GroupConfig{{Name: "testhost", Special: "host"}}})
-			state := filepath.Join(root, "brew-state")
-			env = finalToolsFakeBrew(t, root, env, state)
-			bin := buildOmniBinary(t)
-			name := "fixture"
-			if flowID == "tools.claim" {
-				runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "add", name, "--provider", "brew", "--group", "testhost")
-			} else {
-				name = "orphan"
-				writeIntegrationFile(t, filepath.Join(state, name), "")
-				runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "import", "--provider", "brew", "--group", "testhost")
-			}
-			cfg := loadFinalToolsConfig(t, configPath)
-			if _, ok := cfg.Tools[name]; !ok || !finalToolsGroupHas(cfg, "testhost", name) {
-				t.Fatalf("%s config state = tools %#v, groups %#v", flowID, cfg.Tools, cfg.Groups)
-			}
+	t.Run("tools.normalize_provider_overrides", func(t *testing.T) {
+		root, _, cache, env, configPath := finalToolsFixture(t, &config.RootConfig{
+			Tools:  map[string]config.ToolSpec{"fixture": {Providers: []config.ToolInstallSpec{{Provider: "brew", Package: "fixture-cli"}}}},
+			Hosts:  map[string][]string{"testhost": {}},
+			Groups: []*config.GroupConfig{{Name: "testhost", Special: "host", Tools: []config.ToolEntry{{Name: "fixture"}}}},
 		})
-	}
+		before, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := runOmniOutput(t, buildOmniBinary(t), root, env, "--yes", "--config", configPath, "--cache-dir", cache, "tools", "normalize", "--default-overrides")
+		spec := loadFinalToolsConfig(t, configPath).Tools["fixture"]
+		after, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out, "No default provider overrides to normalize") || string(after) != string(before) || len(spec.Providers) != 1 {
+			t.Fatalf("idempotent normalize = spec %#v\n%s", spec, out)
+		}
+	})
 
-	for _, flowID := range []string{"tools.reinstall_default", "tools.switch_provider"} {
-		flowID := flowID
-		t.Run(flowID, func(t *testing.T) {
-			root, _, cache, env, configPath := finalToolsFixture(t, &config.RootConfig{Hosts: map[string][]string{"testhost": {}}, Groups: []*config.GroupConfig{{Name: "testhost", Special: "host"}}})
-			env = finalToolsFakePythonManagers(t, root, env)
-			bin := buildOmniBinary(t)
-			runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "set", "black", "--provider", "pip")
-			runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "groups", "move-tool", "testhost", "black")
-			runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "install", "black", "--provider", "pip")
-			if flowID == "tools.reinstall_default" {
-				runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "set", "black", "--provider", "uv")
-				runOmniCommand(t, bin, root, env, "--yes", "--config", configPath, "--cache-dir", cache, "tools", "reinstall", "black", "--reinstall-default")
-			} else {
-				runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "reinstall", "black", "--from", "pip", "--to", "uv")
-			}
-			if _, err := os.Stat(filepath.Join(cache, "fake-uv", "black")); err != nil {
-				t.Fatalf("%s did not install uv state: %v", flowID, err)
-			}
-			if _, err := os.Stat(filepath.Join(cache, "fake-pip", "black")); !os.IsNotExist(err) {
-				t.Fatalf("%s retained pip state: %v", flowID, err)
-			}
-		})
-	}
+	t.Run("tools.consolidate", func(t *testing.T) {
+		root, _, cache, env, configPath := finalToolsFixture(t, &config.RootConfig{Hosts: map[string][]string{"testhost": {}}, Groups: []*config.GroupConfig{{Name: "testhost", Special: "host"}}})
+		binDir := filepath.Join(root, "bin")
+		writeExecutable(t, filepath.Join(binDir, "pnpm"), "#!/bin/sh\n[ \"${1:-}\" = \"--version\" ] && echo 9.0.0\n")
+		env = replaceIntegrationEnv(env, "PATH", binDir+string(os.PathListSeparator)+integrationEnvValue(env, "PATH"))
+		runOmniCommand(t, buildOmniBinary(t), root, env, "--config", configPath, "--cache-dir", cache, "tools", "consolidate", "node", "pnpm")
+		if got := loadFinalToolsConfig(t, configPath).HostSettings["testhost"].ProviderPriority; !strings.Contains(strings.Join(got, ","), "pnpm") {
+			t.Fatalf("node manager priority = %#v", got)
+		}
+	})
+
+	t.Run("tools.claim", func(t *testing.T) { runFinalToolsBrewMutation(t, false) })
+	t.Run("tools.import", func(t *testing.T) { runFinalToolsBrewMutation(t, true) })
+	t.Run("tools.reinstall_default", func(t *testing.T) { runFinalToolsPythonMutation(t, true) })
+	t.Run("tools.switch_provider", func(t *testing.T) { runFinalToolsPythonMutation(t, false) })
 
 	t.Run("tools.migrate_nvm", func(t *testing.T) {
 		root, home, cache, env, configPath := finalToolsFixture(t, &config.RootConfig{
@@ -111,6 +106,29 @@ func TestCLIBinaryToolsFinalMaintenanceFlows(t *testing.T) {
 
 	t.Run("tools.fallback", func(t *testing.T) {
 		root, _, cache, env, configPath := finalToolsFixture(t, &config.RootConfig{Tools: map[string]config.ToolSpec{"fixture": {Providers: []config.ToolInstallSpec{{Provider: "apt"}}}}, Hosts: map[string][]string{"testhost": {}}, Groups: []*config.GroupConfig{{Name: "testhost", Special: "host", Tools: []config.ToolEntry{{Name: "fixture"}}}}})
+		var server *httptest.Server
+		server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/releases/latest") {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"id":1,"tag_name":"v1.0.0","published_at":"2026-08-30T00:00:00Z","assets":[{"id":2,"name":"fixture_1.0_linux_x86_64.tar.gz","browser_download_url":%q},{"id":3,"name":"fixture_1.0_linux_aarch64.tar.gz","browser_download_url":%q}]}`, server.URL+"/fixture-amd64", server.URL+"/fixture-arm64")
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		t.Cleanup(server.Close)
+		certPath := filepath.Join(root, "github-test-ca.pem")
+		cert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+		writeIntegrationFile(t, certPath, string(cert))
+		env = append(env, "OMNI_GITHUB_API_BASE="+server.URL, "SSL_CERT_FILE="+certPath)
+		runOmniCommand(t, buildOmniBinary(t), root, env, "--config", configPath, "--cache-dir", cache, "tools", "fallback", "fixture", "--from-github", "owner/repo")
+		fallback := loadFinalToolsConfig(t, configPath).Tools["fixture"].Fallback
+		if fallback == nil || fallback.Source.Owner != "owner" || fallback.Source.Repo != "repo" || fallback.Recipe.AssetDownloadURL == "" {
+			t.Fatalf("persisted fallback = %#v", fallback)
+		}
+	})
+
+	t.Run("tools.fallback_unreachable_api", func(t *testing.T) {
+		root, _, cache, env, configPath := finalToolsFixture(t, &config.RootConfig{Tools: map[string]config.ToolSpec{"fixture": {Providers: []config.ToolInstallSpec{{Provider: "apt"}}}}, Hosts: map[string][]string{"testhost": {}}, Groups: []*config.GroupConfig{{Name: "testhost", Special: "host", Tools: []config.ToolEntry{{Name: "fixture"}}}}})
 		env = append(env, "OMNI_GITHUB_API_BASE=http://127.0.0.1:1")
 		out, err := runFinalToolsFailure(t, buildOmniBinary(t), root, env, "--config", configPath, "--cache-dir", cache, "tools", "fallback", "fixture", "--from-github", "owner/repo")
 		if err == nil || !strings.Contains(out, "/repos/owner/repo/releases/latest") || loadFinalToolsConfig(t, configPath).Tools["fixture"].Fallback != nil {
@@ -151,6 +169,48 @@ func finalToolsGroupHas(cfg *config.RootConfig, groupName, toolName string) bool
 		}
 	}
 	return false
+}
+
+func runFinalToolsBrewMutation(t *testing.T, importOnly bool) {
+	t.Helper()
+	root, _, cache, env, configPath := finalToolsFixture(t, &config.RootConfig{Hosts: map[string][]string{"testhost": {}}, Groups: []*config.GroupConfig{{Name: "testhost", Special: "host"}}})
+	state := filepath.Join(root, "brew-state")
+	env = finalToolsFakeBrew(t, root, env, state)
+	bin := buildOmniBinary(t)
+	name := "fixture"
+	if importOnly {
+		name = "orphan"
+		writeIntegrationFile(t, filepath.Join(state, name), "")
+		runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "import", "--provider", "brew", "--group", "testhost")
+	} else {
+		runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "add", name, "--provider", "brew", "--group", "testhost")
+	}
+	cfg := loadFinalToolsConfig(t, configPath)
+	if _, ok := cfg.Tools[name]; !ok || !finalToolsGroupHas(cfg, "testhost", name) {
+		t.Fatalf("brew mutation config state = tools %#v, groups %#v", cfg.Tools, cfg.Groups)
+	}
+}
+
+func runFinalToolsPythonMutation(t *testing.T, reinstallDefault bool) {
+	t.Helper()
+	root, _, cache, env, configPath := finalToolsFixture(t, &config.RootConfig{Hosts: map[string][]string{"testhost": {}}, Groups: []*config.GroupConfig{{Name: "testhost", Special: "host"}}})
+	env = finalToolsFakePythonManagers(t, root, env)
+	bin := buildOmniBinary(t)
+	runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "set", "black", "--provider", "pip")
+	runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "groups", "move-tool", "testhost", "black")
+	runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "install", "black", "--provider", "pip")
+	if reinstallDefault {
+		runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "set", "black", "--provider", "uv")
+		runOmniCommand(t, bin, root, env, "--yes", "--config", configPath, "--cache-dir", cache, "tools", "reinstall", "black", "--reinstall-default")
+	} else {
+		runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "reinstall", "black", "--from", "pip", "--to", "uv")
+	}
+	if _, err := os.Stat(filepath.Join(cache, "fake-uv", "black")); err != nil {
+		t.Fatalf("python mutation did not install uv state: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cache, "fake-pip", "black")); !os.IsNotExist(err) {
+		t.Fatalf("python mutation retained pip state: %v", err)
+	}
 }
 
 func finalToolsFakeBrew(t *testing.T, root string, env []string, state string) []string {
