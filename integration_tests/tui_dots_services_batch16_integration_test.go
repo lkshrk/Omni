@@ -30,7 +30,17 @@ func TestTUIDotsReminderInstallsSandboxService(t *testing.T) {
 		return waitForRequiredScreen(t, term, 10*time.Second, func(string) bool {
 			_, serviceErr := os.Stat(service)
 			_, timerErr := os.Stat(timer)
-			return serviceErr == nil && timerErr == nil
+			raw, logErr := os.ReadFile(systemctlLog)
+			if serviceErr != nil || timerErr != nil || logErr != nil {
+				return false
+			}
+			for _, command := range strings.Split(string(raw), "\n") {
+				command = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(command), "--user "))
+				if command == "enable --now omni-dots-reminder.timer" {
+					return true
+				}
+			}
+			return false
 		}, "TUI did not install reminder service files")
 	})
 	assertFileContains(t, systemctlLog, "enable --now omni-dots-reminder.timer")
