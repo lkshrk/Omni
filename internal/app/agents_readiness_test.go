@@ -431,3 +431,186 @@ func assertNoPublishedMigrationWrappers(t *testing.T, stateDir string) {
 		t.Fatalf("published migration wrappers = %v", paths)
 	}
 }
+
+type onboardingExecutor struct {
+	available map[string]bool
+	version   string
+	home      string
+	calls     []executor.MockCall
+}
+
+func (e *onboardingExecutor) CommandAvailable(name string) bool { return e.available[name] }
+
+func (e *onboardingExecutor) Run(ctx context.Context, name string, args ...string) (string, string, error) {
+	return e.run(ctx, "", nil, name, args...)
+}
+
+func (e *onboardingExecutor) RunEnv(ctx context.Context, env []string, name string, args ...string) (string, string, error) {
+	return e.run(ctx, "", env, name, args...)
+}
+
+func (e *onboardingExecutor) RunDir(ctx context.Context, dir, name string, args ...string) (string, string, error) {
+	return e.run(ctx, dir, nil, name, args...)
+}
+
+func (e *onboardingExecutor) RunDirEnv(ctx context.Context, dir string, env []string, name string, args ...string) (string, string, error) {
+	return e.run(ctx, dir, env, name, args...)
+}
+
+func (e *onboardingExecutor) run(ctx context.Context, dir string, env []string, name string, args ...string) (string, string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", "", err
+	}
+	e.calls = append(e.calls, executor.MockCall{Name: name, Args: append([]string(nil), args...), Dir: dir, Env: append([]string(nil), env...)})
+	if name == "uv" {
+		e.version = apmVersionPin
+		e.available["apm"] = true
+		return "", "", nil
+	}
+	if name == "apm" && len(args) == 1 && args[0] == "--version" {
+		return "APM CLI version " + e.version + "\n", "", nil
+	}
+	if name == "apm" && len(args) >= 2 && args[0] == "install" {
+		if err := os.MkdirAll(filepath.Join(e.home, ".apm"), 0o700); err != nil {
+			return "", "", err
+		}
+		if err := os.WriteFile(filepath.Join(e.home, ".apm", "apm.lock.yaml"), []byte("dependencies: []\n"), 0o600); err != nil {
+			return "", "", err
+		}
+	}
+	return "", "", nil
+}
+
+func newAgentsStateMachineApp(t *testing.T, version string) (*App, *onboardingExecutor, string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	configHome := filepath.Join(home, "config")
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("APPDATA", configHome)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	configPath := filepath.Join(configHome, "omni", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	exec := &onboardingExecutor{available: map[string]bool{"apm": true, "uv": true}, version: version, home: home}
+	a := New(configPath)
+	a.StateDir = filepath.Join(home, "state", "omni")
+	a.SetFallbackExecutor(exec)
+	return a, exec, home
+}
+
+func TestEnsureAgentsReadyStagesCleanConfigAndIsIdempotent(t *testing.T) {
+	a, exec, _ := newAgentsStateMachineApp(t, apmVersionPin)
+
+	for i := 0; i < 2; i++ {
+		result, err := a.EnsureAgentsReady(t.Context(), "host")
+		if err != nil || result.Readiness.State != AgentsReadinessReady {
+			t.Fatalf("run %d: result=%+v err=%v", i+1, result, err)
+		}
+	}
+	var installs int
+	for _, call := range exec.calls {
+		if call.Name == "apm" && len(call.Args) > 0 && call.Args[0] == "install" {
+			installs++
+		}
+	}
+	if installs != 1 {
+		t.Fatalf("install calls = %d, want one: %+v", installs, exec.calls)
+	}
+}
+
+func TestEnsureAgentsReadyRepairsWrongAPMThenSyncsTemplate(t *testing.T) {
+	a, exec, _ := newAgentsStateMachineApp(t, "0.28.0")
+	template, err := AgentsTemplatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, template, agentsMigrationMarker+"\nname: migrated\nversion: 1.0.0\n")
+
+	result, err := a.EnsureAgentsReady(t.Context(), "host")
+	if err != nil || result.Readiness.State != AgentsReadinessReady {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if exec.version != apmVersionPin {
+		t.Fatalf("APM version = %q, want %q", exec.version, apmVersionPin)
+	}
+	if len(exec.calls) < 4 || exec.calls[1].Name != "uv" {
+		t.Fatalf("calls = %+v", exec.calls)
+	}
+}
+
+func TestEnsureAgentsReadyInstallsMissingAPM(t *testing.T) {
+	a, exec, _ := newAgentsStateMachineApp(t, "")
+	exec.available["apm"] = false
+
+	result, err := a.EnsureAgentsReady(t.Context(), "host")
+	if err != nil || result.Readiness.State != AgentsReadinessReady {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if len(exec.calls) == 0 || exec.calls[0].Name != "uv" || exec.version != apmVersionPin {
+		t.Fatalf("calls=%+v version=%q", exec.calls, exec.version)
+	}
+}
+
+func TestEnsureAgentsReadyCapturesLiveLegacyConfigMigratesAndCleans(t *testing.T) {
+	a, exec, _ := newAgentsStateMachineApp(t, apmVersionPin)
+	legacy := `{
+  "agents": {"mcp_servers": [{"name":"independent","transport":"stdio","command":"independent-mcp"}]},
+  "groups": [{"name":"g","mcp_servers":["independent"]}],
+  "hosts": {"host":["g"]}
+}`
+	if err := os.WriteFile(a.ConfigPath, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 2; i++ {
+		result, err := a.EnsureAgentsReady(t.Context(), "host")
+		if err != nil || result.Readiness.State != AgentsReadinessReady {
+			t.Fatalf("run %d: result=%+v err=%v", i+1, result, err)
+		}
+	}
+	raw, err := os.ReadFile(a.ConfigPath)
+	if err != nil || strings.Contains(string(raw), `"agents"`) || strings.Contains(string(raw), `"mcp_servers"`) {
+		t.Fatalf("cleaned config = %s, err=%v", raw, err)
+	}
+	snapshots, err := filepath.Glob(filepath.Join(filepath.Dir(a.ConfigPath), snapshotGlob))
+	if err != nil || len(snapshots) != 1 {
+		t.Fatalf("snapshots=%v err=%v", snapshots, err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(snapshots[0], 0o700) })
+	var installs int
+	for _, call := range exec.calls {
+		if call.Name == "apm" && len(call.Args) > 0 && call.Args[0] == "install" {
+			installs++
+		}
+	}
+	if installs != 1 {
+		t.Fatalf("install calls = %d, want one", installs)
+	}
+}
+
+func TestCompleteAgentsOnboardingLeavesAmbiguousSnapshotsUntouched(t *testing.T) {
+	a, exec, _ := newAgentsStateMachineApp(t, apmVersionPin)
+	for _, suffix := range []string{"one", "two"} {
+		if err := os.Mkdir(filepath.Join(filepath.Dir(a.ConfigPath), ".omni-apm-migration-backup-"+suffix), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := a.CompleteAgentsOnboarding(t.Context(), "host")
+	if err != nil || result.Readiness.State != AgentsReadinessEmpty || len(result.Readiness.Details) == 0 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if len(exec.calls) != 1 || exec.calls[0].Name != "apm" {
+		t.Fatalf("calls = %+v", exec.calls)
+	}
+	template, _ := AgentsTemplatePath()
+	if _, err := os.Stat(template); !os.IsNotExist(err) {
+		t.Fatalf("ambiguous onboarding wrote template: %v", err)
+	}
+}

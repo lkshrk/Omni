@@ -46,6 +46,140 @@ type AgentsOnboardingResult struct {
 	AutoStaged bool
 }
 
+// EnsureAgentsReady repairs APM and completes any safe, unambiguous onboarding work.
+func (a *App) EnsureAgentsReady(ctx context.Context, host string) (AgentsOnboardingResult, error) {
+	if _, err := a.FixMissingAPM(ctx, false); err != nil {
+		return AgentsOnboardingResult{}, err
+	}
+	a.seedPinnedAPM(apmVersionPin, nil)
+	return a.CompleteAgentsOnboarding(ctx, host)
+}
+
+// CompleteAgentsOnboarding advances the current APM workspace to Ready without
+// mutating ambiguous or invalid state.
+func (a *App) CompleteAgentsOnboarding(ctx context.Context, host string) (AgentsOnboardingResult, error) {
+	readiness, err := a.AgentsReadiness(ctx)
+	if err != nil {
+		return AgentsOnboardingResult{}, err
+	}
+	result := AgentsOnboardingResult{Readiness: readiness}
+	switch readiness.State {
+	case AgentsReadinessReady:
+		return a.finishAgentsOnboarding(result)
+	case AgentsReadinessLockOnly, AgentsReadinessInvalid:
+		return result, nil
+	case AgentsReadinessEmpty:
+		result, err = a.prepareAgentsOnboarding(ctx, host)
+		if err != nil || result.Readiness.State == AgentsReadinessEmpty {
+			return result, err
+		}
+	}
+
+	if result.Readiness.State == AgentsReadinessTemplateOnly || result.Readiness.State == AgentsReadinessLiveIncomplete {
+		if _, err := a.AgentsSyncAll(ctx, AgentsSyncAllOptions{ForceTemplate: true}); err != nil {
+			return result, err
+		}
+	}
+	result.Readiness, err = a.AgentsReadiness(ctx)
+	if err != nil {
+		return result, err
+	}
+	if result.Readiness.State != AgentsReadinessReady {
+		result.Readiness.Details = append(result.Readiness.Details, "APM onboarding did not produce a complete manifest and lockfile")
+		return result, nil
+	}
+	return a.finishAgentsOnboarding(result)
+}
+
+func (a *App) finishAgentsOnboarding(result AgentsOnboardingResult) (AgentsOnboardingResult, error) {
+	hasLegacy, err := config.HasRemovedAgentConfig(a.ConfigPath)
+	if err != nil || !hasLegacy {
+		return result, err
+	}
+	snapshots, err := a.defaultSnapshotDirs()
+	if err != nil {
+		return result, err
+	}
+	if len(snapshots) > 1 {
+		result.Readiness.Details = []string{fmt.Sprintf("%d migration snapshots found; keep one before legacy config cleanup", len(snapshots))}
+		return result, nil
+	}
+	if len(snapshots) == 0 {
+		if _, err := config.CaptureLegacyAgentsSnapshot(a.ConfigPath); err != nil {
+			return result, err
+		}
+	}
+	return result, config.CleanupLegacyAgentsConfig(a.ConfigPath)
+}
+
+func (a *App) prepareAgentsOnboarding(ctx context.Context, host string) (AgentsOnboardingResult, error) {
+	snapshots, err := a.defaultSnapshotDirs()
+	if err != nil {
+		return AgentsOnboardingResult{}, err
+	}
+	if len(snapshots) > 1 {
+		readiness, inspectErr := inspectAgentsReadiness()
+		readiness.Details = []string{fmt.Sprintf("%d migration snapshots found; keep one or migrate explicitly with --snapshot", len(snapshots))}
+		return AgentsOnboardingResult{Readiness: readiness}, inspectErr
+	}
+	if len(snapshots) == 1 {
+		return a.AgentsPrepareOnboarding(ctx, host)
+	}
+	hasLegacy, err := config.HasRemovedAgentConfig(a.ConfigPath)
+	if err != nil {
+		return AgentsOnboardingResult{}, err
+	}
+	if hasLegacy {
+		if _, err := config.CaptureLegacyAgentsSnapshot(a.ConfigPath); err != nil {
+			return AgentsOnboardingResult{}, err
+		}
+		return a.AgentsPrepareOnboarding(ctx, host)
+	}
+	return a.stageEmptyAgentsOnboarding(ctx)
+}
+
+func (a *App) defaultSnapshotDirs() ([]string, error) {
+	if a.ConfigPath == "" {
+		return nil, fmt.Errorf("no config path")
+	}
+	resolved, err := filepath.EvalSymlinks(a.ConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve config path: %w", err)
+	}
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(resolved), snapshotGlob))
+	if err != nil {
+		return nil, err
+	}
+	return matches, nil
+}
+
+func (a *App) stageEmptyAgentsOnboarding(ctx context.Context) (AgentsOnboardingResult, error) {
+	manifest, _, err := renderAPMTemplatePlan(agentBundlePlan{})
+	if err != nil {
+		return AgentsOnboardingResult{}, err
+	}
+	template, err := AgentsTemplatePath()
+	if err != nil {
+		return AgentsOnboardingResult{}, err
+	}
+	lock, err := config.AcquireWriteLock(template)
+	if err != nil {
+		return AgentsOnboardingResult{}, fmt.Errorf("lock agents onboarding: %w", err)
+	}
+	defer func() { _ = lock.Close() }()
+
+	var readiness AgentsReadiness
+	err = apm.WithGlobalWorkspaceLock(ctx, func(lockCtx context.Context) error {
+		readiness, err = inspectAgentsReadiness()
+		if err != nil || readiness.State != AgentsReadinessEmpty {
+			return err
+		}
+		readiness, err = commitAgentsOnboardingLocked(lockCtx, a.StateDir, agentBundlePlan{}, nil, agentsMigrationMarker+"\n"+manifest)
+		return err
+	})
+	return AgentsOnboardingResult{Readiness: readiness, AutoStaged: readiness.State == AgentsReadinessTemplateOnly}, err
+}
+
 // AgentsReadiness probes the pinned APM contract before inspecting its workspace.
 func (a *App) AgentsReadiness(ctx context.Context) (AgentsReadiness, error) {
 	if !a.APMAvailable() {
