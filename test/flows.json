@@ -175,9 +175,18 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [{
+            "type": "tui_blackbox",
+            "role": "primary",
+            "selector": {
+              "package": "github.com/lkshrk/omni/integration_tests",
+              "test": "TestTUIToolsSyncPaletteMatchesCLIProviderState",
+              "tags": ["integration"],
+              "lane": "docker-realism",
+              "os": ["linux"]
+            }
+          }]
         },
         {
           "level": "parity",
@@ -3453,9 +3462,18 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [{
+            "type": "tui_blackbox",
+            "role": "primary",
+            "selector": {
+              "package": "github.com/lkshrk/omni/integration_tests",
+              "test": "TestTUIDotsPullPaletteMatchesRemoteState",
+              "tags": ["integration"],
+              "lane": "docker-realism",
+              "os": ["linux"]
+            }
+          }]
         },
         {
           "level": "parity",
@@ -3625,9 +3643,18 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [{
+            "type": "tui_blackbox",
+            "role": "primary",
+            "selector": {
+              "package": "github.com/lkshrk/omni/integration_tests",
+              "test": "TestTUIDotsPushPaletteMatchesRemoteState",
+              "tags": ["integration"],
+              "lane": "docker-realism",
+              "os": ["linux"]
+            }
+          }]
         },
         {
           "level": "parity",
