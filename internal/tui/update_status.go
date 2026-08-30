@@ -221,6 +221,10 @@ func (m *Model) runDashboardReconcilePlan(items []dashboardReconcilePlanItem, cm
 func (m *Model) startNextDashboardReconcileStep(cmds *[]tea.Cmd) {
 	for len(m.dashboardReconcileQueue) > 0 {
 		kind := m.dashboardReconcileQueue[0]
+		if kind == dashboardReconcilePlanUpgradeTools && statusReconcileToolPlanBusy(*m) {
+			m.dashboardReconcileCurrent = kind
+			return
+		}
 		m.dashboardReconcileQueue = m.dashboardReconcileQueue[1:]
 		if !m.dashboardReconcileStepActionable(kind) {
 			continue
@@ -255,7 +259,7 @@ func (m *Model) dashboardReconcileStepActionable(kind dashboardReconcilePlanKind
 	case dashboardReconcilePlanSyncTools:
 		return statusDashboardToolSyncActionable(*m)
 	case dashboardReconcilePlanUpgradeTools:
-		return len(m.upgradingKeys) == 0 && statusToolCounts(*m).Updates > 0
+		return statusDashboardUpgradeActionable(*m)
 	case dashboardReconcilePlanSyncAgents:
 		return statusDashboardPlanHasStep(*m, app.ReconcileStepSyncAgents)
 	case dashboardReconcilePlanSyncDots:

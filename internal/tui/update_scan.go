@@ -223,11 +223,16 @@ func (m *Model) handleOutdatedProvidersDoneMsg(msg outdatedProvidersDoneMsg) tea
 	}
 	m.settleToolRefresh()
 	m.finishSetupReloadIfIdle()
+	var cmds []tea.Cmd
 	if cmd := m.finishRefreshIssueIfIdle(); cmd != nil {
-		return cmd
+		cmds = append(cmds, cmd)
 	}
 	m.clearActivityStatusIfIdle()
-	return nil
+	if m.dashboardReconcileRunning && m.dashboardReconcileCurrent == dashboardReconcilePlanUpgradeTools {
+		m.dashboardReconcileCurrent = ""
+		m.startNextDashboardReconcileStep(&cmds)
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) handleDiscoveredRefreshedMsg(msg discoveredRefreshedMsg) tea.Cmd {

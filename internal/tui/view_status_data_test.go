@@ -69,17 +69,24 @@ func TestStatusDashboardUpgradeActionable(t *testing.T) {
 	}
 }
 
-func TestAgentDashboardUsesOnlyAPMWorkspaceStatus(t *testing.T) {
+func TestAgentDashboardDerivesLifecycleCountsFromAPMRows(t *testing.T) {
 	t.Parallel()
-	m := baseModel(nil)
+	m := agentsSectionedModel(t)
 	m.apmOutput = "workspace healthy"
 
-	if got := statusAgentsCounts(m); got.OutOfSync() != 0 || got.Outdated() != 0 {
-		t.Fatalf("agent counts = %#v, want no native lifecycle counters", got)
+	if got := statusAgentsCounts(m); got.OutOfSync() != 2 || got.Outdated() != 0 {
+		t.Fatalf("agent counts = %#v, want two syncable package/service rows", got)
 	}
 	details := statusAgentsOverviewDetails(m, agentsDashboardViewFor(m))
 	if len(details) != 1 || !strings.Contains(details[0], "workspace healthy") {
 		t.Fatalf("agent details = %#v, want APM workspace output", details)
+	}
+}
+
+func TestDashboardReconcilePlansAgentSyncFromMissingRows(t *testing.T) {
+	m := agentsSectionedModel(t)
+	if !statusDashboardPlanHasStep(m, app.ReconcileStepSyncAgents) {
+		t.Fatal("dashboard reconcile omitted sync for missing APM rows")
 	}
 }
 

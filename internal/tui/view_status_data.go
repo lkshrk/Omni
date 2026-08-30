@@ -148,20 +148,55 @@ func statusReconcileToolPlanBusy(m Model) bool {
 		m.outdatedSnapshotRefreshing
 }
 
-type agentsDashCounts struct{}
-
-func (agentsDashCounts) OutOfSync() int { return 0 }
-func (agentsDashCounts) Outdated() int  { return 0 }
-
-type agentsDashboardView struct {
-	enabled bool
+type agentsDashCounts struct {
+	outOfSync int
+	outdated  int
 }
 
-func (agentsDashboardView) managed() int                          { return 0 }
-func agentsDashboardEnabled(Model) bool                           { return true }
-func agentsDashboardViewFor(Model) agentsDashboardView            { return agentsDashboardView{enabled: true} }
-func statusAgentsCounts(Model) agentsDashCounts                   { return agentsDashCounts{} }
-func statusAgentsOutdatedNames(Model) []string                    { return nil }
+func (c agentsDashCounts) OutOfSync() int { return c.outOfSync }
+func (c agentsDashCounts) Outdated() int  { return c.outdated }
+
+type agentsDashboardView struct {
+	enabled      bool
+	managedCount int
+}
+
+func (v agentsDashboardView) managed() int { return v.managedCount }
+func agentsDashboardEnabled(Model) bool    { return true }
+func agentsDashboardViewFor(m Model) agentsDashboardView {
+	return agentsDashboardView{enabled: true, managedCount: len(m.agentsRows) + len(m.agentsMCPRows) + len(m.agentsLSPRows)}
+}
+func statusAgentsCounts(m Model) agentsDashCounts {
+	counts := agentsDashCounts{}
+	for _, row := range m.agentsRows {
+		if agentsStatusNeedsSync(row.Status) {
+			counts.outOfSync++
+		}
+		if row.UpdateAvailable {
+			counts.outdated++
+		}
+	}
+	for _, rows := range [][]app.AgentsServiceRow{m.agentsMCPRows, m.agentsLSPRows} {
+		for _, row := range rows {
+			if agentsStatusNeedsSync(row.Status) {
+				counts.outOfSync++
+			}
+		}
+	}
+	return counts
+}
+func agentsStatusNeedsSync(status app.AgentsPackageStatus) bool {
+	return status == app.AgentsPackageMissing || status == app.AgentsPackageDrifted || status == app.AgentsPackageUnavailable
+}
+func statusAgentsOutdatedNames(m Model) []string {
+	var names []string
+	for _, row := range m.agentsRows {
+		if row.UpdateAvailable {
+			names = append(names, row.Name)
+		}
+	}
+	return names
+}
 func statusAgentsAttentionSummary(Model, agentsDashCounts) string { return "APM workspace" }
 func statusAgentsAttentionDetails(m Model, _ agentsDashCounts, _ agentsDashboardView) []string {
 	if m.apmErr != nil {
@@ -447,7 +482,7 @@ func dashboardReconcilePlanInput(m Model) app.DashboardReconcilePlanInput {
 		IgnoredTools:    dashboardIgnoredTools(m),
 		ToolsBusy:       statusReconcileToolPlanBusy(m),
 		UpgradeBusy:     len(m.upgradingKeys) > 0,
-		AgentsOutOfSync: 0,
+		AgentsOutOfSync: statusAgentsCounts(m).OutOfSync(),
 		AgentsBusy:      m.apmRunning,
 		DotsConfigured:  m.dotsSyncAvailCached.Configured,
 		DotsDisabled:    m.dotsSyncAvailCached.Reason == app.DotsSyncAvailabilityDisabled,

@@ -390,6 +390,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		} else {
 			cmds = append(cmds, setStatus(&m, "✓ "+msg.command, false))
 		}
+		m.continueDashboardReconcile(dashboardReconcilePlanSyncAgents, msg.err, &cmds)
 		cmds = append(cmds, m.refreshAgents()...)
 		if m.agentsRegistryMode {
 			cmds = append(cmds, m.doLoadAgentsRegistry())

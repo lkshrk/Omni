@@ -3031,15 +3031,35 @@ func TestStartDashboardDotsBackupDoesNotMoveHead(t *testing.T) {
 	}
 }
 
-func TestQueuedDashboardUpgradeSurvivesBackgroundSnapshotRefresh(t *testing.T) {
+func TestQueuedDashboardUpgradeWaitsForBackgroundSnapshot(t *testing.T) {
 	m := baseModel([]*app.ToolView{{Name: "fixture", Provider: "script", Installed: true, Outdated: true, Tracked: true}})
 	m.outdatedProviders = map[string]bool{"script": true}
 	m.outdatedSnapshotRefreshing = true
-	if statusDashboardUpgradeActionable(m) {
-		t.Fatal("fresh plan should wait for the background outdated snapshot")
+	m.dashboardReconcileRunning = true
+	m.dashboardReconcileQueue = []dashboardReconcilePlanKind{dashboardReconcilePlanUpgradeTools, dashboardReconcilePlanCommitDots}
+	var cmds []tea.Cmd
+	m.startNextDashboardReconcileStep(&cmds)
+	if len(cmds) != 0 || len(m.dashboardReconcileQueue) != 2 || len(m.upgradingKeys) != 0 {
+		t.Fatalf("queued upgrade started before snapshot settled: cmds=%d queue=%v upgrading=%v", len(cmds), m.dashboardReconcileQueue, m.upgradingKeys)
 	}
-	if !m.dashboardReconcileStepActionable(dashboardReconcilePlanUpgradeTools) {
-		t.Fatal("already-selected reconcile upgrade was dropped during background refresh")
+	m.outdatedProviders = nil
+	snapshot := []*app.ToolView{{Name: "fixture", Provider: "script", Installed: true, Outdated: true, Tracked: true, Version: "snapshot"}}
+	cmd := m.handleOutdatedProvidersDoneMsg(outdatedProvidersDoneMsg{tools: snapshot})
+	if cmd == nil || len(m.dashboardReconcileQueue) != 1 || !m.upgradingKeys["*"] {
+		t.Fatalf("queued upgrade did not resume after snapshot: cmd=%v queue=%v upgrading=%v", cmd != nil, m.dashboardReconcileQueue, m.upgradingKeys)
+	}
+	if len(m.allTools) != 1 || m.allTools[0].Version != "snapshot" {
+		t.Fatalf("snapshot was not applied before upgrade start: %#v", m.allTools)
+	}
+}
+
+func TestDashboardReconcileContinuesAfterAgentSync(t *testing.T) {
+	m := baseModel(nil)
+	m.dashboardReconcileRunning = true
+	m.dashboardReconcileCurrent = dashboardReconcilePlanSyncAgents
+	next := drive(m, apmCommandDoneMsg{command: "omni agents sync"})
+	if next.dashboardReconcileRunning || next.dashboardReconcileCurrent != "" {
+		t.Fatalf("agent sync did not finish reconcile: running=%v current=%q", next.dashboardReconcileRunning, next.dashboardReconcileCurrent)
 	}
 }
 

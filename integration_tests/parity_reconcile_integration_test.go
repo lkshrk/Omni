@@ -57,7 +57,12 @@ dependencies:
       transport: http
       url: https://example.invalid/parity
 `)
-	runCommand(t, sandbox.root, sandbox.env, "apm", "install", "-g")
+	realAPM, err := exec.LookPath("apm")
+	if err != nil || strings.ContainsAny(realAPM, "'\n") {
+		t.Fatalf("resolve real apm for reconcile fixture: %q, %v", realAPM, err)
+	}
+	apmLog := filepath.Join(sandbox.root, "apm.log")
+	writeExecutable(t, filepath.Join(sandbox.root, "bin", "apm"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '"+apmLog+"'\nexec '"+realAPM+"' \"$@\"\n")
 }
 
 func runReconcileParityCLI(t *testing.T, bin string, sandbox *paritySandbox) {
@@ -76,7 +81,7 @@ func runReconcileParityTUI(t *testing.T, bin string, sandbox *paritySandbox) {
 		for time.Now().Before(deadline) {
 			writeTUIKeys(t, term, "A")
 			plan, open := waitForScreen(term, 700*time.Millisecond, func(text string) bool { return strings.Contains(text, "Reconcile Plan") })
-			if open && screenHas("Upgrade tools", "Commit dotfiles")(plan) {
+			if open && screenHas("Upgrade tools", "Sync agents", "Commit dotfiles")(plan) {
 				writeTUIKeys(t, term, "\r")
 				completed, done := waitForScreen(term, 30*time.Second, func(text string) bool {
 					return reconcileParityDone(sandbox) && strings.Contains(strings.ToLower(text), "reconciled")
@@ -147,6 +152,7 @@ type reconcileParityState struct {
 		Outdated, Tracked              bool
 	}
 	APM    agentsSyncState
+	APMRun string
 	Dot    struct{ Kind, Target, Content, RepoTree, Status string }
 	Backup struct{ Tree, Subject string }
 }
@@ -177,6 +183,17 @@ func observeReconcileParity(t *testing.T, sandbox *paritySandbox) any {
 	}
 	repo := filepath.Join(sandbox.home, "dotfiles")
 	state := reconcileParityState{Config: normalizedParityConfig(t, sandbox), APM: observeAgentsSyncParity(t, sandbox)}
+	if raw, err := os.ReadFile(filepath.Join(sandbox.root, "apm.log")); err == nil {
+		for _, line := range strings.Split(string(raw), "\n") {
+			if strings.HasPrefix(line, "install -g") {
+				state.APMRun = line
+				break
+			}
+		}
+	}
+	if state.APMRun == "" {
+		t.Fatal("reconcile did not invoke APM install")
+	}
 	state.Tool.Installed, state.Tool.InstalledWith = tool.Installed, tool.InstalledWith
 	state.Tool.Version, state.Tool.Latest = reconcileNullString(tool.Version), reconcileNullString(tool.LatestVersion)
 	state.Tool.Outdated, state.Tool.Tracked = tool.Outdated, tool.Tracked
