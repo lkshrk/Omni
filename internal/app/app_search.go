@@ -2279,18 +2279,24 @@ func (a *App) trackedAliasMigrations(ctx context.Context, desired []*database.To
 		if a.knownEcosystemProvider(row.Provider) {
 			continue
 		}
-		providerEcosystem, providerOK := a.providerEcosystem(row.Provider)
-		ownerEcosystem, ownerOK := a.providerEcosystem(row.InstalledWith)
+		canonicalProvider := config.NormalizeConcreteProvider(row.Provider)
+		canonicalOwner := config.NormalizeConcreteProvider(row.InstalledWith)
+		if canonicalProvider == "" || canonicalOwner == "" {
+			continue
+		}
+		providerEcosystem, providerOK := a.providerEcosystem(canonicalProvider)
+		ownerEcosystem, ownerOK := a.providerEcosystem(canonicalOwner)
 		if !providerOK || !ownerOK || providerEcosystem != ownerEcosystem {
 			continue
 		}
 		for _, target := range desired {
-			if target == nil || target.Name != row.Name || target.Provider != row.InstalledWith {
+			if target == nil || target.Name != row.Name || target.Provider != canonicalOwner {
 				continue
 			}
 			migrations = append(migrations, database.TrackedAliasMigration{
-				From: database.ToolCacheKey{Name: row.Name, Provider: row.Provider, Package: row.Package},
-				To:   database.ToolCacheKey{Name: target.Name, Provider: target.Provider, Package: target.Package},
+				From:          database.ToolCacheKey{Name: row.Name, Provider: row.Provider, Package: row.Package},
+				To:            database.ToolCacheKey{Name: target.Name, Provider: target.Provider, Package: target.Package},
+				InstalledWith: canonicalOwner,
 			})
 			break
 		}

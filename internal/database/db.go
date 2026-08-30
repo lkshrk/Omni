@@ -52,7 +52,8 @@ type ToolCacheKey struct {
 }
 
 type TrackedAliasMigration struct {
-	From, To ToolCacheKey
+	From, To      ToolCacheKey
+	InstalledWith string
 }
 
 // ToolMetadata — Cached independently from install/config state.
@@ -1422,7 +1423,7 @@ func (db *DB) ReconcileTracked(ctx context.Context, desired []*ToolCache, migrat
 		}
 		desiredKeys[ToolCacheKey{Name: t.Name, Provider: t.Provider, Package: t.Package}] = struct{}{}
 	}
-	migrationBySource := make(map[ToolCacheKey]ToolCacheKey, len(migrations))
+	migrationBySource := make(map[ToolCacheKey]TrackedAliasMigration, len(migrations))
 	for _, migration := range migrations {
 		if err := requirePackage(migration.From.Name, migration.From.Provider, migration.From.Package); err != nil {
 			return err
@@ -1433,7 +1434,7 @@ func (db *DB) ReconcileTracked(ctx context.Context, desired []*ToolCache, migrat
 		if _, ok := desiredKeys[migration.To]; !ok {
 			return fmt.Errorf("tracked alias migration target %s/%s is not desired", migration.To.Provider, migration.To.Name)
 		}
-		migrationBySource[migration.From] = migration.To
+		migrationBySource[migration.From] = migration
 	}
 
 	// One transaction so the per-tool UPDATE loop costs one fsync rather than N.
@@ -1447,7 +1448,8 @@ func (db *DB) ReconcileTracked(ctx context.Context, desired []*ToolCache, migrat
 			if _, keep := desiredKeys[key]; keep {
 				continue
 			}
-			if target, migrate := migrationBySource[key]; migrate {
+			if migration, migrate := migrationBySource[key]; migrate {
+				target := migration.To
 				targetExists, err := tx.NewSelect().Model((*ToolCache)(nil)).
 					Where("name = ? AND provider = ? AND package = ?", target.Name, target.Provider, target.Package).
 					Exists(ctx)
@@ -1458,6 +1460,9 @@ func (db *DB) ReconcileTracked(ctx context.Context, desired []*ToolCache, migrat
 					migrated := *t
 					migrated.ID = 0
 					migrated.Name, migrated.Provider, migrated.Package = target.Name, target.Provider, target.Package
+					if installedWith := migration.InstalledWith; installedWith != "" {
+						migrated.InstalledWith = installedWith
+					}
 					migrated.Tracked = true
 					if _, err := tx.NewInsert().Model(&migrated).Exec(ctx); err != nil {
 						return fmt.Errorf("migrating tracked tool %s/%s to %s: %w", t.Provider, t.Name, target.Provider, err)

@@ -1200,7 +1200,7 @@ func TestReconcileTracked_MigratesStaleAliasIntoAbsentDesiredRow(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 	if err := db.Upsert(ctx, &database.ToolCache{
-		Name: "black", Provider: "uv", Package: "black", Installed: true, InstalledWith: "pip", Tracked: true,
+		Name: "black", Provider: "uv", Package: "black", Installed: true, InstalledWith: "pip3", Tracked: true,
 		Version: sql.NullString{String: "1.0.0", Valid: true}, Outdated: true,
 		LatestVersion: sql.NullString{String: "2.0.0", Valid: true},
 	}); err != nil {
@@ -1210,8 +1210,9 @@ func TestReconcileTracked_MigratesStaleAliasIntoAbsentDesiredRow(t *testing.T) {
 	if err := db.ReconcileTracked(ctx,
 		[]*database.ToolCache{{Name: "black", Provider: "pip", Package: "black"}},
 		database.TrackedAliasMigration{
-			From: database.ToolCacheKey{Name: "black", Provider: "uv", Package: "black"},
-			To:   database.ToolCacheKey{Name: "black", Provider: "pip", Package: "black"},
+			From:          database.ToolCacheKey{Name: "black", Provider: "uv", Package: "black"},
+			To:            database.ToolCacheKey{Name: "black", Provider: "pip", Package: "black"},
+			InstalledWith: "pip",
 		},
 	); err != nil {
 		t.Fatalf("ReconcileTracked: %v", err)

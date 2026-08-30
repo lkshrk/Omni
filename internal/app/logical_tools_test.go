@@ -83,6 +83,7 @@ func TestSetToolConvergesTrackedCacheAcrossStaleProviderHistories(t *testing.T) 
 	}{
 		{name: "missing tracked row", seedCanonical: true},
 		{name: "wrong-provider tracked alias", installed: true, installedWith: "pip"},
+		{name: "raw-manager tracked alias", installed: true, installedWith: "pip3"},
 	} {
 		t.Run(history.name, func(t *testing.T) {
 			a, cfgPath := newImportApp(t,
