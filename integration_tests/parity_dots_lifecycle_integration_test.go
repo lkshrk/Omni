@@ -124,7 +124,12 @@ func runDotsLifecycleEnableTUI(t *testing.T, bin string, sandbox *paritySandbox)
 	runDotsLifecycleSettingsTUI(t, bin, sandbox, func(term *vttest.Terminal) {
 		writeTUIKeys(t, term, "\r")
 	}, func(cfg *config.RootConfig) bool {
-		return !dotsLifecycleDisabled(cfg) && dotsLifecycleTargetIsSymlink(sandbox)
+		target := filepath.Join(sandbox.home, ".config", "nvim", "init.lua")
+		content, err := os.ReadFile(target)
+		staging, globErr := filepath.Glob(filepath.Join(sandbox.home, "dotfiles", ".omni-newer-*"))
+		return !dotsLifecycleDisabled(cfg) && dotsLifecycleTargetIsSymlink(sandbox) &&
+			err == nil && string(content) == "repo version\n" && globErr == nil && len(staging) == 0 &&
+			runCommandOutput(t, filepath.Join(sandbox.home, "dotfiles"), sandbox.env, "git", "status", "--porcelain=v1") == ""
 	})
 }
 
