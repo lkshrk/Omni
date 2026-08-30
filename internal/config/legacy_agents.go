@@ -8,10 +8,18 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
 const legacyAgentsSnapshotPrefix = ".omni-apm-migration-backup-"
+
+const (
+	maxLegacyEvidenceEntries = 4096
+	maxLegacyEvidenceDepth   = 32
+	maxLegacyEvidenceFile    = 64 << 20
+	maxLegacyEvidenceBytes   = 512 << 20
+)
 
 type legacyConfigFile struct {
 	path string
@@ -90,6 +98,7 @@ func CaptureLegacyAgentsSnapshot(configPath string) (snapshotDir string, retErr 
 	complete := false
 	defer func() {
 		if !complete {
+			_ = makeSnapshotWritable(snapshotDir)
 			_ = os.RemoveAll(snapshotDir)
 		}
 	}()
@@ -101,6 +110,29 @@ func CaptureLegacyAgentsSnapshot(configPath string) (snapshotDir string, retErr 
 			return "", fmt.Errorf("write legacy agents snapshot: %w", err)
 		}
 		paths[name] = file.path
+	}
+	evidencePaths, err := legacyAgentEvidencePaths(files)
+	if err != nil {
+		return "", err
+	}
+	var evidenceBytes int64
+	evidenceEntries := 0
+	for i, original := range evidencePaths {
+		name := fmt.Sprintf("evidence-%03d", i)
+		info, err := os.Lstat(original)
+		if err != nil {
+			return "", err
+		}
+		if info.Mode().IsRegular() && filepath.Base(original) == "marketplaces.json" {
+			name = "marketplaces.json"
+		}
+		if _, exists := paths[name]; exists {
+			return "", fmt.Errorf("legacy evidence snapshot name collision %q", name)
+		}
+		if err := copyLegacyEvidence(original, filepath.Join(snapshotDir, name), &evidenceEntries, &evidenceBytes); err != nil {
+			return "", fmt.Errorf("copy legacy agent evidence %q: %w", original, err)
+		}
+		paths[name] = original
 	}
 	manifest, err := json.MarshalIndent(paths, "", "  ")
 	if err != nil {
@@ -119,25 +151,32 @@ func CaptureLegacyAgentsSnapshot(configPath string) (snapshotDir string, retErr 
 			return "", fmt.Errorf("verify legacy config %q: %w", file.path, err)
 		}
 	}
-	if err := os.Chmod(snapshotDir, 0o500); err != nil {
+	if err := makeSnapshotReadOnly(snapshotDir); err != nil {
 		return "", fmt.Errorf("make legacy agents snapshot immutable: %w", err)
 	}
 	complete = true
 	return snapshotDir, nil
 }
 
-// CleanupLegacyAgentsConfig removes only the retired agent fields from the
-// resolved config and its includes. Every source is identity-checked before an
-// atomic replacement; callers must capture a snapshot first.
-func CleanupLegacyAgentsConfig(configPath string) (retErr error) {
+// CleanupLegacyAgentsConfig is retained only to fail closed for old callers.
+func CleanupLegacyAgentsConfig(configPath string) error {
+	return errors.New("legacy agents cleanup requires the snapshot returned by CaptureLegacyAgentsSnapshot")
+}
+
+// CleanupLegacyAgentsConfigFromSnapshot removes retired fields only when every
+// live config/include path and byte still matches the captured snapshot.
+func CleanupLegacyAgentsConfigFromSnapshot(configPath, snapshotDir string) (retErr error) {
 	lock, err := AcquireWriteLock(configPath)
 	if err != nil {
 		return err
 	}
 	defer func() { retErr = errors.Join(retErr, lock.Close()) }()
 
-	files, _, err := legacyConfigFiles(configPath)
+	files, root, err := legacyConfigFiles(configPath)
 	if err != nil {
+		return err
+	}
+	if err := verifyLegacyConfigSnapshot(root, snapshotDir, files); err != nil {
 		return err
 	}
 	type change struct {
@@ -166,6 +205,50 @@ func CleanupLegacyAgentsConfig(configPath string) (retErr error) {
 	for _, change := range changes {
 		if err := atomicWriteUnlocked(change.path, change.rendered); err != nil {
 			return fmt.Errorf("clean legacy config %q: %w", change.path, err)
+		}
+	}
+	return nil
+}
+
+func verifyLegacyConfigSnapshot(configRoot, snapshotDir string, files []legacyConfigFile) error {
+	snapshotRoot, err := filepath.Abs(snapshotDir)
+	if err != nil {
+		return err
+	}
+	if filepath.Dir(snapshotRoot) != filepath.Dir(configRoot) || !strings.HasPrefix(filepath.Base(snapshotRoot), legacyAgentsSnapshotPrefix) {
+		return errors.New("legacy agents snapshot is not beside the resolved config")
+	}
+	var budget int64
+	manifest, err := readSnapshotFile(snapshotRoot, "paths.json", &budget)
+	if err != nil {
+		return fmt.Errorf("read legacy agents snapshot paths: %w", err)
+	}
+	var paths map[string]string
+	if err := json.Unmarshal(manifest, &paths); err != nil {
+		return fmt.Errorf("parse legacy agents snapshot paths: %w", err)
+	}
+	expected := make(map[string][]byte)
+	for copied, original := range paths {
+		if !strings.HasPrefix(copied, snapshotConfigPrefix) {
+			continue
+		}
+		original = canonicalEvidencePath(original)
+		if _, exists := expected[original]; exists {
+			return fmt.Errorf("legacy agents snapshot repeats config path %q", original)
+		}
+		raw, err := readSnapshotFile(snapshotRoot, copied, &budget)
+		if err != nil {
+			return fmt.Errorf("read legacy agents snapshot config %q: %w", copied, err)
+		}
+		expected[original] = raw
+	}
+	if len(expected) != len(files) {
+		return errors.New("live config include set differs from the captured snapshot")
+	}
+	for _, file := range files {
+		captured, ok := expected[canonicalEvidencePath(file.path)]
+		if !ok || !bytes.Equal(captured, file.raw) {
+			return fmt.Errorf("legacy config %q changed after snapshot; cleanup refused", file.path)
 		}
 	}
 	return nil
@@ -264,6 +347,10 @@ func safeLegacyIncludePath(base, parent, include string) (string, error) {
 }
 
 func readStableRegularFile(path string) ([]byte, error) {
+	return readStableRegularFileLimit(path, maxSnapshotFileBytes)
+}
+
+func readStableRegularFileLimit(path string, limit int64) ([]byte, error) {
 	before, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
@@ -280,18 +367,158 @@ func readStableRegularFile(path string) ([]byte, error) {
 	if err != nil || !os.SameFile(before, opened) {
 		return nil, errors.New("path changed while opening")
 	}
-	raw, err := io.ReadAll(io.LimitReader(file, maxSnapshotFileBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(raw) > maxSnapshotFileBytes {
-		return nil, fmt.Errorf("file exceeds %d bytes", maxSnapshotFileBytes)
+	if int64(len(raw)) > limit {
+		return nil, fmt.Errorf("file exceeds %d bytes", limit)
 	}
 	after, err := os.Lstat(path)
 	if err != nil || !os.SameFile(before, after) {
 		return nil, errors.New("path changed while reading")
 	}
 	return raw, nil
+}
+
+func legacyAgentEvidencePaths(files []legacyConfigFile) ([]string, error) {
+	set := map[string]struct{}{}
+	for _, file := range files {
+		var root map[string]json.RawMessage
+		if err := json.Unmarshal(file.raw, &root); err != nil {
+			return nil, err
+		}
+		var agents map[string]json.RawMessage
+		if json.Unmarshal(root["agents"], &agents) != nil {
+			continue
+		}
+		for _, kind := range []string{"packages", "plugins", "marketplaces"} {
+			var entries []map[string]json.RawMessage
+			if json.Unmarshal(agents[kind], &entries) != nil {
+				continue
+			}
+			for _, entry := range entries {
+				for _, key := range []string{"path", "install_path", "installPath", "source_path", "sourcePath", "installLocation", "source"} {
+					var value string
+					if json.Unmarshal(entry[key], &value) != nil || value == "" || strings.ContainsAny(value, "\r\n\x00") {
+						continue
+					}
+					local := key != "source" || filepath.IsAbs(value) || strings.HasPrefix(value, ".")
+					if !local {
+						if _, err := os.Lstat(value); err != nil {
+							continue
+						}
+					}
+					path, err := filepath.Abs(value)
+					if err != nil {
+						return nil, err
+					}
+					resolved, err := filepath.EvalSymlinks(path)
+					if err != nil {
+						return nil, fmt.Errorf("resolve local %s evidence %q: %w", kind, value, err)
+					}
+					if resolved != filepath.Clean(path) {
+						return nil, fmt.Errorf("local %s evidence %q contains a symlink", kind, value)
+					}
+					set[path] = struct{}{}
+				}
+			}
+		}
+	}
+	paths := make([]string, 0, len(set))
+	for path := range set {
+		paths = append(paths, path)
+	}
+	if len(paths) > maxLegacyEvidenceEntries {
+		return nil, fmt.Errorf("local evidence roots exceed limit %d", maxLegacyEvidenceEntries)
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+func copyLegacyEvidence(source, destination string, entries *int, total *int64) error {
+	baseDepth := len(strings.Split(filepath.Clean(source), string(filepath.Separator)))
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		*entries++
+		if *entries > maxLegacyEvidenceEntries {
+			return fmt.Errorf("entry limit %d exceeded", maxLegacyEvidenceEntries)
+		}
+		if len(strings.Split(filepath.Clean(path), string(filepath.Separator)))-baseDepth > maxLegacyEvidenceDepth {
+			return fmt.Errorf("depth limit %d exceeded", maxLegacyEvidenceDepth)
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink %q is not allowed", path)
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := destination
+		if rel != "." {
+			target = filepath.Join(destination, rel)
+		}
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o700)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("non-regular evidence %q is not allowed", path)
+		}
+		raw, err := readStableRegularFileLimit(path, maxLegacyEvidenceFile)
+		if err != nil {
+			return err
+		}
+		*total += int64(len(raw))
+		if *total > maxLegacyEvidenceBytes {
+			return fmt.Errorf("evidence exceeds %d bytes", maxLegacyEvidenceBytes)
+		}
+		mode := info.Mode().Perm() &^ 0o222
+		if mode&0o400 == 0 {
+			mode |= 0o400
+		}
+		return os.WriteFile(target, raw, mode)
+	})
+}
+
+func makeSnapshotReadOnly(root string) error {
+	var dirs []string
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			dirs = append(dirs, path)
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		return os.Chmod(path, info.Mode().Perm()&^0o222)
+	}); err != nil {
+		return err
+	}
+	for i := len(dirs) - 1; i >= 0; i-- {
+		if err := os.Chmod(dirs[i], 0o500); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func makeSnapshotWritable(root string) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err == nil && entry.IsDir() {
+			return os.Chmod(path, 0o700)
+		}
+		return err
+	})
 }
 
 func removeLegacyAgentFields(raw map[string]json.RawMessage) bool {

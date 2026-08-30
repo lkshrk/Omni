@@ -3,6 +3,7 @@ package config_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,8 +96,8 @@ func TestCaptureAndCleanupLegacyAgentsConfig(t *testing.T) {
 	if len(decls.Packages) != 1 || len(decls.MCPServers) != 1 || len(decls.Plugins) != 1 {
 		t.Fatalf("snapshot declarations = %#v", decls)
 	}
-	if err := config.CleanupLegacyAgentsConfig(link); err != nil {
-		t.Fatalf("CleanupLegacyAgentsConfig: %v", err)
+	if err := config.CleanupLegacyAgentsConfigFromSnapshot(link, snapshot); err != nil {
+		t.Fatalf("CleanupLegacyAgentsConfigFromSnapshot: %v", err)
 	}
 	if _, err := os.Stat(snapshot); err != nil {
 		t.Fatalf("snapshot removed during cleanup: %v", err)
@@ -158,14 +159,99 @@ func TestLegacyAgentsMigrationRejectsUnsafeIncludes(t *testing.T) {
 			if _, err := config.CaptureLegacyAgentsSnapshot(root); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("CaptureLegacyAgentsSnapshot error = %v, want %q", err, tc.want)
 			}
-			if err := config.CleanupLegacyAgentsConfig(root); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("CleanupLegacyAgentsConfig error = %v, want %q", err, tc.want)
+			if err := config.CleanupLegacyAgentsConfig(root); err == nil || !strings.Contains(err.Error(), "requires the snapshot") {
+				t.Fatalf("CleanupLegacyAgentsConfig error = %v, want snapshot requirement", err)
 			}
 			body, _ := os.ReadFile(root)
 			if !bytes.Contains(body, []byte(`"agents"`)) {
 				t.Fatalf("unsafe cleanup mutated root: %s", body)
 			}
 		})
+	}
+}
+
+func TestCleanupLegacyAgentsConfigRejectsChangeAfterCapture(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	root := filepath.Join(dir, "settings.json")
+	original := []byte(`{"agents":{"mcp_servers":[{"name":"old"}]},"unknown":"keep"}`)
+	if err := os.WriteFile(root, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := config.CaptureLegacyAgentsSnapshot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(snapshot, 0o700) }()
+	changed := []byte(`{"agents":{"mcp_servers":[{"name":"new"}]},"unknown":"user edit"}`)
+	if err := os.WriteFile(root, changed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.CleanupLegacyAgentsConfigFromSnapshot(root, snapshot); err == nil || !strings.Contains(err.Error(), "changed after snapshot") {
+		t.Fatalf("CleanupLegacyAgentsConfigFromSnapshot error = %v, want changed-after-snapshot refusal", err)
+	}
+	got, err := os.ReadFile(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, changed) {
+		t.Fatalf("refused cleanup changed live config: %s", got)
+	}
+}
+
+func TestCaptureLegacyAgentsSnapshotCopiesExplicitLocalBundle(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	bundle := filepath.Join(dir, "local-plugin")
+	if err := os.MkdirAll(filepath.Join(bundle, "skills", "demo"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	bundleFile := filepath.Join(bundle, "skills", "demo", "SKILL.md")
+	bundleRaw := []byte("# exact local bundle\n")
+	if err := os.WriteFile(bundleFile, bundleRaw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(dir, "settings.json")
+	body := fmt.Sprintf(`{"hosts":{"testhost":["work"]},"groups":[{"name":"work","plugins":["local"]}],"agents":{"plugins":[{"name":"local","path":%q}]}}`, bundle)
+	if err := os.WriteFile(root, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := config.CaptureLegacyAgentsSnapshot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = filepath.WalkDir(snapshot, func(path string, entry os.DirEntry, err error) error {
+			if err == nil && entry.IsDir() {
+				_ = os.Chmod(path, 0o700)
+			}
+			return nil
+		})
+	}()
+	manifestRaw, err := os.ReadFile(filepath.Join(snapshot, "paths.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paths map[string]string
+	if err := json.Unmarshal(manifestRaw, &paths); err != nil {
+		t.Fatal(err)
+	}
+	var copied string
+	for rel, original := range paths {
+		if original == bundle {
+			copied = rel
+		}
+	}
+	if copied == "" {
+		t.Fatalf("paths.json did not map local bundle %q: %#v", bundle, paths)
+	}
+	got, err := os.ReadFile(filepath.Join(snapshot, copied, "skills", "demo", "SKILL.md"))
+	if err != nil || !bytes.Equal(got, bundleRaw) {
+		t.Fatalf("copied local bundle = %q, %v", got, err)
+	}
+	decls, evidence, err := config.LegacyAgentsFromSnapshot(snapshot, "testhost")
+	if err != nil || len(decls.Plugins) != 1 || evidence.Paths[bundle] != copied {
+		t.Fatalf("LegacyAgentsFromSnapshot local evidence = %#v, %#v, %v", decls, evidence, err)
 	}
 }
 
