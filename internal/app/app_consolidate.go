@@ -163,10 +163,6 @@ func (a *App) installOperationProviderName(install config.ToolInstallSpec) strin
 	return install.Provider
 }
 
-func managerMatchesInstallWith(installWith string, manager provider.ManagerOption) bool {
-	return installWith == manager.Name || installWith == manager.SettingsValue || installWith == manager.Provider
-}
-
 func (a *App) managerOperationProvider(ecosystem string, manager provider.ManagerOption) (provider.Provider, string, error) {
 	opProvider := manager.Provider
 	if opProvider == "" {
@@ -226,80 +222,73 @@ func (a *App) runConsolidate(ctx context.Context, ecosystem, manager string, dry
 	if err != nil {
 		return nil, err
 	}
-
-	srcSet := a.providersForEcosystem(ecosystem)
+	targetConcrete := config.NormalizeConcreteProvider(spec.SettingsValue)
+	if targetConcrete == "" {
+		targetConcrete = config.NormalizeConcreteProvider(manager)
+	}
 
 	result := &ConsolidateResult{Ecosystem: ecosystem, Manager: manager}
+	var cacheCommits []consolidateCacheCommit
 	err = a.withConfig(func(cfg *config.RootConfig) error {
+		settings := a.effectiveSettings(cfg)
+		availability := make(map[string]bool)
 		for name, toolSpec := range cfg.Tools {
-			install := toolSpec.DefaultInstallSpec()
-			if _, isSrc := srcSet[install.Provider]; !isSrc {
+			source := a.resolveInstallSpecWithSettings(ctx, name, toolSpec, availability, settings)
+			sourceManager := source.InstallWith
+			if sourceManager == "" {
+				sourceManager = source.Provider
+			}
+			sourceEcosystem, ok := a.providerEcosystem(sourceManager)
+			if !ok || sourceEcosystem != ecosystem {
 				continue
 			}
-			if install.InstallWith == "" || managerMatchesInstallWith(install.InstallWith, spec) {
-				continue
-			}
+			target, updatedSpec := consolidateTargetSpec(toolSpec, source, sourceManager, targetConcrete)
 
 			ct := ConsolidateTool{
 				Name:         name,
-				FromProvider: install.Provider,
-				Package:      install.EffectivePackage(name),
+				FromProvider: sourceManager,
+				Package:      target.EffectivePackage(name),
 			}
 
 			if dryRun {
-				result.Migrated = append(result.Migrated, ct)
+				if sourceManager != targetConcrete {
+					result.Migrated = append(result.Migrated, ct)
+				}
 				continue
 			}
 
-			if progress != nil {
-				progress(fmt.Sprintf("migrating %s (%s → %s)…", name, install.Provider, manager))
+			if sourceManager != targetConcrete && progress != nil {
+				progress(fmt.Sprintf("migrating %s (%s → %s)…", name, sourceManager, manager))
 			}
 
 			tgtTool := provider.Tool{
 				Name:     name,
 				Provider: targetOpProvider,
-				Package:  install.EffectivePackage(name),
-				Options:  install.Options,
+				Package:  target.EffectivePackage(name),
+				Options:  target.Options,
 			}
-			if err := installWithProvider(ctx, tgtProv, tgtTool, manager); err != nil {
-				result.Failed = append(result.Failed, ConsolidateFailure{ConsolidateTool: ct, Err: err})
-				continue
+			if sourceManager != targetConcrete {
+				if err := installWithProvider(ctx, tgtProv, tgtTool, manager); err != nil {
+					result.Failed = append(result.Failed, ConsolidateFailure{ConsolidateTool: ct, Err: err})
+					continue
+				}
 			}
 			ver, err := verifyInstalledAfterInstall(ctx, tgtProv, tgtTool, manager, targetOpProvider)
 			if err != nil {
 				result.Failed = append(result.Failed, ConsolidateFailure{ConsolidateTool: ct, Err: err})
 				continue
 			}
-			if ue := a.uninstallInstallSpec(ctx, install, name, targetOpProvider, manager); ue != nil {
-				result.UninstallWarnings = append(result.UninstallWarnings, ConsolidateFailure{ConsolidateTool: ct, Err: ue})
-			}
-			if err := a.readDB().Upsert(ctx, &database.ToolCache{
-				Name:          name,
-				Provider:      ecosystem,
-				Package:       install.EffectivePackage(name),
-				Installed:     true,
-				InstalledWith: manager,
-				Version:       sql.NullString{String: ver, Valid: ver != ""},
-				LastChecked:   time.Now(),
-			}); err != nil {
-				return fmt.Errorf("upserting consolidate cache for %s/%s: %w", ecosystem, name, err)
-			}
-			if install.Provider != ecosystem {
-				if err := a.readDB().Delete(ctx, name, install.Provider, install.EffectivePackage(name)); err != nil {
-					return fmt.Errorf("deleting old consolidate cache for %s/%s: %w", install.Provider, name, err)
+			if sourceManager != targetConcrete {
+				if ue := a.uninstallInstallSpec(ctx, source, name, targetOpProvider, manager); ue != nil {
+					result.UninstallWarnings = append(result.UninstallWarnings, ConsolidateFailure{ConsolidateTool: ct, Err: ue})
 				}
+				result.Migrated = append(result.Migrated, ct)
 			}
-			if install.InstallWith != "" && install.InstallWith != install.Provider && install.InstallWith != ecosystem {
-				if err := a.readDB().Delete(ctx, name, install.InstallWith, install.EffectivePackage(name)); err != nil {
-					return fmt.Errorf("deleting old consolidate cache for %s/%s: %w", install.InstallWith, name, err)
-				}
-			}
-			toolSpec.Provider = ecosystem
-			toolSpec.Package = install.EffectivePackage(name)
-			toolSpec.InstallWith = ""
-			toolSpec.Options = install.Options
-			cfg.Tools[name] = toolSpec
-			result.Migrated = append(result.Migrated, ct)
+			cfg.Tools[name] = updatedSpec
+			cacheCommits = append(cacheCommits, consolidateCacheCommit{
+				Name: name, Ecosystem: ecosystem, Provider: targetConcrete,
+				Package: target.EffectivePackage(name), Version: ver,
+			})
 		}
 
 		if dryRun {
@@ -326,7 +315,66 @@ func (a *App) runConsolidate(ctx context.Context, ecosystem, manager string, dry
 	if err != nil {
 		return result, err
 	}
+	if !dryRun {
+		for _, commit := range cacheCommits {
+			if err := a.reconcileConsolidatedCache(ctx, commit); err != nil {
+				return result, err
+			}
+		}
+	}
 	return result, nil
+}
+
+type consolidateCacheCommit struct {
+	Name, Ecosystem, Provider, Package, Version string
+}
+
+func consolidateTargetSpec(toolSpec config.ToolSpec, source config.ToolInstallSpec, sourceManager, targetConcrete string) (config.ToolInstallSpec, config.ToolSpec) {
+	for _, candidate := range toolSpec.Providers {
+		if config.NormalizeConcreteProvider(candidate.Provider) == targetConcrete {
+			return candidate, toolSpec
+		}
+	}
+
+	target := cloneToolInstallSpec(source)
+	target.Provider = targetConcrete
+	target.InstallWith = ""
+	if len(toolSpec.Providers) == 0 {
+		source.Provider = config.NormalizeConcreteProvider(sourceManager)
+		source.InstallWith = ""
+		toolSpec.Providers = append(toolSpec.Providers, cloneToolInstallSpec(source))
+	}
+	toolSpec.Providers = append(toolSpec.Providers, cloneToolInstallSpec(target))
+	toolSpec.Provider = ""
+	toolSpec.Package = ""
+	toolSpec.InstallWith = ""
+	toolSpec.Options = nil
+	return target, toolSpec
+}
+
+func (a *App) reconcileConsolidatedCache(ctx context.Context, commit consolidateCacheCommit) error {
+	db := a.readDB()
+	rows, err := db.List(ctx)
+	if err != nil {
+		return fmt.Errorf("listing consolidate cache for %s: %w", commit.Name, err)
+	}
+	for _, row := range rows {
+		rowEcosystem, ok := a.providerEcosystem(row.Provider)
+		if row.Name != commit.Name || !ok || rowEcosystem != commit.Ecosystem || (row.Provider == commit.Provider && row.Package == commit.Package) {
+			continue
+		}
+		if err := db.Delete(ctx, row.Name, row.Provider, row.Package); err != nil {
+			return fmt.Errorf("deleting old consolidate cache for %s/%s: %w", row.Provider, row.Name, err)
+		}
+	}
+	if err := db.Upsert(ctx, &database.ToolCache{
+		Name: commit.Name, Provider: commit.Provider, Package: commit.Package,
+		Installed: true, InstalledWith: commit.Provider, Tracked: true,
+		Version: sql.NullString{String: commit.Version, Valid: commit.Version != ""}, LastChecked: time.Now(),
+	}); err != nil {
+		return fmt.Errorf("upserting consolidate cache for %s/%s: %w", commit.Provider, commit.Name, err)
+	}
+	return nil
 }
 
 func (a *App) consolidatableEcosystems() []string {
