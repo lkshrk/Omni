@@ -68,14 +68,7 @@ func runPaletteDotsPushTUI(t *testing.T, bin string, s *paritySandbox, done func
 		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
 			return strings.Contains(text, "nvim") && strings.Contains(strings.ToLower(text), "dirty")
 		}, "TUI did not render the dirty dots repo")
-		deadline := time.Now().Add(8 * time.Second)
-		for time.Now().Before(deadline) {
-			writeTUIKeys(t, term, "R")
-			if _, ok := waitForScreen(term, 600*time.Millisecond, screenHas("no untracked dotfile candidates")); ok {
-				break
-			}
-		}
-		waitForRequiredScreen(t, term, time.Second, screenHas("no untracked dotfile candidates"), "TUI launch dots work did not settle before push")
+		settleTUIDotsLaunch(t, term, "TUI launch dots work did not settle before push")
 		runTUICommandPalette(t, term, "dots push")
 		return waitForRequiredScreen(t, term, 10*time.Second, func(_ string) bool { return done() }, "TUI palette command did not converge: dots push")
 	})

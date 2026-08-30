@@ -65,14 +65,7 @@ func TestCLIAndTUIDotsRefreshPreserveEquivalentBrokenLinkState(t *testing.T) {
 		waitForRequiredScreen(t, term, 7*time.Second, screenHas("Dashboard", "Tools"), "TUI did not start")
 		writeTUIKeys(t, term, "\t", "\t")
 		waitForRequiredScreen(t, term, 8*time.Second, screenHas("nvim", "synced"), "TUI did not render synced dot state")
-		deadline := time.Now().Add(8 * time.Second)
-		for time.Now().Before(deadline) {
-			writeTUIKeys(t, term, "R")
-			if _, ok := waitForScreen(term, 600*time.Millisecond, screenHas("no untracked dotfile candidates")); ok {
-				break
-			}
-		}
-		waitForRequiredScreen(t, term, time.Second, screenHas("no untracked dotfile candidates"), "TUI launch dots sync did not settle before refresh")
+		settleTUIDotsLaunch(t, term, "TUI launch dots sync did not settle before refresh")
 		if err := os.Remove(tui.target); err != nil {
 			t.Fatal(err)
 		}

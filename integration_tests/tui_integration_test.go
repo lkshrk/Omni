@@ -836,6 +836,18 @@ func writeTUIKeys(t *testing.T, term *vttest.Terminal, keys ...string) {
 	term.Emulator.SendText(strings.Join(keys, ""))
 }
 
+func settleTUIDotsLaunch(t *testing.T, term *vttest.Terminal, failure string) {
+	t.Helper()
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		writeTUIKeys(t, term, "R")
+		if _, ok := waitForScreen(term, 600*time.Millisecond, screenHas("no untracked dotfile candidates")); ok {
+			return
+		}
+	}
+	waitForRequiredScreen(t, term, time.Second, screenHas("no untracked dotfile candidates"), failure)
+}
+
 func waitForRequiredScreen(t *testing.T, term *vttest.Terminal, timeout time.Duration, ready func(string) bool, message string) string {
 	t.Helper()
 	screen, ok := waitForScreen(term, timeout, ready)

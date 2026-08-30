@@ -154,6 +154,7 @@ func runDotsLifecycleDotsTUI(t *testing.T, bin string, sandbox *paritySandbox, a
 		waitForRequiredScreen(t, term, 6*time.Second, screenHas("Dashboard", "Dots"), "TUI did not render main tabs")
 		writeTUIKeys(t, term, "\t", "\t")
 		waitForRequiredScreen(t, term, 8*time.Second, screenHas("nvim"), "TUI did not render dots entry")
+		settleTUIDotsLaunch(t, term, "TUI launch dots work did not settle before lifecycle action")
 		sendDotsLifecycleKeyUntil(t, term, "j", func(text string) bool {
 			return strings.Contains(text, ">") && strings.Contains(text, "nvim")
 		}, "TUI did not select dots entry")
