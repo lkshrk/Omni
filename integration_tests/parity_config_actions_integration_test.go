@@ -27,7 +27,7 @@ func runParityGroupCreateTUI(t *testing.T, bin string, sandbox *paritySandbox) {
 		sendParityKeyUntil(t, term, "n", screenHas("New Group", "group name"), "TUI did not open group creation")
 		writeTUIKeys(t, term, "dev\r")
 	}, func(cfg *config.RootConfig) bool {
-		return configHasGroup(cfg, "dev") && !slices.Contains(cfg.Hosts["testhost"], "dev")
+		return parityGroupExists(cfg, "dev") && !slices.Contains(cfg.Hosts["testhost"], "dev")
 	})
 }
 

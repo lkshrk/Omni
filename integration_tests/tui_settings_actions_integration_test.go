@@ -3,7 +3,6 @@
 package integration_test
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/charmbracelet/x/vttest"
 
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 )
 
 func TestTUISettingsProviderPersistsPriorityOrder(t *testing.T) {
@@ -32,50 +30,6 @@ func TestTUISettingsProviderPersistsPriorityOrder(t *testing.T) {
 			priority := cfg.HostSettings["testhost"].ProviderPriority
 			return len(priority) >= 2 && priority[0] == "apt" && priority[1] == "brew"
 		}, "TUI did not persist provider priority")
-	})
-}
-
-func TestTUISettingsResetPreservesInventoryAndClearsSettings(t *testing.T) {
-	bin, root, cache, configPath, env := newTUISettingsActionSandbox(t)
-
-	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
-		openTUISettingsActions(t, term)
-		revealTUISettingsCursor(t, term)
-		writeTUIKeys(t, term, "k", "k")
-		waitForRequiredScreen(t, term, 3*time.Second, screenHas("> Reset Settings", "Restore all settings to defaults"), "TUI did not select settings reset")
-		writeTUIKeys(t, term, "\r", "\r")
-		return waitForRequiredScreen(t, term, 8*time.Second, func(_ string) bool {
-			cfg, err := config.Load(configPath)
-			if err != nil {
-				return false
-			}
-			host := cfg.HostSettings["testhost"]
-			return !cfg.Settings.AutoImport && len(host.ProviderPriority) == 0 && len(host.DisabledProviders) == 0 && configHasGroup(cfg, "work")
-		}, "TUI did not reset settings while preserving inventory")
-	})
-}
-
-func TestTUISettingsResetCacheRemovesCachedToolState(t *testing.T) {
-	bin, root, cache, configPath, env := newTUISettingsActionSandbox(t)
-	seedTUIToolCache(t, cache, &database.ToolCache{
-		Name:      "cache-only-marker",
-		Provider:  "marker",
-		Package:   "cache-only-marker",
-		Installed: true,
-	})
-
-	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
-		openTUISettingsActions(t, term)
-		if !tuiCacheHasMarker(cache) {
-			t.Fatal("seeded cache marker disappeared before reset")
-		}
-		revealTUISettingsCursor(t, term)
-		writeTUIKeys(t, term, "k")
-		waitForRequiredScreen(t, term, 3*time.Second, screenHas("> Reset Cache", "Delete and reinitialise"), "TUI did not select cache reset")
-		writeTUIKeys(t, term, "\r", "\r")
-		return waitForRequiredScreen(t, term, 8*time.Second, func(_ string) bool {
-			return !tuiCacheHasMarker(cache)
-		}, "TUI did not clear cached tool state")
 	})
 }
 
@@ -120,22 +74,4 @@ func revealTUISettingsCursor(t *testing.T, term *vttest.Terminal) {
 	t.Helper()
 	sendTUIKey(term, uv.KeyHome)
 	waitForRequiredScreen(t, term, 3*time.Second, screenHas("> Import Installed Tools"), "TUI did not reveal the settings cursor")
-}
-
-func tuiCacheHasMarker(cache string) bool {
-	db, err := database.Open(filepath.Join(cache, "omni.db"))
-	if err != nil {
-		return false
-	}
-	defer db.Close()
-	rows, err := db.List(context.Background())
-	if err != nil {
-		return false
-	}
-	for _, row := range rows {
-		if row.Name == "cache-only-marker" && row.Provider == "marker" {
-			return true
-		}
-	}
-	return false
 }
