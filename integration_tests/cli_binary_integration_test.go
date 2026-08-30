@@ -5,7 +5,6 @@ package integration_test
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -187,44 +186,6 @@ func TestCLIBinaryDotsStatusReportsManagedFileDrift(t *testing.T) {
 	}
 	if len(result.Entries) != 1 || result.Entries[0].Name != "fixture" || result.Entries[0].Health != "conflict" {
 		t.Fatalf("dots status did not report drift: %+v", result.Entries)
-	}
-}
-
-func TestCLIBinaryAgentsSyncDeploysMCPThroughRealAPM(t *testing.T) {
-	if _, err := exec.LookPath("apm"); err != nil {
-		t.Fatalf("integration tests require apm on PATH: %v", err)
-	}
-	root, home, cache, env := newCLIBinarySandbox(t)
-	configPath := filepath.Join(root, "settings.json")
-	if err := config.Save(configPath, &config.RootConfig{Version: config.CurrentVersion}); err != nil {
-		t.Fatal(err)
-	}
-	writeIntegrationFile(t, filepath.Join(home, ".apm", "apm.yml"), `name: omni-cli
-version: 1.0.0
-targets: [codex]
-dependencies:
-  apm: []
-  mcp:
-    - name: omni-cli
-      registry: false
-      transport: http
-      url: https://example.invalid/mcp
-`)
-
-	runOmniCommand(t, buildOmniBinary(t), root, env, "--config", configPath, "--cache-dir", cache, "agents", "sync")
-	for path, wants := range map[string][]string{
-		filepath.Join(home, ".apm", "apm.lock.yaml"): {"codex", "omni-cli"},
-		filepath.Join(home, ".codex", "config.toml"): {"omni-cli", "https://example.invalid/mcp"},
-	} {
-		content, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read deployed APM state %s: %v", path, err)
-		}
-		for _, want := range wants {
-			if !strings.Contains(string(content), want) {
-				t.Fatalf("%s missing %q:\n%s", path, want, content)
-			}
-		}
 	}
 }
 

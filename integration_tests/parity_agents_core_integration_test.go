@@ -32,10 +32,10 @@ func TestCLIAndTUIAgentsSyncProduceEquivalentAPMState(t *testing.T) {
 
 	runOmniCommand(t, bin, cliRoot.root, cliRoot.env,
 		"--config", cliRoot.configPath, "--cache-dir", cliRoot.cache, "agents", "sync")
-	runTUI(t, bin, tuiRoot.root, tuiRoot.env, []string{"--config", tuiRoot.configPath, "--cache-dir", tuiRoot.cache}, func(term *vttest.Terminal) string {
+	screen := runTUI(t, bin, tuiRoot.root, tuiRoot.env, []string{"--config", tuiRoot.configPath, "--cache-dir", tuiRoot.cache}, func(term *vttest.Terminal) string {
 		waitForRequiredScreen(t, term, 8*time.Second, screenHas("Dashboard", "Tools"), "TUI did not start for agents parity")
 		writeTUIKeys(t, term, "\t", "\t", "\t")
-		waitForRequiredScreen(t, term, 8*time.Second, screenHas("MCP servers", "omni-parity"), "TUI did not render parity APM state")
+		waitForRequiredScreen(t, term, 8*time.Second, screenHas("~/.apm/apm.yml", "MCP servers", "omni-parity"), "TUI did not render parity APM workspace")
 		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
 			return !strings.Contains(text, "checking package updates")
 		}, "agents update check did not settle")
@@ -44,6 +44,9 @@ func TestCLIAndTUIAgentsSyncProduceEquivalentAPMState(t *testing.T) {
 			return strings.Contains(text, "omni agents sync") && !strings.Contains(text, "running omni agents sync")
 		}, "TUI did not complete agents sync")
 	})
+	if strings.Contains(strings.ToLower(screen), "error") {
+		t.Fatalf("TUI showed an error while syncing agents; screen:\n%s", screen)
+	}
 
 	cliState := observeAgentsSyncParity(t, cliRoot)
 	tuiState := observeAgentsSyncParity(t, tuiRoot)
