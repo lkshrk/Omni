@@ -68,6 +68,28 @@ func TestTUIDotsWatchInstallsSandboxServiceAfterDoctorSettles(t *testing.T) {
 	assertFileContains(t, systemctlLog, "enable --now omni-dots-watch.service")
 }
 
+func TestCLIAndTUIDotsWatchProduceEquivalentServiceState(t *testing.T) {
+	cliBin, cliRoot, _, cliCache, cliConfig, cliEnv, cliLog := batch16DotsServiceFixture(t)
+	tuiBin, tuiRoot, tuiHome, tuiCache, tuiConfig, tuiEnv, tuiLog := batch16DotsServiceFixture(t)
+	runOmniCommand(t, cliBin, cliRoot, cliEnv, "--config", cliConfig, "--cache-dir", cliCache, "dots", "watch", "install", "--debounce", "5s")
+	installBatch16WatchTUI(t, tuiBin, tuiRoot, tuiHome, tuiCache, tuiConfig, tuiEnv)
+	cliStatus := batch16WatchStatus(t, cliBin, cliRoot, cliEnv, cliConfig, cliCache)
+	tuiStatus := batch16WatchStatus(t, tuiBin, tuiRoot, tuiEnv, tuiConfig, tuiCache)
+	if !reflect.DeepEqual(cliStatus, tuiStatus) {
+		t.Fatalf("watch service state differs\nCLI: %#v\nTUI: %#v", cliStatus, tuiStatus)
+	}
+	cliCommands := batch16ServiceCommands(t, cliLog)
+	tuiCommands := batch16ServiceCommands(t, tuiLog)
+	if !reflect.DeepEqual(cliCommands, tuiCommands) {
+		t.Fatalf("watch service commands differ\nCLI: %#v\nTUI: %#v", cliCommands, tuiCommands)
+	}
+	cliCfg := batch16NormalizedServiceConfig(t, cliConfig)
+	tuiCfg := batch16NormalizedServiceConfig(t, tuiConfig)
+	if !reflect.DeepEqual(cliCfg, tuiCfg) {
+		t.Fatalf("watch config differs\nCLI: %#v\nTUI: %#v", cliCfg, tuiCfg)
+	}
+}
+
 func TestCLIAndTUIDotsRefreshPreserveEquivalentBrokenLinkState(t *testing.T) {
 	cli := batch16BrokenDotsFixture(t)
 	tui := batch16BrokenDotsFixture(t)
@@ -97,6 +119,12 @@ type batch16ReminderObservation struct {
 	Platform  string        `json:"platform"`
 	Interval  time.Duration `json:"interval"`
 	Notify    bool          `json:"notify"`
+	Installed bool          `json:"installed"`
+}
+
+type batch16WatchObservation struct {
+	Platform  string        `json:"platform"`
+	Debounce  time.Duration `json:"debounce"`
 	Installed bool          `json:"installed"`
 }
 
@@ -172,6 +200,23 @@ func installBatch16ReminderTUI(t *testing.T, bin, root, home, cache, configPath 
 	})
 }
 
+func installBatch16WatchTUI(t *testing.T, bin, root, home, cache, configPath string, env []string) {
+	t.Helper()
+	service := filepath.Join(home, ".config", "systemd", "user", "omni-dots-watch.service")
+	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
+		openTUISettingsActions(t, term)
+		waitForRequiredScreen(t, term, 10*time.Second, func(text string) bool {
+			return strings.Contains(text, "Watch Sync") && !strings.Contains(text, "Running doctor") && !strings.Contains(text, "Refreshing doctor")
+		}, "TUI doctor activity did not settle")
+		batch16RevealSettingsCursor(t, term)
+		writeTUIKeys(t, term, "j", "j", "j", "j", "j", "j", " ")
+		return waitForRequiredScreen(t, term, 10*time.Second, func(string) bool {
+			_, err := os.Stat(service)
+			return err == nil
+		}, "TUI did not install watch service")
+	})
+}
+
 func batch16ReminderStatus(t *testing.T, bin, root string, env []string, configPath, cache string) batch16ReminderObservation {
 	t.Helper()
 	out := runOmniOutput(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "dots", "reminder", "status", "--format", "json")
@@ -180,6 +225,42 @@ func batch16ReminderStatus(t *testing.T, bin, root string, env []string, configP
 		t.Fatal(err)
 	}
 	return status
+}
+
+func batch16WatchStatus(t *testing.T, bin, root string, env []string, configPath, cache string) batch16WatchObservation {
+	t.Helper()
+	out := runOmniOutput(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "dots", "watch", "status", "--format", "json")
+	var status batch16WatchObservation
+	if err := json.Unmarshal([]byte(out), &status); err != nil {
+		t.Fatal(err)
+	}
+	return status
+}
+
+func batch16ServiceCommands(t *testing.T, path string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var commands []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			commands = append(commands, line)
+		}
+	}
+	return commands
+}
+
+func batch16NormalizedServiceConfig(t *testing.T, path string) *config.RootConfig {
+	t.Helper()
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Settings.DotsRepo = "$ROOT/dotfiles"
+	return cfg
 }
 
 func batch16RevealSettingsCursor(t *testing.T, term *vttest.Terminal) {
