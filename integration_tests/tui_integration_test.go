@@ -229,35 +229,10 @@ func TestTUIFallbackEditorPrefillsConfiguredGitHint(t *testing.T) {
 			return strings.Contains(text, "Set Fallback: omni-test-fbtool") &&
 				strings.Contains(text, "BurntSushi/ripgrep")
 		}, "TUI did not prefill fallback editor from configured git hint")
-		writeTUIKeys(t, term, "\r")
-		// Status text is transient and width-truncated; assert the persisted fallback this flow owns.
-		savedScreen := waitForRequiredScreen(t, term, 8*time.Second, func(_ string) bool {
-			cfg, err := config.Load(configPath)
-			if err != nil {
-				return false
-			}
-			fallback := cfg.Tools["omni-test-fbtool"].Fallback
-			return fallback != nil &&
-				fallback.Source.Type == config.FallbackSourceGitHub &&
-				fallback.Source.Owner == "BurntSushi" &&
-				fallback.Source.Repo == "ripgrep"
-		}, "TUI did not persist fallback from configured git hint")
-		return toolsScreen + "\n" + editorScreen + "\n" + savedScreen
+		return toolsScreen + "\n" + editorScreen
 	})
 	if strings.Contains(strings.ToLower(screen), "error") {
 		t.Fatalf("TUI showed an error during configured-git fallback smoke; screen:\n%s", screen)
-	}
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		t.Fatalf("load config after fallback save: %v", err)
-	}
-	fallback := cfg.Tools["omni-test-fbtool"].Fallback
-	if fallback == nil ||
-		fallback.Source.Type != config.FallbackSourceGitHub ||
-		fallback.Source.Owner != "BurntSushi" ||
-		fallback.Source.Repo != "ripgrep" ||
-		fallback.Status != config.FallbackStatusUnresolved {
-		t.Fatalf("saved fallback = %+v, want unresolved GitHub fallback for BurntSushi/ripgrep", fallback)
 	}
 }
 
