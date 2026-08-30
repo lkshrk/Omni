@@ -5,6 +5,7 @@ package integration_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,12 +51,33 @@ func TestCLIAndTUIDotsPushPaletteProduceEquivalentSemanticState(t *testing.T) {
 			runOmniCommand(t, bin, s.root, s.env, "--config", s.configPath, "--cache-dir", s.cache, "dots", "push")
 		},
 		runTUI: func(t *testing.T, bin string, s *paritySandbox) {
-			runPaletteTUI(t, bin, s, "dots push", func() bool {
+			runPaletteDotsPushTUI(t, bin, s, func() bool {
 				return runCommandOutput(t, filepath.Join(s.home, "dotfiles"), s.env, "git", "status", "--porcelain") == "" && paletteDotsHeadsMatch(t, s)
 			})
 		},
 		observe: observePaletteDotsState,
 		readTUI: readPaletteDotsThroughCLI,
+	})
+}
+
+func runPaletteDotsPushTUI(t *testing.T, bin string, s *paritySandbox, done func() bool) {
+	t.Helper()
+	runTUI(t, bin, s.root, s.env, []string{"--config", s.configPath, "--cache-dir", s.cache}, func(term *vttest.Terminal) string {
+		waitForRequiredScreen(t, term, 6*time.Second, screenHas("Dashboard", "Tools"), "TUI did not start")
+		writeTUIKeys(t, term, "\t", "\t")
+		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
+			return strings.Contains(text, "nvim") && strings.Contains(strings.ToLower(text), "dirty")
+		}, "TUI did not render the dirty dots repo")
+		deadline := time.Now().Add(8 * time.Second)
+		for time.Now().Before(deadline) {
+			writeTUIKeys(t, term, "R")
+			if _, ok := waitForScreen(term, 600*time.Millisecond, screenHas("no untracked dotfile candidates")); ok {
+				break
+			}
+		}
+		waitForRequiredScreen(t, term, time.Second, screenHas("no untracked dotfile candidates"), "TUI launch dots work did not settle before push")
+		runTUICommandPalette(t, term, "dots push")
+		return waitForRequiredScreen(t, term, 10*time.Second, func(_ string) bool { return done() }, "TUI palette command did not converge: dots push")
 	})
 }
 
