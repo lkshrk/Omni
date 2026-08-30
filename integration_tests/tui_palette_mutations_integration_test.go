@@ -12,55 +12,56 @@ import (
 	"github.com/charmbracelet/x/vttest"
 )
 
-func TestTUIToolsSyncPaletteMatchesCLIProviderState(t *testing.T) {
+func TestCLIAndTUIToolsSyncPaletteProduceEquivalentSemanticState(t *testing.T) {
 	bin := buildOmniBinary(t)
-	sandbox := newParitySandbox(t, t.TempDir())
-	seedParityToolInstall(t, sandbox)
-	runTUI(t, bin, sandbox.root, sandbox.env, []string{"--config", sandbox.configPath, "--cache-dir", sandbox.cache}, func(term *vttest.Terminal) string {
+	runParityFlow(t, bin, parityFlow{
+		seed: seedParityToolInstall,
+		runCLI: func(t *testing.T, bin string, s *paritySandbox) {
+			runOmniCommand(t, bin, s.root, s.env, "--config", s.configPath, "--cache-dir", s.cache, "tools", "sync")
+		},
+		runTUI: func(t *testing.T, bin string, s *paritySandbox) {
+			runPaletteTUI(t, bin, s, "tools sync", func() bool { return parityToolInstalled(s) })
+		},
+		observe: observeParityToolInstall,
+		readTUI: readParityToolThroughCLI,
+	})
+}
+
+func TestCLIAndTUIDotsPullPaletteProduceEquivalentSemanticState(t *testing.T) {
+	bin := buildOmniBinary(t)
+	runParityFlow(t, bin, parityFlow{
+		seed: seedPaletteDotsPull,
+		runCLI: func(t *testing.T, bin string, s *paritySandbox) {
+			runOmniCommand(t, bin, s.root, s.env, "--config", s.configPath, "--cache-dir", s.cache, "dots", "pull")
+		},
+		runTUI: func(t *testing.T, bin string, s *paritySandbox) {
+			runPaletteTUI(t, bin, s, "dots pull", func() bool { return paletteDotsHeadsMatch(t, s) })
+		},
+		observe: observePaletteDotsState,
+		readTUI: readPaletteDotsThroughCLI,
+	})
+}
+
+func seedPaletteDotsPull(t *testing.T, s *paritySandbox) {
+	t.Helper()
+	seedDotsGitCommitParity(t, s)
+	repo, remote := filepath.Join(s.home, "dotfiles"), filepath.Join(s.root, "remote.git")
+	runCommand(t, repo, s.env, "git", "checkout", "--", ".")
+	other := filepath.Join(s.root, "other")
+	runCommand(t, s.root, s.env, "git", "clone", remote, other)
+	dotsActionConfigureGit(t, other, s.env)
+	writeIntegrationFile(t, filepath.Join(other, "dotfiles", "nvim", ".config", "nvim", "init.lua"), "remote change\n")
+	runCommand(t, other, s.env, "git", "add", "dotfiles")
+	runCommand(t, other, s.env, "git", "commit", "-m", "remote change")
+	runCommand(t, other, s.env, "git", "push")
+}
+
+func runPaletteTUI(t *testing.T, bin string, s *paritySandbox, command string, done func() bool) {
+	t.Helper()
+	runTUI(t, bin, s.root, s.env, []string{"--config", s.configPath, "--cache-dir", s.cache}, func(term *vttest.Terminal) string {
 		waitForRequiredScreen(t, term, 6*time.Second, screenHas("Dashboard", "Tools"), "TUI did not start")
-		runTUICommandPalette(t, term, "tools sync")
-		return waitForRequiredScreen(t, term, 10*time.Second, func(_ string) bool { return parityToolInstalled(sandbox) }, "TUI palette sync did not install the configured tool")
-	})
-}
-
-func TestTUIDotsPullPaletteMatchesRemoteState(t *testing.T) {
-	bin := buildOmniBinary(t)
-	sandbox := newParitySandbox(t, t.TempDir())
-	seedDotsGitCommitParity(t, sandbox)
-	repo := filepath.Join(sandbox.home, "dotfiles")
-	remote := filepath.Join(sandbox.root, "remote.git")
-	runCommand(t, repo, sandbox.env, "git", "checkout", "--", ".")
-	other := filepath.Join(sandbox.root, "other")
-	runCommand(t, sandbox.root, sandbox.env, "git", "clone", remote, other)
-	dotsActionConfigureGit(t, other, sandbox.env)
-	remoteFile := filepath.Join(other, "dotfiles", "nvim", ".config", "nvim", "init.lua")
-	writeIntegrationFile(t, remoteFile, "remote change\n")
-	runCommand(t, other, sandbox.env, "git", "add", "dotfiles")
-	runCommand(t, other, sandbox.env, "git", "commit", "-m", "remote change")
-	runCommand(t, other, sandbox.env, "git", "push")
-	target := filepath.Join(sandbox.home, ".config", "nvim", "init.lua")
-	runTUI(t, bin, sandbox.root, sandbox.env, []string{"--config", sandbox.configPath, "--cache-dir", sandbox.cache}, func(term *vttest.Terminal) string {
-		waitForRequiredScreen(t, term, 6*time.Second, screenHas("Dashboard", "Dots"), "TUI did not start")
-		runTUICommandPalette(t, term, "dots pull")
-		return waitForRequiredScreen(t, term, 10*time.Second, func(_ string) bool {
-			content, err := os.ReadFile(target)
-			return err == nil && string(content) == "remote change\n" && runCommandOutput(t, repo, sandbox.env, "git", "rev-parse", "HEAD") == runCommandOutput(t, remote, sandbox.env, "git", "rev-parse", "refs/heads/main")
-		}, "TUI palette pull did not converge to remote state")
-	})
-}
-
-func TestTUIDotsPushPaletteMatchesRemoteState(t *testing.T) {
-	bin := buildOmniBinary(t)
-	sandbox := newParitySandbox(t, t.TempDir())
-	seedDotsGitCommitParity(t, sandbox)
-	repo := filepath.Join(sandbox.home, "dotfiles")
-	remote := filepath.Join(sandbox.root, "remote.git")
-	runTUI(t, bin, sandbox.root, sandbox.env, []string{"--config", sandbox.configPath, "--cache-dir", sandbox.cache}, func(term *vttest.Terminal) string {
-		waitForRequiredScreen(t, term, 6*time.Second, screenHas("Dashboard", "Dots"), "TUI did not start")
-		runTUICommandPalette(t, term, "dots push")
-		return waitForRequiredScreen(t, term, 10*time.Second, func(_ string) bool {
-			return runCommandOutput(t, repo, sandbox.env, "git", "status", "--porcelain") == "" && runCommandOutput(t, repo, sandbox.env, "git", "rev-parse", "HEAD") == runCommandOutput(t, remote, sandbox.env, "git", "rev-parse", "refs/heads/main")
-		}, "TUI palette push did not converge the remote")
+		runTUICommandPalette(t, term, command)
+		return waitForRequiredScreen(t, term, 10*time.Second, func(_ string) bool { return done() }, "TUI palette command did not converge: "+command)
 	})
 }
 
@@ -77,4 +78,46 @@ func runTUICommandPalette(t *testing.T, term *vttest.Terminal, command string) {
 	writeTUIKeys(t, term, command)
 	waitForRequiredScreen(t, term, 3*time.Second, screenHas(": > "+command), "TUI did not filter the command palette")
 	sendTUIKey(term, uv.KeyEnter)
+}
+
+type paletteDotsState struct {
+	Config                                                                         any
+	Tree, Subject, Status, RemoteTree, RemoteSubject, SourceContent, TargetContent string
+	TargetSymlink                                                                  bool
+}
+
+func observePaletteDotsState(t *testing.T, s *paritySandbox) any {
+	t.Helper()
+	repo, remote := filepath.Join(s.home, "dotfiles"), filepath.Join(s.root, "remote.git")
+	source := filepath.Join(repo, "dotfiles", "nvim", ".config", "nvim", "init.lua")
+	target := filepath.Join(s.home, ".config", "nvim", "init.lua")
+	sourceContent, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetContent, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return paletteDotsState{
+		Config: normalizedParityConfig(t, s),
+		Tree:   runCommandOutput(t, repo, s.env, "git", "rev-parse", "HEAD^{tree}"), Subject: runCommandOutput(t, repo, s.env, "git", "log", "-1", "--pretty=%s"), Status: runCommandOutput(t, repo, s.env, "git", "status", "--porcelain=v1"),
+		RemoteTree: runCommandOutput(t, remote, s.env, "git", "rev-parse", "refs/heads/main^{tree}"), RemoteSubject: runCommandOutput(t, remote, s.env, "git", "log", "-1", "--pretty=%s", "refs/heads/main"),
+		SourceContent: string(sourceContent), TargetContent: string(targetContent), TargetSymlink: info.Mode()&os.ModeSymlink != 0,
+	}
+}
+
+func paletteDotsHeadsMatch(t *testing.T, s *paritySandbox) bool {
+	t.Helper()
+	repo, remote := filepath.Join(s.home, "dotfiles"), filepath.Join(s.root, "remote.git")
+	return runCommandOutput(t, repo, s.env, "git", "rev-parse", "HEAD") == runCommandOutput(t, remote, s.env, "git", "rev-parse", "refs/heads/main")
+}
+
+func readPaletteDotsThroughCLI(t *testing.T, bin string, s *paritySandbox) {
+	t.Helper()
+	runOmniCommand(t, bin, s.root, s.env, "--config", s.configPath, "--cache-dir", s.cache, "dots", "status", "--format", "json")
 }
