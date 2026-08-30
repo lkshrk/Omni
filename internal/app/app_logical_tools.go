@@ -406,7 +406,7 @@ func (a *App) SetToolProviderScopeWithState(ctx context.Context, name string, op
 	if err != nil {
 		return nil, err
 	}
-	if opts.Kind == ToolProviderScopeHost {
+	if opts.Kind != ToolProviderScopeTool {
 		if scopeDisplay.ToolProviderPins == nil {
 			scopeDisplay.ToolProviderPins = make(map[string]string)
 		}
