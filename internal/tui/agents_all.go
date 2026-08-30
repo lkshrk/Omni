@@ -177,30 +177,10 @@ func (m *Model) doPrepareAgentsReadiness() tea.Cmd {
 	m.agentsReadinessPending = true
 	m.agentsReadinessErr = nil
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(parent, 45*time.Second)
+		ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 		defer cancel()
-		result, err := a.AgentsPrepareOnboarding(ctx, host)
+		result, err := a.EnsureAgentsReady(ctx, host)
 		return agentsReadinessMsg{gen: gen, result: result, err: err}
-	}
-}
-
-func (m *Model) doRepairAgentsAPM() tea.Cmd {
-	a, ctx := m.app, m.ctx
-	host := ""
-	if m.hostInfo != nil {
-		host = m.hostInfo.Active
-	}
-	if host == "" {
-		host = os.Getenv("OMNI_HOSTNAME")
-	}
-	return func() tea.Msg {
-		report, err := a.FixMissingAPM(ctx, false)
-		var readiness app.AgentsOnboardingResult
-		var readinessErr error
-		if err == nil {
-			readiness, readinessErr = a.AgentsPrepareOnboarding(ctx, host)
-		}
-		return agentsRepairDoneMsg{report: report, readiness: readiness, readinessErr: readinessErr, err: err}
 	}
 }
 
@@ -319,13 +299,6 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea
 	}
 	if m.agentsReadinessPending && (updateAll || syncAll || refresh) {
 		return true, []tea.Cmd{setStatus(m, "checking APM readiness", false)}
-	}
-	if refresh && m.agentsReadinessErr != nil && m.agentsReadinessRepair {
-		m.agentsReadinessGen++ // invalidate any pre-repair readiness completion
-		m.agentsReadinessPending = false
-		m.apmRunning = true
-		m.apmCommand = "repair pinned APM"
-		return true, []tea.Cmd{m.spinner.Tick, m.doRepairAgentsAPM()}
 	}
 	if m.agentsOutdatedChecking && (updateAll || syncAll || refresh) {
 		return true, []tea.Cmd{setStatus(m, agentsUpdateCheckBusyStatus, false)}

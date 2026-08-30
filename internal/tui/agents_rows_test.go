@@ -201,50 +201,24 @@ func TestAgentsReadinessLoadsOutdatedOnlyWhenReady(t *testing.T) {
 	}
 }
 
-func TestAgentsReadinessGuidanceUsesExplicitRepairSyncAndManualCTAs(t *testing.T) {
+func TestAgentsReadinessGuidanceUsesAutomaticRetryAndReviewCTAs(t *testing.T) {
 	m := agentsRowsModel(t)
 	m.agentsReadinessErr = &app.APMRepairError{Kind: app.APMRepairVersionMismatch, Err: errors.New("apm version mismatch")}
-	m.agentsReadinessRepair = true
-	if got := agentsReadinessGuidance(m); !strings.Contains(got, "R repair pinned APM") || strings.Contains(got, "Update check failed") {
-		t.Fatalf("repair guidance = %q", got)
+	if got := agentsReadinessGuidance(m); !strings.Contains(got, "Automatic APM setup failed") || !strings.Contains(got, "R retry") {
+		t.Fatalf("automatic setup guidance = %q", got)
 	}
 	m.agentsReadinessErr = nil
-	m.agentsReadinessRepair = false
 	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessTemplateOnly, CTA: app.AgentsCTASync}
-	if got := agentsReadinessGuidance(m); !strings.Contains(got, "S sync") {
-		t.Fatalf("sync guidance = %q", got)
+	if got := agentsReadinessGuidance(m); !strings.Contains(got, "R retry") || strings.Contains(got, "S sync") {
+		t.Fatalf("automatic retry guidance = %q", got)
 	}
 	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessLockOnly, CTA: app.AgentsCTARetry, Details: []string{"lock only"}}
 	if got := agentsReadinessGuidance(m); !strings.Contains(got, "inspect APM files") || strings.Contains(got, "repair pinned") {
 		t.Fatalf("manual guidance = %q", got)
 	}
-}
-
-func TestAgentsRepairFailureStaysActionable(t *testing.T) {
-	m := agentsRowsModel(t)
-	m.apmRunning = true
-	next := drive(m, agentsRepairDoneMsg{err: errors.New("installer failed")})
-	if next.apmRunning || next.apmErr == nil || !strings.Contains(next.statusMsg, "APM repair failed") {
-		t.Fatalf("repair failure state running=%v err=%v status=%q", next.apmRunning, next.apmErr, next.statusMsg)
-	}
-}
-
-func TestAgentsSuccessfulRepairWithNonRepairableRecheckRoutesRToRecheck(t *testing.T) {
-	m := agentsRowsModel(t)
-	m.app = app.New(filepath.Join(t.TempDir(), "settings.json"))
-	m.ctx = context.Background()
-	m.apmRunning = true
-	m.agentsReadinessRepair = true
-	next := drive(m, agentsRepairDoneMsg{report: app.APMInstallFixReport{Upgraded: "uv tool install"}, readinessErr: os.ErrPermission})
-	if next.apmRunning || next.agentsReadinessRepair || !errors.Is(next.agentsReadinessErr, os.ErrPermission) {
-		t.Fatalf("recheck state running=%v repairable=%v err=%v", next.apmRunning, next.agentsReadinessRepair, next.agentsReadinessErr)
-	}
-	if guidance := agentsReadinessGuidance(next); !strings.Contains(guidance, "R recheck") || strings.Contains(guidance, "repair pinned") {
-		t.Fatalf("recheck guidance = %q", guidance)
-	}
-	_, cmds := next.handleAgentsGlobalActionKeyMsg(tea.KeyPressMsg{Code: 'R', Text: "R"})
-	if next.apmRunning || !next.agentsReadinessPending || len(cmds) != 1 {
-		t.Fatalf("R routing running=%v pending=%v cmds=%d", next.apmRunning, next.agentsReadinessPending, len(cmds))
+	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessReady, CTA: app.AgentsCTAMigrate, Details: []string{"legacy agent config remains"}}
+	if got := agentsReadinessGuidance(m); !strings.Contains(got, "legacy agent config remains") || !strings.Contains(got, "review migration") {
+		t.Fatalf("ready legacy guidance = %q", got)
 	}
 }
 
@@ -258,23 +232,26 @@ func TestDashboardAgentsReadinessPendingOrFailedIsNeverHealthy(t *testing.T) {
 	}
 	m.agentsReadinessPending = false
 	m.agentsReadinessErr = &app.APMRepairError{Kind: app.APMRepairVersionMismatch, Err: errors.New("APM version mismatch")}
-	m.agentsReadinessRepair = true
 	for _, row := range []statusListRow{statusAgentsAttentionRow(m), statusAgentUpdatesAttentionRow(m)} {
-		if !row.needsAttention || !strings.Contains(row.summary, "Open Agents to repair") || row.action.kind != statusActionOpenAgents {
+		if !row.needsAttention || !strings.Contains(row.summary, "automatic APM setup failure") || row.action.kind != statusActionOpenAgents {
 			t.Fatalf("failed dashboard row = %#v", row)
 		}
 	}
+	m.agentsReadinessErr = nil
+	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessReady, CTA: app.AgentsCTAMigrate, Details: []string{"legacy agent config remains"}}
+	if got := agentsDashboardReadinessGuidance(m); !strings.Contains(got, "remaining legacy") {
+		t.Fatalf("ready legacy dashboard guidance = %q", got)
+	}
 }
 
-func TestAgentsRefreshRepairsOnlyTypedAPMErrors(t *testing.T) {
+func TestAgentsRefreshAlwaysRetriesAutomaticReadiness(t *testing.T) {
 	for _, test := range []struct {
-		name       string
-		err        error
-		repairable bool
+		name string
+		err  error
 	}{
-		{name: "missing", err: &app.APMRepairError{Kind: app.APMRepairMissing, Err: errors.New("missing")}, repairable: true},
-		{name: "version mismatch", err: &app.APMRepairError{Kind: app.APMRepairVersionMismatch, Err: errors.New("mismatch")}, repairable: true},
-		{name: "unparseable", err: &app.APMRepairError{Kind: app.APMRepairVersionUnparseable, Err: errors.New("unparseable")}, repairable: true},
+		{name: "missing", err: &app.APMRepairError{Kind: app.APMRepairMissing, Err: errors.New("missing")}},
+		{name: "version mismatch", err: &app.APMRepairError{Kind: app.APMRepairVersionMismatch, Err: errors.New("mismatch")}},
+		{name: "unparseable", err: &app.APMRepairError{Kind: app.APMRepairVersionUnparseable, Err: errors.New("unparseable")}},
 		{name: "permission", err: os.ErrPermission},
 		{name: "context", err: context.Canceled},
 		{name: "deadline", err: context.DeadlineExceeded},
@@ -284,38 +261,9 @@ func TestAgentsRefreshRepairsOnlyTypedAPMErrors(t *testing.T) {
 			m.app = app.New(filepath.Join(t.TempDir(), "settings.json"))
 			m.ctx = context.Background()
 			m.agentsReadinessErr = test.err
-			m.agentsReadinessRepair = test.repairable
 			_, cmds := m.handleAgentsGlobalActionKeyMsg(tea.KeyPressMsg{Code: 'R', Text: "R"})
-			wantCmds := 1
-			if test.repairable {
-				wantCmds = 2 // spinner + repair command
-			}
-			if m.apmRunning != test.repairable || len(cmds) != wantCmds {
-				t.Fatalf("repair routing running=%v cmds=%d", m.apmRunning, len(cmds))
-			}
-			if !test.repairable && (!m.agentsReadinessPending || m.agentsOutdatedChecking) {
-				t.Fatalf("recheck routing pending=%v outdated=%v", m.agentsReadinessPending, m.agentsOutdatedChecking)
-			}
-		})
-	}
-}
-
-func TestAgentsReadinessMessageClassifiesOnlyTypedRepairErrors(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{name: "typed", err: &app.APMRepairError{Kind: app.APMRepairMissing, Err: errors.New("missing")}, want: true},
-		{name: "permission", err: os.ErrPermission},
-		{name: "context", err: context.Canceled},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			m := agentsRowsModel(t)
-			m.agentsReadinessGen = 1
-			got := drive(m, agentsReadinessMsg{gen: 1, err: test.err})
-			if got.agentsReadinessRepair != test.want {
-				t.Fatalf("repair classification = %v", got.agentsReadinessRepair)
+			if m.apmRunning || len(cmds) != 1 || !m.agentsReadinessPending || m.agentsOutdatedChecking {
+				t.Fatalf("automatic retry running=%v pending=%v outdated=%v cmds=%d", m.apmRunning, m.agentsReadinessPending, m.agentsOutdatedChecking, len(cmds))
 			}
 		})
 	}
@@ -1028,6 +976,16 @@ func TestAgentsRowOpsBlockedWhileAPMRuns(t *testing.T) {
 	agentsPressRowKey(t, &m, "u")
 	if len(mock.Calls) != 0 || !m.statusIsErr {
 		t.Fatalf("row op ran during another op: %#v", mock.Calls)
+	}
+}
+
+func TestAgentsRowOpsBlockedWhileReadinessRuns(t *testing.T) {
+	m, mock := agentsRowOpModel(t)
+	m.agentsCursor = 0
+	m.agentsReadinessPending = true
+	agentsPressRowKey(t, &m, "u")
+	if len(mock.Calls) != 0 || m.apmRunning {
+		t.Fatalf("row op ran during readiness: %#v", mock.Calls)
 	}
 }
 

@@ -847,18 +847,18 @@ func agentsDashboardReadinessGuidance(m Model) string {
 		return "Checking APM readiness…"
 	}
 	if m.agentsReadinessErr != nil {
-		if m.agentsReadinessRepair {
-			return "Open Agents to repair the pinned APM version."
-		}
-		return "Open Agents to inspect the APM readiness failure."
+		return "Open Agents to inspect the automatic APM setup failure."
+	}
+	if m.agentsReadiness.CTA == app.AgentsCTAMigrate && len(m.agentsReadiness.Details) != 0 {
+		return "Open Agents to review remaining legacy agent configuration."
 	}
 	switch m.agentsReadiness.State {
 	case app.AgentsReadinessTemplateOnly, app.AgentsReadinessLiveIncomplete:
-		return "Open Agents to sync incomplete APM state."
+		return "Open Agents to retry automatic APM setup."
 	case app.AgentsReadinessLockOnly, app.AgentsReadinessInvalid:
 		return "Open Agents to inspect inconsistent APM state."
 	case app.AgentsReadinessEmpty:
-		return "Open Agents to add a package."
+		return "Open Agents to review legacy configuration."
 	default:
 		return ""
 	}

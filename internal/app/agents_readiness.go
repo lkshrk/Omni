@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -62,9 +63,18 @@ func (a *App) CompleteAgentsOnboarding(ctx context.Context, host string) (Agents
 		return AgentsOnboardingResult{}, err
 	}
 	result := AgentsOnboardingResult{Readiness: readiness}
+	hasLegacy, err := config.HasRemovedAgentConfig(a.ConfigPath)
+	if err != nil {
+		return result, err
+	}
 	var legacySnapshot string
+	createdTemplate := false
 	switch readiness.State {
 	case AgentsReadinessReady:
+		if hasLegacy {
+			result.Readiness.CTA = AgentsCTAMigrate
+			result.Readiness.Details = append(result.Readiness.Details, "legacy agent config remains, but the existing APM workspace was not created by this migration; review before cleanup")
+		}
 		return result, nil
 	case AgentsReadinessLockOnly, AgentsReadinessInvalid:
 		return result, nil
@@ -73,10 +83,13 @@ func (a *App) CompleteAgentsOnboarding(ctx context.Context, host string) (Agents
 		if err != nil || result.Readiness.State == AgentsReadinessEmpty {
 			return result, err
 		}
+		createdTemplate = result.Readiness.State == AgentsReadinessTemplateOnly
 	}
 
+	var syncResult AgentsSyncAllResult
 	if result.Readiness.State == AgentsReadinessTemplateOnly || result.Readiness.State == AgentsReadinessLiveIncomplete {
-		if _, err := a.AgentsSyncAll(ctx, AgentsSyncAllOptions{ForceTemplate: true}); err != nil {
+		syncResult, err = a.AgentsSyncAll(ctx, AgentsSyncAllOptions{ForceTemplate: createdTemplate})
+		if err != nil {
 			return result, err
 		}
 	}
@@ -89,11 +102,31 @@ func (a *App) CompleteAgentsOnboarding(ctx context.Context, host string) (Agents
 		return result, nil
 	}
 	if legacySnapshot != "" {
+		if !cleanAgentsMigrationSync(syncResult) {
+			result.Readiness.CTA = AgentsCTARetry
+			result.Readiness.Details = append(result.Readiness.Details, "legacy config and migration snapshot retained because APM sync reported warnings or incomplete deployment")
+			return result, nil
+		}
 		if err := config.CleanupLegacyAgentsConfigFromSnapshot(a.ConfigPath, legacySnapshot); err != nil {
 			return result, err
 		}
+		remaining, err := config.HasRemovedAgentConfig(a.ConfigPath)
+		if err != nil {
+			return result, err
+		}
+		if remaining {
+			return result, fmt.Errorf("legacy agent config remains after migration cleanup")
+		}
+		if err := config.RemoveLegacyAgentsSnapshot(a.ConfigPath, legacySnapshot); err != nil {
+			return result, fmt.Errorf("remove completed migration snapshot: %w", err)
+		}
 	}
 	return result, nil
+}
+
+func cleanAgentsMigrationSync(result AgentsSyncAllResult) bool {
+	return result.Warning == "" && len(result.Notices) == 0 && strings.TrimSpace(result.Stderr) == "" &&
+		!strings.Contains(result.Output, "[!]") && !strings.Contains(result.Output, "Rejected")
 }
 
 func (a *App) prepareAgentsOnboarding(ctx context.Context, host string) (AgentsOnboardingResult, string, error) {

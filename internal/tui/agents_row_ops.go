@@ -174,6 +174,9 @@ func (m *Model) handleAgentsRowOpKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 	if !update && !remove {
 		return false, nil
 	}
+	if m.agentsReadinessPending {
+		return true, []tea.Cmd{setStatus(m, "checking APM readiness", false)}
+	}
 	row, ok := m.agentsSelectedRow()
 	if !ok {
 		return true, nil

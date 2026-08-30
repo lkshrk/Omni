@@ -1,9 +1,6 @@
 package tui
 
 import (
-	"errors"
-	"fmt"
-
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 
@@ -369,36 +366,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			m.agentsReadinessPending = false
 			m.agentsReadiness = msg.result.Readiness
 			m.agentsReadinessErr = msg.err
-			var repair *app.APMRepairError
-			m.agentsReadinessRepair = errors.As(msg.err, &repair)
 			m.agentsOutdatedErr = nil
-			cmds = append(cmds, m.loadAgentsAfterReadiness()...)
-		}
-
-	case agentsRepairDoneMsg:
-		m.apmRunning = false
-		m.apmErr = msg.err
-		if msg.err != nil {
-			m.agentsReadinessErr = fmt.Errorf("APM repair failed: %w", msg.err)
-			cmds = append(cmds, setStatus(&m, "✗ APM repair failed: "+msg.err.Error(), true))
-		} else if msg.readinessErr != nil {
-			m.agentsReadinessErr = msg.readinessErr
-			var repair *app.APMRepairError
-			m.agentsReadinessRepair = errors.As(msg.readinessErr, &repair)
-			cmds = append(cmds, setStatus(&m, "✗ APM readiness recheck failed: "+msg.readinessErr.Error(), true))
-		} else {
-			m.agentsReadinessErr = nil
-			m.agentsReadinessRepair = false
-			m.agentsReadiness = msg.readiness.Readiness
-			m.agentsReadinessPending = false
-			detail := msg.report.Installed
-			if detail == "" {
-				detail = msg.report.Upgraded
-			}
-			if detail == "" {
-				detail = "pinned APM ready"
-			}
-			cmds = append(cmds, setStatus(&m, "✓ "+detail, false))
 			cmds = append(cmds, m.loadAgentsAfterReadiness()...)
 		}
 

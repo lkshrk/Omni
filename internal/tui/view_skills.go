@@ -379,22 +379,19 @@ func agentsReadinessGuidance(m Model) string {
 		return "Checking APM readiness…"
 	}
 	if m.agentsReadinessErr != nil {
-		if m.agentsReadinessRepair {
-			return "APM is missing or incompatible: " + m.agentsReadinessErr.Error() + " · R repair pinned APM"
-		}
-		return "APM readiness check failed: " + m.agentsReadinessErr.Error() + " · R recheck"
+		return "Automatic APM setup failed: " + m.agentsReadinessErr.Error() + " · R retry"
 	}
 	detail := strings.Join(m.agentsReadiness.Details, "; ")
+	if m.agentsReadiness.CTA == app.AgentsCTAMigrate && detail != "" {
+		return detail + " · review migration before cleanup"
+	}
 	switch m.agentsReadiness.State {
 	case app.AgentsReadinessEmpty:
-		if detail != "" {
-			return detail + " · review migration snapshot or a add package"
-		}
-		return "No agent packages configured · a add package"
+		return firstNonEmpty(detail, "No migratable agent configuration found") + " · review legacy configuration; R retry"
 	case app.AgentsReadinessTemplateOnly:
-		return firstNonEmpty(detail, "APM template is staged") + " · S sync"
+		return firstNonEmpty(detail, "Automatic APM migration is staged but not installed") + " · R retry"
 	case app.AgentsReadinessLiveIncomplete:
-		return firstNonEmpty(detail, "APM live state is incomplete") + " · S sync"
+		return firstNonEmpty(detail, "Automatic APM migration did not create a lockfile") + " · R retry"
 	case app.AgentsReadinessLockOnly:
 		return firstNonEmpty(detail, "APM lockfile exists without a live manifest") + " · inspect APM files; R recheck"
 	case app.AgentsReadinessInvalid:

@@ -153,13 +153,6 @@ type agentsReadinessMsg struct {
 	err    error
 }
 
-type agentsRepairDoneMsg struct {
-	report       app.APMInstallFixReport
-	readiness    app.AgentsOnboardingResult
-	readinessErr error
-	err          error
-}
-
 type fixIgnoreDoneMsg struct {
 	modified []string
 	err      error

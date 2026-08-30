@@ -26,6 +26,11 @@ type legacyConfigFile struct {
 	raw  []byte
 }
 
+type legacyConfigChange struct {
+	legacyConfigFile
+	rendered []byte
+}
+
 // HasRemovedAgentConfig detects whether onboarding must run before normal
 // config repair. It deliberately decodes no removed DTOs.
 func HasRemovedAgentConfig(path string) (bool, error) {
@@ -79,7 +84,7 @@ func HasRemovedAgentConfig(path string) (bool, error) {
 }
 
 // CaptureLegacyAgentsSnapshot copies the resolved config and its recursive includes verbatim.
-// The returned directory is read-only and remains as recovery evidence after migration.
+// An exact existing snapshot is reused so retries do not accumulate duplicates.
 func CaptureLegacyAgentsSnapshot(configPath string) (snapshotDir string, retErr error) {
 	lock, err := AcquireWriteLock(configPath)
 	if err != nil {
@@ -90,6 +95,30 @@ func CaptureLegacyAgentsSnapshot(configPath string) (snapshotDir string, retErr 
 	files, root, err := legacyConfigFiles(configPath)
 	if err != nil {
 		return "", err
+	}
+	if snapshotDir, err = matchingLegacyAgentsSnapshot(root, files); err != nil || snapshotDir != "" {
+		return snapshotDir, err
+	}
+	evidencePaths, err := legacyAgentEvidencePaths(files)
+	if err != nil {
+		return "", err
+	}
+	if len(evidencePaths) != 0 {
+		return "", errors.New("local agent bundle evidence requires an existing migration snapshot; automatic capture only supports remote packages and inline MCP declarations")
+	}
+	for _, original := range evidencePaths {
+		info, err := os.Lstat(original)
+		if err != nil {
+			return "", err
+		}
+		if info.IsDir() {
+			if err := requireLegacyBundleRoot(original); err != nil {
+				return "", fmt.Errorf("local agent evidence %q requires manual review: %w", original, err)
+			}
+			if err := inspectLegacyEvidenceTree(original); err != nil {
+				return "", fmt.Errorf("local agent evidence %q requires manual review: %w", original, err)
+			}
+		}
 	}
 	snapshotDir, err = os.MkdirTemp(filepath.Dir(root), legacyAgentsSnapshotPrefix+"*")
 	if err != nil {
@@ -111,10 +140,6 @@ func CaptureLegacyAgentsSnapshot(configPath string) (snapshotDir string, retErr 
 		}
 		paths[name] = file.path
 	}
-	evidencePaths, err := legacyAgentEvidencePaths(files)
-	if err != nil {
-		return "", err
-	}
 	var evidenceBytes int64
 	evidenceEntries := 0
 	for i, original := range evidencePaths {
@@ -125,6 +150,10 @@ func CaptureLegacyAgentsSnapshot(configPath string) (snapshotDir string, retErr 
 		}
 		if info.Mode().IsRegular() && filepath.Base(original) == "marketplaces.json" {
 			name = "marketplaces.json"
+		} else if info.IsDir() {
+			if err := requireLegacyBundleRoot(original); err != nil {
+				return "", fmt.Errorf("local agent evidence %q requires manual review: %w", original, err)
+			}
 		}
 		if _, exists := paths[name]; exists {
 			return "", fmt.Errorf("legacy evidence snapshot name collision %q", name)
@@ -158,6 +187,18 @@ func CaptureLegacyAgentsSnapshot(configPath string) (snapshotDir string, retErr 
 	return snapshotDir, nil
 }
 
+func inspectLegacyEvidenceTree(root string) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path != root && unsafeLegacyEvidenceName(entry.Name()) {
+			return fmt.Errorf("sensitive or generated path %q", path)
+		}
+		return nil
+	})
+}
+
 // CleanupLegacyAgentsConfig is retained only to fail closed for old callers.
 func CleanupLegacyAgentsConfig(configPath string) error {
 	return errors.New("legacy agents cleanup requires the snapshot returned by CaptureLegacyAgentsSnapshot")
@@ -179,18 +220,14 @@ func CleanupLegacyAgentsConfigFromSnapshot(configPath, snapshotDir string) (retE
 	if err := verifyLegacyConfigSnapshot(root, snapshotDir, files); err != nil {
 		return err
 	}
-	type change struct {
-		legacyConfigFile
-		rendered []byte
-	}
-	changes := make([]change, 0, len(files))
+	changes := make([]legacyConfigChange, 0, len(files))
 	for _, file := range files {
 		var raw map[string]json.RawMessage
 		if err := unmarshalJSONObject(file.raw, &raw); err != nil {
 			return fmt.Errorf("parse legacy config %q: %w", file.path, err)
 		}
 		if removeLegacyAgentFields(raw) {
-			changes = append(changes, change{legacyConfigFile: file, rendered: renderFragmentRaw(raw, nil)})
+			changes = append(changes, legacyConfigChange{legacyConfigFile: file, rendered: renderFragmentRaw(raw, nil)})
 		}
 	}
 	for _, change := range changes {
@@ -202,12 +239,61 @@ func CleanupLegacyAgentsConfigFromSnapshot(configPath, snapshotDir string) (retE
 			return fmt.Errorf("verify legacy config %q: %w", change.path, err)
 		}
 	}
-	for _, change := range changes {
-		if err := atomicWriteUnlocked(change.path, change.rendered); err != nil {
-			return fmt.Errorf("clean legacy config %q: %w", change.path, err)
+	return applyLegacyAgentCleanup(changes, atomicWriteUnlocked)
+}
+
+func matchingLegacyAgentsSnapshot(configRoot string, files []legacyConfigFile) (string, error) {
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(configRoot), legacyAgentsSnapshotPrefix+"*"))
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(matches)
+	for _, candidate := range matches {
+		if verifyLegacyConfigSnapshot(configRoot, candidate, files) == nil {
+			return candidate, nil
+		}
+	}
+	return "", nil
+}
+
+func applyLegacyAgentCleanup(changes []legacyConfigChange, write func(string, []byte) error) error {
+	for i, change := range changes {
+		if err := write(change.path, change.rendered); err != nil {
+			rollbackErr := error(nil)
+			for j := i - 1; j >= 0; j-- {
+				rollbackErr = errors.Join(rollbackErr, write(changes[j].path, changes[j].raw))
+			}
+			return errors.Join(fmt.Errorf("clean legacy config %q: %w", change.path, err), rollbackErr)
 		}
 	}
 	return nil
+}
+
+// RemoveLegacyAgentsSnapshot deletes recovery evidence only after the caller
+// has verified the migration and completed legacy cleanup.
+func RemoveLegacyAgentsSnapshot(configPath, snapshotDir string) error {
+	_, root, err := legacyConfigFiles(configPath)
+	if err != nil {
+		return err
+	}
+	snapshotRoot, err := filepath.Abs(snapshotDir)
+	if err != nil {
+		return err
+	}
+	if filepath.Dir(snapshotRoot) != filepath.Dir(root) || !strings.HasPrefix(filepath.Base(snapshotRoot), legacyAgentsSnapshotPrefix) {
+		return errors.New("legacy agents snapshot is not beside the resolved config")
+	}
+	info, err := os.Lstat(snapshotRoot)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return errors.New("legacy agents snapshot must be a real directory")
+	}
+	if err := makeSnapshotWritable(snapshotRoot); err != nil {
+		return err
+	}
+	return os.RemoveAll(snapshotRoot)
 }
 
 func verifyLegacyConfigSnapshot(configRoot, snapshotDir string, files []legacyConfigFile) error {
@@ -405,9 +491,7 @@ func legacyAgentEvidencePaths(files []legacyConfigFile) ([]string, error) {
 					}
 					local := key != "source" || filepath.IsAbs(value) || strings.HasPrefix(value, ".")
 					if !local {
-						if _, err := os.Lstat(value); err != nil {
-							continue
-						}
+						continue
 					}
 					path, err := filepath.Abs(value)
 					if err != nil {
@@ -460,6 +544,9 @@ func copyLegacyEvidence(source, destination string, entries *int, total *int64) 
 		if err != nil {
 			return err
 		}
+		if rel != "." && unsafeLegacyEvidenceName(filepath.Base(path)) {
+			return fmt.Errorf("sensitive or generated path %q requires manual review", path)
+		}
 		target := destination
 		if rel != "." {
 			target = filepath.Join(destination, rel)
@@ -484,6 +571,41 @@ func copyLegacyEvidence(source, destination string, entries *int, total *int64) 
 		}
 		return os.WriteFile(target, raw, mode)
 	})
+}
+
+func requireLegacyBundleRoot(root string) error {
+	markers := []string{
+		"apm.yml",
+		"SKILL.md",
+		filepath.Join(".codex-plugin", "plugin.json"),
+		filepath.Join(".claude-plugin", "plugin.json"),
+		filepath.Join(".claude-plugin", "marketplace.json"),
+	}
+	for _, marker := range markers {
+		if info, err := os.Lstat(filepath.Join(root, marker)); err == nil && info.Mode().IsRegular() {
+			return nil
+		}
+	}
+	skills, _ := filepath.Glob(filepath.Join(root, "skills", "*", "SKILL.md"))
+	if len(skills) > 0 {
+		return nil
+	}
+	return errors.New("path is not a recognized APM, plugin, marketplace, or skill bundle")
+}
+
+func unsafeLegacyEvidenceName(name string) bool {
+	lower := strings.ToLower(name)
+	if lower == ".git" || lower == "node_modules" || lower == "target" || lower == "build" || lower == "dist" || lower == ".venv" || lower == "venv" {
+		return true
+	}
+	if lower == ".env" || strings.HasPrefix(lower, ".env.") {
+		return true
+	}
+	switch lower {
+	case "credentials", "credentials.json", "id_rsa", "id_ed25519", ".npmrc", ".pypirc", ".netrc":
+		return true
+	}
+	return false
 }
 
 func makeSnapshotReadOnly(root string) error {

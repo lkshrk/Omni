@@ -67,10 +67,9 @@ func TestCaptureAndCleanupLegacyAgentsConfig(t *testing.T) {
 		t.Fatalf("snapshot = %q, want unique directory beside resolved config", snapshot)
 	}
 	second, err := config.CaptureLegacyAgentsSnapshot(link)
-	if err != nil || second == snapshot {
-		t.Fatalf("second snapshot = %q, %v; want distinct directory", second, err)
+	if err != nil || second != snapshot {
+		t.Fatalf("second snapshot = %q, %v; want reuse of %q", second, err, snapshot)
 	}
-	defer func() { _ = os.Chmod(second, 0o700) }()
 	manifestRaw, err := os.ReadFile(filepath.Join(snapshot, "paths.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -199,16 +198,14 @@ func TestCleanupLegacyAgentsConfigRejectsChangeAfterCapture(t *testing.T) {
 	}
 }
 
-func TestCaptureLegacyAgentsSnapshotCopiesExplicitLocalBundle(t *testing.T) {
+func TestCaptureLegacyAgentsSnapshotRequiresReviewForLocalBundle(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	bundle := filepath.Join(dir, "local-plugin")
 	if err := os.MkdirAll(filepath.Join(bundle, "skills", "demo"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	bundleFile := filepath.Join(bundle, "skills", "demo", "SKILL.md")
-	bundleRaw := []byte("# exact local bundle\n")
-	if err := os.WriteFile(bundleFile, bundleRaw, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(bundle, "skills", "demo", "SKILL.md"), []byte("# local bundle\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	root := filepath.Join(dir, "settings.json")
@@ -216,42 +213,54 @@ func TestCaptureLegacyAgentsSnapshotCopiesExplicitLocalBundle(t *testing.T) {
 	if err := os.WriteFile(root, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := config.CaptureLegacyAgentsSnapshot(root)
-	if err != nil {
+	if _, err := config.CaptureLegacyAgentsSnapshot(root); err == nil || !strings.Contains(err.Error(), "local agent bundle evidence") {
+		t.Fatalf("CaptureLegacyAgentsSnapshot error = %v, want local evidence review", err)
+	}
+}
+
+func TestCaptureLegacyAgentsSnapshotRejectsSensitiveLocalBundleTree(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	bundle := filepath.Join(dir, "local-plugin")
+	if err := os.MkdirAll(filepath.Join(bundle, ".codex-plugin"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		_ = filepath.WalkDir(snapshot, func(path string, entry os.DirEntry, err error) error {
-			if err == nil && entry.IsDir() {
-				_ = os.Chmod(path, 0o700)
-			}
-			return nil
-		})
-	}()
-	manifestRaw, err := os.ReadFile(filepath.Join(snapshot, "paths.json"))
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(bundle, ".codex-plugin", "plugin.json"), []byte(`{"name":"local"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var paths map[string]string
-	if err := json.Unmarshal(manifestRaw, &paths); err != nil {
+	if err := os.WriteFile(filepath.Join(bundle, ".env"), []byte("TOKEN=secret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var copied string
-	for rel, original := range paths {
-		if original == bundle {
-			copied = rel
-		}
+	root := filepath.Join(dir, "settings.json")
+	body := fmt.Sprintf(`{"hosts":{"testhost":["work"]},"groups":[{"name":"work","plugins":["local"]}],"agents":{"plugins":[{"name":"local","path":%q}]}}`, bundle)
+	if err := os.WriteFile(root, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if copied == "" {
-		t.Fatalf("paths.json did not map local bundle %q: %#v", bundle, paths)
+	if _, err := config.CaptureLegacyAgentsSnapshot(root); err == nil || !strings.Contains(err.Error(), "local agent bundle evidence") {
+		t.Fatalf("CaptureLegacyAgentsSnapshot error = %v, want local evidence review", err)
 	}
-	got, err := os.ReadFile(filepath.Join(snapshot, copied, "skills", "demo", "SKILL.md"))
-	if err != nil || !bytes.Equal(got, bundleRaw) {
-		t.Fatalf("copied local bundle = %q, %v", got, err)
+	snapshots, _ := filepath.Glob(filepath.Join(dir, ".omni-apm-migration-backup-*"))
+	if len(snapshots) != 0 {
+		t.Fatalf("failed capture left snapshots: %v", snapshots)
 	}
-	decls, evidence, err := config.LegacyAgentsFromSnapshot(snapshot, "testhost")
-	if err != nil || len(decls.Plugins) != 1 || evidence.Paths[bundle] != copied {
-		t.Fatalf("LegacyAgentsFromSnapshot local evidence = %#v, %#v, %v", decls, evidence, err)
+}
+
+func TestRemoveLegacyAgentsSnapshotRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(configPath, []byte(`{"version":24}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := t.TempDir()
+	link := filepath.Join(dir, ".omni-apm-migration-backup-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.RemoveLegacyAgentsSnapshot(configPath, link); err == nil || !strings.Contains(err.Error(), "real directory") {
+		t.Fatalf("RemoveLegacyAgentsSnapshot error = %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("snapshot symlink target changed: %v", err)
 	}
 }
 

@@ -433,10 +433,13 @@ func assertNoPublishedMigrationWrappers(t *testing.T, stateDir string) {
 }
 
 type onboardingExecutor struct {
-	available map[string]bool
-	version   string
-	home      string
-	calls     []executor.MockCall
+	available     map[string]bool
+	version       string
+	home          string
+	calls         []executor.MockCall
+	installStdout string
+	installStderr string
+	installErr    error
 }
 
 func (e *onboardingExecutor) CommandAvailable(name string) bool { return e.available[name] }
@@ -477,6 +480,7 @@ func (e *onboardingExecutor) run(ctx context.Context, dir string, env []string, 
 		if err := os.WriteFile(filepath.Join(e.home, ".apm", "apm.lock.yaml"), []byte("dependencies: []\n"), 0o600); err != nil {
 			return "", "", err
 		}
+		return e.installStdout, e.installStderr, e.installErr
 	}
 	return "", "", nil
 }
@@ -579,10 +583,9 @@ func TestEnsureAgentsReadyCapturesLiveLegacyConfigMigratesAndCleans(t *testing.T
 		t.Fatalf("cleaned config = %s, err=%v", raw, err)
 	}
 	snapshots, err := filepath.Glob(filepath.Join(filepath.Dir(a.ConfigPath), snapshotGlob))
-	if err != nil || len(snapshots) != 1 {
+	if err != nil || len(snapshots) != 0 {
 		t.Fatalf("snapshots=%v err=%v", snapshots, err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(snapshots[0], 0o700) })
 	var installs int
 	for _, call := range exec.calls {
 		if call.Name == "apm" && len(call.Args) > 0 && call.Args[0] == "install" {
@@ -628,6 +631,9 @@ func TestEnsureAgentsReadyDoesNotCleanUnmigratedLegacyConfig(t *testing.T) {
 	if err != nil || result.Readiness.State != AgentsReadinessReady {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
+	if result.Readiness.CTA != AgentsCTAMigrate || len(result.Readiness.Details) == 0 {
+		t.Fatalf("ready legacy result did not require review: %+v", result.Readiness)
+	}
 	raw, err := os.ReadFile(a.ConfigPath)
 	if err != nil || string(raw) != legacy {
 		t.Fatalf("unmigrated legacy config changed: %q err=%v", raw, err)
@@ -638,5 +644,58 @@ func TestEnsureAgentsReadyDoesNotCleanUnmigratedLegacyConfig(t *testing.T) {
 	snapshots, err := filepath.Glob(filepath.Join(filepath.Dir(a.ConfigPath), snapshotGlob))
 	if err != nil || len(snapshots) != 0 {
 		t.Fatalf("snapshots=%v err=%v", snapshots, err)
+	}
+}
+
+func TestEnsureAgentsReadyRetainsLegacySnapshotOnSyncWarning(t *testing.T) {
+	a, exec, _ := newAgentsStateMachineApp(t, apmVersionPin)
+	exec.installStdout = "[!] [legacy] Rejected agent target path: Cannot verify containment of\n'/tmp/existing' within\n"
+	legacy := `{
+  "agents": {"mcp_servers": [{"name":"independent","transport":"stdio","command":"independent-mcp"}]},
+  "groups": [{"name":"g","mcp_servers":["independent"]}],
+  "hosts": {"host":["g"]}
+}`
+	if err := os.WriteFile(a.ConfigPath, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := a.EnsureAgentsReady(t.Context(), "host")
+	if err != nil || result.Readiness.State != AgentsReadinessReady || result.Readiness.CTA != AgentsCTARetry {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	raw, err := os.ReadFile(a.ConfigPath)
+	if err != nil || string(raw) != legacy {
+		t.Fatalf("legacy config changed after warning: %q err=%v", raw, err)
+	}
+	snapshots, err := filepath.Glob(filepath.Join(filepath.Dir(a.ConfigPath), snapshotGlob))
+	if err != nil || len(snapshots) != 1 {
+		t.Fatalf("snapshots=%v err=%v", snapshots, err)
+	}
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(snapshots[0], func(path string, entry os.DirEntry, err error) error {
+			if err == nil && entry.IsDir() {
+				_ = os.Chmod(path, 0o700)
+			}
+			return nil
+		})
+	})
+}
+
+func TestCompleteAgentsOnboardingDoesNotForcePreexistingLiveManifest(t *testing.T) {
+	a, _, home := newAgentsStateMachineApp(t, apmVersionPin)
+	template, err := AgentsTemplatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, template, "name: staged\n")
+	live := writeAgentsWorkspaceFile(t, home, "apm.yml", "name: user-managed\n")
+
+	result, err := a.CompleteAgentsOnboarding(t.Context(), "host")
+	if err != nil || result.Readiness.State != AgentsReadinessReady {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	raw, err := os.ReadFile(live)
+	if err != nil || string(raw) != "name: user-managed\n" {
+		t.Fatalf("preexisting live manifest changed: %q err=%v", raw, err)
 	}
 }
