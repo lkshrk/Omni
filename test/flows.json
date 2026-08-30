@@ -986,9 +986,20 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI writes global ignore.tools while TUI all-hosts selection persists tool-level ignore state; normalized configs differ despite equivalent suppression.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUIToolsIgnoreProduceEquivalentSemanticState",
+                "tags": ["integration"],
+                "lane": "docker-realism",
+                "os": ["linux"]
+              }
+            }
+          ]
         }
       ],
       "parity": {
@@ -2301,9 +2312,20 @@
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUIDotsRefreshPreserveEquivalentBrokenLinkState",
+                "tags": ["integration"],
+                "lane": "docker-realism",
+                "os": ["linux"]
+              }
+            }
+          ]
         }
       ],
       "parity": {
@@ -3706,15 +3728,37 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIDotsReminderInstallsSandboxService",
+                "tags": ["integration"],
+                "lane": "docker-realism",
+                "os": ["linux"]
+              }
+            }
+          ]
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUIDotsReminderProduceEquivalentServiceState",
+                "tags": ["integration"],
+                "lane": "docker-realism",
+                "os": ["linux"]
+              }
+            }
+          ]
         }
       ],
       "parity": {
@@ -3942,9 +3986,20 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIDotsWatchInstallsSandboxServiceAfterDoctorSettles",
+                "tags": ["integration"],
+                "lane": "docker-realism",
+                "os": ["linux"]
+              }
+            }
+          ]
         },
         {
           "level": "parity",
