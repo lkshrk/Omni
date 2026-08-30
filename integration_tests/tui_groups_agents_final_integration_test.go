@@ -23,7 +23,7 @@ func TestTUIGroupsEditToolsPersistsToolMembership(t *testing.T) {
 		writeTUIKeys(t, term, " ", "\r")
 		return waitForRequiredScreen(t, term, 8*time.Second, func(_ string) bool {
 			cfg, err := config.Load(configPath)
-			return err == nil && toolInConfigGroup(cfg, "work", "omni-local")
+			return err == nil && toolInConfigGroup(cfg, "dev", "omni-local") && toolInConfigGroup(cfg, "work", "omni-local")
 		}, "TUI did not persist the group tool membership")
 	})
 }
