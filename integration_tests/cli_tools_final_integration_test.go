@@ -31,13 +31,16 @@ func TestCLIBinaryToolsFinalMaintenanceFlows(t *testing.T) {
 	t.Run("tools.normalize_provider_overrides", func(t *testing.T) {
 		root, _, cache, env, configPath := finalToolsFixture(t, &config.RootConfig{
 			Settings: config.Settings{Ecosystems: map[string]config.EcosystemSettings{"node": {Manager: "pnpm"}}},
-			Tools:    map[string]config.ToolSpec{"fixture": {Providers: []config.ToolInstallSpec{{Provider: "node", Package: "fixture-cli", InstallWith: "pnpm"}}}},
-			Hosts:    map[string][]string{"testhost": {}},
-			Groups:   []*config.GroupConfig{{Name: "testhost", Special: "host", Tools: []config.ToolEntry{{Name: "fixture"}}}},
+			Tools: map[string]config.ToolSpec{"fixture": {
+				Providers:   []config.ToolInstallSpec{{Provider: "pnpm", Package: "fixture-cli"}},
+				InstallWith: "pnpm",
+			}},
+			Hosts:  map[string][]string{"testhost": {}},
+			Groups: []*config.GroupConfig{{Name: "testhost", Special: "host", Tools: []config.ToolEntry{{Name: "fixture"}}}},
 		})
 		out := runOmniOutput(t, buildOmniBinary(t), root, env, "--yes", "--config", configPath, "--cache-dir", cache, "tools", "normalize", "--default-overrides")
 		spec := loadFinalToolsConfig(t, configPath).Tools["fixture"]
-		if !strings.Contains(out, "Normalized 1 provider override") || len(spec.Providers) != 1 || spec.Providers[0].Provider != "node" || spec.Providers[0].InstallWith != "" {
+		if !strings.Contains(out, "Normalized 1 provider override") || len(spec.Providers) != 1 || spec.Providers[0].Provider != "pnpm" || spec.InstallWith != "" {
 			t.Fatalf("normalized override = spec %#v\n%s", spec, out)
 		}
 	})
