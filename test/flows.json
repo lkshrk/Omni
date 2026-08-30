@@ -1545,24 +1545,8 @@
               }
             }
           ]
-        },
-        {
-          "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
-        },
-        {
-          "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
         }
-      ],
-      "parity": {
-        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.set_spec",
-        "rationale": "tools.set_spec is mutable; parity compares resulting state, not adapter output."
-      }
+      ]
     },
     {
       "id": "tools.fallback",
@@ -2015,24 +1999,8 @@
               }
             }
           ]
-        },
-        {
-          "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
-        },
-        {
-          "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
         }
-      ],
-      "parity": {
-        "semantic_state": "normalized tool installation, provider selection, and persisted tool config after tools.import",
-        "rationale": "tools.import is mutable; parity compares resulting state, not adapter output."
-      }
+      ]
     },
     {
       "id": "tools.switch_provider",

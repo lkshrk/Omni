@@ -371,8 +371,8 @@ var Tools = []Action{
 		LongDescription: "Create or update a logical tool spec, including concrete provider candidates, package name, quarantine, or legacy host override.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName, RequiresEcosystemProvider},
-		TUI:             &TUIBinding{KeyMapField: "PinProvider", DefaultKey: "p", Label: "set tool spec", Description: "Edit provider and package settings for the selected tool."},
 		CLI:             []CLIBinding{{Command: []string{"tools", "set"}, Flags: []string{"--provider", "--package", "--install-with", "--host", "--global", "--quarantine"}}},
+		CLIOnlyReason:   "The TUI provider picker changes provider overrides; arbitrary package and quarantine edits remain CLI-only.",
 	},
 	{
 		ID:              ToolFallback,
@@ -450,8 +450,8 @@ var Tools = []Action{
 		Description:     "Import installed tools into config.",
 		LongDescription: "Discover locally installed tools and add them to config, optionally scoped by provider and destination group.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "import installed tools", Description: "Import installed tools into the selected group."},
 		CLI:             []CLIBinding{{Command: []string{"tools", "import"}, Flags: []string{"--provider", "--group", "--dry-run"}}},
+		CLIOnlyReason:   "The TUI sync-all action also installs missing tools; import-only discovery remains CLI-only.",
 	},
 	{
 		ID:              ToolSwitchProvider,
