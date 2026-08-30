@@ -268,8 +268,21 @@ func providerMutationSettled(s *paritySandbox, provider string) bool {
 		return false
 	}
 	defer db.Close()
-	tool, err := db.Get(context.Background(), "black", provider, "black")
-	return err == nil && tool.Installed && tool.InstalledWith == provider && !tool.Outdated
+	rows, err := db.List(context.Background())
+	if err != nil {
+		return false
+	}
+	black := 0
+	for _, tool := range rows {
+		if tool.Name != "black" {
+			continue
+		}
+		black++
+		if tool.Provider != provider || tool.Package != "black" || !tool.Installed || tool.InstalledWith != provider || tool.Outdated {
+			return false
+		}
+	}
+	return black == 1
 }
 
 func providerMutationPinSettled(s *paritySandbox) bool {

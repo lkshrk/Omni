@@ -663,6 +663,9 @@ func TestGlobalUpdateRefreshesRemoteGitPackage(t *testing.T) {
 
 	server := httptest.NewTLSServer(gitHTTPHandler(root))
 	t.Cleanup(server.Close)
+	credentialFile := filepath.Join(root, "git-credentials")
+	writeFile(t, credentialFile, "https://omni-test:test-token@"+strings.TrimPrefix(server.URL, "https://")+"\n")
+	runGit(t, root, "config", "--global", "credential.helper", "store --file="+credentialFile)
 	gitURL := server.URL + "/owner/fixture"
 	writeFile(t, filepath.Join(home, ".apm", "apm.yml"), "name: update-integration\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm:\n    - git: "+gitURL+"\n      ref: main\n  mcp: []\n")
 	client := apm.New(commandexec.New(), apm.Global)

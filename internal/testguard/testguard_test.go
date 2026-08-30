@@ -242,6 +242,12 @@ func TestCopyApprovedToolFallback(t *testing.T) {
 	}
 }
 
+func TestResolveApprovedToolRejectsMissingPath(t *testing.T) {
+	if _, err := resolveApprovedTool(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("missing approved tool path accepted")
+	}
+}
+
 func TestWindowsEnvKeyNormalizationBlocksCaseVariants(t *testing.T) {
 	for _, key := range []string{"home", "OmNi_Config", "PaTh", "gOcAcHe"} {
 		if !isProtectedEnvKey(key, true) {

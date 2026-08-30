@@ -72,9 +72,13 @@ func runToolsDeleteSpecParityTUI(t *testing.T, bin string, s *paritySandbox) {
 		waitForRequiredScreen(t, term, 10*time.Second, func(text string) bool {
 			return strings.Contains(text, "omni-missing") && !strings.Contains(strings.ToLower(text), "refreshing tools")
 		}, "TUI installed-provider refresh did not settle before deletion")
-		writeTUIKeys(t, term, "j")
-		waitForRequiredScreen(t, term, 4*time.Second, func(text string) bool {
-			return strings.Contains(text, ">") && strings.Contains(text, "omni-missing")
+		sendToolsFinalKeyUntil(t, term, "j", func(text string) bool {
+			for _, line := range strings.Split(text, "\n") {
+				if strings.Contains(line, ">") && strings.Contains(line, "omni-missing") {
+					return true
+				}
+			}
+			return false
 		}, "TUI did not select missing tracked tool")
 		writeTUIKeys(t, term, "d")
 		waitForRequiredScreen(t, term, 4*time.Second, screenHas("confirm delete", "omni-missing"), "TUI did not arm spec deletion")

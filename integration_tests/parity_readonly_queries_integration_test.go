@@ -69,7 +69,7 @@ esac
 		waitForRequiredScreen(t, term, 7*time.Second, screenHas("Dashboard", "Tools"), "TUI did not start")
 		waitForRequiredScreen(t, term, 12*time.Second, func(string) bool {
 			packet, err := readOnlyObservationPacket(observationPath)
-			return err == nil && packet.Doctor != nil
+			return err == nil && reflect.DeepEqual(packet.Doctor, &cliDoctor)
 		}, "TUI did not publish the accepted doctor result")
 		writeTUIKeys(t, term, "\t")
 		waitForRequiredScreen(t, term, 10*time.Second, func(text string) bool {

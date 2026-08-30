@@ -238,5 +238,4 @@ per-dependency `targets:` natively, resolve legacy package roots through an
 explicit `path:` coordinate, and support `--dry-run`.
 
 Upgrading APM means rerunning Omni's APM contract and integration suites against
-the candidate build and moving the pin to that build's immutable commit. Do not
-switch to a floating branch or an untested release.
+the current upstream `main` build before changing Omni's required version.

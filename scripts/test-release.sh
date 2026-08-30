@@ -27,6 +27,26 @@ assert_release_requires_latest_ci_success() {
     echo "release workflow must not accept an older successful CI run" >&2
     exit 1
   fi
+  if ! grep -q 'echo "approved=true" >> "$GITHUB_OUTPUT"' "$workflow"; then
+    echo "release workflow must positively authorize a successful CI run" >&2
+    exit 1
+  fi
+  if ! grep -q "if: steps.civerify.outputs.approved == 'true'" "$workflow"; then
+    echo "release tag lookup must fail closed without positive CI authorization" >&2
+    exit 1
+  fi
+  if grep -q "github.event_name == 'workflow_run' || steps.civerify.outputs.approved" "$workflow"; then
+    echo "workflow_run must not bypass positive CI authorization" >&2
+    exit 1
+  fi
+  if grep -q 'steps.civerify.outputs.skip' "$workflow"; then
+    echo "release workflow must not use fail-open negative CI authorization" >&2
+    exit 1
+  fi
+  if ! grep -q "github.event.workflow_run.event == 'push'" "$workflow"; then
+    echo "release workflow must ignore non-push CI completions" >&2
+    exit 1
+  fi
 }
 
 FAKEBIN="$TMPDIR/bin"

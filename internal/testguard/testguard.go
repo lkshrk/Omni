@@ -243,7 +243,7 @@ func (s *Sandbox) installApprovedTools() error {
 			}
 			continue
 		}
-		resolved, err := filepath.EvalSymlinks(source)
+		resolved, err := resolveApprovedTool(source)
 		if err != nil {
 			return fmt.Errorf("resolving approved test tool %q: %w", name, err)
 		}
@@ -259,6 +259,20 @@ func (s *Sandbox) installApprovedTools() error {
 		}
 	}
 	return nil
+}
+
+func resolveApprovedTool(source string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(source)
+	if err == nil {
+		return resolved, nil
+	}
+	// Windows toolcache executables may be reachable through junctions that EvalSymlinks cannot traverse.
+	if runtime.GOOS == "windows" {
+		if info, statErr := os.Stat(source); statErr == nil && !info.IsDir() {
+			return source, nil
+		}
+	}
+	return "", err
 }
 
 func parseApprovedTools(value string) ([]string, error) {

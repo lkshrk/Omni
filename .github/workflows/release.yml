@@ -22,7 +22,7 @@ permissions:
 jobs:
   release:
     name: GoReleaser
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -31,9 +31,8 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha || github.ref }}
           fetch-depth: 0
 
-      - name: Verify CI passed for manual or tag-push release
+      - name: Verify latest CI passed
         id: civerify
-        if: github.event_name != 'workflow_run'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -57,13 +56,13 @@ jobs:
           IFS=$'\t' read -r ci_status ci_conclusion <<< "${latest}"
           if [ "${ci_status}" = "completed" ] && [ "${ci_conclusion}" = "success" ]; then
             echo "Latest CI Pipeline run for ${TARGET_SHA} passed."
+            echo "approved=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # A tag arriving mid-CI is deferred to the successful workflow_run trigger.
-          if [ "${ci_status}" != "completed" ] && [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+          # A tag or older workflow_run arriving mid-CI is deferred to the latest successful workflow_run trigger.
+          if [ "${ci_status}" != "completed" ] && [ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]; then
             echo "CI for ${TARGET_SHA} is still running; deferring to the workflow_run trigger."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -72,6 +71,7 @@ jobs:
 
       - name: Check for release tag
         id: tag
+        if: steps.civerify.outputs.approved == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -93,14 +93,14 @@ jobs:
           git checkout "$TAG"
 
       - name: Set up Go
-        if: steps.tag.outputs.tag != '' && steps.civerify.outputs.skip != 'true'
+        if: steps.tag.outputs.tag != ''
         uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: true
 
       - name: GoReleaser
-        if: steps.tag.outputs.tag != '' && steps.civerify.outputs.skip != 'true'
+        if: steps.tag.outputs.tag != ''
         uses: goreleaser/goreleaser-action@v7.2.3
         with:
           version: '~> v2'
@@ -110,7 +110,7 @@ jobs:
           GORELEASER_CURRENT_TAG: ${{ steps.tag.outputs.tag }}
 
       - name: Update Homebrew formula
-        if: steps.tag.outputs.tag != '' && steps.civerify.outputs.skip != 'true'
+        if: steps.tag.outputs.tag != ''
         env:
           TAG: ${{ steps.tag.outputs.tag }}
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

@@ -73,8 +73,8 @@ run when the config declares agent packages, and reports how to install APM.
 
 `omni doctor` requires the exact build `0.29.0`; another version or an
 unparseable version fails the "APM version" check. `--fix` restores the required
-build from the immutable upstream commit through the same installer preference.
-See [Pinned APM Build](agents.md#pinned-apm-build) for provenance and the
+build from the upstream `main` branch through the same installer preference.
+See [APM Main Build](agents.md#apm-main-build) for provenance and the
 upgrade procedure.
 
 `omni doctor` exits nonzero when any check fails, and `--fix` and `--dry-run`

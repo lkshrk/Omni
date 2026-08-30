@@ -73,7 +73,7 @@ func runDotsLifecycleIgnoreTUI(t *testing.T, bin string, sandbox *paritySandbox)
 		writeTUIKeys(t, term, "x")
 	}, func(cfg *config.RootConfig) bool {
 		entry := dotsLifecycleEntry(cfg, "nvim")
-		return entry != nil && entry.Ignored
+		return entry != nil && entry.Ignored && dotsLifecycleRepoSourceRemoved(sandbox) && dotsLifecycleTargetIsLocalFile(sandbox)
 	})
 }
 
@@ -90,7 +90,7 @@ func runDotsLifecycleDeleteTUI(t *testing.T, bin string, sandbox *paritySandbox)
 		sendDotsLifecycleKeyUntil(t, term, "d", screenHas("keep local?", "yes", "no"), "TUI did not arm dots delete")
 		writeTUIKeys(t, term, "y")
 	}, func(cfg *config.RootConfig) bool {
-		return dotsLifecycleEntry(cfg, "nvim") == nil
+		return dotsLifecycleEntry(cfg, "nvim") == nil && dotsLifecycleRepoSourceRemoved(sandbox) && dotsLifecycleTargetIsLocalFile(sandbox)
 	})
 }
 
@@ -203,6 +203,18 @@ func dotsLifecycleDisabled(cfg *config.RootConfig) bool {
 func dotsLifecycleTargetIsSymlink(sandbox *paritySandbox) bool {
 	info, err := os.Lstat(filepath.Join(sandbox.home, ".config", "nvim", "init.lua"))
 	return err == nil && info.Mode()&os.ModeSymlink != 0
+}
+
+func dotsLifecycleRepoSourceRemoved(sandbox *paritySandbox) bool {
+	_, err := os.Lstat(filepath.Join(sandbox.home, "dotfiles", "dotfiles", "nvim", ".config", "nvim", "init.lua"))
+	return os.IsNotExist(err)
+}
+
+func dotsLifecycleTargetIsLocalFile(sandbox *paritySandbox) bool {
+	target := filepath.Join(sandbox.home, ".config", "nvim", "init.lua")
+	info, err := os.Lstat(target)
+	content, readErr := os.ReadFile(target)
+	return err == nil && info.Mode().IsRegular() && readErr == nil && string(content) == "repo version\n"
 }
 
 func dotsLifecycleEntry(cfg *config.RootConfig, name string) *config.DotEntry {
