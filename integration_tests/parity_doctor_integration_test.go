@@ -60,6 +60,7 @@ func TestCLIAndTUIDoctorFixProduceEquivalentSemanticState(t *testing.T) {
 
 func seedDoctorFixParity(t *testing.T, sandbox *paritySandbox) {
 	t.Helper()
+	writeIntegrationFile(t, filepath.Join(sandbox.home, ".config", "omni", "apm.yml"), "name: parity\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm: []\n  mcp: []\n")
 	writeExecutable(t, filepath.Join(sandbox.home, ".test-stub-bin", "apm"), `#!/bin/sh
 case "$*" in
   --version) echo 'Agent Package Manager (APM) CLI version 0.29.0' ;;
