@@ -34,8 +34,8 @@ func TestFlowCatalogMatchesActionRegistryAndStaticEvidence(t *testing.T) {
 	gapCeiling := map[testflow.Level]int{
 		testflow.LevelIntegration: 0,
 		testflow.LevelCLIBlackBox: 0,
-		testflow.LevelTUIBlackBox: 7,
-		testflow.LevelParity:      12,
+		testflow.LevelTUIBlackBox: 6,
+		testflow.LevelParity:      11,
 	}
 	gaps := make(map[testflow.Level]int)
 	for _, flow := range catalog.Flows {
