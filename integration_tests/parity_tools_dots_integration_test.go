@@ -118,7 +118,16 @@ func runParityToolDeleteTUI(t *testing.T, bin string, sandbox *paritySandbox) {
 			return false
 		}
 		_, declared := cfg.Tools["fixture"]
-		return !declared
+		if declared {
+			return false
+		}
+		db, err := database.Open(filepath.Join(sandbox.cache, "omni.db"))
+		if err != nil {
+			return false
+		}
+		defer db.Close()
+		tool, err := db.Get(context.Background(), "fixture", "script", "fixture")
+		return errors.Is(err, sql.ErrNoRows) || (err == nil && !tool.Installed)
 	})
 }
 
@@ -235,13 +244,14 @@ func readParityDeletedToolThroughCLI(t *testing.T, bin string, sandbox *paritySa
 		"--config", sandbox.configPath, "--cache-dir", sandbox.cache,
 		"tools", "list", "fixture", "--format", "json")
 	var tools []struct {
-		Name  string `json:"name"`
-		Group string `json:"group"`
+		Name      string `json:"name"`
+		Group     string `json:"group"`
+		Installed bool   `json:"installed"`
 	}
 	if err := json.Unmarshal([]byte(out), &tools); err != nil {
 		t.Fatalf("decode CLI tool read over TUI state: %v", err)
 	}
-	if len(tools) != 0 {
+	if len(tools) > 1 || (len(tools) == 1 && (tools[0].Name != "fixture" || tools[0].Group != "-" || tools[0].Installed)) {
 		t.Fatalf("CLI did not observe TUI removal from config: %#v", tools)
 	}
 	db, err := database.Open(filepath.Join(sandbox.cache, "omni.db"))

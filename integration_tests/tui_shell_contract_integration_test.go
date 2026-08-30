@@ -61,7 +61,7 @@ func TestTUIShellContractRedrawsAfterPTYResize(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "--config", configPath, "--cache-dir", cache)
+	cmd := exec.CommandContext(ctx, bin, "--config", configPath, "--cache-dir", cache, "ui")
 	cmd.Dir = root
 	cmd.Env = isolatedTUIEnv(t, home, cache)
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 100})

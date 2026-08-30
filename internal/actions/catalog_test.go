@@ -324,6 +324,7 @@ func TestActionCatalogIncludesDurableDomains(t *testing.T) {
 		HostEditGroups,
 		SettingsSet,
 		SettingsProvider,
+		SettingsProviderPriority,
 		SettingsReset,
 		SettingsResetCache,
 		SettingsMigrateHostOverrides,

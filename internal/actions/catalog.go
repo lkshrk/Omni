@@ -63,6 +63,7 @@ const (
 	HostEditGroups                 ID = "hosts.edit_groups"
 	SettingsSet                    ID = "settings.set"
 	SettingsProvider               ID = "settings.provider"
+	SettingsProviderPriority       ID = "settings.provider_priority"
 	SettingsReset                  ID = "settings.reset"
 	SettingsResetCache             ID = "settings.reset_cache"
 	SettingsMigrateHostOverrides   ID = "settings.migrate_host_overrides"
@@ -924,11 +925,22 @@ var Settings = []Action{
 		Description:     "Enable or disable a provider family.",
 		LongDescription: "Enable or disable a provider family for this host.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "Toggle", DefaultKey: "space", Label: "toggle provider", Description: "Enable or disable the selected provider."},
+		TUI:             &TUIBinding{KeyMapField: "Ignore", DefaultKey: "x", Label: "toggle provider", Description: "Enable or disable the selected provider."},
 		CLI: []CLIBinding{
 			{Command: []string{"settings", "disable-provider"}},
 			{Command: []string{"settings", "enable-provider"}},
 		},
+	},
+	{
+		ID:              SettingsProviderPriority,
+		Domain:          "settings",
+		Scope:           ScopeGlobal,
+		Label:           "reorder provider priority",
+		Description:     "Change provider detection and installation priority.",
+		LongDescription: "Reorder the provider families used for detection and installation on this host.",
+		Mutates:         true,
+		TUI:             &TUIBinding{KeyMapField: "Toggle", DefaultKey: "space", Label: "grab provider", Description: "Grab or drop the selected provider while reordering priority."},
+		TUIOnlyReason:   "The CLI edits provider_priority through settings.set; the interactive reorder editor is TUI-only.",
 	},
 	{
 		ID:                 SettingsReset,

@@ -49,6 +49,8 @@ type App struct {
 	configMu sync.Mutex
 	// Guards the a.db pointer only; SQLite's own locking handles concurrent calls on the handle.
 	dbMu sync.RWMutex
+	// Prevents a provider scan captured before a lifecycle mutation from restoring stale installed rows afterward.
+	installedStateMu sync.RWMutex
 
 	// Serialises prependDotsHistory so concurrent tea.Cmd goroutines cannot lose entries.
 	historyMu sync.Mutex

@@ -40,8 +40,183 @@ type multiManagerLifecycleProvider struct {
 	entries map[string]provider.InstalledEntry
 }
 
+type blockingInstalledProvider struct {
+	lifecycleProvider
+	started         chan struct{}
+	release         chan struct{}
+	checks          atomic.Int32
+	scanInstalled   bool
+	verifyInstalled bool
+}
+
+type blockingDiscoveryProvider struct {
+	stubProvider
+	started chan struct{}
+	release chan struct{}
+}
+
+func (p *blockingDiscoveryProvider) ListInstalled(context.Context) ([]provider.InstalledTool, error) {
+	close(p.started)
+	<-p.release
+	return append([]provider.InstalledTool(nil), p.installed...), nil
+}
+
+func (p *blockingInstalledProvider) IsInstalled(_ context.Context, tool provider.Tool) (bool, string, error) {
+	select {
+	case <-p.started:
+	default:
+		close(p.started)
+	}
+	<-p.release
+	if p.checks.Add(1) == 1 {
+		return p.scanInstalled, "1.0.0", nil
+	}
+	return p.verifyInstalled, "2.0.0", nil
+}
+
 func (p *multiManagerLifecycleProvider) InstalledByManager(_ context.Context) (map[string]provider.InstalledEntry, error) {
 	return p.entries, nil
+}
+
+func TestUninstallWaitsForInstalledRefreshAndWinsCacheState(t *testing.T) {
+	ctx := context.Background()
+	prov := &blockingInstalledProvider{
+		lifecycleProvider: lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}},
+		started:           make(chan struct{}),
+		release:           make(chan struct{}),
+		scanInstalled:     true,
+	}
+	a, cfgPath := newImportApp(t, prov)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  map[string]config.ToolSpec{"fixture": {Providers: []config.ToolInstallSpec{{Provider: "brew", Package: "fixture"}}}},
+		Groups: []*config.GroupConfig{{Tools: groupTools("fixture")}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{Name: "fixture", Provider: "brew", Package: "fixture", Installed: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- a.RefreshInstalled(ctx, nil) }()
+	select {
+	case <-prov.started:
+	case <-time.After(time.Second):
+		t.Fatal("installed refresh did not start")
+	}
+	uninstallDone := make(chan error, 1)
+	go func() { uninstallDone <- a.Uninstall(ctx, "fixture", "brew") }()
+	select {
+	case err := <-uninstallDone:
+		t.Fatalf("uninstall bypassed active refresh: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(prov.release)
+	if err := <-refreshDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-uninstallDone; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.DB().Get(ctx, "fixture", "brew", "fixture"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("stale installed cache survived uninstall: %v", err)
+	}
+}
+
+func TestInstallAndAddWaitsForInstalledRefreshAndWinsCacheState(t *testing.T) {
+	ctx := context.Background()
+	prov := &blockingInstalledProvider{
+		lifecycleProvider: lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}},
+		started:           make(chan struct{}),
+		release:           make(chan struct{}),
+		verifyInstalled:   true,
+	}
+	a, cfgPath := newImportApp(t, prov)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  map[string]config.ToolSpec{"fixture": {Providers: []config.ToolInstallSpec{{Provider: "brew", Package: "fixture"}}}},
+		Groups: []*config.GroupConfig{{Name: "dev", Tools: groupTools("fixture")}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- a.RefreshInstalled(ctx, nil) }()
+	select {
+	case <-prov.started:
+	case <-time.After(time.Second):
+		t.Fatal("installed refresh did not start")
+	}
+	installDone := make(chan error, 1)
+	go func() {
+		_, err := a.InstallAndAddWithState(ctx, app.AddToolOptions{
+			Name: "fixture", Package: "fixture", ProviderName: "brew", GroupName: "dev", Options: map[string]string{"channel": "stable"},
+		})
+		installDone <- err
+	}()
+	select {
+	case err := <-installDone:
+		t.Fatalf("install bypassed active refresh: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(prov.release)
+	if err := <-refreshDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-installDone; err != nil {
+		t.Fatal(err)
+	}
+	cached, err := a.DB().Get(ctx, "fixture", "brew", "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cached.Installed || cached.Version.String != "2.0.0" {
+		t.Fatalf("stale refresh overwrote install cache: %+v", cached)
+	}
+}
+
+func TestUninstallWaitsForDiscoveredRefreshAndWinsCacheState(t *testing.T) {
+	ctx := context.Background()
+	prov := &blockingDiscoveryProvider{
+		stubProvider: stubProvider{
+			name:      "brew",
+			available: true,
+			installed: []provider.InstalledTool{{Tool: provider.Tool{Name: "fixture", Provider: "brew", Package: "fixture"}, Version: "1.0.0"}},
+		},
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	a, cfgPath := newImportApp(t, prov)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  map[string]config.ToolSpec{"tracked": {Providers: []config.ToolInstallSpec{{Provider: "brew", Package: "tracked"}}}},
+		Groups: []*config.GroupConfig{{Tools: groupTools("tracked")}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- a.RefreshDiscovered(ctx) }()
+	select {
+	case <-prov.started:
+	case <-time.After(time.Second):
+		t.Fatal("discovered refresh did not start")
+	}
+	uninstallDone := make(chan error, 1)
+	go func() { uninstallDone <- a.Uninstall(ctx, "fixture", "brew") }()
+	select {
+	case err := <-uninstallDone:
+		t.Fatalf("uninstall bypassed active discovered refresh: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(prov.release)
+	if err := <-refreshDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-uninstallDone; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.DB().Get(ctx, "fixture", "brew", "fixture"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("stale discovered cache survived uninstall: %v", err)
+	}
 }
 
 func (p *lifecycleProvider) Uninstall(_ context.Context, tool provider.Tool) error {

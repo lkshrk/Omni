@@ -797,6 +797,13 @@ func (a *App) scanInstalledBulkMaps(ctx context.Context, available []provider.Pr
 }
 
 func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error {
+	a.installedStateMu.RLock()
+	defer a.installedStateMu.RUnlock()
+	release, err := a.lockInstalledStateFile(true)
+	if err != nil {
+		return err
+	}
+	defer release()
 	defer profile.Start("app.refresh.installed.total")()
 
 	stop := profile.Start("app.refresh.installed.load_config")
@@ -1092,6 +1099,13 @@ func (a *App) flushProviderInstalledUpserts(ctx context.Context, provName string
 }
 
 func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName string, progress func(RefreshInstalledProgressEvent)) error {
+	a.installedStateMu.RLock()
+	defer a.installedStateMu.RUnlock()
+	release, err := a.lockInstalledStateFile(true)
+	if err != nil {
+		return err
+	}
+	defer release()
 	defer profile.Start("app.refresh.installed.provider." + provName)()
 
 	cfg, err := a.loadConfig()
@@ -1349,6 +1363,13 @@ func (a *App) RefreshDiscovered(ctx context.Context) error {
 }
 
 func (a *App) RefreshDiscoveredWithProgress(ctx context.Context, progress func(RefreshDiscoveredProgressEvent)) error {
+	a.installedStateMu.RLock()
+	defer a.installedStateMu.RUnlock()
+	release, err := a.lockInstalledStateFile(true)
+	if err != nil {
+		return err
+	}
+	defer release()
 	defer profile.Start("app.refresh.discovered.total")()
 
 	stop := profile.Start("app.refresh.discovered.load_config")

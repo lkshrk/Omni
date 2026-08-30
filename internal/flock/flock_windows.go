@@ -16,6 +16,12 @@ func Lock(f *os.File) error {
 	return windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &o)
 }
 
+// RLock blocks until a shared lock is held.
+func RLock(f *os.File) error {
+	var o windows.Overlapped
+	return windows.LockFileEx(windows.Handle(f.Fd()), 0, 0, 1, 0, &o)
+}
+
 // TryLock reports whether the exclusive lock was taken without waiting.
 func TryLock(f *os.File) (bool, error) {
 	var o windows.Overlapped

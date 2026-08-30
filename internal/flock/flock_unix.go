@@ -12,6 +12,9 @@ import (
 // Lock blocks until the exclusive lock is held.
 func Lock(f *os.File) error { return syscall.Flock(int(f.Fd()), syscall.LOCK_EX) }
 
+// RLock blocks until a shared lock is held.
+func RLock(f *os.File) error { return syscall.Flock(int(f.Fd()), syscall.LOCK_SH) }
+
 // TryLock reports whether the exclusive lock was taken without waiting.
 func TryLock(f *os.File) (bool, error) {
 	err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)

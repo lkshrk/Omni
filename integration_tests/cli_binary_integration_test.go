@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lkshrk/omni/internal/config"
 )
@@ -151,9 +152,17 @@ func TestCLIBinaryDotsStatusReportsManagedFileDrift(t *testing.T) {
 	repo := filepath.Join(root, "dots")
 	configPath := filepath.Join(root, "settings.json")
 	target := filepath.Join(home, ".config", "fixture", "settings.toml")
+	source := filepath.Join(repo, "dotfiles", "fixture", ".config", "fixture", "settings.toml")
 	initDotsRepo(t, repo, env)
-	writeIntegrationFile(t, filepath.Join(repo, "dotfiles", "fixture", ".config", "fixture", "settings.toml"), "managed = true\n")
+	writeIntegrationFile(t, source, "managed = true\n")
 	writeIntegrationFile(t, target, "managed = false\n")
+	localTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(target, localTime, localTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(source, localTime.Add(time.Hour), localTime.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
 	if err := config.Save(configPath, &config.RootConfig{
 		Version:  config.CurrentVersion,
 		Settings: config.Settings{DotsRepo: repo},

@@ -680,6 +680,13 @@ func (a *App) DefaultInstallProvider(ctx context.Context) (string, error) {
 }
 
 func (a *App) Install(ctx context.Context, name, providerName string) error {
+	a.installedStateMu.Lock()
+	defer a.installedStateMu.Unlock()
+	release, err := a.lockInstalledStateFile(false)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if ignored, err := a.configuredToolIgnored(name); err != nil {
 		return err
 	} else if ignored {
@@ -948,6 +955,13 @@ func (a *App) lifecycleProvider(providerName, installedWith string) (provider.Pr
 }
 
 func (a *App) Uninstall(ctx context.Context, name, providerName string) error {
+	a.installedStateMu.Lock()
+	defer a.installedStateMu.Unlock()
+	release, err := a.lockInstalledStateFile(false)
+	if err != nil {
+		return err
+	}
+	defer release()
 	_, ok := a.registry.Get(providerName)
 	if !ok {
 		return fmt.Errorf("unknown provider %q", providerName)
@@ -1151,6 +1165,13 @@ func (a *App) installedUpgradeTarget(ctx context.Context, name string) (*databas
 }
 
 func (a *App) UpgradeWithOptions(ctx context.Context, name, providerName string, opts UpgradeOptions) error {
+	a.installedStateMu.Lock()
+	defer a.installedStateMu.Unlock()
+	release, err := a.lockInstalledStateFile(false)
+	if err != nil {
+		return err
+	}
+	defer release()
 	_, ok := a.registry.Get(providerName)
 	if !ok {
 		return fmt.Errorf("unknown provider %q", providerName)
@@ -1664,6 +1685,13 @@ func (a *App) installForAdd(ctx context.Context, opts AddToolOptions) error {
 	if opts.InstallWith == "" && opts.Options == nil && pkg == name {
 		return a.Install(ctx, name, opts.ProviderName)
 	}
+	a.installedStateMu.Lock()
+	defer a.installedStateMu.Unlock()
+	release, err := a.lockInstalledStateFile(false)
+	if err != nil {
+		return err
+	}
+	defer release()
 	providerName := opts.ProviderName
 	if ignored, err := a.configuredToolIgnored(name); err != nil {
 		return err

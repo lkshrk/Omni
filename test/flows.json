@@ -1789,9 +1789,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDotsEntryLifecyclePersistsFilesGroupsAndHistory",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -1845,9 +1860,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDotsEntryLifecyclePersistsFilesGroupsAndHistory",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -1901,9 +1931,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDotsVariantLifecyclePersistsAndListsHostPackage",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -1973,9 +2018,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDotsEntryLifecyclePersistsFilesGroupsAndHistory",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -2313,9 +2373,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDotsEntryLifecyclePersistsFilesGroupsAndHistory",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -2414,9 +2489,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDotsDisableEnableRoundTripPreservesLocalContent",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -2470,9 +2560,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDotsDisableEnableRoundTripPreservesLocalContent",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -2526,9 +2631,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDotsPullPushSynchronizesLocalBareRemote",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -2582,9 +2702,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDotsCommitPersistsGitCommitAndHistory",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -2638,9 +2773,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDotsPullPushSynchronizesLocalBareRemote",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "tui_blackbox",
@@ -3030,9 +3180,39 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No verified CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDotsEntryLifecyclePersistsFilesGroupsAndHistory",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "cli_blackbox",
+              "role": "supplemental",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDotsCommitPersistsGitCommitAndHistory",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -3933,13 +4113,13 @@
         {
           "level": "tui_blackbox",
           "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
+          "reason": "The TUI provider editor uses x to enable or disable a provider; provider-priority reorder evidence does not cover that mutation.",
           "target_stage": "Stage 5"
         },
         {
           "level": "parity",
           "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
+          "reason": "CLI enable/disable and the TUI x-toggle do not yet have compared persisted provider state.",
           "target_stage": "Stage 6"
         }
       ],
@@ -4003,15 +4183,45 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUISettingsResetPreservesInventoryAndClearsSettings",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUISettingsResetProduceEquivalentSemanticState",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "parity": {
@@ -4074,15 +4284,45 @@
         },
         {
           "level": "tui_blackbox",
-          "status": "gap",
-          "reason": "No verified TUI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUISettingsResetCacheRemovesCachedToolState",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "parity",
-          "status": "gap",
-          "reason": "CLI and TUI semantic outcomes are not compared yet.",
-          "target_stage": "Stage 6"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUISettingsResetCacheProduceEquivalentSemanticState",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ],
       "parity": {
@@ -5538,9 +5778,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No independently built startup command evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIShellContractRedrawsAfterPTYResize",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         },
         {
           "level": "parity",
@@ -6250,9 +6505,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No independently built CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDotsEntryLifecyclePersistsFilesGroupsAndHistory",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -6299,9 +6569,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No independently built CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryDotsVariantLifecyclePersistsAndListsHostPackage",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -6442,9 +6727,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No independently built CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinarySettingsReadCommandsUseIsolatedConfig",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -6490,9 +6790,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No independently built CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinarySettingsReadCommandsUseIsolatedConfig",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -6538,9 +6853,24 @@
         },
         {
           "level": "cli_blackbox",
-          "status": "gap",
-          "reason": "No independently built CLI black-box evidence is linked yet.",
-          "target_stage": "Stage 5"
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinarySettingsReadCommandsUseIsolatedConfig",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -6637,6 +6967,58 @@
           "status": "gap",
           "reason": "No independently built CLI black-box evidence is linked yet.",
           "target_stage": "Stage 5"
+        }
+      ]
+    },
+    {
+      "id": "settings.provider_priority",
+      "capability": "settings",
+      "title": "reorder provider priority",
+      "criticality": "high",
+      "criticality_reason": "Provider priority changes which installer and discovery path Omni selects for future tool operations.",
+      "action_ids": [
+        "settings.provider_priority"
+      ],
+      "requirements": [
+        {
+          "level": "component",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "component",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/tui",
+                "test": "TestModel_PriorityEditor_GrabCarryDown",
+                "tags": [],
+                "lane": "unit-tui",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUISettingsProviderPersistsPriorityOrder",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
         }
       ]
     }
