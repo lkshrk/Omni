@@ -40,7 +40,7 @@ func seedMutationsFinalDotsGroups(t *testing.T, sandbox *paritySandbox) {
 func runMutationsFinalDotsGroupsCLI(t *testing.T, bin string, sandbox *paritySandbox) {
 	runOmniCommand(t, bin, sandbox.root, sandbox.env,
 		"--config", sandbox.configPath, "--cache-dir", sandbox.cache,
-		"dots", "groups", "nvim", "--group", "work")
+		"dots", "groups", "nvim", "--group", "testhost", "--group", "work")
 }
 
 func runMutationsFinalDotsGroupsTUI(t *testing.T, bin string, sandbox *paritySandbox) {
@@ -52,10 +52,10 @@ func runMutationsFinalDotsGroupsTUI(t *testing.T, bin string, sandbox *paritySan
 			return strings.Contains(text, ">") && strings.Contains(text, "nvim")
 		}, "TUI did not select dots entry")
 		sendMutationsFinalKeyUntil(t, term, "g", screenHas("Change Groups: nvim", "work", "testhost", "enter confirm"), "TUI did not open dots group picker")
-		writeTUIKeys(t, term, " ", "j", " ", "\r")
+		writeTUIKeys(t, term, "j", " ", "\r")
 		return waitForRequiredScreen(t, term, 10*time.Second, func(string) bool {
 			cfg, err := config.Load(sandbox.configPath)
-			return err == nil && mutationsFinalDotGroups(cfg, "nvim", "work")
+			return err == nil && mutationsFinalDotGroups(cfg, "nvim", "testhost", "work")
 		}, "TUI did not persist dots groups")
 	})
 }

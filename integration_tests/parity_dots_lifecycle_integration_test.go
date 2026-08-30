@@ -17,7 +17,7 @@ import (
 func TestCLIAndTUIDotsLifecycleIgnoreProduceEquivalentSemanticState(t *testing.T) {
 	bin := buildOmniBinary(t)
 	runParityFlow(t, bin, parityFlow{
-		seed:    seedParityDotsConflict,
+		seed:    seedParityDotsMissingTarget,
 		runCLI:  runDotsLifecycleIgnoreCLI,
 		runTUI:  runDotsLifecycleIgnoreTUI,
 		observe: observeDotsLifecycleState,
@@ -59,14 +59,17 @@ func TestCLIAndTUIDotsLifecycleEnableProduceEquivalentSemanticState(t *testing.T
 }
 
 func runDotsLifecycleIgnoreCLI(t *testing.T, bin string, sandbox *paritySandbox) {
+	prepareDotsLifecycleSynced(t, bin, sandbox)
 	runOmniCommand(t, bin, sandbox.root, sandbox.env,
 		"--config", sandbox.configPath, "--cache-dir", sandbox.cache,
 		"dots", "ignore", "nvim")
 }
 
 func runDotsLifecycleIgnoreTUI(t *testing.T, bin string, sandbox *paritySandbox) {
+	prepareDotsLifecycleSynced(t, bin, sandbox)
 	runDotsLifecycleDotsTUI(t, bin, sandbox, func(term *vttest.Terminal) {
-		sendDotsLifecycleKeyUntil(t, term, "x", screenHas("x confirm ignore"), "TUI did not arm dots ignore")
+		writeTUIKeys(t, term, "x")
+		waitForRequiredScreen(t, term, 3*time.Second, screenHas("confirm ignore", "nvim"), "TUI did not arm dots ignore")
 		writeTUIKeys(t, term, "x")
 	}, func(cfg *config.RootConfig) bool {
 		entry := dotsLifecycleEntry(cfg, "nvim")

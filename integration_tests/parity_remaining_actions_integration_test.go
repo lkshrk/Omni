@@ -91,8 +91,8 @@ func runParityToolUpdateAllTUI(t *testing.T, bin string, sandbox *paritySandbox)
 		writeTUIKeys(t, term, "\t")
 		waitForRequiredScreen(t, term, 8*time.Second, screenHas("omni-old-one", "omni-old-two"), "TUI did not render outdated tools")
 		writeTUIKeys(t, term, "U")
-		return waitForRequiredScreen(t, term, 12*time.Second, func(string) bool {
-			return parityUpdateAllSettled(sandbox)
+		return waitForRequiredScreen(t, term, 12*time.Second, func(text string) bool {
+			return parityUpdateAllSettled(sandbox) && !strings.Contains(strings.ToLower(text), "upgrading")
 		}, "TUI did not update every tool")
 	})
 }

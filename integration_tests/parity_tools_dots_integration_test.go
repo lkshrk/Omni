@@ -279,8 +279,12 @@ func readParityUpdatedToolThroughCLI(t *testing.T, bin string, sandbox *paritySa
 
 func seedParityDotsMissingTarget(t *testing.T, sandbox *paritySandbox) {
 	seedParityDotsConflict(t, sandbox)
-	if err := os.Remove(filepath.Join(sandbox.home, ".config", "nvim", "init.lua")); err != nil {
+	target := filepath.Join(sandbox.home, ".config", "nvim", "init.lua")
+	if err := os.Remove(target); err != nil {
 		t.Fatalf("remove initial dots target: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(sandbox.root, "missing"), target); err != nil {
+		t.Fatalf("seed broken dots target: %v", err)
 	}
 }
 

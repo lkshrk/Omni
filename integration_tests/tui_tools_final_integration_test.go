@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/vttest"
 
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/database"
 )
 
 func TestTUIToolsRefreshRechecksProviderState(t *testing.T) {
@@ -77,4 +79,19 @@ func exactLineCount(path, want string) int {
 		}
 	}
 	return count
+}
+
+func bulkUpgradeCacheSettled(cache string) bool {
+	db, err := database.Open(filepath.Join(cache, "omni.db"))
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+	for _, name := range []string{"omni-old-one", "omni-old-two"} {
+		tool, err := db.Get(context.Background(), name, "brew", name)
+		if err != nil || !tool.Installed || tool.Version.String != "2.0.0" || tool.Outdated {
+			return false
+		}
+	}
+	return true
 }

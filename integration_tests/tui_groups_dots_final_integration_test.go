@@ -12,7 +12,7 @@ import (
 )
 
 func TestTUIGroupsEditDotsPersistsAdditionalDotMembership(t *testing.T) {
-	bin, root, cache, configPath, _, _, env := newTUIDotActionSandbox(t)
+	bin, root, cache, configPath, env := newTUIDotActionSandbox(t)
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		t.Fatal(err)

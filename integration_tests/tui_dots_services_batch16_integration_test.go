@@ -17,72 +17,28 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-func TestTUIDotsReminderInstallsSandboxService(t *testing.T) {
-	bin, root, home, cache, configPath, env, systemctlLog := batch16DotsServiceFixture(t)
-	service := filepath.Join(home, ".config", "systemd", "user", "omni-dots-reminder.service")
-	timer := filepath.Join(home, ".config", "systemd", "user", "omni-dots-reminder.timer")
-	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
-		openTUISettingsActions(t, term)
-		batch16RevealSettingsCursor(t, term)
-		writeTUIKeys(t, term, "j", "j", "j", "j")
-		waitForRequiredScreen(t, term, 3*time.Second, screenHas("> Reminder Notifications"), "TUI did not select reminder settings")
-		writeTUIKeys(t, term, " ")
-		return waitForRequiredScreen(t, term, 10*time.Second, func(string) bool {
-			_, serviceErr := os.Stat(service)
-			_, timerErr := os.Stat(timer)
-			raw, logErr := os.ReadFile(systemctlLog)
-			if serviceErr != nil || timerErr != nil || logErr != nil {
-				return false
-			}
-			for _, command := range strings.Split(string(raw), "\n") {
-				command = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(command), "--user "))
-				if command == "enable --now omni-dots-reminder.timer" {
-					return true
-				}
-			}
-			return false
-		}, "TUI did not install reminder service files")
-	})
-	assertFileContains(t, systemctlLog, "enable --now omni-dots-reminder.timer")
-}
-
 func TestCLIAndTUIDotsReminderProduceEquivalentServiceState(t *testing.T) {
-	cliBin, cliRoot, _, cliCache, cliConfig, cliEnv, _ := batch16DotsServiceFixture(t)
-	tuiBin, tuiRoot, tuiHome, tuiCache, tuiConfig, tuiEnv, _ := batch16DotsServiceFixture(t)
+	cliBin, cliRoot, _, cliCache, cliConfig, cliEnv, cliLog := batch16DotsServiceFixture(t)
+	tuiBin, tuiRoot, tuiHome, tuiCache, tuiConfig, tuiEnv, tuiLog := batch16DotsServiceFixture(t)
 	runOmniCommand(t, cliBin, cliRoot, cliEnv, "--config", cliConfig, "--cache-dir", cliCache, "dots", "reminder", "install")
-	installBatch16ReminderTUI(t, tuiBin, tuiRoot, tuiHome, tuiCache, tuiConfig, tuiEnv)
+	installBatch16ReminderTUI(t, tuiBin, tuiRoot, tuiHome, tuiCache, tuiConfig, tuiEnv, tuiLog)
 	cli := batch16ReminderStatus(t, cliBin, cliRoot, cliEnv, cliConfig, cliCache)
 	tui := batch16ReminderStatus(t, tuiBin, tuiRoot, tuiEnv, tuiConfig, tuiCache)
 	if !reflect.DeepEqual(cli, tui) {
 		t.Fatalf("reminder service state differs\nCLI: %#v\nTUI: %#v", cli, tui)
 	}
-}
-
-func TestTUIDotsWatchInstallsSandboxServiceAfterDoctorSettles(t *testing.T) {
-	bin, root, home, cache, configPath, env, systemctlLog := batch16DotsServiceFixture(t)
-	service := filepath.Join(home, ".config", "systemd", "user", "omni-dots-watch.service")
-	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
-		openTUISettingsActions(t, term)
-		waitForRequiredScreen(t, term, 10*time.Second, func(text string) bool {
-			return strings.Contains(text, "Watch Sync") && !strings.Contains(text, "Running doctor") && !strings.Contains(text, "Refreshing doctor")
-		}, "TUI doctor activity did not settle")
-		batch16RevealSettingsCursor(t, term)
-		writeTUIKeys(t, term, "j", "j", "j", "j", "j", "j")
-		waitForRequiredScreen(t, term, 3*time.Second, screenHas("> Watch Sync", "space change"), "TUI did not expose actionable watch settings")
-		writeTUIKeys(t, term, " ")
-		return waitForRequiredScreen(t, term, 10*time.Second, func(string) bool {
-			_, err := os.Stat(service)
-			return err == nil
-		}, "TUI did not install watch service file")
-	})
-	assertFileContains(t, systemctlLog, "enable --now omni-dots-watch.service")
+	cliCommands := batch16ServiceCommands(t, cliLog)
+	tuiCommands := batch16ServiceCommands(t, tuiLog)
+	if !reflect.DeepEqual(cliCommands, tuiCommands) {
+		t.Fatalf("reminder service commands differ\nCLI: %#v\nTUI: %#v", cliCommands, tuiCommands)
+	}
 }
 
 func TestCLIAndTUIDotsWatchProduceEquivalentServiceState(t *testing.T) {
 	cliBin, cliRoot, _, cliCache, cliConfig, cliEnv, cliLog := batch16DotsServiceFixture(t)
 	tuiBin, tuiRoot, tuiHome, tuiCache, tuiConfig, tuiEnv, tuiLog := batch16DotsServiceFixture(t)
 	runOmniCommand(t, cliBin, cliRoot, cliEnv, "--config", cliConfig, "--cache-dir", cliCache, "dots", "watch", "install", "--debounce", "5s")
-	installBatch16WatchTUI(t, tuiBin, tuiRoot, tuiHome, tuiCache, tuiConfig, tuiEnv)
+	installBatch16WatchTUI(t, tuiBin, tuiRoot, tuiHome, tuiCache, tuiConfig, tuiEnv, tuiLog)
 	cliStatus := batch16WatchStatus(t, cliBin, cliRoot, cliEnv, cliConfig, cliCache)
 	tuiStatus := batch16WatchStatus(t, tuiBin, tuiRoot, tuiEnv, tuiConfig, tuiCache)
 	if !reflect.DeepEqual(cliStatus, tuiStatus) {
@@ -204,7 +160,7 @@ func batch16ReadBrokenDotsState(t *testing.T, fixture batch16DotsFixture) batch1
 	return batch16BrokenDotsState{LinkTarget: filepath.Base(link), Config: cfg}
 }
 
-func installBatch16ReminderTUI(t *testing.T, bin, root, home, cache, configPath string, env []string) {
+func installBatch16ReminderTUI(t *testing.T, bin, root, home, cache, configPath string, env []string, systemctlLog string) {
 	t.Helper()
 	service := filepath.Join(home, ".config", "systemd", "user", "omni-dots-reminder.service")
 	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
@@ -212,13 +168,14 @@ func installBatch16ReminderTUI(t *testing.T, bin, root, home, cache, configPath 
 		batch16RevealSettingsCursor(t, term)
 		writeTUIKeys(t, term, "j", "j", "j", "j", " ")
 		return waitForRequiredScreen(t, term, 10*time.Second, func(string) bool {
-			_, err := os.Stat(service)
-			return err == nil
+			_, serviceErr := os.Stat(service)
+			log, logErr := os.ReadFile(systemctlLog)
+			return serviceErr == nil && logErr == nil && strings.Contains(string(log), "enable --now omni-dots-reminder.timer")
 		}, "TUI did not install reminder service")
 	})
 }
 
-func installBatch16WatchTUI(t *testing.T, bin, root, home, cache, configPath string, env []string) {
+func installBatch16WatchTUI(t *testing.T, bin, root, home, cache, configPath string, env []string, systemctlLog string) {
 	t.Helper()
 	service := filepath.Join(home, ".config", "systemd", "user", "omni-dots-watch.service")
 	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
@@ -229,8 +186,9 @@ func installBatch16WatchTUI(t *testing.T, bin, root, home, cache, configPath str
 		batch16RevealSettingsCursor(t, term)
 		writeTUIKeys(t, term, "j", "j", "j", "j", "j", "j", " ")
 		return waitForRequiredScreen(t, term, 10*time.Second, func(string) bool {
-			_, err := os.Stat(service)
-			return err == nil
+			_, serviceErr := os.Stat(service)
+			log, logErr := os.ReadFile(systemctlLog)
+			return serviceErr == nil && logErr == nil && strings.Contains(string(log), "enable --now omni-dots-watch.service")
 		}, "TUI did not install watch service")
 	})
 }
