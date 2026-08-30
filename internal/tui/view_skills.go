@@ -379,7 +379,10 @@ func agentsReadinessGuidance(m Model) string {
 		return "Checking APM readiness…"
 	}
 	if m.agentsReadinessErr != nil {
-		return "APM is missing or incompatible: " + m.agentsReadinessErr.Error() + " · R repair pinned APM"
+		if m.agentsReadinessRepair {
+			return "APM is missing or incompatible: " + m.agentsReadinessErr.Error() + " · R repair pinned APM"
+		}
+		return "APM readiness check failed: " + m.agentsReadinessErr.Error() + " · R recheck"
 	}
 	detail := strings.Join(m.agentsReadiness.Details, "; ")
 	switch m.agentsReadiness.State {

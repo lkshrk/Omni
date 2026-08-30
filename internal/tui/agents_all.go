@@ -210,6 +210,8 @@ func (m *Model) refreshAgents() []tea.Cmd {
 	m.agentsSyncActionable = 0
 	m.agentsOutdatedErr = nil
 	m.agentsOutdatedChecking = false
+	m.agentsOutdatedGen++ // invalidate any pre-readiness update completion
+	m.agentsOutdatedResult = app.AgentsOutdatedResult{}
 	app.ApplyAgentsOutdated(m.agentsRows, app.AgentsOutdatedResult{})
 	return []tea.Cmd{m.doPrepareAgentsReadiness()}
 }
@@ -288,7 +290,7 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea
 			return true, []tea.Cmd{setStatus(m, "checking APM readiness", false)}
 		}
 		if m.agentsReadinessErr != nil {
-			return true, []tea.Cmd{setStatus(m, "repair pinned APM with R first", true)}
+			return true, []tea.Cmd{setStatus(m, agentsReadinessGuidance(*m), true)}
 		}
 		if state := m.agentsReadiness.State; state != app.AgentsReadinessReady && state != app.AgentsReadinessEmpty {
 			return true, []tea.Cmd{setStatus(m, agentsReadinessGuidance(*m), true)}
@@ -318,7 +320,7 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea
 	if m.agentsReadinessPending && (updateAll || syncAll || refresh) {
 		return true, []tea.Cmd{setStatus(m, "checking APM readiness", false)}
 	}
-	if refresh && m.agentsReadinessErr != nil {
+	if refresh && m.agentsReadinessErr != nil && m.agentsReadinessRepair {
 		m.agentsReadinessGen++ // invalidate any pre-repair readiness completion
 		m.agentsReadinessPending = false
 		m.apmRunning = true

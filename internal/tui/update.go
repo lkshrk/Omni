@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 
 	"charm.land/bubbles/v2/spinner"
@@ -368,6 +369,8 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			m.agentsReadinessPending = false
 			m.agentsReadiness = msg.result.Readiness
 			m.agentsReadinessErr = msg.err
+			var repair *app.APMRepairError
+			m.agentsReadinessRepair = errors.As(msg.err, &repair)
 			m.agentsOutdatedErr = nil
 			cmds = append(cmds, m.loadAgentsAfterReadiness()...)
 		}
@@ -383,6 +386,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			cmds = append(cmds, setStatus(&m, "✗ APM readiness recheck failed: "+msg.readinessErr.Error(), true))
 		} else {
 			m.agentsReadinessErr = nil
+			m.agentsReadinessRepair = false
 			m.agentsReadiness = msg.readiness.Readiness
 			m.agentsReadinessPending = false
 			detail := msg.report.Installed

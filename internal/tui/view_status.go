@@ -825,7 +825,7 @@ func statusAgentsAttentionRow(m Model) statusListRow {
 }
 
 func statusAgentsReadinessRow(m Model, label string) (statusListRow, bool) {
-	guidance := agentsReadinessGuidance(m)
+	guidance := agentsDashboardReadinessGuidance(m)
 	if guidance == "" {
 		return statusListRow{}, false
 	}
@@ -837,8 +837,31 @@ func statusAgentsReadinessRow(m Model, label string) (statusListRow, bool) {
 	}
 	return statusListRow{
 		section: statusSectionAttention, icon: icon, iconStyle: iconStyle, label: label,
-		value: value, summary: guidance, details: statusDetailLines(m, guidance), needsAttention: true,
+		value: value, summary: guidance, details: statusDetailLines(m, guidance),
+		action: statusAction{kind: statusActionOpenAgents, desc: "open agents"}, needsAttention: true,
 	}, true
+}
+
+func agentsDashboardReadinessGuidance(m Model) string {
+	if m.agentsReadinessPending {
+		return "Checking APM readiness…"
+	}
+	if m.agentsReadinessErr != nil {
+		if m.agentsReadinessRepair {
+			return "Open Agents to repair the pinned APM version."
+		}
+		return "Open Agents to inspect the APM readiness failure."
+	}
+	switch m.agentsReadiness.State {
+	case app.AgentsReadinessTemplateOnly, app.AgentsReadinessLiveIncomplete:
+		return "Open Agents to sync incomplete APM state."
+	case app.AgentsReadinessLockOnly, app.AgentsReadinessInvalid:
+		return "Open Agents to inspect inconsistent APM state."
+	case app.AgentsReadinessEmpty:
+		return "Open Agents to add a package."
+	default:
+		return ""
+	}
 }
 
 func statusRowLine(m Model, row statusListRow, selected bool) string {

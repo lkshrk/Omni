@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/vttest"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -19,7 +20,7 @@ func TestTUIAgentsWrongVersionRepairsAndRechecksReadiness(t *testing.T) {
 	fixture := newAgentsReadinessPTYFixture(t, "0.28.0", false)
 	fixture.writeReadyWorkspace(t)
 	runTUI(t, fixture.bin, fixture.root, fixture.env, []string{"--config", fixture.configPath, "--cache-dir", fixture.cache}, func(term *vttest.Terminal) string {
-		openAgentsReadinessTab(t, term)
+		openAgentsFromDashboard(t, term, "Open Agents to repair")
 		waitForRequiredScreen(t, term, 10*time.Second, screenHas("R repair pinned APM"), "TUI did not offer pinned APM repair")
 		sendAgentsActionsKeyUntil(t, term, "R", func(string) bool {
 			return fileContains(fixture.repairLog, "invoked")
@@ -37,10 +38,13 @@ func TestTUIAgentsMissingLockShowsSyncWithoutOutdated(t *testing.T) {
 	fixture := newAgentsReadinessPTYFixture(t, "0.29.0", false)
 	writeIntegrationFile(t, filepath.Join(fixture.home, ".apm", "apm.yml"), "name: live\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm: []\n")
 	runTUI(t, fixture.bin, fixture.root, fixture.env, []string{"--config", fixture.configPath, "--cache-dir", fixture.cache}, func(term *vttest.Terminal) string {
-		openAgentsReadinessTab(t, term)
-		return waitForRequiredScreen(t, term, 10*time.Second, screenHas("live manifest exists without a readable lockfile", "S sync"), "TUI did not show missing-lock sync CTA")
+		openAgentsFromDashboard(t, term, "Open Agents to sync")
+		waitForRequiredScreen(t, term, 10*time.Second, screenHas("live manifest exists without a readable lockfile", "S sync"), "TUI did not show missing-lock sync CTA")
+		writeTUIKeys(t, term, "S")
+		return waitForRequiredScreen(t, term, 10*time.Second, func(string) bool { return fileContains(fixture.logPath, "install -g") }, "TUI did not invoke sync from readiness CTA")
 	})
-	if fileContains(fixture.logPath, "outdated") {
+	log := readFileString(t, fixture.logPath)
+	if outdated, install := strings.Index(log, "outdated"), strings.Index(log, "install -g"); outdated >= 0 && outdated < install {
 		t.Fatal("missing-lock readiness invoked outdated")
 	}
 }
@@ -100,9 +104,10 @@ if [ "${1:-}" = "--version" ]; then echo "APM CLI version $(cat %q)"; exit 0; fi
 printf '%%s\n' "$*" >> %q
 case "$*" in
   'outdated -g --parallel-checks 4') echo '[✓] All dependencies are up-to-date' ;;
+  'install -g') printf 'dependencies: []\n' > %q; echo '[✓] installed' ;;
   *) echo '[✓] done' ;;
 esac
-`, versionPath, logPath))
+`, versionPath, logPath, filepath.Join(home, ".apm", "apm.lock.yaml")))
 	apmPath := filepath.Join(stub, "apm")
 	uvBody := fmt.Sprintf(`case "$*" in
   --version) echo 'uv 0.9.0' ;;
@@ -141,6 +146,26 @@ func openAgentsReadinessTab(t *testing.T, term *vttest.Terminal) {
 	t.Helper()
 	waitForRequiredScreen(t, term, 7*time.Second, screenHas("Dashboard", "Agents"), "TUI did not start")
 	writeTUIKeys(t, term, "\t", "\t", "\t")
+}
+
+func openAgentsFromDashboard(t *testing.T, term *vttest.Terminal, guidance string) {
+	t.Helper()
+	waitForRequiredScreen(t, term, 10*time.Second, screenHas("Dashboard", guidance), "Dashboard did not show APM readiness guidance")
+	sendTUIKey(term, uv.KeyHome)
+	sendAgentsActionsKeyUntil(t, term, "j", func(text string) bool {
+		return strings.Contains(text, guidance) && dashboardAgentsRowSelected(text)
+	}, "Dashboard did not select Agents readiness row")
+	writeTUIKeys(t, term, "\r")
+	waitForRequiredScreen(t, term, 6*time.Second, screenHas("~/.apm/apm.yml"), "Dashboard Agents action did not open Agents tab")
+}
+
+func dashboardAgentsRowSelected(text string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, ">") && strings.Contains(line, " Agents ") && !strings.Contains(line, "Agent Updates") {
+			return true
+		}
+	}
+	return false
 }
 
 func writeAgentsReadinessSnapshot(t *testing.T, configDir string) {

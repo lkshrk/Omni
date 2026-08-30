@@ -502,6 +502,7 @@ type Model struct {
 	agentsOutdatedResult   app.AgentsOutdatedResult
 	agentsReadiness        app.AgentsReadiness
 	agentsReadinessErr     error
+	agentsReadinessRepair  bool
 	agentsReadinessGen     int
 	agentsReadinessPending bool
 
