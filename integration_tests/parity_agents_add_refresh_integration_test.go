@@ -34,7 +34,13 @@ if [ "${1:-}" = "--version" ]; then echo 'Agent Package Manager (APM) CLI versio
 printf '%s|%s\n' "$PWD" "$*" >> "${OMNI_TEST_APM_LOG:?}"
 case "$*" in
   outdated*) echo '[✓] All dependencies are up-to-date' ;;
-  'install -g zz-brainstorming@superpowers-dev') touch "${OMNI_TEST_APM_STATE:?}/added"; echo '[✓] installed' ;;
+  'install -g zz-brainstorming@superpowers-dev')
+    touch "${OMNI_TEST_APM_STATE:?}/added"
+    printf 'dependencies:\n  - name: zz-brainstorming\n    version: 1.0.0\n' > "$PWD/apm.lock.yaml"
+    mkdir -p "$HOME/.codex"
+    printf '[plugins.zz-brainstorming]\nenabled = true\n' > "$HOME/.codex/config.toml"
+    echo '[✓] installed'
+    ;;
   *) echo "delegated: $*" ;;
 esac
 `)
@@ -63,15 +69,30 @@ func runAgentsAddParityTUI(t *testing.T, bin string, sandbox *paritySandbox) {
 }
 
 type agentsAddState struct {
-	Config  any
-	Action  string
-	Added   bool
-	CwdOkay bool
+	Config      any
+	Manifest    string
+	Lock        string
+	Deployment  string
+	Action      string
+	ActionCount int
+	Added       bool
+	CwdOkay     bool
 }
 
 func observeAgentsAddParity(t *testing.T, sandbox *paritySandbox) any {
 	t.Helper()
 	state := agentsAddState{Config: normalizedParityConfig(t, sandbox)}
+	for path, target := range map[string]*string{
+		filepath.Join(sandbox.home, ".apm", "apm.yml"):       &state.Manifest,
+		filepath.Join(sandbox.home, ".apm", "apm.lock.yaml"): &state.Lock,
+		filepath.Join(sandbox.home, ".codex", "config.toml"): &state.Deployment,
+	} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		*target = string(raw)
+	}
 	raw, err := os.ReadFile(filepath.Join(sandbox.root, "apm.log"))
 	if err != nil {
 		t.Fatal(err)
@@ -81,9 +102,13 @@ func observeAgentsAddParity(t *testing.T, sandbox *paritySandbox) any {
 		if ok && args == "install -g zz-brainstorming@superpowers-dev" {
 			state.Action = args
 			state.CwdOkay = cwd == filepath.Join(sandbox.home, ".apm")
+			state.ActionCount++
 		}
 	}
 	_, err = os.Stat(filepath.Join(sandbox.root, "apm-state", "added"))
 	state.Added = err == nil
+	if state.ActionCount != 1 {
+		t.Fatalf("install invocation count = %d, want 1", state.ActionCount)
+	}
 	return state
 }
