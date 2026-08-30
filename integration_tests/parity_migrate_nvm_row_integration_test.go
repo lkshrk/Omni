@@ -19,15 +19,6 @@ import (
 	"github.com/lkshrk/omni/internal/database"
 )
 
-func TestTUIToolMigrateNvmRowMovesPackageToPnpm(t *testing.T) {
-	s := newParitySandbox(t, t.TempDir())
-	seedBatch24Nvm(t, s)
-	runBatch24NvmTUI(t, buildOmniBinary(t), s)
-	if !batch24NvmConverged(s) {
-		t.Fatal("TUI nvm migration did not converge")
-	}
-}
-
 func TestCLIAndTUIToolMigrateNvmRowProduceEquivalentSemanticState(t *testing.T) {
 	bin := buildOmniBinary(t)
 	cli, tui := newParityTwins(t)

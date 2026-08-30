@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +26,9 @@ func TestCLIAndTUIToolsFallbackProduceEquivalentResolvedRecipe(t *testing.T) {
 	runTUI(t, tui.bin, tui.root, tui.env, []string{"--config", tui.configPath, "--cache-dir", tui.cache}, func(term *vttest.Terminal) string {
 		waitForRequiredScreen(t, term, 7*time.Second, screenHas("Dashboard", "Tools"), "TUI did not start")
 		writeTUIKeys(t, term, "\t")
-		waitForRequiredScreen(t, term, 8*time.Second, screenHas("fixture", "missing"), "TUI did not render fallback fixture")
+		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
+			return screenHas("fixture", "missing")(text) && !strings.Contains(text, "gh?")
+		}, "TUI did not render unresolved fallback fixture")
 		writeTUIKeys(t, term, "j")
 		waitForRequiredScreen(t, term, 4*time.Second, screenHas(">", "fixture", "f set fallback"), "TUI did not select fallback fixture")
 		writeTUIKeys(t, term, "f")

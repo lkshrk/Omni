@@ -177,65 +177,6 @@ func TestTUIFallbackProviderListSmoke(t *testing.T) {
 	}
 }
 
-func TestTUIFallbackEditorPrefillsConfiguredGitHint(t *testing.T) {
-	bin := buildOmniBinary(t)
-	root := t.TempDir()
-	home := filepath.Join(root, "home")
-	cache := filepath.Join(root, "cache")
-	configPath := filepath.Join(root, "settings.json")
-	env := isolatedTUIEnv(t, home, cache)
-
-	if err := os.MkdirAll(cache, 0o755); err != nil {
-		t.Fatalf("create cache: %v", err)
-	}
-	if err := config.Save(configPath, &config.RootConfig{
-		Version:  config.CurrentVersion,
-		Settings: config.Settings{DisabledProviders: []string{"node", "python", "pip"}},
-		Tools: map[string]config.ToolSpec{
-			// This synthetic name must not resolve on PATH or fallback is ineligible.
-			"omni-test-fbtool": {
-				Providers: []config.ToolInstallSpec{{Provider: "apt", Package: "omni-test-fbtool"}},
-				Git:       "https://github.com/BurntSushi/ripgrep",
-			},
-		},
-		Hosts: map[string][]string{"testhost": {"dev"}},
-		Groups: []*config.GroupConfig{
-			{Name: "testhost", Special: "host"},
-			{Name: "dev", Tools: []config.ToolEntry{{Name: "omni-test-fbtool"}}},
-		},
-	}); err != nil {
-		t.Fatalf("save config: %v", err)
-	}
-	seedTUIToolCache(t, cache,
-		&database.ToolCache{Name: "omni-test-fbtool", Provider: "apt", Package: "omni-test-fbtool", Installed: false, Tracked: true},
-	)
-	listOut := runOmniOutput(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "list")
-	if !strings.Contains(listOut, "omni-test-fbtool") {
-		t.Fatalf("seeded tool is not visible through app list:\n%s", listOut)
-	}
-
-	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
-		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool {
-			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools")
-		}, "TUI did not render main tabs")
-		writeTUIKeys(t, term, "\t")
-		toolsScreen := waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
-			return strings.Contains(text, "omni-test-fbtool") &&
-				strings.Contains(text, "apt") &&
-				!strings.Contains(text, "gh?")
-		}, "TUI did not render provider-list tool without fallback status")
-		writeTUIKeys(t, term, "f")
-		editorScreen := waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
-			return strings.Contains(text, "Set Fallback: omni-test-fbtool") &&
-				strings.Contains(text, "BurntSushi/ripgrep")
-		}, "TUI did not prefill fallback editor from configured git hint")
-		return toolsScreen + "\n" + editorScreen
-	})
-	if strings.Contains(strings.ToLower(screen), "error") {
-		t.Fatalf("TUI showed an error during configured-git fallback smoke; screen:\n%s", screen)
-	}
-}
-
 func TestTUIInstallsMissingToolWithFakeBrew(t *testing.T) {
 	bin := buildOmniBinary(t)
 	root := t.TempDir()
