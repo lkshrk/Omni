@@ -127,8 +127,10 @@ func TestAgentsCursorMovesThroughRows(t *testing.T) {
 	}
 }
 
-func TestAgentsRefreshKeyReloadsRowsWithoutAPM(t *testing.T) {
+func TestAgentsRefreshKeyChecksReadinessBeforeRowsOrOutdated(t *testing.T) {
 	m := agentsRowsModel(t)
+	m.app = app.New(filepath.Join(t.TempDir(), "settings.json"))
+	m.ctx = context.Background()
 	handled, cmds := m.handleAgentsGlobalActionKeyMsg(tea.KeyPressMsg{Code: 'R', Text: "R"})
 	if !handled {
 		t.Fatal("R not handled")
@@ -136,7 +138,7 @@ func TestAgentsRefreshKeyReloadsRowsWithoutAPM(t *testing.T) {
 	if m.apmRunning || m.apmCommand != "" {
 		t.Fatalf("R dispatched an APM command: %q", m.apmCommand)
 	}
-	if len(cmds) != 2 {
+	if len(cmds) != 1 || !m.agentsReadinessPending || m.agentsRowsGen != 0 || m.agentsOutdatedGen != 0 {
 		t.Fatalf("cmds = %#v", cmds)
 	}
 }
@@ -175,13 +177,70 @@ func TestAgentsOutdatedCheckStateAndMutationGate(t *testing.T) {
 	}
 }
 
-func TestAgentsStartupDispatchesRowsAndOutdatedCheck(t *testing.T) {
+func TestAgentsStartupDispatchesReadinessBeforeRowsAndOutdated(t *testing.T) {
 	m := agentsRowsModel(t)
 	m.app = app.New(filepath.Join(t.TempDir(), "settings.json"))
 	m.ctx = context.Background()
-	next := drive(m, agentsStartupMsg{})
-	if next.agentsRowsGen != 1 || next.agentsOutdatedGen != 1 || !next.agentsOutdatedChecking {
-		t.Fatalf("startup state rows=%d outdated=%d checking=%v", next.agentsRowsGen, next.agentsOutdatedGen, next.agentsOutdatedChecking)
+	cmds := m.refreshAgents()
+	if len(cmds) != 1 || !m.agentsReadinessPending || m.agentsReadinessGen != 1 || m.agentsRowsGen != 0 || m.agentsOutdatedGen != 0 {
+		t.Fatalf("startup state readiness=%d rows=%d outdated=%d checking=%v", m.agentsReadinessGen, m.agentsRowsGen, m.agentsOutdatedGen, m.agentsReadinessPending)
+	}
+}
+
+func TestAgentsReadinessLoadsOutdatedOnlyWhenReady(t *testing.T) {
+	m := agentsRowsModel(t)
+	m.app = app.New(filepath.Join(t.TempDir(), "settings.json"))
+	m.ctx = context.Background()
+	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessTemplateOnly, CTA: app.AgentsCTASync}
+	if cmds := m.loadAgentsAfterReadiness(); len(cmds) != 1 || m.agentsRowsGen != 1 || m.agentsOutdatedGen != 0 {
+		t.Fatalf("template-only dispatched rows=%d outdated=%d cmds=%d", m.agentsRowsGen, m.agentsOutdatedGen, len(cmds))
+	}
+	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessReady}
+	if cmds := m.loadAgentsAfterReadiness(); len(cmds) != 2 || m.agentsRowsGen != 2 || m.agentsOutdatedGen != 1 || !m.agentsOutdatedChecking {
+		t.Fatalf("ready dispatched rows=%d outdated=%d cmds=%d", m.agentsRowsGen, m.agentsOutdatedGen, len(cmds))
+	}
+}
+
+func TestAgentsReadinessGuidanceUsesExplicitRepairSyncAndManualCTAs(t *testing.T) {
+	m := agentsRowsModel(t)
+	m.agentsReadinessErr = errors.New("apm version mismatch")
+	if got := agentsReadinessGuidance(m); !strings.Contains(got, "R repair pinned APM") || strings.Contains(got, "Update check failed") {
+		t.Fatalf("repair guidance = %q", got)
+	}
+	m.agentsReadinessErr = nil
+	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessTemplateOnly, CTA: app.AgentsCTASync}
+	if got := agentsReadinessGuidance(m); !strings.Contains(got, "S sync") {
+		t.Fatalf("sync guidance = %q", got)
+	}
+	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessLockOnly, CTA: app.AgentsCTARetry, Details: []string{"lock only"}}
+	if got := agentsReadinessGuidance(m); !strings.Contains(got, "inspect APM files") || strings.Contains(got, "repair pinned") {
+		t.Fatalf("manual guidance = %q", got)
+	}
+}
+
+func TestAgentsRepairFailureStaysActionable(t *testing.T) {
+	m := agentsRowsModel(t)
+	m.apmRunning = true
+	next := drive(m, agentsRepairDoneMsg{err: errors.New("installer failed")})
+	if next.apmRunning || next.apmErr == nil || !strings.Contains(next.statusMsg, "APM repair failed") {
+		t.Fatalf("repair failure state running=%v err=%v status=%q", next.apmRunning, next.apmErr, next.statusMsg)
+	}
+}
+
+func TestDashboardAgentsReadinessPendingOrFailedIsNeverHealthy(t *testing.T) {
+	m := agentsRowsModel(t)
+	m.agentsReadinessPending = true
+	for _, row := range []statusListRow{statusAgentsAttentionRow(m), statusAgentUpdatesAttentionRow(m)} {
+		if !row.needsAttention || !strings.Contains(row.summary, "Checking APM readiness") {
+			t.Fatalf("pending dashboard row = %#v", row)
+		}
+	}
+	m.agentsReadinessPending = false
+	m.agentsReadinessErr = errors.New("APM version mismatch")
+	for _, row := range []statusListRow{statusAgentsAttentionRow(m), statusAgentUpdatesAttentionRow(m)} {
+		if !row.needsAttention || !strings.Contains(row.summary, "R repair pinned APM") {
+			t.Fatalf("failed dashboard row = %#v", row)
+		}
 	}
 }
 
@@ -291,11 +350,14 @@ func TestAgentsRowsReloadAfterAPMCommandDone(t *testing.T) {
 	if next.apmRunning {
 		t.Fatal("still running")
 	}
-	if next.agentsRowsKnown || next.agentsSyncActionable != 0 || !next.agentsOutdatedChecking || next.agentsOutdatedGen != outdatedGen {
+	if next.agentsRowsKnown || next.agentsSyncActionable != 0 || next.agentsOutdatedChecking || next.agentsOutdatedGen != outdatedGen {
 		t.Fatalf("mutation refresh state known=%v actionable=%d checking=%v outdatedGen=%d", next.agentsRowsKnown, next.agentsSyncActionable, next.agentsOutdatedChecking, next.agentsOutdatedGen)
 	}
+	_ = cmd // readiness probing is covered separately; feed an accepted non-ready result to test row reload.
+	readyModel, readyCmd := next.Update(agentsReadinessMsg{gen: next.agentsReadinessGen, result: app.AgentsOnboardingResult{Readiness: app.AgentsReadiness{State: app.AgentsReadinessLiveIncomplete, CTA: app.AgentsCTASync}}})
+	next = readyModel.(Model)
 	var rows agentsRowsMsg
-	for _, msg := range runBatchCmd(cmd) {
+	for _, msg := range runBatchCmd(readyCmd) {
 		if got, ok := msg.(agentsRowsMsg); ok {
 			rows = got
 		}

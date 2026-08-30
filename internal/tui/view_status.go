@@ -726,6 +726,9 @@ func statusAgentsOverviewIcon(m Model) (string, lipgloss.Style) {
 
 // Outdated is disjoint from out-of-sync (see agentsDashCounts), so without its own row the Agents row's "in sync" verdict silently hides every pending upgrade.
 func statusAgentUpdatesAttentionRow(m Model) statusListRow {
+	if row, ok := statusAgentsReadinessRow(m, "Agent Updates"); ok {
+		return row
+	}
 	counts := statusAgentsCounts(m)
 	if counts.Outdated() == 0 {
 		icon, iconStyle := statusRowOKIcon(m)
@@ -776,6 +779,9 @@ func statusAgentsAttentionRow(m Model) statusListRow {
 			muted:     true,
 		}
 	}
+	if row, ok := statusAgentsReadinessRow(m, "Agents"); ok {
+		return row
+	}
 	if m.agentsRowsErr != nil {
 		icon, iconStyle := statusRowWarningIcon(m)
 		return statusListRow{
@@ -816,6 +822,23 @@ func statusAgentsAttentionRow(m Model) statusListRow {
 		action:         action,
 		needsAttention: true,
 	}
+}
+
+func statusAgentsReadinessRow(m Model, label string) (statusListRow, bool) {
+	guidance := agentsReadinessGuidance(m)
+	if guidance == "" {
+		return statusListRow{}, false
+	}
+	icon, iconStyle := statusRowWarningIcon(m)
+	value := statusCountValue(m, 1, "issue", "issues", "ready")
+	if m.agentsReadinessPending {
+		icon, iconStyle = statusRowWorkingIcon(m, true)
+		value = statusLoadingValue(m, "checking")
+	}
+	return statusListRow{
+		section: statusSectionAttention, icon: icon, iconStyle: iconStyle, label: label,
+		value: value, summary: guidance, details: statusDetailLines(m, guidance), needsAttention: true,
+	}, true
 }
 
 func statusRowLine(m Model, row statusListRow, selected bool) string {

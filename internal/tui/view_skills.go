@@ -345,6 +345,13 @@ func (m Model) agentsFooterLines() []string {
 		lines = append(lines, m.agentsWrappedNotice(m.apmErr.Error(), p.styleErr)...)
 	}
 	lines = append(lines, m.agentsRemovalHintLines()...)
+	if guidance := agentsReadinessGuidance(m); guidance != "" {
+		style := p.styleHelp
+		if m.agentsReadinessErr != nil || m.agentsReadiness.State == app.AgentsReadinessInvalid || m.agentsReadiness.State == app.AgentsReadinessLockOnly {
+			style = p.styleErr
+		}
+		lines = append(lines, m.agentsWrappedNotice(guidance, style)...)
+	}
 	for _, notice := range agentsHarnessNoticeLines(m.agentsNotices) {
 		lines = append(lines, m.agentsWrappedNotice(notice, p.styleOutdated)...)
 	}
@@ -365,6 +372,33 @@ func (m Model) agentsFooterLines() []string {
 		lines = append(lines, p.styleHelp.Render(pad+agentsSummaryText(m)))
 	}
 	return lines
+}
+
+func agentsReadinessGuidance(m Model) string {
+	if m.agentsReadinessPending {
+		return "Checking APM readiness…"
+	}
+	if m.agentsReadinessErr != nil {
+		return "APM is missing or incompatible: " + m.agentsReadinessErr.Error() + " · R repair pinned APM"
+	}
+	detail := strings.Join(m.agentsReadiness.Details, "; ")
+	switch m.agentsReadiness.State {
+	case app.AgentsReadinessEmpty:
+		if detail != "" {
+			return detail + " · review migration snapshot or a add package"
+		}
+		return "No agent packages configured · a add package"
+	case app.AgentsReadinessTemplateOnly:
+		return firstNonEmpty(detail, "APM template is staged") + " · S sync"
+	case app.AgentsReadinessLiveIncomplete:
+		return firstNonEmpty(detail, "APM live state is incomplete") + " · S sync"
+	case app.AgentsReadinessLockOnly:
+		return firstNonEmpty(detail, "APM lockfile exists without a live manifest") + " · inspect APM files; R recheck"
+	case app.AgentsReadinessInvalid:
+		return firstNonEmpty(detail, "APM workspace is invalid") + " · inspect APM files; R recheck"
+	default:
+		return ""
+	}
 }
 
 type agentsColWidths struct {

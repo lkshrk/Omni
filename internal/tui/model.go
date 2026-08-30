@@ -500,6 +500,10 @@ type Model struct {
 	agentsOutdatedErr      error
 	agentsOutdatedUnknown  int
 	agentsOutdatedResult   app.AgentsOutdatedResult
+	agentsReadiness        app.AgentsReadiness
+	agentsReadinessErr     error
+	agentsReadinessGen     int
+	agentsReadinessPending bool
 
 	dangerConfirmRow int // settings row awaiting inline confirmation; -1 = none
 

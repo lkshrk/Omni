@@ -147,6 +147,19 @@ type doctorDoneMsg struct {
 	err    error
 }
 
+type agentsReadinessMsg struct {
+	gen    int
+	result app.AgentsOnboardingResult
+	err    error
+}
+
+type agentsRepairDoneMsg struct {
+	report       app.APMInstallFixReport
+	readiness    app.AgentsOnboardingResult
+	readinessErr error
+	err          error
+}
+
 type fixIgnoreDoneMsg struct {
 	modified []string
 	err      error

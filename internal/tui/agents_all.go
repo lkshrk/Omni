@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -160,16 +161,65 @@ func (m *Model) doCheckAgentsOutdated() tea.Cmd {
 	}
 }
 
+func (m *Model) doPrepareAgentsReadiness() tea.Cmd {
+	if m.app == nil {
+		return nil
+	}
+	m.agentsReadinessGen++
+	gen, a, parent := m.agentsReadinessGen, m.app, m.ctx
+	host := ""
+	if m.hostInfo != nil {
+		host = m.hostInfo.Active
+	}
+	if host == "" {
+		host = os.Getenv("OMNI_HOSTNAME")
+	}
+	m.agentsReadinessPending = true
+	m.agentsReadinessErr = nil
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(parent, 45*time.Second)
+		defer cancel()
+		result, err := a.AgentsPrepareOnboarding(ctx, host)
+		return agentsReadinessMsg{gen: gen, result: result, err: err}
+	}
+}
+
+func (m *Model) doRepairAgentsAPM() tea.Cmd {
+	a, ctx := m.app, m.ctx
+	host := ""
+	if m.hostInfo != nil {
+		host = m.hostInfo.Active
+	}
+	if host == "" {
+		host = os.Getenv("OMNI_HOSTNAME")
+	}
+	return func() tea.Msg {
+		report, err := a.FixMissingAPM(ctx, false)
+		var readiness app.AgentsOnboardingResult
+		var readinessErr error
+		if err == nil {
+			readiness, readinessErr = a.AgentsPrepareOnboarding(ctx, host)
+		}
+		return agentsRepairDoneMsg{report: report, readiness: readiness, readinessErr: readinessErr, err: err}
+	}
+}
+
 func (m *Model) refreshAgents() []tea.Cmd {
 	m.agentsRowsKnown = false
 	m.agentsRowsErr = nil
 	m.agentsSyncActionable = 0
+	m.agentsOutdatedErr = nil
+	m.agentsOutdatedChecking = false
 	app.ApplyAgentsOutdated(m.agentsRows, app.AgentsOutdatedResult{})
+	return []tea.Cmd{m.doPrepareAgentsReadiness()}
+}
+
+func (m *Model) loadAgentsAfterReadiness() []tea.Cmd {
 	cmds := []tea.Cmd{m.doLoadAgentsRows()}
-	if m.agentsOutdatedChecking {
-		return append(cmds, setStatus(m, agentsUpdateCheckBusyStatus, false))
+	if m.agentsReadiness.State == app.AgentsReadinessReady {
+		cmds = append(cmds, m.doCheckAgentsOutdated())
 	}
-	return append(cmds, m.doCheckAgentsOutdated())
+	return cmds
 }
 
 // Returns the spinner plus the caller's work, or nil when there is no app to run against.
@@ -234,6 +284,15 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea
 		return true, []tea.Cmd{m.openTraceLog()}
 	}
 	if add {
+		if m.agentsReadinessPending {
+			return true, []tea.Cmd{setStatus(m, "checking APM readiness", false)}
+		}
+		if m.agentsReadinessErr != nil {
+			return true, []tea.Cmd{setStatus(m, "repair pinned APM with R first", true)}
+		}
+		if state := m.agentsReadiness.State; state != app.AgentsReadinessReady && state != app.AgentsReadinessEmpty {
+			return true, []tea.Cmd{setStatus(m, agentsReadinessGuidance(*m), true)}
+		}
 		// Registry mode already owns the input; re-entering it would only reset the query.
 		if m.agentsRegistryMode {
 			return true, nil
@@ -256,13 +315,29 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea
 	if m.apmRunning {
 		return true, []tea.Cmd{setStatus(m, agentsBusyStatus, true)}
 	}
+	if m.agentsReadinessPending && (updateAll || syncAll || refresh) {
+		return true, []tea.Cmd{setStatus(m, "checking APM readiness", false)}
+	}
+	if refresh && m.agentsReadinessErr != nil {
+		m.agentsReadinessGen++ // invalidate any pre-repair readiness completion
+		m.agentsReadinessPending = false
+		m.apmRunning = true
+		m.apmCommand = "repair pinned APM"
+		return true, []tea.Cmd{m.spinner.Tick, m.doRepairAgentsAPM()}
+	}
 	if m.agentsOutdatedChecking && (updateAll || syncAll || refresh) {
 		return true, []tea.Cmd{setStatus(m, agentsUpdateCheckBusyStatus, false)}
 	}
 	switch {
 	case updateAll:
+		if m.agentsReadiness.State != app.AgentsReadinessReady {
+			return true, []tea.Cmd{setStatus(m, agentsReadinessGuidance(*m), true)}
+		}
 		return true, m.doAgentsUpdateAll()
 	case syncAll:
+		if m.agentsReadiness.State != app.AgentsReadinessReady && m.agentsReadiness.CTA != app.AgentsCTASync {
+			return true, []tea.Cmd{setStatus(m, agentsReadinessGuidance(*m), true)}
+		}
 		return true, m.doAgentsSyncAll()
 	default:
 		m.apmCommand, m.apmOutput, m.apmErr = "", "", nil
