@@ -223,7 +223,7 @@ func TestAgentsStatusPropagatesHarnessNotices(t *testing.T) {
 
 func agentsTargetsForTest(row AgentsServiceRow) string { return strings.Join(row.Targets, ",") }
 
-func driftFixture(t *testing.T, lockConfig, claudeConfig string) []AgentsServiceRow {
+func driftFixture(t *testing.T, lockConfig, claudeConfig string) AgentsStatus {
 	t.Helper()
 	manifest := "targets:\n- claude\ndependencies:\n  mcp:\n  - name: probe\n    registry: false\n    transport: stdio\n"
 	lock := "dependencies: []\nmcp_servers:\n- probe\nmcp_configs:\n  probe:\n    name: probe\n" + lockConfig
@@ -239,7 +239,7 @@ func driftFixture(t *testing.T, lockConfig, claudeConfig string) []AgentsService
 	if err != nil {
 		t.Fatal(err)
 	}
-	return status.MCP
+	return status
 }
 
 func TestAgentsStatusDetectsDeployedMCPDrift(t *testing.T) {
@@ -258,18 +258,25 @@ func TestAgentsStatusDetectsDeployedMCPDrift(t *testing.T) {
 		"not on claude":    {"    command: sh\n", "", AgentsPackageInstalled},
 	} {
 		t.Run(name, func(t *testing.T) {
-			rows := driftFixture(t, tc.lock, tc.claude)
-			row := serviceRow(t, rows, "probe")
+			status := driftFixture(t, tc.lock, tc.claude)
+			row := serviceRow(t, status.MCP, "probe")
 			if row.Status != tc.want || row.SyncActionable != (tc.want == AgentsPackageDrifted) {
 				t.Fatalf("row = %+v, want status %q actionable=%v", row, tc.want, tc.want == AgentsPackageDrifted)
+			}
+			wantActionable := 0
+			if tc.want == AgentsPackageDrifted {
+				wantActionable = 1
+			}
+			if status.SyncActionable != wantActionable {
+				t.Fatalf("aggregate actionable = %d for row %+v", status.SyncActionable, row)
 			}
 		})
 	}
 }
 
 func TestAgentsStatusDriftBeatsUnavailable(t *testing.T) {
-	rows := driftFixture(t, "    command: omni-test-absent-binary\n", `{"command": "TAMPERED"}`)
-	if got := serviceRow(t, rows, "probe").Status; got != AgentsPackageDrifted {
+	status := driftFixture(t, "    command: omni-test-absent-binary\n", `{"command": "TAMPERED"}`)
+	if got := serviceRow(t, status.MCP, "probe").Status; got != AgentsPackageDrifted {
 		t.Fatalf("status = %q", got)
 	}
 }

@@ -64,7 +64,6 @@ func (a *App) AgentsStatus() (AgentsStatus, error) {
 	}
 	for _, rows := range [][]AgentsServiceRow{mcpRows, lspRows} {
 		for i := range rows {
-			rows[i].SyncActionable = rows[i].Status == AgentsPackageMissing
 			if rows[i].SyncActionable {
 				syncActionable++
 			}
