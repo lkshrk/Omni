@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/vttest"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -26,8 +25,9 @@ func TestCLIAndTUISettingsProviderProduceEquivalentSemanticState(t *testing.T) {
 		runOmniCommand(t, bin, s.root, s.env, "--config", s.configPath, "--cache-dir", s.cache, "settings", "disable-provider", "brew")
 	}, runTUI: func(t *testing.T, bin string, s *paritySandbox) {
 		runParitySettingsTUI(t, bin, s, func(term *vttest.Terminal) {
-			sendTUIKey(term, uv.KeyHome)
-			writeTUIKeys(t, term, "j\r")
+			sendParityKeyUntil(t, term, "k", screenHas("> Import Installed Tools"), "TUI did not reveal settings cursor")
+			sendParityKeyUntil(t, term, "j", screenHas("> Provider Priority"), "TUI did not select provider priority")
+			writeTUIKeys(t, term, "\r")
 			waitForRequiredScreen(t, term, 3*time.Second, screenHas("Provider Priority", "x on/off"), "TUI did not open provider editor")
 			writeTUIKeys(t, term, "x\r")
 		}, func(cfg *config.RootConfig) bool {
