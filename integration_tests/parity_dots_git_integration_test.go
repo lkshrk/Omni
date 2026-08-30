@@ -90,7 +90,8 @@ type dotsGitCommitState struct {
 	Tree          string
 	Subject       string
 	Status        string
-	RemoteHead    string
+	RemoteTree    string
+	RemoteSubject string
 	SourceContent string
 }
 
@@ -108,7 +109,8 @@ func observeDotsGitCommitParity(t *testing.T, sandbox *paritySandbox) any {
 		Tree:          runCommandOutput(t, repo, sandbox.env, "git", "rev-parse", "HEAD^{tree}"),
 		Subject:       runCommandOutput(t, repo, sandbox.env, "git", "log", "-1", "--pretty=%s"),
 		Status:        runCommandOutput(t, repo, sandbox.env, "git", "status", "--porcelain=v1"),
-		RemoteHead:    runCommandOutput(t, remote, sandbox.env, "git", "rev-parse", "refs/heads/main"),
+		RemoteTree:    runCommandOutput(t, remote, sandbox.env, "git", "rev-parse", "refs/heads/main^{tree}"),
+		RemoteSubject: runCommandOutput(t, remote, sandbox.env, "git", "log", "-1", "--pretty=%s", "refs/heads/main"),
 		SourceContent: string(raw),
 	}
 }
