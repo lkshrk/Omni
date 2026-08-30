@@ -60,6 +60,18 @@ func runToolsDeleteSpecParityTUI(t *testing.T, bin string, s *paritySandbox) {
 		waitForRequiredScreen(t, term, 7*time.Second, screenHas("Dashboard", "Tools"), "TUI did not start")
 		writeTUIKeys(t, term, "\t")
 		waitForRequiredScreen(t, term, 9*time.Second, screenHas("omni-missing", "apt"), "TUI did not render missing tracked tool")
+		deadline := time.Now().Add(8 * time.Second)
+		for time.Now().Before(deadline) {
+			writeTUIKeys(t, term, "R")
+			if _, ok := waitForScreen(term, 500*time.Millisecond, func(text string) bool {
+				return strings.Contains(strings.ToLower(text), "refreshing tools")
+			}); ok {
+				break
+			}
+		}
+		waitForRequiredScreen(t, term, 10*time.Second, func(text string) bool {
+			return strings.Contains(text, "omni-missing") && !strings.Contains(strings.ToLower(text), "refreshing tools")
+		}, "TUI installed-provider refresh did not settle before deletion")
 		writeTUIKeys(t, term, "j")
 		waitForRequiredScreen(t, term, 4*time.Second, func(text string) bool {
 			return strings.Contains(text, ">") && strings.Contains(text, "omni-missing")
@@ -69,9 +81,27 @@ func runToolsDeleteSpecParityTUI(t *testing.T, bin string, s *paritySandbox) {
 		writeTUIKeys(t, term, "d")
 		return waitForRequiredScreen(t, term, 10*time.Second, func(string) bool {
 			cfg, err := config.Load(s.configPath)
-			return err == nil && !deleteSpecConfigured(cfg, "omni-missing")
+			return err == nil && !deleteSpecConfigured(cfg, "omni-missing") && deleteSpecCacheAbsent(s, "omni-missing")
 		}, "TUI did not remove tool spec")
 	})
+}
+
+func deleteSpecCacheAbsent(s *paritySandbox, name string) bool {
+	db, err := database.Open(filepath.Join(s.cache, "omni.db"))
+	if err != nil {
+		return false
+	}
+	defer db.Close()
+	tools, err := db.List(context.Background())
+	if err != nil {
+		return false
+	}
+	for _, tool := range tools {
+		if tool.Name == name {
+			return false
+		}
+	}
+	return true
 }
 
 type deleteSpecCacheRow struct {
