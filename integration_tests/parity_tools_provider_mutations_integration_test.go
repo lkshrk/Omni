@@ -31,6 +31,7 @@ func TestCLIAndTUIToolsReinstallDefaultProduceEquivalentSemanticState(t *testing
 		waitForRequiredScreen(t, term, 4*time.Second, func(text string) bool { return strings.Contains(strings.ToLower(text), "confirm reinstall") }, "TUI did not arm reinstall-default")
 		writeTUIKeys(t, term, "i")
 	}, func(s *paritySandbox) bool { return providerMutationSettled(s, "uv") })
+	runOmniCommand(t, bin, tui.root, tui.env, "--config", tui.configPath, "--cache-dir", tui.cache, "tools", "list", "black", "--format", "json")
 	assertProviderMutationParity(t, cli, tui)
 }
 
@@ -53,6 +54,7 @@ func TestCLIAndTUIToolsPinProviderProduceEquivalentSemanticState(t *testing.T) {
 		spec, ok := cfg.Tools["black"]
 		return ok && len(spec.Providers) > 0 && spec.Providers[0].Provider == "pip" && spec.Provider == "" && spec.Package == "" && spec.InstallWith == ""
 	})
+	runOmniCommand(t, bin, tui.root, tui.env, "--config", tui.configPath, "--cache-dir", tui.cache, "tools", "list", "black", "--format", "json")
 	assertProviderMutationParity(t, cli, tui)
 }
 
