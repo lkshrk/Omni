@@ -93,6 +93,10 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 	}
 
 	if m.loading {
+		if m.mode == viewSkills && key.Matches(msg, m.keys.AgentsRefresh) {
+			_, refresh := m.handleAgentsGlobalActionKeyMsg(msg)
+			cmds = append(cmds, refresh...)
+		}
 		return *m, tea.Batch(cmds...)
 	}
 	if m.dotsPushRunning {

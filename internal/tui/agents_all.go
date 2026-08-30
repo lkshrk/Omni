@@ -316,7 +316,7 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea
 		return true, m.doAgentsSyncAll()
 	default:
 		m.apmCommand, m.apmOutput, m.apmErr = "", "", nil
-		return true, m.refreshAgents()
+		return true, append([]tea.Cmd{setStatus(m, "Refreshing agents…", false)}, m.refreshAgents()...)
 	}
 }
 

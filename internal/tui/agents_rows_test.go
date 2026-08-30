@@ -138,7 +138,7 @@ func TestAgentsRefreshKeyChecksReadinessBeforeRowsOrOutdated(t *testing.T) {
 	if m.apmRunning || m.apmCommand != "" {
 		t.Fatalf("R dispatched an APM command: %q", m.apmCommand)
 	}
-	if len(cmds) != 1 || !m.agentsReadinessPending || m.agentsRowsGen != 0 || m.agentsOutdatedGen != 1 {
+	if len(cmds) != 2 || !m.agentsReadinessPending || m.agentsRowsGen != 0 || m.agentsOutdatedGen != 1 {
 		t.Fatalf("cmds = %#v", cmds)
 	}
 }
@@ -262,7 +262,7 @@ func TestAgentsRefreshAlwaysRetriesAutomaticReadiness(t *testing.T) {
 			m.ctx = context.Background()
 			m.agentsReadinessErr = test.err
 			_, cmds := m.handleAgentsGlobalActionKeyMsg(tea.KeyPressMsg{Code: 'R', Text: "R"})
-			if m.apmRunning || len(cmds) != 1 || !m.agentsReadinessPending || m.agentsOutdatedChecking {
+			if m.apmRunning || len(cmds) != 2 || !m.agentsReadinessPending || m.agentsOutdatedChecking {
 				t.Fatalf("automatic retry running=%v pending=%v outdated=%v cmds=%d", m.apmRunning, m.agentsReadinessPending, m.agentsOutdatedChecking, len(cmds))
 			}
 		})
