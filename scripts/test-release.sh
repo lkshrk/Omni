@@ -17,6 +17,18 @@ assert_goreleaser_declares_stow_dependencies() {
   fi
 }
 
+assert_release_requires_latest_ci_success() {
+  local workflow="$ROOT/.github/workflows/release.yml"
+  if ! grep -q 'sort_by(.run_number) | last' "$workflow"; then
+    echo "release workflow must gate on the latest CI run" >&2
+    exit 1
+  fi
+  if grep -q -- '-f status=success' "$workflow"; then
+    echo "release workflow must not accept an older successful CI run" >&2
+    exit 1
+  fi
+}
+
 FAKEBIN="$TMPDIR/bin"
 mkdir -p "$FAKEBIN"
 
@@ -182,6 +194,7 @@ scenario_origin_advance_aborts_before_tag() {
 
 scenario_published_head_gets_new_demo_commit
 assert_goreleaser_declares_stow_dependencies
+assert_release_requires_latest_ci_success
 scenario_unpushed_release_commit_gets_amended
 scenario_origin_advance_aborts_before_tag
 
