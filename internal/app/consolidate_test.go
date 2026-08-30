@@ -21,6 +21,7 @@ type managerInstallStub struct {
 	stubProvider
 	installedByManager   map[string][]provider.Tool
 	uninstalledByManager map[string][]provider.Tool
+	installErr           map[string]error
 	version              string
 	onInstall            func()
 }
@@ -35,6 +36,9 @@ func (s *consolidateInstallFailStub) Install(_ context.Context, _ provider.Tool)
 }
 
 func (s *managerInstallStub) InstallWithManager(_ context.Context, tool provider.Tool, manager string) error {
+	if err := s.installErr[tool.EffectivePackage()]; err != nil {
+		return err
+	}
 	if s.onInstall != nil {
 		s.onInstall()
 	}
@@ -436,6 +440,99 @@ func TestConsolidate_ConfigSaveFailureKeepsSourceAndCleansTarget(t *testing.T) {
 	}
 	if len(cfg.Tools["prettier"].Providers) != 1 || cfg.Tools["prettier"].Providers[0].Provider != "npm" {
 		t.Fatalf("source config changed after failed save: %#v", cfg.Tools["prettier"])
+	}
+}
+
+func TestConsolidate_ConfigSaveFailurePreservesPreexistingTarget(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	node := &managerInstallStub{
+		stubProvider: stubProvider{name: "node", available: true},
+		installedByManager: map[string][]provider.Tool{
+			"pnpm": {{Name: "a-existing", Provider: "node", Package: "existing-target"}},
+		},
+	}
+	npm := &uninstallCaptureStub{stubProvider: stubProvider{name: "npm", available: true}}
+	pnpm := provider.Named("pnpm", &stubProvider{name: "node", available: true})
+	a, _ := newImportApp(t, node, npm, pnpm)
+	originalPath := a.ConfigPath
+	if err := saveAppConfig(t, originalPath, &config.RootConfig{
+		Settings: config.Settings{ProviderPriority: []string{"npm"}},
+		Tools: map[string]config.ToolSpec{
+			"a-existing": {Providers: []config.ToolInstallSpec{{Provider: "npm", Package: "existing-source"}, {Provider: "pnpm", Package: "existing-target"}}},
+			"b-new":      {Providers: []config.ToolInstallSpec{{Provider: "npm", Package: "new-source"}, {Provider: "pnpm", Package: "new-target"}}},
+		},
+		Groups: []*config.GroupConfig{testHostToolGroup("a-existing", "b-new")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	blocked := filepath.Join(t.TempDir(), "blocked")
+	if err := os.Mkdir(blocked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	node.onInstall = func() { a.ConfigPath = blocked }
+
+	if _, err := a.Consolidate(ctx, "node", "pnpm", nil); err == nil {
+		t.Fatal("expected config save failure")
+	}
+	installed := node.installedByManager["pnpm"]
+	if len(installed) != 1 || installed[0].Package != "existing-target" {
+		t.Fatalf("preexisting target was removed: %#v", installed)
+	}
+	uninstalled := node.uninstalledByManager["pnpm"]
+	if len(uninstalled) != 1 || uninstalled[0].Package != "new-target" {
+		t.Fatalf("target compensation = %#v, want only new-target", uninstalled)
+	}
+	if len(npm.uninstalled) != 0 {
+		t.Fatalf("source uninstalled before config commit: %#v", npm.uninstalled)
+	}
+}
+
+func TestConsolidate_LaterToolFailurePreservesPreexistingTarget(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	installErr := errors.New("later target install failed")
+	node := &managerInstallStub{
+		stubProvider: stubProvider{name: "node", available: true},
+		installedByManager: map[string][]provider.Tool{
+			"pnpm": {{Name: "a-existing", Provider: "node", Package: "existing-target"}},
+		},
+		installErr: map[string]error{"failing-target": installErr},
+	}
+	npm := &uninstallCaptureStub{stubProvider: stubProvider{name: "npm", available: true}}
+	pnpm := provider.Named("pnpm", &stubProvider{name: "node", available: true})
+	a, cfgPath := newImportApp(t, node, npm, pnpm)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{ProviderPriority: []string{"npm"}},
+		Tools: map[string]config.ToolSpec{
+			"a-existing": {Providers: []config.ToolInstallSpec{{Provider: "npm", Package: "existing-source"}, {Provider: "pnpm", Package: "existing-target"}}},
+			"b-failing":  {Providers: []config.ToolInstallSpec{{Provider: "npm", Package: "failing-source"}, {Provider: "pnpm", Package: "failing-target"}}},
+		},
+		Groups: []*config.GroupConfig{testHostToolGroup("a-existing", "b-failing")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := a.Consolidate(ctx, "node", "pnpm", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Failed) != 1 || !errors.Is(result.Failed[0].Err, installErr) {
+		t.Fatalf("failures = %#v", result.Failed)
+	}
+	installed := node.installedByManager["pnpm"]
+	if len(installed) != 1 || installed[0].Package != "existing-target" || len(node.uninstalledByManager["pnpm"]) != 0 {
+		t.Fatalf("later failure disturbed preexisting target: installed=%#v uninstalled=%#v", installed, node.uninstalledByManager)
+	}
+	if len(npm.uninstalled) != 0 {
+		t.Fatalf("source uninstalled on atomic install failure: %#v", npm.uninstalled)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.HostSettings[testShortHostname()].ProviderPriority; len(got) != 0 {
+		t.Fatalf("settings committed despite later install failure: %#v", got)
 	}
 }
 

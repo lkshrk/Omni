@@ -247,7 +247,13 @@ func (a *App) runConsolidate(ctx context.Context, ecosystem, manager string, dry
 	settings := a.effectiveSettings(cfg)
 	availability := make(map[string]bool)
 	var plans []ecosystemConsolidatePlan
-	for name, toolSpec := range cfg.Tools {
+	names := make([]string, 0, len(cfg.Tools))
+	for name := range cfg.Tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		toolSpec := cfg.Tools[name]
 		source := a.resolveInstallSpecWithSettings(ctx, name, toolSpec, availability, settings)
 		sourceOwner := source.InstallWith
 		if sourceOwner == "" {
@@ -288,7 +294,23 @@ func (a *App) runConsolidate(ctx context.Context, ecosystem, manager string, dry
 
 	for i := range plans {
 		plan := &plans[i]
-		if plan.NeedsMigration {
+		installed, version, checkErr := installedWithProvider(ctx, tgtProv, plan.TargetTool, manager)
+		if checkErr != nil {
+			result.Failed = append(result.Failed, ConsolidateFailure{ConsolidateTool: plan.Change, Err: checkErr})
+			continue
+		}
+		plan.TargetPreexisting = installed
+		if installed {
+			plan.Version = version
+		}
+	}
+	if len(result.Failed) > 0 {
+		return result, nil
+	}
+
+	for i := range plans {
+		plan := &plans[i]
+		if plan.NeedsMigration && !plan.TargetPreexisting {
 			if progress != nil {
 				progress(fmt.Sprintf("migrating %s (%s → %s)…", plan.Name, plan.SourceConcrete, manager))
 			}
@@ -350,7 +372,7 @@ type ecosystemConsolidatePlan struct {
 	UpdatedSpec                                                           config.ToolSpec
 	TargetTool                                                            provider.Tool
 	Change                                                                ConsolidateTool
-	NeedsMigration, InstalledTarget                                       bool
+	NeedsMigration, TargetPreexisting, InstalledTarget                    bool
 }
 
 func cloneConsolidateConfig(cfg *config.RootConfig) *config.RootConfig {

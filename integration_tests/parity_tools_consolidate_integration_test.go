@@ -4,7 +4,9 @@ package integration_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -132,7 +134,8 @@ func toolsConsolidateSettled(s *paritySandbox) bool {
 	}
 	defer db.Close()
 	row, err := db.Get(context.Background(), "fixture", "pnpm", "fixture-cli")
-	return err == nil && row.Installed && row.InstalledWith == "pnpm" && row.Version.String == "2.0.0"
+	_, sourceErr := db.Get(context.Background(), "fixture", "npm", "fixture-cli")
+	return err == nil && row.Installed && row.InstalledWith == "pnpm" && row.Version.String == "2.0.0" && errors.Is(sourceErr, sql.ErrNoRows)
 }
 
 type toolsConsolidateCacheRow struct {
