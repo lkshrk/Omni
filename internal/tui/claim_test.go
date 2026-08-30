@@ -446,6 +446,9 @@ func TestDoSetProviderScope_ToolSuccess(t *testing.T) {
 	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "brew" || spec.Providers[0].Package != "ripgrep" {
 		t.Fatalf("provider scope was not persisted: %+v", spec)
 	}
+	if spec.Provider != "" || spec.Package != "" || spec.InstallWith != "" {
+		t.Fatalf("legacy fields survived provider scope pin: %+v", spec)
+	}
 }
 
 func TestDoSetProviderScope_PersistsPackageAlias(t *testing.T) {

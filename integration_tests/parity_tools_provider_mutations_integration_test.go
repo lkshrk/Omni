@@ -34,6 +34,27 @@ func TestCLIAndTUIToolsReinstallDefaultProduceEquivalentSemanticState(t *testing
 	assertProviderMutationParity(t, cli, tui)
 }
 
+func TestCLIAndTUIToolsPinProviderProduceEquivalentSemanticState(t *testing.T) {
+	bin := buildOmniBinary(t)
+	cli, tui := newParityTwins(t)
+	seedProviderMutationParity(t, bin, cli)
+	seedProviderMutationParity(t, bin, tui)
+	runOmniCommand(t, bin, cli.root, cli.env, "--config", cli.configPath, "--cache-dir", cli.cache, "tools", "set", "black", "--provider", "pip", "--package", "black", "--install-with", "pip", "--global")
+	runProviderMutationTUI(t, bin, tui, func(term *vttest.Terminal) {
+		writeTUIKeys(t, term, "p")
+		waitForRequiredScreen(t, term, 4*time.Second, screenHas("this tool on this host", "this tool everywhere", "pip"), "TUI did not open provider scope picker")
+		writeTUIKeys(t, term, "j", " ")
+	}, func(s *paritySandbox) bool {
+		cfg, err := config.Load(s.configPath)
+		if err != nil {
+			return false
+		}
+		spec, ok := cfg.Tools["black"]
+		return ok && len(spec.Providers) > 0 && spec.Providers[0].Provider == "pip" && spec.Provider == "" && spec.Package == "" && spec.InstallWith == ""
+	})
+	assertProviderMutationParity(t, cli, tui)
+}
+
 func seedProviderMutationParity(t *testing.T, bin string, s *paritySandbox) {
 	s.env = providerMutationFakePython(t, s.root, s.env)
 	if err := config.Save(s.configPath, &config.RootConfig{

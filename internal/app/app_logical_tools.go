@@ -373,7 +373,7 @@ func (a *App) SetToolProviderScopeWithState(ctx context.Context, name string, op
 	case ToolProviderScopeHost:
 		err = a.SetToolHostInstallSpec(name, opts.ProviderName, opts.Package, opts.InstallWith)
 	case ToolProviderScopeTool:
-		err = a.SetToolDefaultInstallSpec(name, opts.ProviderName, opts.Package, opts.InstallWith)
+		err = a.SetTool(name, opts.ProviderName, opts.Package, opts.InstallWith)
 	case ToolProviderScopeEcosystem:
 		err = a.PinEcosystemForHost(ctx, opts.ProviderName, opts.InstallWith)
 	default:

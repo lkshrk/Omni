@@ -293,17 +293,21 @@ func TestSetToolProviderScopeWithStatePersistsToolProviderPin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToolScopeDisplayState: %v", err)
 	}
-	if got := reloaded.ToolProviderPins["prettier"]; got != "bun" {
-		t.Fatalf("reloaded provider pins = %v, want prettier pinned to bun", reloaded.ToolProviderPins)
+	if got := reloaded.ToolProviderPins["prettier"]; got != "" {
+		t.Fatalf("reloaded provider pins = %v, want canonical providers without a legacy pin marker", reloaded.ToolProviderPins)
 	}
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
+	spec := cfg.Tools["prettier"]
 	want := []config.ToolInstallSpec{{Provider: "bun", Package: "prettier"}, {Provider: "npm"}}
-	if got := cfg.Tools["prettier"].Providers; !reflect.DeepEqual(got, want) {
+	if got := spec.Providers; !reflect.DeepEqual(got, want) {
 		t.Fatalf("providers = %+v, want %+v", got, want)
+	}
+	if spec.Provider != "" || spec.Package != "" || spec.InstallWith != "" {
+		t.Fatalf("legacy fields = provider %q package %q install_with %q, want empty", spec.Provider, spec.Package, spec.InstallWith)
 	}
 }
 
