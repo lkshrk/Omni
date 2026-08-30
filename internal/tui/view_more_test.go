@@ -4407,6 +4407,20 @@ func TestFallbackEditorManualSpecRepoEditPreservesManualFlow(t *testing.T) {
 	}
 }
 
+func TestFallbackEditorUnsupportedResolvedFallbackReResolvesFromProvenance(t *testing.T) {
+	t.Parallel()
+	tool := &app.ToolView{Name: "fixture", Provider: "system", Tracked: true}
+	state := fallbackEditorStateForTool(tool, map[string]config.FallbackSpec{"fixture": {
+		Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "owner", Repo: "repo"},
+		Status: config.FallbackStatusUnsupported,
+		Binary: "fixture",
+		Recipe: config.FallbackRecipe{ReleaseID: "330388700", TagName: "v2.93.0", PublishedAt: "2026-05-27T17:47:41Z"},
+	}}, nil)
+	if state.origin != fallbackEditorOriginResolved || !fallbackEditorShouldResolve(tool.Name, state) {
+		t.Fatalf("unsupported resolved fallback origin/routing = %v/%t", state.origin, fallbackEditorShouldResolve(tool.Name, state))
+	}
+}
+
 func TestRenderFallbackEditorPopup_LongCommandsFitNarrowFrame(t *testing.T) {
 	t.Parallel()
 	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}

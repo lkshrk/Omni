@@ -288,7 +288,7 @@ func fallbackEditorStateForTool(t *app.ToolView, fallbacks map[string]app.Fallba
 	state.fields[fallbackFieldUpgrade] = fallback.Commands.Upgrade
 	state.fields[fallbackFieldVersion] = fallback.Commands.Version
 	state.fields[fallbackFieldReleaseChannel] = fallback.ReleaseChannel
-	if fallback.Recipe.AssetDownloadURL != "" && fallback.Recipe.TagName != "" {
+	if fallback.Recipe.ReleaseID != "" || fallback.Recipe.TagName != "" || fallback.Recipe.PublishedAt != "" {
 		state.origin = fallbackEditorOriginResolved
 	} else {
 		state.origin = fallbackEditorOriginManual
