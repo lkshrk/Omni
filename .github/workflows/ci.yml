@@ -122,7 +122,7 @@ jobs:
           cat >"$evidence_dir/meta.json" <<'JSON'
           {"schema_version":1,"lane":"unit-${{ matrix.name }}","goos":"linux","tags":[],"count":1}
           JSON
-          make test-unit TEST_PACKAGES="$packages" TEST_FLAGS="-race -trimpath -count=1 -json" \
+          make --silent test-unit TEST_PACKAGES="$packages" TEST_FLAGS="-race -trimpath -count=1 -json" \
             | tee "$evidence_dir/go-test.jsonl"
 
       - name: Upload flow evidence

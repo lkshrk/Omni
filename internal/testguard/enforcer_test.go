@@ -195,6 +195,7 @@ func TestCIUnitLanesUploadFlowEvidence(t *testing.T) {
 	}
 	workflow := string(data)
 	for _, want := range []string{
+		`make --silent test-unit`,
 		`TEST_FLAGS="-race -trimpath -count=1 -json"`,
 		`| tee "$evidence_dir/go-test.jsonl"`,
 		`{"schema_version":1,"lane":"unit-${{ matrix.name }}","goos":"linux","tags":[],"count":1}`,
