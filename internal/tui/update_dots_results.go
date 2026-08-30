@@ -610,12 +610,17 @@ func (m *Model) doDotsPull() tea.Cmd {
 func (m *Model) doDotsPush() tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
+	// A push is commit+remote-update. Once it starts, a superseding TUI refresh must
+	// not cancel between those two mutations and leave only the local commit.
+	ctx = dotsPushContext(ctx)
 	return func() tea.Msg {
 		result, err := a.DotsPushWithState(ctx, "")
 		entries, gitStatus, memberships := dotsSnapshotFromState(result)
 		return dotsPushedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }
+
+func dotsPushContext(ctx context.Context) context.Context { return context.WithoutCancel(ctx) }
 
 func (m *Model) doDotsCommit() tea.Cmd {
 	a := m.app

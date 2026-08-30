@@ -42,6 +42,36 @@ func TestCLIAndTUIDotsPullPaletteProduceEquivalentSemanticState(t *testing.T) {
 	})
 }
 
+func TestCLIAndTUIDotsPushPaletteProduceEquivalentSemanticState(t *testing.T) {
+	bin := buildOmniBinary(t)
+	runParityFlow(t, bin, parityFlow{
+		seed: seedPaletteDotsPush,
+		runCLI: func(t *testing.T, bin string, s *paritySandbox) {
+			runOmniCommand(t, bin, s.root, s.env, "--config", s.configPath, "--cache-dir", s.cache, "dots", "push")
+		},
+		runTUI: func(t *testing.T, bin string, s *paritySandbox) {
+			runPaletteTUI(t, bin, s, "dots push", func() bool {
+				return paletteDotsHeadsMatch(t, s) && runCommandOutput(t, filepath.Join(s.home, "dotfiles"), s.env, "git", "status", "--porcelain") == ""
+			})
+		},
+		observe: observePaletteDotsState,
+		readTUI: readPaletteDotsThroughCLI,
+	})
+}
+
+func seedPaletteDotsPush(t *testing.T, s *paritySandbox) {
+	t.Helper()
+	seedDotsGitCommitParity(t, s)
+	source := filepath.Join(s.home, "dotfiles", "dotfiles", "nvim", ".config", "nvim", "init.lua")
+	target := filepath.Join(s.home, ".config", "nvim", "init.lua")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, target); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func seedPaletteDotsPull(t *testing.T, s *paritySandbox) {
 	t.Helper()
 	seedDotsGitCommitParity(t, s)
