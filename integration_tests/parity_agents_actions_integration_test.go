@@ -16,29 +16,29 @@ import (
 )
 
 func TestCLIAndTUIAgentsUpdateAllProduceEquivalentAPMState(t *testing.T) {
-	bin := buildOmniBinary(t)
+	bin := batch16OmniBinary(t)
 	runParityFlow(t, bin, parityFlow{
 		seed:    seedAgentsActionsParity,
 		runCLI:  runAgentsUpdateAllParityCLI,
 		runTUI:  runAgentsUpdateAllParityTUI,
-		observe: observeAgentsActionsParity,
+		observe: observeAgentsMutationParity,
 		readTUI: readAgentsActionsThroughCLI,
 	})
 }
 
 func TestCLIAndTUIAgentsRemoveProduceEquivalentAPMState(t *testing.T) {
-	bin := buildOmniBinary(t)
+	bin := batch16OmniBinary(t)
 	runParityFlow(t, bin, parityFlow{
 		seed:    seedAgentsActionsParity,
 		runCLI:  runAgentsRemoveParityCLI,
 		runTUI:  runAgentsRemoveParityTUI,
-		observe: observeAgentsActionsParity,
+		observe: observeAgentsMutationParity,
 		readTUI: readAgentsActionsThroughCLI,
 	})
 }
 
 func TestCLIAndTUIAgentsRefreshProduceEquivalentAPMState(t *testing.T) {
-	bin := buildOmniBinary(t)
+	bin := batch16OmniBinary(t)
 	runParityFlow(t, bin, parityFlow{seed: seedAgentsActionsParity, runCLI: func(t *testing.T, bin string, s *paritySandbox) {
 		runOmniCommand(t, bin, s.root, s.env, "--config", s.configPath, "--cache-dir", s.cache, "agents", "outdated")
 	}, runTUI: func(t *testing.T, bin string, s *paritySandbox) {
@@ -205,6 +205,15 @@ func observeAgentsActionsParity(t *testing.T, sandbox *paritySandbox) any {
 	state.Removed = removeErr == nil
 	_, refreshErr := os.Stat(filepath.Join(sandbox.root, "apm-state", "refreshed"))
 	state.Refreshed = refreshErr == nil
+	return state
+}
+
+func observeAgentsMutationParity(t *testing.T, sandbox *paritySandbox) any {
+	t.Helper()
+	state := observeAgentsActionsParity(t, sandbox).(agentsActionsState)
+	// TUI readiness performs an initial read-only outdated query before mutation.
+	// Refresh semantics have their own parity flow; mutation parity compares only mutation effects.
+	state.Refreshed = false
 	return state
 }
 
