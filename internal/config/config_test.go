@@ -1351,6 +1351,24 @@ func TestDefaultConfigPath_FallsBackToHomeConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigDirUsesXDGAndHomeFallback(t *testing.T) {
+	t.Run("xdg", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", dir)
+		got, err := config.DefaultConfigDir()
+		if err != nil || got != filepath.Join(dir, "omni") {
+			t.Fatalf("DefaultConfigDir = %q, %v", got, err)
+		}
+	})
+	t.Run("home", func(t *testing.T) {
+		t.Setenv("XDG_CONFIG_HOME", "")
+		got, err := config.DefaultConfigDir()
+		if err != nil || !strings.HasSuffix(got, filepath.Join(".config", "omni")) {
+			t.Fatalf("DefaultConfigDir = %q, %v", got, err)
+		}
+	})
+}
+
 func TestDotEntry_Path_RoundTrips(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")

@@ -128,6 +128,15 @@ func DefaultConfigPath() (string, error) {
 		}
 		return p, nil
 	}
+	dir, err := DefaultConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "settings.json"), nil
+}
+
+// DefaultConfigDir resolves Omni's XDG config directory consistently on every platform.
+func DefaultConfigDir() (string, error) {
 	base := os.Getenv("XDG_CONFIG_HOME")
 	if base == "" {
 		home, err := os.UserHomeDir()
@@ -136,8 +145,8 @@ func DefaultConfigPath() (string, error) {
 		}
 		base = filepath.Join(home, ".config")
 	}
-	path := filepath.Join(base, "omni", "settings.json")
-	if err := testguard.RequireTempPath("default config path", path); err != nil {
+	path := filepath.Join(base, "omni")
+	if err := testguard.RequireTempPath("default config directory", path); err != nil {
 		return "", err
 	}
 	return path, nil

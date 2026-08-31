@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -97,11 +99,68 @@ type AgentsOutdatedResult = apm.OutdatedResult
 
 // AgentsTemplatePath resolves the host template APM installs never write to.
 func AgentsTemplatePath() (string, error) {
-	base, err := os.UserConfigDir()
+	base, err := config.DefaultConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "omni", "apm.yml"), nil
+	path := filepath.Join(base, "apm.yml")
+	if runtime.GOOS == "darwin" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		legacy := filepath.Join(home, "Library", "Application Support", "omni", "apm.yml")
+		if err := migrateLegacyDarwinAgentsTemplate(path, legacy); err != nil {
+			return "", err
+		}
+	}
+	return path, nil
+}
+
+func migrateLegacyDarwinAgentsTemplate(canonical, legacy string) error {
+	old, oldExists, err := readRegularTemplate(legacy)
+	if err != nil || !oldExists {
+		return err
+	}
+	current, currentExists, err := readRegularTemplate(canonical)
+	if err != nil {
+		return err
+	}
+	switch {
+	case !currentExists:
+		_, err = writeAgentsMigrationTemplate(canonical, old)
+		return err
+	case bytes.Equal(current, old), !emptyMigrationTemplate(current):
+		return nil
+	case emptyMigrationTemplate(current) && !emptyMigrationTemplate(old):
+		_, err = writeAgentsMigrationTemplate(canonical, old)
+		return err
+	default:
+		return fmt.Errorf("canonical and legacy Darwin APM templates differ; review %s and %s", canonical, legacy)
+	}
+}
+
+func readRegularTemplate(path string) ([]byte, bool, error) {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, true, fmt.Errorf("APM template %s is not a regular file", path)
+	}
+	raw, err := os.ReadFile(path)
+	return raw, true, err
+}
+
+func emptyMigrationTemplate(raw []byte) bool {
+	if !bytes.Contains(raw, []byte(agentsMigrationMarker)) {
+		return false
+	}
+	var manifest apmManifest
+	return yaml.Unmarshal(raw, &manifest) == nil && len(manifest.Dependencies.APM) == 0 && len(manifest.Dependencies.MCP) == 0 && len(manifest.Dependencies.LSP) == 0
 }
 
 func manifestHash(data []byte) string {
