@@ -80,7 +80,7 @@ func TestRecoverNativePluginPlanClaudeOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"name: demo", "marketplace: official", "- claude", "# apm marketplace add acme/plugins --name official"} {
+	for _, want := range []string{"name: demo", "marketplace: official", "- claude", "# apm marketplace add https://github.com/acme/plugins.git --name official"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered manifest missing %q:\n%s", want, rendered)
 		}
@@ -108,7 +108,7 @@ func TestRecoverNativePluginPlanUnionsTargets(t *testing.T) {
 		nativeRule("claude plugins list --json", `{"installed":[{"id":"@scope/demo@official"}]}`),
 		nativeRule("claude plugins marketplace list --json", `{"marketplaces":[{"name":"official","source":"github","repo":"acme/plugins"}]}`),
 		nativeRule("codex plugin list --json", `[{"name":"@scope/demo","marketplaceName":"official"}]`),
-		nativeRule("codex plugin marketplace list --json", `[{"name":"official","marketplaceSource":{"source":"acme/plugins"}}]`),
+		nativeRule("codex plugin marketplace list --json", `[{"name":"official","marketplaceSource":{"source":"https://github.com/ACME/plugins.git"}}]`),
 	)
 	_, rendered, err := a.recoverNativeAgentPlan(t.Context())
 	if err != nil {
@@ -121,6 +121,20 @@ func TestRecoverNativePluginPlanUnionsTargets(t *testing.T) {
 	}
 	if strings.Count(rendered, "marketplace: official") != 1 {
 		t.Fatalf("plugin was not unioned:\n%s", rendered)
+	}
+}
+
+func TestCanonicalNativeMarketplaceSource(t *testing.T) {
+	want := "https://github.com/mksglu/context-mode.git"
+	for _, source := range []string{
+		"mksglu/context-mode",
+		"https://github.com/mksglu/context-mode.git",
+		"git@github.com:mksglu/context-mode.git",
+		"ssh://git@github.com/MKSGLU/context-mode",
+	} {
+		if got := canonicalNativeMarketplaceSource(source); got != want {
+			t.Fatalf("canonicalNativeMarketplaceSource(%q) = %q", source, got)
+		}
 	}
 }
 

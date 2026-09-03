@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -63,14 +64,15 @@ func (a *App) recoverNativeAgentPlan(ctx context.Context) (agentBundlePlan, stri
 		if marketplace.Name == "" {
 			continue
 		}
-		if marketplace.Source == "" {
+		source := canonicalNativeMarketplaceSource(marketplace.Source)
+		if source == "" {
 			missingSources[marketplace.Name] = true
 			continue
 		}
-		if existing, ok := sources[marketplace.Name]; ok && existing != marketplace.Source {
-			return agentBundlePlan{}, "", fmt.Errorf("native marketplace %q has ambiguous sources %q and %q (installed: %s)", marketplace.Name, existing, marketplace.Source, nativePluginIdentities(plugins))
+		if existing, ok := sources[marketplace.Name]; ok && existing != source {
+			return agentBundlePlan{}, "", fmt.Errorf("native marketplace %q has ambiguous sources %q and %q (installed: %s)", marketplace.Name, existing, source, nativePluginIdentities(plugins))
 		}
-		sources[marketplace.Name] = marketplace.Source
+		sources[marketplace.Name] = source
 	}
 
 	targets := map[string]map[string]bool{}
@@ -143,6 +145,31 @@ func (a *App) recoverNativeAgentPlan(ctx context.Context) (agentBundlePlan, stri
 		rendered.WriteString("# " + command + "\n")
 	}
 	return plan, rendered.String(), nil
+}
+
+func canonicalNativeMarketplaceSource(source string) string {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return ""
+	}
+	path := ""
+	switch {
+	case strings.HasPrefix(strings.ToLower(source), "git@github.com:"):
+		path = source[len("git@github.com:"):]
+	case strings.HasPrefix(strings.ToLower(source), "ssh://git@github.com/"):
+		path = source[len("ssh://git@github.com/"):]
+	default:
+		if parsed, err := url.Parse(source); err == nil && strings.EqualFold(parsed.Host, "github.com") {
+			path = strings.TrimPrefix(parsed.Path, "/")
+		} else if !strings.Contains(source, "://") && !filepath.IsAbs(source) && strings.Count(source, "/") == 1 {
+			path = source
+		}
+	}
+	path = strings.TrimSuffix(strings.TrimSuffix(path, "/"), ".git")
+	if path != "" && strings.Count(path, "/") == 1 && !strings.ContainsAny(path, " \t\r\n") {
+		return "https://github.com/" + strings.ToLower(path) + ".git"
+	}
+	return source
 }
 
 func (a *App) listNativeMCP(ctx context.Context, cli string) ([]nativeMCP, error) {
