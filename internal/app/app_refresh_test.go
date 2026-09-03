@@ -317,7 +317,7 @@ func TestRefreshProviderOutdated_ConcurrentGitHubRecipesShareLatestReleaseLookup
 	calls := int32(0)
 	a, cfgPath := newImportApp(t, script.New(executor.NewMatchMock().WithFallback(executor.MockCall{})))
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, &calls, func() io.ReadCloser {
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(time.Second)
 		return githubFallbackReleaseBody("v2.93.0", "2026-05-27T17:47:41Z", asset.name, asset.downloadURL)
 	}))
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
