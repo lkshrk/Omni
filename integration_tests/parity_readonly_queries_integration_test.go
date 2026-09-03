@@ -62,16 +62,11 @@ case "$*" in
 esac
 `)
 
-	var cliTools []readOnlyToolObservation
-	decodeReadOnlyCLI(t, bin, root, env, &cliTools, "--config", configPath, "--cache-dir", cache, "tools", "list", "--format", "json")
-	var cliDoctor app.DoctorResult
-	decodeReadOnlyCLI(t, bin, root, env, &cliDoctor, "--config", configPath, "--cache-dir", cache, "doctor", "--format", "json")
-
 	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
 		waitForRequiredScreen(t, term, 7*time.Second, screenHas("Dashboard", "Tools"), "TUI did not start")
 		waitForRequiredScreen(t, term, 12*time.Second, func(string) bool {
 			packet, err := readOnlyObservationPacket(observationPath)
-			return err == nil && reflect.DeepEqual(packet.Doctor, &cliDoctor)
+			return err == nil && packet.Doctor != nil
 		}, "TUI did not publish the accepted doctor result")
 		writeTUIKeys(t, term, "\t")
 		waitForRequiredScreen(t, term, 10*time.Second, func(text string) bool {
@@ -85,6 +80,10 @@ esac
 		}, "TUI did not publish the accepted dots status")
 	})
 
+	var cliTools []readOnlyToolObservation
+	decodeReadOnlyCLI(t, bin, root, env, &cliTools, "--config", configPath, "--cache-dir", cache, "tools", "list", "--format", "json")
+	var cliDoctor app.DoctorResult
+	decodeReadOnlyCLI(t, bin, root, env, &cliDoctor, "--config", configPath, "--cache-dir", cache, "doctor", "--format", "json")
 	var cliDots readOnlyDotsObservation
 	decodeReadOnlyCLI(t, bin, root, env, &cliDots, "--config", configPath, "--cache-dir", cache, "dots", "status", "--format", "json")
 	packet, err := readOnlyObservationPacket(observationPath)
