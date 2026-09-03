@@ -26,11 +26,12 @@ const templateStateName = "agents-template-state"
 var errAgentsSyncLockfile = errors.New("APM lockfile unavailable")
 
 type AgentsSyncAllOptions struct {
-	DryRun        bool
-	Frozen        bool
-	ForceTemplate bool
-	Progress      func(string)
-	Output        func(stdout, stderr string)
+	DryRun           bool
+	Frozen           bool
+	ForceTemplate    bool
+	Progress         func(string)
+	initialMigration bool
+	Output           func(stdout, stderr string)
 }
 
 type AgentsSyncAllResult struct {
@@ -161,7 +162,7 @@ func readRegularTemplate(path string) ([]byte, bool, error) {
 }
 
 func emptyMigrationTemplate(raw []byte) bool {
-	if !bytes.Contains(raw, []byte(agentsMigrationMarker)) {
+	if !bytes.HasPrefix(raw, []byte(agentsMigrationMarker+"\n")) {
 		return false
 	}
 	var manifest apmManifest
@@ -304,7 +305,13 @@ func (a *App) agentsSyncAllLocked(ctx context.Context, opts AgentsSyncAllOptions
 	if err != nil {
 		return AgentsSyncAllResult{}, err
 	}
-	manifest, verify, err := checkAgentsOwnershipPreflight(dir, a.StateDir, candidatePath, candidate)
+	var manifest apmManifest
+	var verify func() error
+	if opts.initialMigration {
+		manifest, verify, err = checkInitialMigrationPreflight(candidatePath, candidate, a.StateDir)
+	} else {
+		manifest, verify, err = checkAgentsOwnershipPreflight(dir, a.StateDir, candidatePath, candidate)
+	}
 	if err != nil {
 		if errors.Is(err, errAgentsSyncLockfile) {
 			if guardErr := checkAgentsLSPHazardsManifest(opts, manifest); guardErr != nil {
@@ -386,6 +393,28 @@ func (a *App) agentsSyncAllLocked(ctx context.Context, opts AgentsSyncAllOptions
 	}
 	// Snapshot the manifest as apm normalized it, so the next sync sees no divergence.
 	return res, snapshotLiveManifest(dir, a.StateDir)
+}
+
+func checkInitialMigrationPreflight(path string, raw []byte, stateDir string) (apmManifest, func() error, error) {
+	var manifest apmManifest
+	if !bytes.HasPrefix(raw, []byte(agentsMigrationMarker+"\n")) {
+		return manifest, nil, fmt.Errorf("initial migration requires an Omni-owned manifest")
+	}
+	if _, _, err := inspectAgentsMigrationOwnership(raw, stateDir); err != nil {
+		return manifest, nil, err
+	}
+	if err := yaml.Unmarshal(raw, &manifest); err != nil {
+		return manifest, nil, fmt.Errorf("invalid APM manifest")
+	}
+	hash := manifestHash(raw)
+	return manifest, func() error {
+		current, err := os.ReadFile(path)
+		if err != nil || manifestHash(current) != hash {
+			return fmt.Errorf("APM manifest changed during initial migration preflight")
+		}
+		_, _, err = inspectAgentsMigrationOwnership(raw, stateDir)
+		return err
+	}, nil
 }
 
 func agentsSyncCandidate(dir string) (string, []byte, error) {

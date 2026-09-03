@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -69,15 +70,30 @@ func (a *App) CompleteAgentsOnboarding(ctx context.Context, host string) (Agents
 	}
 	var legacySnapshot string
 	createdTemplate := false
+	initialMigration := false
 	switch readiness.State {
 	case AgentsReadinessReady:
 		if hasLegacy {
 			result.Readiness.CTA = AgentsCTAMigrate
 			result.Readiness.Details = append(result.Readiness.Details, "legacy agent config remains, but the existing APM workspace was not created by this migration; review before cleanup")
+			return result, nil
 		}
-		return result, nil
+		if !emptyMigrationStubPair(readiness) {
+			return result, nil
+		}
+		plan, rendered, recoverErr := a.recoverNativeAgentPlan(ctx)
+		if recoverErr != nil {
+			return result, recoverErr
+		}
+		if nativeAgentPlanEmpty(plan) {
+			return result, nil
+		}
+		result, err = a.repairEmptyAgentsOnboarding(ctx, readiness, plan, rendered)
+		return result, err
 	case AgentsReadinessLockOnly, AgentsReadinessInvalid:
 		return result, nil
+	case AgentsReadinessLiveIncomplete:
+		initialMigration = migrationOwnedManifestPair(readiness)
 	case AgentsReadinessEmpty:
 		result, legacySnapshot, err = a.prepareAgentsOnboarding(ctx, host)
 		if err != nil || result.Readiness.State == AgentsReadinessEmpty {
@@ -88,7 +104,7 @@ func (a *App) CompleteAgentsOnboarding(ctx context.Context, host string) (Agents
 
 	var syncResult AgentsSyncAllResult
 	if result.Readiness.State == AgentsReadinessTemplateOnly || result.Readiness.State == AgentsReadinessLiveIncomplete {
-		syncResult, err = a.AgentsSyncAll(ctx, AgentsSyncAllOptions{ForceTemplate: createdTemplate})
+		syncResult, err = a.AgentsSyncAll(ctx, AgentsSyncAllOptions{ForceTemplate: createdTemplate, initialMigration: initialMigration})
 		if err != nil {
 			return result, err
 		}
@@ -142,12 +158,57 @@ func (a *App) prepareAgentsOnboarding(ctx context.Context, host string) (AgentsO
 		result, err := a.agentsPrepareOnboarding(ctx, host, snapshot)
 		return result, snapshot, err
 	}
-	plan, rendered, err := a.recoverNativePluginPlan(ctx)
+	plan, rendered, err := a.recoverNativeAgentPlan(ctx)
 	if err != nil {
 		return AgentsOnboardingResult{}, "", err
 	}
 	result, err := a.stageEmptyAgentsOnboarding(ctx, plan, rendered)
 	return result, "", err
+}
+
+func emptyMigrationStubPair(readiness AgentsReadiness) bool {
+	template, templateErr := os.ReadFile(readiness.TemplatePath)
+	live, liveErr := os.ReadFile(readiness.ManifestPath)
+	return templateErr == nil && liveErr == nil && bytes.Equal(template, live) && strictMigrationOwned(template) && emptyMigrationTemplate(template)
+}
+
+func migrationOwnedManifestPair(readiness AgentsReadiness) bool {
+	template, templateErr := os.ReadFile(readiness.TemplatePath)
+	live, liveErr := os.ReadFile(readiness.ManifestPath)
+	return templateErr == nil && liveErr == nil && bytes.Equal(template, live) && strictMigrationOwned(template)
+}
+
+func strictMigrationOwned(raw []byte) bool {
+	line, _, _ := bytes.Cut(raw, []byte("\n"))
+	return string(line) == agentsMigrationMarker
+}
+
+func (a *App) repairEmptyAgentsOnboarding(ctx context.Context, expected AgentsReadiness, plan agentBundlePlan, rendered string) (AgentsOnboardingResult, error) {
+	lock, err := config.AcquireWriteLock(expected.TemplatePath)
+	if err != nil {
+		return AgentsOnboardingResult{Readiness: expected}, fmt.Errorf("lock agents onboarding repair: %w", err)
+	}
+	defer func() { _ = lock.Close() }()
+
+	result := AgentsOnboardingResult{Readiness: expected}
+	err = apm.WithGlobalWorkspaceLock(ctx, func(lockCtx context.Context) error {
+		current, err := inspectAgentsReadiness()
+		if err != nil {
+			return err
+		}
+		if !emptyMigrationStubPair(current) {
+			return fmt.Errorf("APM state changed during onboarding repair; retry")
+		}
+		if _, err := writeAgentsMigrationTemplate(current.TemplatePath, []byte(rendered)); err != nil {
+			return fmt.Errorf("replace empty agents template: %w", err)
+		}
+		if _, err := a.agentsSyncAllLocked(lockCtx, AgentsSyncAllOptions{ForceTemplate: true, initialMigration: true}); err != nil {
+			return err
+		}
+		result.Readiness, err = inspectAgentsReadiness()
+		return err
+	})
+	return result, err
 }
 
 func (a *App) stageEmptyAgentsOnboarding(ctx context.Context, plan agentBundlePlan, rendered string) (AgentsOnboardingResult, error) {
