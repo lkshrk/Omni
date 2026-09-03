@@ -92,6 +92,11 @@ func (a *App) AgentsOutdated(ctx context.Context) (apm.OutdatedResult, error) {
 	if readiness.State != AgentsReadinessReady {
 		return apm.OutdatedResult{}, nil
 	}
+	if _, err := os.Stat(readiness.LockPath); os.IsNotExist(err) {
+		return apm.OutdatedResult{}, nil
+	} else if err != nil {
+		return apm.OutdatedResult{}, fmt.Errorf("inspect APM lockfile: %w", err)
+	}
 	return a.APMClient(apm.Global).Outdated(ctx)
 }
 

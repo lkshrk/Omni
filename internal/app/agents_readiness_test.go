@@ -254,6 +254,17 @@ func TestAgentsOutdatedInvokesAPMForReadyWorkspace(t *testing.T) {
 	}
 }
 
+func TestAgentsOutdatedSkipsLocklessReadyWorkspace(t *testing.T) {
+	a, mock, home := newAgentsReadinessApp(t, true, pinnedVersionResponse())
+	writeAgentsWorkspaceFile(t, home, "apm.yml", "name: live\ndependencies:\n  mcp: []\n")
+	if _, err := a.AgentsOutdated(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(mock.Calls) != 1 || strings.Join(mock.Calls[0].Args, " ") != "--version" {
+		t.Fatalf("calls = %+v", mock.Calls)
+	}
+}
+
 func writeDefaultMigrationSnapshot(t *testing.T, a *App, host string) string {
 	t.Helper()
 	dir := filepath.Join(filepath.Dir(a.ConfigPath), ".omni-apm-migration-backup-test")
