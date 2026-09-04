@@ -80,6 +80,14 @@ type agentsPackageLockEvidence struct {
 	DeployedFiles  []string
 }
 
+func newAgentsPackageLockEvidence(dep apmLockDep) *agentsPackageLockEvidence {
+	return &agentsPackageLockEvidence{
+		RepoURL: dep.RepoURL, Name: dep.Name, VirtualPath: dep.VirtualPath, LocalPath: dep.LocalPath,
+		PackageType: dep.PackageType, ResolvedCommit: dep.ResolvedCommit,
+		DeployedFiles: slices.Clone(dep.DeployedFiles),
+	}
+}
+
 type AgentsProvidedChild struct {
 	Kind   string
 	Name   string
@@ -330,11 +338,7 @@ func joinAPMPackages(manifest apmManifest, lock apmLockfile) []AgentsPackageRow 
 		row.LocalPath = dep.LocalPath
 		row.ModuleSource = apmPackageSource(dep.RepoURL, dep.VirtualPath)
 		row.DeployedFiles = len(dep.DeployedFiles)
-		row.lockEvidence = &agentsPackageLockEvidence{
-			RepoURL: dep.RepoURL, Name: dep.Name, VirtualPath: dep.VirtualPath, LocalPath: dep.LocalPath,
-			PackageType: dep.PackageType, ResolvedCommit: dep.ResolvedCommit,
-			DeployedFiles: slices.Clone(dep.DeployedFiles),
-		}
+		row.lockEvidence = newAgentsPackageLockEvidence(dep)
 		if dep.Name != "" {
 			row.Name = dep.Name
 		}
@@ -427,6 +431,7 @@ func joinAPMPackages(manifest apmManifest, lock apmLockfile) []AgentsPackageRow 
 			Targets:       dep.TargetSubset,
 			DeployedFiles: len(dep.DeployedFiles),
 			Status:        AgentsPackageOrphaned,
+			lockEvidence:  newAgentsPackageLockEvidence(dep),
 		}
 		if row.Name == "" {
 			row.Name = path.Base(row.Source)

@@ -88,7 +88,15 @@ fi
 ls -l "$TEMPLATE" | sed 's/^/   /'
 
 step "apm toolchain"
-run omni doctor --fix
+doctor_rc=0
+run omni doctor --fix || doctor_rc=$?
+if [ "$doctor_rc" -ne 0 ]; then
+  printf '   omni doctor --fix exited %s; checking whether apm is usable\n' "$doctor_rc"
+  if ! apm --version >/dev/null 2>&1; then
+    echo "   apm is missing and omni doctor --fix could not install it; aborting" >&2
+    exit 1
+  fi
+fi
 apm --version | sed 's/^/   /'
 
 step "sync from template"
