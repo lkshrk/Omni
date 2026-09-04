@@ -47,7 +47,33 @@ step() { printf '\n==> %s\n' "$*"; }
 run() { printf '   $ %s\n' "$*"; "$@"; }
 section() { awk -v h="$1" '$0 ~ "^"h{f=1;next} /^[^ ]/{f=0} f' "$2"; }
 col() { awk -F'  +' -v n="$1" '{print $n}'; }
-queue() { printf '%s\n' "$*" >> "$WORK/cleanup.txt"; }
+queue() {
+  local cmd="$*"
+  if [ -f "$WORK/cleanup.txt" ] && grep -qxF "$cmd" "$WORK/cleanup.txt"; then return 0; fi
+  printf '%s\n' "$cmd" >> "$WORK/cleanup.txt"
+}
+
+plugin_keep_reason() {
+  case "$2" in
+    *@skills-dir) echo 'apm-generated, marketplace skills-dir'; return 0 ;;
+  esac
+  awk -F'\t' -v t="$1" -v id="$2" '$1==t && $2==id {print $3; f=1; exit} END{exit !f}' "$WORK/plugin-keep.txt"
+}
+
+queue_plugin_uninstall() {
+  local reason
+  if reason="$(plugin_keep_reason "$1" "$2")"; then
+    if ! grep -qxF "$1/$2" "$WORK/kept.txt" 2>/dev/null; then
+      printf '%s/%s\n' "$1" "$2" >> "$WORK/kept.txt"
+      printf '   keep: %s (%s)\n' "$2" "$reason"
+    fi
+    return 0
+  fi
+  case "$1" in
+    claude) queue "$CLAUDE" plugin uninstall "$2" ;;
+    codex)  queue "$CODEX" plugin remove "$2" ;;
+  esac
+}
 
 native_plugin_marketplaces() {
   {
@@ -278,15 +304,61 @@ EOF
   fi
 fi
 
+step "cleanup queue"
+: > "$WORK/claude-plugins.json"
+: > "$WORK/codex-plugins.json"
+if [ -n "$CLAUDE" ]; then "$CLAUDE" plugin list --json > "$WORK/claude-plugins.json" 2>/dev/null || true; fi
+if [ -n "$CODEX" ]; then "$CODEX" plugin list --json > "$WORK/codex-plugins.json" 2>/dev/null || true; fi
+python3 - "$WORK/claude-plugins.json" "$WORK/codex-plugins.json" > "$WORK/plugin-keep.txt" <<'PY'
+import json, os, sys
+
+home = os.environ["HOME"]
+PROTECTED = (os.path.join(home, ".claude", "skills"), os.path.join(home, ".apm"))
+
+
+def under(path):
+    path = os.path.expanduser(path or "")
+    return any(path == p or path.startswith(p + os.sep) for p in PROTECTED)
+
+
+def installed(path):
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    if isinstance(data, dict):
+        data = data.get("installed") or []
+    return [e for e in data if isinstance(e, dict)]
+
+
+for target, path, field in (("claude", sys.argv[1], "installPath"), ("codex", sys.argv[2], "source.url")):
+    for entry in installed(path):
+        ident = entry.get("id") or ""
+        if ident:
+            name, _, market = ident.partition("@")
+        else:
+            name, market = entry.get("name") or "", entry.get("marketplaceName") or ""
+        if not name:
+            continue
+        if field == "installPath":
+            root = entry.get("installPath") or ""
+        else:
+            root = (entry.get("source") or {}).get("url") or ""
+        if under(root):
+            print("%s\t%s@%s\tapm-generated, %s %s" % (target, name, market, field, root))
+PY
+
 : > "$WORK/cleanup.txt"
+: > "$WORK/kept.txt"
 if [ "$DROP_UNMANAGED" -eq 1 ]; then
   while IFS= read -r line; do
     t="$(printf '%s\n' "$line" | col 2)"; k="$(printf '%s\n' "$line" | col 3)"; id="$(printf '%s\n' "$line" | col 4)"
     case "$t/$k" in
       claude/mcp)    queue "$CLAUDE" mcp remove -s user "$id" ;;
-      claude/plugin) queue "$CLAUDE" plugin uninstall "$id" ;;
+      claude/plugin) queue_plugin_uninstall claude "$id" ;;
       codex/mcp)     queue "$CODEX" mcp remove "$id" ;;
-      codex/plugin)  queue "$CODEX" plugin remove "$id" ;;
+      codex/plugin)  queue_plugin_uninstall codex "$id" ;;
     esac
   done < "$WORK/replaced.txt"
 fi
@@ -294,8 +366,8 @@ if [ "$REMOVE_DUPES" -eq 1 ]; then
   while IFS= read -r line; do
     t="$(printf '%s\n' "$line" | col 2)"; k="$(printf '%s\n' "$line" | col 3)"; id="$(printf '%s\n' "$line" | col 4)"
     case "$t/$k" in
-      claude/plugin) queue "$CLAUDE" plugin uninstall "$id" ;;
-      codex/plugin)  queue "$CODEX" plugin remove "$id" ;;
+      claude/plugin) queue_plugin_uninstall claude "$id" ;;
+      codex/plugin)  queue_plugin_uninstall codex "$id" ;;
     esac
   done < "$WORK/managed.txt"
 fi
