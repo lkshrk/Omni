@@ -13,7 +13,8 @@ usage: apm-host-migrate.sh [--apply] [--drop-unmanaged] [--remove-duplicates] [-
   --skip-pull          do not run `omni dots pull`
 
 Flow: dots pull -> drop dangling dot links -> ensure template link -> omni doctor --fix
--> omni agents sync -> omni agents migrate -> cleanup -> omni agents sync -> final check.
+-> omni agents sync -> sweep stale unmanaged copies -> omni agents migrate -> cleanup
+-> omni agents sync -> final check.
 EOF
 }
 
@@ -93,6 +94,137 @@ apm --version | sed 's/^/   /'
 step "sync from template"
 run omni agents sync
 
+step "stale unmanaged copies"
+python3 - > "$WORK/stale.txt" <<'PY'
+import os, re
+
+home = os.environ["HOME"]
+lock = os.path.join(home, ".apm", "apm.lock.yaml")
+modules = os.path.join(home, ".apm", "apm_modules")
+STAGING = ".apm-resolution-staging"
+KINDS = ("agents", "commands", "skills", "hooks")
+
+
+def managed_values():
+    if not os.path.exists(lock):
+        return []
+    try:
+        import yaml
+    except ImportError:
+        yaml = None
+    if yaml is not None:
+        data = yaml.safe_load(open(lock)) or {}
+        return [str(d["value"]) for d in (data.get("deployments") or [])
+                if isinstance(d, dict) and d.get("kind") == "project-relative" and d.get("value")]
+    out, inblock = [], False
+    for line in open(lock):
+        s = line.rstrip("\n")
+        if re.match(r"^-\s+kind:\s*project-relative\s*$", s):
+            inblock = True
+        elif s.startswith("- ") or (s and not s.startswith(" ")):
+            inblock = False
+        elif inblock:
+            m = re.match(r"^\s+value:\s*(.+?)\s*$", s)
+            if m:
+                out.append(m.group(1).strip("'\""))
+    return out
+
+
+managed = set(os.path.join(home, v) for v in managed_values())
+
+
+def is_managed(p):
+    return p in managed or any(m.startswith(p + os.sep) for m in managed)
+
+
+def package_roots():
+    roots = set()
+    if not os.path.isdir(modules):
+        return roots
+    for owner in os.listdir(modules):
+        odir = os.path.join(modules, owner)
+        if owner == STAGING or not os.path.isdir(odir):
+            continue
+        for pkg in os.listdir(odir):
+            if os.path.isdir(os.path.join(odir, pkg)):
+                roots.add(os.path.join(odir, pkg))
+    for dirpath, dirnames, filenames in os.walk(modules):
+        if STAGING in dirnames:
+            dirnames.remove(STAGING)
+        if "apm.yml" in filenames or os.path.isfile(os.path.join(dirpath, ".claude-plugin", "plugin.json")):
+            roots.add(dirpath)
+    return roots
+
+
+def sources():
+    for root in sorted(package_roots()):
+        for kind in KINDS:
+            for src in (os.path.join(root, kind), os.path.join(root, ".claude", kind)):
+                if os.path.isdir(src):
+                    yield src, kind
+        codex = os.path.join(root, ".codex", "agents")
+        if os.path.isdir(codex):
+            yield codex, "codex-agents"
+
+
+def destinations(src, kind):
+    for n in sorted(os.listdir(src)):
+        if n.startswith("."):
+            continue
+        isdir = os.path.isdir(os.path.join(src, n))
+        if kind == "codex-agents":
+            if not isdir and n.endswith(".toml"):
+                yield os.path.join(home, ".codex", "agents", n)
+        elif kind == "skills":
+            if isdir:
+                yield os.path.join(home, ".agents", "skills", n)
+                yield os.path.join(home, ".claude", "skills", n)
+        elif not isdir:
+            yield os.path.join(home, ".claude", kind, n)
+
+
+seen = set()
+for src, kind in sources():
+    for dest in destinations(src, kind):
+        if dest in seen:
+            continue
+        seen.add(dest)
+        if not os.path.lexists(dest) or is_managed(dest):
+            continue
+        if os.path.islink(dest):
+            print("keep\t%s\tsymlink (dotfiles override)" % dest)
+        else:
+            print("remove\t%s" % dest)
+PY
+
+STALE_REMOVED=0
+awk -F'\t' '$1=="keep"{print $2"  -- "$3}' "$WORK/stale.txt" > "$WORK/stale-keep.txt"
+awk -F'\t' '$1=="remove"{print $2}' "$WORK/stale.txt" > "$WORK/stale-remove.txt"
+if [ -s "$WORK/stale-keep.txt" ]; then
+  echo "   keep:"
+  sed 's/^/     /' "$WORK/stale-keep.txt"
+fi
+if [ ! -s "$WORK/stale-remove.txt" ]; then
+  echo "   remove: none"
+elif [ "$APPLY" -eq 0 ]; then
+  echo "   remove (shadows APM package content, sync reports these as skipped):"
+  sed 's/^/     /' "$WORK/stale-remove.txt"
+  echo "   (dry-run)"
+else
+  echo "   remove:"
+  sed 's/^/     /' "$WORK/stale-remove.txt"
+  BACKUP="$HOME/.cache/omni/apm-stale-backup-$(date +%Y%m%d-%H%M%S)"
+  while IFS= read -r p; do
+    rel="${p#$HOME/}"
+    mkdir -p "$WORK/stale-backup/$(dirname "$rel")" "$BACKUP/$(dirname "$rel")"
+    cp -R "$p" "$WORK/stale-backup/$rel"
+    cp -R "$p" "$BACKUP/$rel"
+    rm -rf "$p"
+  done < "$WORK/stale-remove.txt"
+  echo "   removed; backup: $BACKUP"
+  STALE_REMOVED=1
+fi
+
 step "inventory"
 omni agents migrate --host "$HOST" > "$WORK/preview.txt"
 section 'Replaced by this manifest' "$WORK/preview.txt" > "$WORK/replaced.txt"
@@ -142,23 +274,23 @@ fi
 
 if [ ! -s "$WORK/cleanup.txt" ]; then
   echo "   nothing to delete"
-  exit 0
+  [ "$STALE_REMOVED" -eq 1 ] || exit 0
+else
+  step "cleanup commands"
+  sed 's/^/   $ /' "$WORK/cleanup.txt"
+  if [ "$APPLY" -eq 0 ]; then
+    echo "   (dry-run: rerun with --apply)"
+    exit 0
+  fi
+  while IFS= read -r cmd; do
+    printf '   $ %s\n' "$cmd"
+    eval "$cmd" || echo "   (failed, continuing)"
+  done < "$WORK/cleanup.txt"
 fi
-
-step "cleanup commands"
-sed 's/^/   $ /' "$WORK/cleanup.txt"
-if [ "$APPLY" -eq 0 ]; then
-  echo "   (dry-run: rerun with --apply)"
-  exit 0
-fi
-while IFS= read -r cmd; do
-  printf '   $ %s\n' "$cmd"
-  eval "$cmd" || echo "   (failed, continuing)"
-done < "$WORK/cleanup.txt"
 
 step "marketplaces no native plugin references any more"
 native_plugin_marketplaces > "$WORK/still-used.txt"
-cat "$WORK/replaced.txt" "$WORK/managed.txt" | while IFS= read -r line; do
+if [ -s "$WORK/cleanup.txt" ]; then cat "$WORK/replaced.txt" "$WORK/managed.txt"; fi | while IFS= read -r line; do
   t="$(printf '%s\n' "$line" | col 2)"; k="$(printf '%s\n' "$line" | col 3)"; id="$(printf '%s\n' "$line" | col 4)"
   [ "$k" = marketplace ] || continue
   if grep -qx "$t/$id" "$WORK/still-used.txt"; then
