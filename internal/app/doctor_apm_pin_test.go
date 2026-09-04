@@ -68,7 +68,7 @@ func TestDoctorAPMPinIsSilentWithoutAReceipt(t *testing.T) {
 
 func TestParseAPMPackagePin(t *testing.T) {
 	url, ref := parseAPMPackagePin(apmPackagePin)
-	if url != "https://github.com/microsoft/apm.git" || ref != "main" {
+	if url != "https://github.com/microsoft/apm.git" || ref != "656f3d6e6dbade369b6fc8727a4eb7b164409b6d" {
 		t.Fatalf("url = %q, ref = %q", url, ref)
 	}
 }

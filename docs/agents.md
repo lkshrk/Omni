@@ -257,11 +257,11 @@ processes do not participate in Omni's lock.
 
 ## APM Main Build
 
-Omni requires APM `0.29.0` from the upstream `microsoft/apm` `main` branch.
+Omni requires APM `0.29.0` built from `microsoft/apm` commit `656f3d6e` (main, 2026-09-04).
 Installers use this source specification:
 
 ```text
-git+https://github.com/microsoft/apm.git@main
+git+https://github.com/microsoft/apm.git@656f3d6e6dbade369b6fc8727a4eb7b164409b6d
 ```
 
 The `lkshrk/apm` fork Omni previously required is retired. Its capabilities are

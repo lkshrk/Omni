@@ -14,7 +14,7 @@ import (
 
 // APM is contract-tested as an exact dependency; newer releases require rerunning that suite.
 const apmVersionPin = "0.29.0"
-const apmPackagePin = "git+https://github.com/microsoft/apm.git@main"
+const apmPackagePin = "git+https://github.com/microsoft/apm.git@656f3d6e6dbade369b6fc8727a4eb7b164409b6d"
 
 const apmVersionFixHint = "run 'omni doctor --fix' to upgrade apm-cli"
 
