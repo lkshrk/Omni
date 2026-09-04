@@ -141,9 +141,22 @@ func newAPMAgentsTargetsCmd(state *rootState) *cobra.Command {
 }
 
 func newAPMAgentsOutdatedCmd(state *rootState) *cobra.Command {
-	return apmLeaf(state, "outdated", "Show outdated global APM dependencies", cobra.NoArgs, func([]string) []string {
-		return []string{"outdated", "-g", "--parallel-checks", "4"}
-	})
+	return &cobra.Command{
+		Use:   "outdated",
+		Short: "Show outdated global APM dependencies",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			dir, missing, err := app.AgentsMissingLockfile()
+			if err != nil {
+				return err
+			}
+			if missing {
+				fmt.Fprintf(cmdOut(cmd), "nothing managed yet: no lockfile in %s\n", dir)
+				return nil
+			}
+			return runAPM(state, cmd, "outdated", "-g", "--parallel-checks", "4")
+		},
+	}
 }
 
 func newAPMAgentsPruneCmd(state *rootState) *cobra.Command {

@@ -98,12 +98,30 @@ func (a *App) AgentsOutdated(ctx context.Context) (apm.OutdatedResult, error) {
 	if readiness.State != AgentsReadinessReady {
 		return apm.OutdatedResult{}, nil
 	}
-	if _, err := os.Stat(readiness.LockPath); os.IsNotExist(err) {
+	_, missing, err := AgentsMissingLockfile()
+	if err != nil {
+		return apm.OutdatedResult{}, err
+	}
+	if missing {
 		return apm.OutdatedResult{}, nil
-	} else if err != nil {
-		return apm.OutdatedResult{}, fmt.Errorf("inspect APM lockfile: %w", err)
 	}
 	return a.APMClient(apm.Global).Outdated(ctx)
+}
+
+// AgentsMissingLockfile reports the global APM workspace and whether it holds no lockfile.
+func AgentsMissingLockfile() (string, bool, error) {
+	dir, err := apm.GlobalWorkspaceDir()
+	if err != nil {
+		return "", false, err
+	}
+	switch _, statErr := os.Stat(filepath.Join(dir, "apm.lock.yaml")); {
+	case statErr == nil:
+		return dir, false, nil
+	case os.IsNotExist(statErr):
+		return dir, true, nil
+	default:
+		return dir, false, fmt.Errorf("inspect APM lockfile: %w", statErr)
+	}
 }
 
 type AgentsOutdatedResult = apm.OutdatedResult

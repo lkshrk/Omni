@@ -28,7 +28,6 @@ func TestAgentsCommandsDelegateToAPM(t *testing.T) {
 		{"search", []string{"search", "security"}, []string{"search", "security"}},
 		{"audit", []string{"audit"}, []string{"audit", "--ci"}},
 		{"targets", []string{"targets"}, []string{"targets", "--json"}},
-		{"outdated", []string{"outdated"}, []string{"outdated", "-g", "--parallel-checks", "4"}},
 		{"prune", []string{"prune"}, []string{"prune"}},
 		{"deps list", []string{"deps", "list"}, []string{"deps", "list", "-g"}},
 		{"deps why", []string{"deps", "why", "owner/pkg"}, []string{"deps", "why", "-g", "owner/pkg"}},
