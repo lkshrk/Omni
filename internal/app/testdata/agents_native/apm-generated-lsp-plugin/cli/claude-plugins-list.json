@@ -1,0 +1,9 @@
+[
+  {
+    "id": "apm-lsp@skills-dir",
+    "version": "unknown",
+    "scope": "user",
+    "enabled": true,
+    "installPath": "@HOME@/.claude/skills/apm-lsp"
+  }
+]

@@ -19,6 +19,9 @@ const (
 	managedSectionTitle  = "Already managed by APM:"
 
 	legacyObservationTarget = "snapshot"
+
+	apmGeneratedLSPPlugin      = "apm-lsp"
+	apmGeneratedLSPMarketplace = "skills-dir"
 )
 
 // AgentsMigrationPreview is the read-only extractor output: one manifest plus what it replaces, keeps, and skips.
@@ -163,6 +166,7 @@ func mergeLegacyDeclMap(base, extra map[string]json.RawMessage) map[string]json.
 // apmManagedIndex answers whether APM already deploys an observed item; a missing lockfile manages nothing.
 type apmManagedIndex struct {
 	modules string
+	lsp     bool
 	servers map[string]bool
 	plugins map[string][]string
 }
@@ -172,7 +176,8 @@ func loadAPMManagedIndex() (apmManagedIndex, error) {
 	if err != nil {
 		return apmManagedIndex{}, err
 	}
-	if len(lock.Dependencies) == 0 && len(lock.MCPServers) == 0 {
+	lsp := len(lock.LSPServers) > 0 || len(lock.LSPConfigs) > 0
+	if len(lock.Dependencies) == 0 && len(lock.MCPServers) == 0 && !lsp {
 		return apmManagedIndex{}, nil
 	}
 	dir, err := apm.GlobalWorkspaceDir()
@@ -181,6 +186,7 @@ func loadAPMManagedIndex() (apmManagedIndex, error) {
 	}
 	index := apmManagedIndex{
 		modules: filepath.Join(dir, "apm_modules"),
+		lsp:     lsp,
 		servers: make(map[string]bool, len(lock.MCPServers)),
 		plugins: make(map[string][]string, len(lock.Dependencies)),
 	}
@@ -232,6 +238,36 @@ func (i apmManagedIndex) managesPlugin(name, source string) bool {
 	return slices.Contains(repos, apmNormalizeRepo(source))
 }
 
+// apm generates and registers this plugin itself whenever the workspace locks LSP servers.
+func (i apmManagedIndex) managesLSPPlugin(observation agentObservation) bool {
+	name, marketplace := splitNativePluginIdentity(observation.Identity)
+	if !i.lsp || name != apmGeneratedLSPPlugin {
+		return false
+	}
+	if declared, ok := apmGeneratedLSPManifestName(observation.InstallRoot); ok {
+		return declared == apmGeneratedLSPPlugin
+	}
+	return marketplace == apmGeneratedLSPMarketplace
+}
+
+func apmGeneratedLSPManifestName(root string) (string, bool) {
+	if strings.TrimSpace(root) == "" {
+		return "", false
+	}
+	raw, _, err := readRegularBounded(filepath.Join(root, ".claude-plugin", "plugin.json"), maxBundleManifestBytes)
+	if err != nil {
+		return "", false
+	}
+	var manifest struct {
+		Name       string                     `json:"name"`
+		LSPServers map[string]json.RawMessage `json:"lspServers"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil || len(manifest.LSPServers) == 0 {
+		return "", false
+	}
+	return manifest.Name, true
+}
+
 func subtractAPMManaged(dispositions []agentDisposition, index apmManagedIndex) []agentDisposition {
 	if index.modules == "" {
 		return dispositions
@@ -243,6 +279,7 @@ func subtractAPMManaged(dispositions []agentDisposition, index apmManagedIndex) 
 		}
 	}
 	out := slices.Clone(dispositions)
+	generated := map[string]bool{}
 	for i, disposition := range out {
 		// Managed outranks retain: apm itself writes the literals its adapters expand at install time.
 		if disposition.Action != agentActionImport && disposition.Action != agentActionRetain {
@@ -258,8 +295,35 @@ func subtractAPMManaged(dispositions []agentDisposition, index apmManagedIndex) 
 			name, marketplace := splitNativePluginIdentity(observation.Identity)
 			if index.managesPlugin(name, sources[marketplace]) {
 				out[i].Action, out[i].Reason = agentActionManaged, ""
+				continue
+			}
+			if index.managesLSPPlugin(observation) {
+				out[i].Action, out[i].Reason = agentActionManaged, ""
+				generated[marketplace] = true
 			}
 		}
 	}
-	return out
+	return subtractGeneratedMarketplaces(out, generated)
+}
+
+// The marketplace apm invents for its generated plugin is managed too, unless it also carries plugins apm does not own.
+func subtractGeneratedMarketplaces(dispositions []agentDisposition, generated map[string]bool) []agentDisposition {
+	if len(generated) == 0 {
+		return dispositions
+	}
+	for _, disposition := range dispositions {
+		if disposition.Observation.Kind == agentKindPlugin && disposition.Action != agentActionManaged {
+			_, marketplace := splitNativePluginIdentity(disposition.Observation.Identity)
+			delete(generated, marketplace)
+		}
+	}
+	for i, disposition := range dispositions {
+		if disposition.Observation.Kind != agentKindMarketplace || !generated[disposition.Observation.Identity] {
+			continue
+		}
+		if disposition.Action == agentActionImport || disposition.Action == agentActionRetain {
+			dispositions[i].Action, dispositions[i].Reason = agentActionManaged, ""
+		}
+	}
+	return dispositions
 }

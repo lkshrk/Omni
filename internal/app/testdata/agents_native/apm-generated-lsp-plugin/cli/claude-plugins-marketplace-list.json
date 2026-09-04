@@ -1,0 +1,7 @@
+[
+  {
+    "name": "skills-dir",
+    "source": "directory",
+    "installLocation": "@HOME@/.claude/skills"
+  }
+]

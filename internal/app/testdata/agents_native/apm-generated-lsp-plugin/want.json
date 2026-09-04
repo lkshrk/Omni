@@ -1,0 +1,17 @@
+{
+  "plugins": [
+    {
+      "name": "apm-lsp",
+      "marketplace": "skills-dir",
+      "target": "claude",
+      "version": "unknown",
+      "installRoot": "@HOME@/.claude/skills/apm-lsp"
+    }
+  ],
+  "marketplaces": [
+    {
+      "name": "skills-dir",
+      "source": ""
+    }
+  ]
+}

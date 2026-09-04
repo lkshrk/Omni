@@ -1,0 +1,7 @@
+lockfile_version: '1'
+lsp_servers:
+- gopls
+lsp_configs:
+  gopls:
+    name: gopls
+    command: gopls

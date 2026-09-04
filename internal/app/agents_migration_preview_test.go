@@ -147,6 +147,47 @@ func TestMigratePreviewOmitsAPMManagedServers(t *testing.T) {
 	}
 }
 
+func TestMigratePreviewClassifiesGeneratedLSPPluginAsManaged(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		lockfile bool
+	}{
+		{name: "lockfile locks an LSP server", lockfile: true},
+		{name: "no lockfile"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			a, _, home := nativeFixtureApp(t, "apm-generated-lsp-plugin")
+			if !test.lockfile {
+				if err := os.Remove(filepath.Join(home, ".apm", "apm.lock.yaml")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			preview, err := a.BuildAgentsMigrationPreview(t.Context(), "host", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			rendered := preview.Render()
+			managed := sectionRows(rendered, managedSectionTitle)
+			retained := sectionRows(rendered, retainedSectionTitle)
+			want := []string{"claude  marketplace  skills-dir", "claude  plugin  apm-lsp@skills-dir"}
+			if !test.lockfile {
+				if len(managed) != 0 || len(retained) != 2 || !strings.Contains(retained[0], agentReasonNoSource) {
+					t.Fatalf("managed=%q retained=%q:\n%s", managed, retained, rendered)
+				}
+				return
+			}
+			if len(retained) != 0 || len(managed) != len(want) {
+				t.Fatalf("managed=%q retained=%q:\n%s", managed, retained, rendered)
+			}
+			for i, row := range want {
+				if managed[i] != row {
+					t.Fatalf("managed row %d = %q, want %q:\n%s", i, managed[i], row, rendered)
+				}
+			}
+		})
+	}
+}
+
 func TestMigrateWriteNeverTouchesHarnessDirs(t *testing.T) {
 	a, _, home := nativeFixtureApp(t, "plugin-owned-child")
 	writeFile(t, filepath.Join(home, ".codex", "config.toml"), "[mcp_servers.unrelated]\ncommand = \"true\"\n")
