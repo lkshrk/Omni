@@ -201,24 +201,28 @@ func TestAgentsReadinessLoadsOutdatedOnlyWhenReady(t *testing.T) {
 	}
 }
 
-func TestAgentsReadinessGuidanceUsesAutomaticRetryAndReviewCTAs(t *testing.T) {
+func TestAgentsReadinessGuidanceUsesManualCTAs(t *testing.T) {
 	m := agentsRowsModel(t)
 	m.agentsReadinessErr = &app.APMRepairError{Kind: app.APMRepairVersionMismatch, Err: errors.New("apm version mismatch")}
-	if got := agentsReadinessGuidance(m); !strings.Contains(got, "Automatic APM setup failed") || !strings.Contains(got, "R retry") {
-		t.Fatalf("automatic setup guidance = %q", got)
+	if got := agentsReadinessGuidance(m); !strings.Contains(got, "APM readiness check failed") || strings.Contains(got, "Automatic") {
+		t.Fatalf("failure guidance = %q", got)
 	}
 	m.agentsReadinessErr = nil
 	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessTemplateOnly, CTA: app.AgentsCTASync}
-	if got := agentsReadinessGuidance(m); !strings.Contains(got, "R retry") || strings.Contains(got, "S sync") {
-		t.Fatalf("automatic retry guidance = %q", got)
+	if got := agentsReadinessGuidance(m); !strings.Contains(got, "S sync") || strings.Contains(got, "R retry") {
+		t.Fatalf("template guidance = %q", got)
 	}
-	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessLockOnly, CTA: app.AgentsCTARetry, Details: []string{"lock only"}}
+	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessInvalid, Details: []string{"APM lockfile exists without a live manifest"}}
 	if got := agentsReadinessGuidance(m); !strings.Contains(got, "inspect APM files") || strings.Contains(got, "repair pinned") {
-		t.Fatalf("manual guidance = %q", got)
+		t.Fatalf("invalid guidance = %q", got)
 	}
-	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessReady, CTA: app.AgentsCTAMigrate, Details: []string{"legacy agent config remains"}}
-	if got := agentsReadinessGuidance(m); !strings.Contains(got, "legacy agent config remains") || !strings.Contains(got, "review migration") {
-		t.Fatalf("ready legacy guidance = %q", got)
+	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessInvalid, Details: []string{"apm is not installed", "run omni doctor --fix"}}
+	if got := agentsReadinessGuidance(m); !strings.Contains(got, "run omni doctor --fix") {
+		t.Fatalf("missing apm guidance = %q", got)
+	}
+	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessReady, CTA: app.AgentsCTAMigrate, Details: []string{"run omni agents migrate --host coder"}}
+	if got := agentsReadinessGuidance(m); !strings.Contains(got, "run omni agents migrate --host coder") || !strings.Contains(got, "Legacy agent configuration") {
+		t.Fatalf("legacy guidance = %q", got)
 	}
 }
 
@@ -233,7 +237,7 @@ func TestDashboardAgentsReadinessPendingOrFailedIsNeverHealthy(t *testing.T) {
 	m.agentsReadinessPending = false
 	m.agentsReadinessErr = &app.APMRepairError{Kind: app.APMRepairVersionMismatch, Err: errors.New("APM version mismatch")}
 	for _, row := range []statusListRow{statusAgentsAttentionRow(m), statusAgentUpdatesAttentionRow(m)} {
-		if !row.needsAttention || !strings.Contains(row.summary, "automatic APM setup failure") || row.action.kind != statusActionOpenAgents {
+		if !row.needsAttention || !strings.Contains(row.summary, "APM readiness failure") || row.action.kind != statusActionOpenAgents {
 			t.Fatalf("failed dashboard row = %#v", row)
 		}
 	}
@@ -396,7 +400,7 @@ func TestAgentsRowsReloadAfterAPMCommandDone(t *testing.T) {
 		t.Fatalf("mutation refresh state known=%v actionable=%d checking=%v outdatedGen=%d", next.agentsRowsKnown, next.agentsSyncActionable, next.agentsOutdatedChecking, next.agentsOutdatedGen)
 	}
 	_ = cmd // readiness probing is covered separately; feed an accepted non-ready result to test row reload.
-	readyModel, readyCmd := next.Update(agentsReadinessMsg{gen: next.agentsReadinessGen, result: app.AgentsOnboardingResult{Readiness: app.AgentsReadiness{State: app.AgentsReadinessLiveIncomplete, CTA: app.AgentsCTASync}}})
+	readyModel, readyCmd := next.Update(agentsReadinessMsg{gen: next.agentsReadinessGen, readiness: app.AgentsReadiness{State: app.AgentsReadinessLiveIncomplete, CTA: app.AgentsCTASync}})
 	next = readyModel.(Model)
 	var rows agentsRowsMsg
 	for _, msg := range runBatchCmd(readyCmd) {

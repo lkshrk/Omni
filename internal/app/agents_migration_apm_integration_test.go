@@ -59,14 +59,14 @@ func TestAgentsMigrationRealAPMLifecycle(t *testing.T) {
 
 	a := &App{StateDir: state}
 	a.SetFallbackExecutor(executor.New())
-	preview, err := a.AgentsMigrate("h", snapshot)
+	preview, err := a.AgentsMigrate(t.Context(), "h", snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(state, "agents-migration")); !os.IsNotExist(err) {
 		t.Fatalf("preview wrote migration wrappers: %v", err)
 	}
-	written, err := a.AgentsMigrateWrite("h", snapshot)
+	written, err := a.AgentsMigrateWrite(t.Context(), "h", snapshot)
 	if err != nil || written != preview {
 		t.Fatalf("migration write differs from preview: err=%v", err)
 	}

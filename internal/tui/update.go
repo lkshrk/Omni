@@ -364,7 +364,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	case agentsReadinessMsg:
 		if msg.gen == m.agentsReadinessGen {
 			m.agentsReadinessPending = false
-			m.agentsReadiness = msg.result.Readiness
+			m.agentsReadiness = msg.readiness
 			m.agentsReadinessErr = msg.err
 			m.agentsOutdatedErr = nil
 			cmds = append(cmds, m.loadAgentsAfterReadiness()...)

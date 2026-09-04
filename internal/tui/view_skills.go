@@ -347,7 +347,7 @@ func (m Model) agentsFooterLines() []string {
 	lines = append(lines, m.agentsRemovalHintLines()...)
 	if guidance := agentsReadinessGuidance(m); guidance != "" {
 		style := p.styleHelp
-		if m.agentsReadinessErr != nil || m.agentsReadiness.State == app.AgentsReadinessInvalid || m.agentsReadiness.State == app.AgentsReadinessLockOnly {
+		if m.agentsReadinessErr != nil || m.agentsReadiness.State == app.AgentsReadinessInvalid {
 			style = p.styleErr
 		}
 		lines = append(lines, m.agentsWrappedNotice(guidance, style)...)
@@ -379,21 +379,19 @@ func agentsReadinessGuidance(m Model) string {
 		return "Checking APM readiness…"
 	}
 	if m.agentsReadinessErr != nil {
-		return "Automatic APM setup failed: " + m.agentsReadinessErr.Error() + " · R retry"
+		return "APM readiness check failed: " + m.agentsReadinessErr.Error() + " · R recheck"
 	}
 	detail := strings.Join(m.agentsReadiness.Details, "; ")
 	if m.agentsReadiness.CTA == app.AgentsCTAMigrate && detail != "" {
-		return detail + " · review migration before cleanup"
+		return "Legacy agent configuration found · " + detail
 	}
 	switch m.agentsReadiness.State {
 	case app.AgentsReadinessEmpty:
-		return firstNonEmpty(detail, "No migratable agent configuration found") + " · review legacy configuration; R retry"
+		return firstNonEmpty(detail, "No APM workspace and no host template") + " · commit a host template, then S sync"
 	case app.AgentsReadinessTemplateOnly:
-		return firstNonEmpty(detail, "Automatic APM migration is staged but not installed") + " · R retry"
+		return firstNonEmpty(detail, "APM template is staged but not installed") + " · S sync"
 	case app.AgentsReadinessLiveIncomplete:
-		return firstNonEmpty(detail, "Automatic APM migration did not create a lockfile") + " · R retry"
-	case app.AgentsReadinessLockOnly:
-		return firstNonEmpty(detail, "APM lockfile exists without a live manifest") + " · inspect APM files; R recheck"
+		return firstNonEmpty(detail, "APM manifest has no lockfile") + " · S sync"
 	case app.AgentsReadinessInvalid:
 		return firstNonEmpty(detail, "APM workspace is invalid") + " · inspect APM files; R recheck"
 	default:

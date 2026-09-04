@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -256,17 +257,17 @@ func decodeLegacyEntry(raw json.RawMessage, kind, name string) (legacyEntry, err
 func unsafeMigrationScalar(value string) bool { return strings.ContainsAny(value, "\r\n\x00") }
 
 // AgentsMigrate previews a host's pre-migration declarations; it writes nothing and runs no apm command.
-func (a *App) AgentsMigrate(host, snapshotDir string) (string, error) {
-	return a.agentsMigrate(host, snapshotDir, false, nil)
+func (a *App) AgentsMigrate(ctx context.Context, host, snapshotDir string) (string, error) {
+	return a.agentsMigrate(ctx, host, snapshotDir, false, nil)
 }
 
 // AgentsMigrateWrite publishes required wrappers and the canonical migration-owned template.
-func (a *App) AgentsMigrateWrite(host, snapshotDir string) (string, error) {
-	return a.agentsMigrate(host, snapshotDir, true, writeAgentsMigrationTemplate)
+func (a *App) AgentsMigrateWrite(ctx context.Context, host, snapshotDir string) (string, error) {
+	return a.agentsMigrate(ctx, host, snapshotDir, true, writeAgentsMigrationTemplate)
 }
 
-func (a *App) agentsMigrate(host, snapshotDir string, write bool, writeTemplate func(string, []byte) (string, error)) (string, error) {
-	plan, rendered, err := a.planAgentsMigration(host, snapshotDir)
+func (a *App) agentsMigrate(ctx context.Context, host, snapshotDir string, write bool, writeTemplate func(string, []byte) (string, error)) (string, error) {
+	plan, rendered, err := a.planAgentsMigration(ctx, host, snapshotDir)
 	if err != nil {
 		return "", err
 	}
@@ -296,7 +297,7 @@ func (a *App) agentsMigrate(host, snapshotDir string, write bool, writeTemplate 
 	return rendered, nil
 }
 
-func (a *App) planAgentsMigration(host, snapshotDir string) (agentBundlePlan, string, error) {
+func (a *App) planAgentsMigration(ctx context.Context, host, snapshotDir string) (agentBundlePlan, string, error) {
 	if host == "" {
 		return agentBundlePlan{}, "", fmt.Errorf("host is required")
 	}
@@ -306,6 +307,9 @@ func (a *App) planAgentsMigration(host, snapshotDir string) (agentBundlePlan, st
 			return agentBundlePlan{}, "", err
 		}
 		snapshotDir = found
+	}
+	if snapshotDir == "" {
+		return a.recoverNativeAgentPlan(ctx)
 	}
 	decls, evidence, err := config.LegacyAgentsFromSnapshot(snapshotDir, host)
 	if err != nil {
@@ -458,7 +462,8 @@ func (a *App) defaultSnapshotDir() (string, error) {
 	case 1:
 		return matches[0], nil
 	case 0:
-		return "", fmt.Errorf("no %s directory next to %s: pass --snapshot", snapshotGlob, resolved)
+		// An absent snapshot is a native-only migration, not an error.
+		return "", nil
 	default:
 		sort.Strings(matches)
 		return "", fmt.Errorf("%d %s directories next to %s: pass --snapshot to pick one", len(matches), snapshotGlob, resolved)

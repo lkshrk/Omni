@@ -419,10 +419,6 @@ func normalizeNativeMCP(entry *legacyEntry) {
 	}
 }
 
-func nativeAgentPlanEmpty(plan agentBundlePlan) bool {
-	return len(plan.Decls.Plugins) == 0 && len(plan.Decls.MCPServers) == 0
-}
-
 func (a *App) listNativePlugins(ctx context.Context, cli string) ([]nativePlugin, error) {
 	args := []string{"plugin", "list", "--json"}
 	if cli == "claude" {

@@ -132,7 +132,7 @@ func TestAgentsSyncRejectsChangedManifestlessEvidenceBeforeMutation(t *testing.T
 	} {
 		t.Run(name, func(t *testing.T) {
 			a, mock, dir, module, candidatePath, candidate := setupManifestlessSync(t)
-			_, verify, err := checkAgentsOwnershipPreflight(dir, a.StateDir, candidatePath, candidate)
+			_, verify, _, err := checkAgentsOwnershipPreflight(dir, a.StateDir, candidatePath, candidate)
 			if err != nil {
 				t.Fatal(err)
 			}

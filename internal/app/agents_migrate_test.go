@@ -186,7 +186,7 @@ func TestAgentsMigrateRendersOwnerWithoutOwnedStandaloneChildren(t *testing.T) {
 	mustWriteBundleFile(t, filepath.Join(snapshot, "paths.json"), string(paths))
 
 	state := filepath.Join(t.TempDir(), "state")
-	got, err := (&App{StateDir: state}).AgentsMigrate("h", snapshot)
+	got, err := (&App{StateDir: state}).AgentsMigrate(t.Context(), "h", snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestAgentsMigrateRendersOwnerWithoutOwnedStandaloneChildren(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := (&App{StateDir: state}).AgentsMigrateWrite("h", snapshot); err != nil {
+	if _, err := (&App{StateDir: state}).AgentsMigrateWrite(t.Context(), "h", snapshot); err != nil {
 		t.Fatal(err)
 	}
 	wrappers, err := filepath.Glob(filepath.Join(state, "agents-migration", "bundles", "*", "apm.yml"))

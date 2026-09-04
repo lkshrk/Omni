@@ -3,9 +3,13 @@
 package integration_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -15,81 +19,79 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-func TestTUIAgentsWrongVersionRepairsAutomatically(t *testing.T) {
-	fixture := newAgentsReadinessPTYFixture(t, "0.28.0", false)
-	fixture.writeReadyWorkspace(t)
-	runTUI(t, fixture.bin, fixture.root, fixture.env, []string{"--config", fixture.configPath, "--cache-dir", fixture.cache}, func(term *vttest.Terminal) string {
-		openAgentsReadinessTab(t, term)
-		return waitForRequiredScreen(t, term, 15*time.Second, func(text string) bool {
-			return strings.Contains(text, "1 installed") && fileContains(fixture.repairLog, "invoked") && fileContains(fixture.logPath, "outdated -g --parallel-checks 4")
-		}, "TUI did not automatically repair and recheck APM")
-	})
-	if got := strings.TrimSpace(readFileString(t, fixture.versionPath)); got != "0.29.0" {
-		t.Fatalf("repaired APM version = %q", got)
-	}
-}
-
-func TestTUIAgentsMissingLockSyncsAutomatically(t *testing.T) {
-	fixture := newAgentsReadinessPTYFixture(t, "0.29.0", false)
-	writeIntegrationFile(t, filepath.Join(fixture.home, ".apm", "apm.yml"), "name: live\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm:\n    - git: https://github.com/acme/tool.git\n")
-	runTUI(t, fixture.bin, fixture.root, fixture.env, []string{"--config", fixture.configPath, "--cache-dir", fixture.cache}, func(term *vttest.Terminal) string {
-		openAgentsReadinessTab(t, term)
-		return waitForRequiredScreen(t, term, 15*time.Second, func(string) bool {
-			return fileContains(fixture.logPath, "install -g") && fileContains(fixture.logPath, "outdated -g --parallel-checks 4")
-		}, "TUI did not automatically sync missing-lock state")
-	})
-	log := readFileString(t, fixture.logPath)
-	if outdated, install := strings.Index(log, "outdated"), strings.Index(log, "install -g"); outdated >= 0 && outdated < install {
-		t.Fatal("missing-lock readiness invoked outdated")
-	}
-}
-
-func TestTUIAgentsSnapshotMigrationInstallsAutomatically(t *testing.T) {
-	fixture := newAgentsReadinessPTYFixture(t, "0.29.0", false)
-	writeAgentsReadinessSnapshot(t, filepath.Dir(fixture.configPath))
-	runTUI(t, fixture.bin, fixture.root, fixture.env, []string{"--config", fixture.configPath, "--cache-dir", fixture.cache}, func(term *vttest.Terminal) string {
-		openAgentsReadinessTab(t, term)
-		return waitForRequiredScreen(t, term, 15*time.Second, func(string) bool {
-			return fileContains(fixture.logPath, "install -g") && fileContains(fixture.logPath, "outdated -g --parallel-checks 4")
-		}, "TUI did not automatically install the migrated snapshot")
-	})
-	if _, err := os.Stat(filepath.Join(fixture.home, ".config", "omni", "apm.yml")); err != nil {
-		t.Fatalf("template was not auto-staged: %v", err)
-	}
-	for _, name := range []string{"apm.yml", "apm.lock.yaml"} {
-		if _, err := os.Stat(filepath.Join(fixture.home, ".apm", name)); err != nil {
-			t.Fatalf("automatic migration did not create live APM state %s: %v", name, err)
-		}
-	}
-}
-
-func TestTUIAgentsCleanEmptyConfigBecomesReadyAutomatically(t *testing.T) {
-	fixture := newAgentsReadinessPTYFixture(t, "0.29.0", false)
-	runTUI(t, fixture.bin, fixture.root, fixture.env, []string{"--config", fixture.configPath, "--cache-dir", fixture.cache}, func(term *vttest.Terminal) string {
-		openAgentsReadinessTab(t, term)
-		return waitForRequiredScreen(t, term, 15*time.Second, func(string) bool {
-			return fileContains(fixture.logPath, "install -g") && fileContains(fixture.logPath, "outdated -g --parallel-checks 4")
-		}, "TUI did not automatically initialize an empty APM workspace")
-	})
-	for _, path := range []string{
-		filepath.Join(fixture.home, ".config", "omni", "apm.yml"),
-		filepath.Join(fixture.home, ".apm", "apm.yml"),
-		filepath.Join(fixture.home, ".apm", "apm.lock.yaml"),
+func TestTUIAgentsReadinessNeverWritesAndGuidesTheOperator(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		version string
+		setup   func(t *testing.T, fixture agentsReadinessPTYFixture)
+		want    []string
+	}{
+		{
+			name:    "off-pin apm asks for doctor",
+			version: "0.28.0",
+			want:    []string{"doctor", "--fix"},
+		},
+		{
+			name:    "legacy config asks for migrate",
+			version: "0.29.0",
+			setup: func(t *testing.T, fixture agentsReadinessPTYFixture) {
+				writeIntegrationFile(t, fixture.configPath, `{"version":22,"agents":{"mcp_servers":[{"name":"legacy","transport":"stdio","command":"legacy-mcp"}]},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host"}]}`)
+			},
+			want: []string{"agents migrate", "--host"},
+		},
+		{
+			name:    "staged template asks for sync",
+			version: "0.29.0",
+			setup: func(t *testing.T, fixture agentsReadinessPTYFixture) {
+				writeIntegrationFile(t, filepath.Join(fixture.home, ".config", "omni", "apm.yml"), "name: staged\nversion: 1.0.0\n")
+			},
+			want: []string{"S sync"},
+		},
+		{
+			name:    "live manifest without a lock asks for sync",
+			version: "0.29.0",
+			setup: func(t *testing.T, fixture agentsReadinessPTYFixture) {
+				writeIntegrationFile(t, filepath.Join(fixture.home, ".apm", "apm.yml"), "name: live\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm:\n    - git: https://github.com/acme/tool.git\n")
+			},
+			want: []string{"S sync"},
+		},
+		{
+			name:    "lock without a manifest is invalid",
+			version: "0.29.0",
+			setup: func(t *testing.T, fixture agentsReadinessPTYFixture) {
+				writeIntegrationFile(t, filepath.Join(fixture.home, ".apm", "apm.lock.yaml"), "dependencies: []\n")
+			},
+			want: []string{"inspect APM files"},
+		},
 	} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("automatic empty setup did not create %s: %v", path, err)
-		}
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newAgentsReadinessPTYFixture(t, test.version)
+			if test.setup != nil {
+				test.setup(t, fixture)
+			}
+			before := hashIntegrationTree(t, fixture.home)
+			runTUI(t, fixture.bin, fixture.root, fixture.env, []string{"--config", fixture.configPath, "--cache-dir", fixture.cache}, func(term *vttest.Terminal) string {
+				openAgentsReadinessTab(t, term)
+				return waitForRequiredScreen(t, term, 15*time.Second, func(text string) bool {
+					for _, want := range test.want {
+						if !strings.Contains(text, want) {
+							return false
+						}
+					}
+					return true
+				}, "TUI did not show the expected readiness guidance")
+			})
+			if after := hashIntegrationTree(t, fixture.home); after != before {
+				t.Fatalf("readiness wrote to HOME: %s -> %s", before, after)
+			}
+			if raw, err := os.ReadFile(fixture.logPath); err == nil && strings.TrimSpace(string(raw)) != "" {
+				t.Fatalf("readiness invoked mutating apm commands: %s", raw)
+			}
+			if _, err := os.Stat(fixture.repairLog); err == nil {
+				t.Fatal("readiness invoked the apm repair path")
+			}
+		})
 	}
-}
-
-func TestTUIAgentsAutomaticRepairFailureRemainsActionable(t *testing.T) {
-	fixture := newAgentsReadinessPTYFixture(t, "0.28.0", true)
-	runTUI(t, fixture.bin, fixture.root, fixture.env, []string{"--config", fixture.configPath, "--cache-dir", fixture.cache}, func(term *vttest.Terminal) string {
-		openAgentsReadinessTab(t, term)
-		return waitForRequiredScreen(t, term, 12*time.Second, func(text string) bool {
-			return fileContains(fixture.repairLog, "invoked") && strings.Contains(text, "Automatic APM setup failed") && strings.Contains(text, "R retry")
-		}, "TUI did not report the automatic repair failure")
-	})
 }
 
 type agentsReadinessPTYFixture struct {
@@ -97,7 +99,7 @@ type agentsReadinessPTYFixture struct {
 	env                                                                 []string
 }
 
-func newAgentsReadinessPTYFixture(t *testing.T, version string, repairFails bool) agentsReadinessPTYFixture {
+func newAgentsReadinessPTYFixture(t *testing.T, version string) agentsReadinessPTYFixture {
 	t.Helper()
 	bin, root := batch16OmniBinary(t), t.TempDir()
 	home, cache := filepath.Join(root, "home"), filepath.Join(root, "cache")
@@ -108,49 +110,22 @@ func newAgentsReadinessPTYFixture(t *testing.T, version string, repairFails bool
 	}
 	versionPath, logPath, repairLog := filepath.Join(root, "apm-version"), filepath.Join(root, "apm.log"), filepath.Join(root, "repair.log")
 	writeIntegrationFile(t, versionPath, version+"\n")
+	writeIntegrationFile(t, logPath, "")
 	stub := filepath.Join(home, ".test-stub-bin")
 	writeExecutable(t, filepath.Join(stub, "apm"), fmt.Sprintf(`#!/bin/sh
 set -eu
 if [ "${1:-}" = "--version" ]; then echo "APM CLI version $(cat %q)"; exit 0; fi
 printf '%%s\n' "$*" >> %q
-case "$*" in
-  'outdated -g --parallel-checks 4') echo '[✓] All dependencies are up-to-date' ;;
-  'install -g') mkdir -p %q; printf 'dependencies: []\n' > %q; echo '[✓] installed' ;;
-  *) echo '[✓] done' ;;
-esac
-`, versionPath, logPath, filepath.Join(home, ".apm"), filepath.Join(home, ".apm", "apm.lock.yaml")))
-	apmPath := filepath.Join(stub, "apm")
-	uvBody := fmt.Sprintf(`case "$*" in
-  --version) echo 'uv 0.9.0' ;;
-  'tool install --force '*)
-    echo invoked >> %q
-cat > %q <<'PINNED_APM'
-#!/bin/sh
+echo '[✓] done'
+`, versionPath, logPath))
+	writeExecutable(t, filepath.Join(stub, "uv"), fmt.Sprintf(`#!/bin/sh
 set -eu
-if [ "${1:-}" = "--version" ]; then echo 'APM CLI version 0.29.0'; exit 0; fi
-printf '%%s\n' "$*" >> %q
 case "$*" in
-  'outdated -g --parallel-checks 4') echo '[✓] All dependencies are up-to-date' ;;
-  *) echo '[✓] done' ;;
+  --version) echo 'uv 0.9.0' ;;
+  *) echo invoked >> %q ;;
 esac
-PINNED_APM
-chmod 755 %q
-echo 0.29.0 > %q
-    ;;
-  *) exit 0 ;;
-esac
-`, repairLog, apmPath, logPath, apmPath, versionPath)
-	if repairFails {
-		uvBody = fmt.Sprintf("case \"$*\" in\n  --version) echo 'uv 0.9.0' ;;\n  'tool install --force '*) echo invoked >> %q; echo repair failed >&2; exit 1 ;;\n  *) exit 0 ;;\nesac\n", repairLog)
-	}
-	writeExecutable(t, filepath.Join(stub, "uv"), "#!/bin/sh\nset -eu\n"+uvBody)
+`, repairLog))
 	return agentsReadinessPTYFixture{bin: bin, root: root, home: home, cache: cache, configPath: configPath, versionPath: versionPath, logPath: logPath, repairLog: repairLog, env: env}
-}
-
-func (fixture agentsReadinessPTYFixture) writeReadyWorkspace(t *testing.T) {
-	t.Helper()
-	writeIntegrationFile(t, filepath.Join(fixture.home, ".apm", "apm.yml"), "name: live\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm:\n    - git: https://github.com/acme/tool.git\n")
-	writeIntegrationFile(t, filepath.Join(fixture.home, ".apm", "apm.lock.yaml"), "dependencies:\n  - repo_url: acme/tool\n    name: tool\n    version: 1.0.0\n")
 }
 
 func openAgentsReadinessTab(t *testing.T, term *vttest.Terminal) {
@@ -159,23 +134,42 @@ func openAgentsReadinessTab(t *testing.T, term *vttest.Terminal) {
 	writeTUIKeys(t, term, "\t", "\t", "\t")
 }
 
-func writeAgentsReadinessSnapshot(t *testing.T, configDir string) {
+// hashIntegrationTree fingerprints every path, mode and byte under root so a test can prove nothing was written.
+// Omni's own cache and state live under HOME in this sandbox and are not agent configuration.
+func hashIntegrationTree(t *testing.T, root string) string {
 	t.Helper()
-	dir := filepath.Join(configDir, ".omni-apm-migration-backup-test")
-	writeIntegrationFile(t, filepath.Join(dir, "omni-config-000.json"), `{"agents":{"mcp_servers":[{"name":"independent","transport":"stdio","command":"independent-mcp"}]},"groups":[{"name":"g","mcp_servers":["independent"]}],"hosts":{"testhost":["g"]}}`)
-	writeIntegrationFile(t, filepath.Join(dir, "paths.json"), `{"omni-config-000.json":"/tmp/settings.json"}`)
-}
-
-func fileContains(path, needle string) bool {
-	raw, err := os.ReadFile(path)
-	return err == nil && strings.Contains(string(raw), needle)
-}
-
-func readFileString(t *testing.T, path string) string {
-	t.Helper()
-	raw, err := os.ReadFile(path)
+	var lines []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if rel == ".cache" || rel == ".local" {
+			return filepath.SkipDir
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		line := rel + " " + info.Mode().String()
+		if info.Mode().IsRegular() {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			sum := sha256.Sum256(raw)
+			line += " " + hex.EncodeToString(sum[:])
+		}
+		lines = append(lines, line)
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(raw)
+	sort.Strings(lines)
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+	return hex.EncodeToString(sum[:])
 }

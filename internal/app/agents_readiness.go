@@ -1,12 +1,11 @@
 package app
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -21,7 +20,6 @@ const (
 	AgentsReadinessEmpty          AgentsReadinessState = "empty"
 	AgentsReadinessTemplateOnly   AgentsReadinessState = "template-only"
 	AgentsReadinessLiveIncomplete AgentsReadinessState = "live-incomplete"
-	AgentsReadinessLockOnly       AgentsReadinessState = "lock-only"
 	AgentsReadinessInvalid        AgentsReadinessState = "invalid"
 )
 
@@ -31,7 +29,6 @@ const (
 	AgentsCTANone    AgentsReadinessCTA = ""
 	AgentsCTAMigrate AgentsReadinessCTA = "migrate"
 	AgentsCTASync    AgentsReadinessCTA = "sync"
-	AgentsCTARetry   AgentsReadinessCTA = "retry"
 )
 
 type AgentsReadiness struct {
@@ -43,206 +40,45 @@ type AgentsReadiness struct {
 	LockPath     string
 }
 
-type AgentsOnboardingResult struct {
-	Readiness AgentsReadiness
-}
-
-// EnsureAgentsReady repairs APM and completes any safe, unambiguous onboarding work.
-func (a *App) EnsureAgentsReady(ctx context.Context, host string) (AgentsOnboardingResult, error) {
-	if _, err := a.FixMissingAPM(ctx, false); err != nil {
-		return AgentsOnboardingResult{}, err
-	}
-	a.seedPinnedAPM(apmVersionPin, nil)
-	return a.CompleteAgentsOnboarding(ctx, host)
-}
-
-// CompleteAgentsOnboarding advances the current APM workspace to Ready without
-// mutating ambiguous or invalid state.
-func (a *App) CompleteAgentsOnboarding(ctx context.Context, host string) (AgentsOnboardingResult, error) {
-	readiness, err := a.AgentsReadiness(ctx)
-	if err != nil {
-		return AgentsOnboardingResult{}, err
-	}
-	result := AgentsOnboardingResult{Readiness: readiness}
-	hasLegacy, err := config.HasRemovedAgentConfig(a.ConfigPath)
-	if err != nil {
-		return result, err
-	}
-	var legacySnapshot string
-	createdTemplate := false
-	initialMigration := false
-	switch readiness.State {
-	case AgentsReadinessReady:
-		if hasLegacy {
-			result.Readiness.CTA = AgentsCTAMigrate
-			result.Readiness.Details = append(result.Readiness.Details, "legacy agent config remains, but the existing APM workspace was not created by this migration; review before cleanup")
-			return result, nil
-		}
-		if !emptyMigrationStubPair(readiness) {
-			return result, nil
-		}
-		plan, rendered, recoverErr := a.recoverNativeAgentPlan(ctx)
-		if recoverErr != nil {
-			return result, recoverErr
-		}
-		if nativeAgentPlanEmpty(plan) {
-			return result, nil
-		}
-		result, err = a.repairEmptyAgentsOnboarding(ctx, readiness, plan, rendered)
-		return result, err
-	case AgentsReadinessLockOnly, AgentsReadinessInvalid:
-		return result, nil
-	case AgentsReadinessLiveIncomplete:
-		initialMigration = migrationOwnedManifestPair(readiness)
-	case AgentsReadinessEmpty:
-		result, legacySnapshot, err = a.prepareAgentsOnboarding(ctx, host)
-		if err != nil || result.Readiness.State == AgentsReadinessEmpty {
-			return result, err
-		}
-		createdTemplate = result.Readiness.State == AgentsReadinessTemplateOnly
-	}
-
-	var syncResult AgentsSyncAllResult
-	if result.Readiness.State == AgentsReadinessTemplateOnly || result.Readiness.State == AgentsReadinessLiveIncomplete {
-		syncResult, err = a.AgentsSyncAll(ctx, AgentsSyncAllOptions{ForceTemplate: createdTemplate, initialMigration: initialMigration})
-		if err != nil {
-			return result, err
-		}
-	}
-	result.Readiness, err = a.AgentsReadiness(ctx)
-	if err != nil {
-		return result, err
-	}
-	if result.Readiness.State != AgentsReadinessReady {
-		result.Readiness.Details = append(result.Readiness.Details, "APM onboarding did not produce a complete manifest and lockfile")
-		return result, nil
-	}
-	if legacySnapshot != "" {
-		if !cleanAgentsMigrationSync(syncResult) {
-			result.Readiness.CTA = AgentsCTARetry
-			result.Readiness.Details = append(result.Readiness.Details, "legacy config and migration snapshot retained because APM sync reported warnings or incomplete deployment")
-			return result, nil
-		}
-		if err := config.CleanupLegacyAgentsConfigFromSnapshot(a.ConfigPath, legacySnapshot); err != nil {
-			return result, err
-		}
-		remaining, err := config.HasRemovedAgentConfig(a.ConfigPath)
-		if err != nil {
-			return result, err
-		}
-		if remaining {
-			return result, fmt.Errorf("legacy agent config remains after migration cleanup")
-		}
-		if err := config.RemoveLegacyAgentsSnapshot(a.ConfigPath, legacySnapshot); err != nil {
-			return result, fmt.Errorf("remove completed migration snapshot: %w", err)
-		}
-	}
-	return result, nil
-}
-
-func cleanAgentsMigrationSync(result AgentsSyncAllResult) bool {
-	return result.Warning == "" && len(result.Notices) == 0 && strings.TrimSpace(result.Stderr) == "" &&
-		!strings.Contains(result.Output, "Rejected")
-}
-
-func (a *App) prepareAgentsOnboarding(ctx context.Context, host string) (AgentsOnboardingResult, string, error) {
-	hasLegacy, err := config.HasRemovedAgentConfig(a.ConfigPath)
-	if err != nil {
-		return AgentsOnboardingResult{}, "", err
-	}
-	if hasLegacy {
-		snapshot, err := config.CaptureLegacyAgentsSnapshot(a.ConfigPath)
-		if err != nil {
-			return AgentsOnboardingResult{}, "", err
-		}
-		result, err := a.agentsPrepareOnboarding(ctx, host, snapshot)
-		return result, snapshot, err
-	}
-	plan, rendered, err := a.recoverNativeAgentPlan(ctx)
-	if err != nil {
-		return AgentsOnboardingResult{}, "", err
-	}
-	result, err := a.stageEmptyAgentsOnboarding(ctx, plan, rendered)
-	return result, "", err
-}
-
-func emptyMigrationStubPair(readiness AgentsReadiness) bool {
-	template, templateErr := os.ReadFile(readiness.TemplatePath)
-	live, liveErr := os.ReadFile(readiness.ManifestPath)
-	return templateErr == nil && liveErr == nil && bytes.Equal(template, live) && strictMigrationOwned(template) && emptyMigrationTemplate(template)
-}
-
-func migrationOwnedManifestPair(readiness AgentsReadiness) bool {
-	template, templateErr := os.ReadFile(readiness.TemplatePath)
-	live, liveErr := os.ReadFile(readiness.ManifestPath)
-	return templateErr == nil && liveErr == nil && bytes.Equal(template, live) && strictMigrationOwned(template)
-}
-
-func strictMigrationOwned(raw []byte) bool {
-	line, _, _ := bytes.Cut(raw, []byte("\n"))
-	return string(line) == agentsMigrationMarker
-}
-
-func (a *App) repairEmptyAgentsOnboarding(ctx context.Context, expected AgentsReadiness, plan agentBundlePlan, rendered string) (AgentsOnboardingResult, error) {
-	lock, err := config.AcquireWriteLock(expected.TemplatePath)
-	if err != nil {
-		return AgentsOnboardingResult{Readiness: expected}, fmt.Errorf("lock agents onboarding repair: %w", err)
-	}
-	defer func() { _ = lock.Close() }()
-
-	result := AgentsOnboardingResult{Readiness: expected}
-	err = apm.WithGlobalWorkspaceLock(ctx, func(lockCtx context.Context) error {
-		current, err := inspectAgentsReadiness()
-		if err != nil {
-			return err
-		}
-		if !emptyMigrationStubPair(current) {
-			return fmt.Errorf("APM state changed during onboarding repair; retry")
-		}
-		if _, err := writeAgentsMigrationTemplate(current.TemplatePath, []byte(rendered)); err != nil {
-			return fmt.Errorf("replace empty agents template: %w", err)
-		}
-		if _, err := a.agentsSyncAllLocked(lockCtx, AgentsSyncAllOptions{ForceTemplate: true, initialMigration: true}); err != nil {
-			return err
-		}
-		result.Readiness, err = inspectAgentsReadiness()
-		return err
-	})
-	return result, err
-}
-
-func (a *App) stageEmptyAgentsOnboarding(ctx context.Context, plan agentBundlePlan, rendered string) (AgentsOnboardingResult, error) {
-	template, err := AgentsTemplatePath()
-	if err != nil {
-		return AgentsOnboardingResult{}, err
-	}
-	lock, err := config.AcquireWriteLock(template)
-	if err != nil {
-		return AgentsOnboardingResult{}, fmt.Errorf("lock agents onboarding: %w", err)
-	}
-	defer func() { _ = lock.Close() }()
-
-	var readiness AgentsReadiness
-	err = apm.WithGlobalWorkspaceLock(ctx, func(lockCtx context.Context) error {
-		readiness, err = inspectAgentsReadiness()
-		if err != nil || readiness.State != AgentsReadinessEmpty {
-			return err
-		}
-		readiness, err = commitAgentsOnboardingLocked(lockCtx, a.StateDir, plan, nil, rendered)
-		return err
-	})
-	return AgentsOnboardingResult{Readiness: readiness}, err
-}
-
-// AgentsReadiness probes the pinned APM contract before inspecting its workspace.
-func (a *App) AgentsReadiness(ctx context.Context) (AgentsReadiness, error) {
+// AgentsReadiness inspects the pinned APM contract and its workspace without writing anything.
+func (a *App) AgentsReadiness(ctx context.Context, host string) (AgentsReadiness, error) {
 	if !a.APMAvailable() {
-		return AgentsReadiness{}, errAPMNotInstalled()
+		return agentsAPMRepairReadiness(errAPMNotInstalled())
 	}
 	if err := a.requirePinnedAPM(ctx); err != nil {
-		return AgentsReadiness{}, err
+		var repair *APMRepairError
+		if !errors.As(err, &repair) {
+			return AgentsReadiness{}, err
+		}
+		return agentsAPMRepairReadiness(err)
 	}
-	return inspectAgentsReadiness()
+	readiness, err := inspectAgentsReadiness()
+	if err != nil {
+		return readiness, err
+	}
+	hasLegacy, err := config.HasRemovedAgentConfig(a.ConfigPath)
+	if err != nil {
+		return readiness, err
+	}
+	if hasLegacy {
+		if host == "" {
+			host = "<host>"
+		}
+		readiness.CTA = AgentsCTAMigrate
+		readiness.Details = append(readiness.Details, "run omni agents migrate --host "+host)
+	}
+	return readiness, nil
+}
+
+func agentsAPMRepairReadiness(err error) (AgentsReadiness, error) {
+	r := AgentsReadiness{State: AgentsReadinessInvalid, Details: []string{err.Error(), "run omni doctor --fix"}}
+	if template, pathErr := AgentsTemplatePath(); pathErr == nil {
+		r.TemplatePath = template
+	}
+	if dir, dirErr := apm.GlobalWorkspaceDir(); dirErr == nil {
+		r.ManifestPath, r.LockPath = filepath.Join(dir, "apm.yml"), filepath.Join(dir, "apm.lock.yaml")
+	}
+	return r, nil
 }
 
 func inspectAgentsReadiness() (AgentsReadiness, error) {
@@ -260,7 +96,7 @@ func inspectAgentsReadiness() (AgentsReadiness, error) {
 		LockPath:     filepath.Join(dir, "apm.lock.yaml"),
 	}
 	if err := validateAPMWorkspaceDir(dir); err != nil {
-		r.State, r.CTA, r.Details = AgentsReadinessInvalid, AgentsCTARetry, []string{err.Error()}
+		r.State, r.Details = AgentsReadinessInvalid, []string{err.Error()}
 		return r, nil
 	}
 	templateExists, templateErr := readableRegularYAML(r.TemplatePath, &apmManifest{})
@@ -268,22 +104,26 @@ func inspectAgentsReadiness() (AgentsReadiness, error) {
 	manifestExists, manifestErr := readableRegularYAML(r.ManifestPath, &manifest)
 	lockExists, lockErr := readableRegularYAML(r.LockPath, &apmLockfile{})
 	if first := firstNonNil(templateErr, manifestErr, lockErr); first != nil {
-		r.State, r.CTA, r.Details = AgentsReadinessInvalid, AgentsCTARetry, []string{first.Error()}
+		r.State, r.Details = AgentsReadinessInvalid, []string{first.Error()}
 		return r, nil
 	}
 	switch {
-	case manifestExists && (lockExists || len(manifest.Dependencies.APM) == 0):
+	case manifestExists && (lockExists || noAPMDependencies(manifest)):
 		r.State = AgentsReadinessReady
 	case !templateExists && !manifestExists && !lockExists:
 		r.State, r.CTA = AgentsReadinessEmpty, AgentsCTAMigrate
 	case templateExists && !manifestExists && !lockExists:
 		r.State, r.CTA, r.Details = AgentsReadinessTemplateOnly, AgentsCTASync, []string{"APM template is staged; sync to create the live manifest and lockfile"}
 	case lockExists && !manifestExists:
-		r.State, r.CTA, r.Details = AgentsReadinessLockOnly, AgentsCTARetry, []string{"APM lockfile exists without a live manifest"}
+		r.State, r.Details = AgentsReadinessInvalid, []string{"APM lockfile exists without a live manifest"}
 	default:
 		r.State, r.CTA, r.Details = AgentsReadinessLiveIncomplete, AgentsCTASync, []string{"APM live manifest exists without a readable lockfile"}
 	}
 	return r, nil
+}
+
+func noAPMDependencies(manifest apmManifest) bool {
+	return len(manifest.Dependencies.APM) == 0 && len(manifest.Dependencies.MCP) == 0 && len(manifest.Dependencies.LSP) == 0
 }
 
 func validateAPMWorkspaceDir(dir string) error {
@@ -331,97 +171,4 @@ func firstNonNil(errs ...error) error {
 		}
 	}
 	return nil
-}
-
-// AgentsPrepareOnboarding stages a unique safe legacy snapshot only while all APM state is empty.
-// It never invokes APM, installs packages, creates a lockfile, or overwrites existing state.
-func (a *App) AgentsPrepareOnboarding(ctx context.Context, host string) (AgentsOnboardingResult, error) {
-	return a.agentsPrepareOnboarding(ctx, host, "")
-}
-
-func (a *App) agentsPrepareOnboarding(ctx context.Context, host, snapshotDir string) (AgentsOnboardingResult, error) {
-	readiness, err := a.AgentsReadiness(ctx)
-	if err != nil || readiness.State != AgentsReadinessEmpty {
-		return AgentsOnboardingResult{Readiness: readiness}, err
-	}
-	lock, err := config.AcquireWriteLock(readiness.TemplatePath)
-	if err != nil {
-		return AgentsOnboardingResult{}, fmt.Errorf("lock agents onboarding: %w", err)
-	}
-	defer func() { _ = lock.Close() }()
-
-	var result AgentsOnboardingResult
-	err = apm.WithGlobalWorkspaceLock(ctx, func(lockCtx context.Context) error {
-		if err := lockCtx.Err(); err != nil {
-			return err
-		}
-		current, err := inspectAgentsReadiness()
-		if err != nil {
-			return err
-		}
-		result.Readiness = current
-		if current.State != AgentsReadinessEmpty {
-			return nil
-		}
-		if err := lockCtx.Err(); err != nil {
-			return err
-		}
-		snapshot := snapshotDir
-		if snapshot == "" {
-			snapshot, err = a.defaultSnapshotDir()
-			if err != nil {
-				result.Readiness.Details = []string{err.Error()}
-				return nil
-			}
-		}
-		if err := lockCtx.Err(); err != nil {
-			return err
-		}
-		plan, rendered, err := a.planAgentsMigration(host, snapshot)
-		if err != nil {
-			result.Readiness.Details = []string{err.Error()}
-			return nil
-		}
-		if len(plan.Suppressed) != 0 {
-			result.Readiness.Details = []string{"legacy snapshot contains suppressed package-owned declarations; review migration manually"}
-			return nil
-		}
-		prepared, err := prepareAgentBundleWrappers(plan)
-		if err != nil {
-			return fmt.Errorf("prepare migration wrappers: %w", err)
-		}
-		defer discardPreparedAgentBundleWrappers(prepared)
-		result.Readiness, err = commitAgentsOnboardingLocked(lockCtx, a.StateDir, plan, prepared, rendered)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	return result, err
-}
-
-func commitAgentsOnboardingLocked(ctx context.Context, stateDir string, plan agentBundlePlan, prepared []preparedAgentBundleWrapper, rendered string) (AgentsReadiness, error) {
-	if err := ctx.Err(); err != nil {
-		return AgentsReadiness{}, err
-	}
-	// This is the final publish boundary. Recheck after wrapper preparation because neither lock
-	// protects the workspace from direct external writers.
-	current, err := inspectAgentsReadiness()
-	if err != nil {
-		return current, err
-	}
-	if current.State != AgentsReadinessEmpty {
-		return current, fmt.Errorf("APM state changed during onboarding; retry")
-	}
-	identity, err := inspectAgentsMigrationTemplate(current.TemplatePath)
-	if err != nil {
-		return current, err
-	}
-	if err := ctx.Err(); err != nil {
-		return current, err
-	}
-	if _, err := commitAgentMigrationLocked(current.TemplatePath, stateDir, plan, prepared, identity, rendered, writeAgentsMigrationTemplate); err != nil {
-		return current, err
-	}
-	return inspectAgentsReadiness()
 }

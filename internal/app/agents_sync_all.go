@@ -26,12 +26,11 @@ const templateStateName = "agents-template-state"
 var errAgentsSyncLockfile = errors.New("APM lockfile unavailable")
 
 type AgentsSyncAllOptions struct {
-	DryRun           bool
-	Frozen           bool
-	ForceTemplate    bool
-	Progress         func(string)
-	initialMigration bool
-	Output           func(stdout, stderr string)
+	DryRun        bool
+	Frozen        bool
+	ForceTemplate bool
+	Progress      func(string)
+	Output        func(stdout, stderr string)
 }
 
 type AgentsSyncAllResult struct {
@@ -86,7 +85,13 @@ func (a *App) RunAPM(ctx context.Context, args ...string) (apm.Result, error) {
 }
 
 func (a *App) AgentsOutdated(ctx context.Context) (apm.OutdatedResult, error) {
-	readiness, err := a.AgentsReadiness(ctx)
+	if !a.APMAvailable() {
+		return apm.OutdatedResult{}, errAPMNotInstalled()
+	}
+	if err := a.requirePinnedAPM(ctx); err != nil {
+		return apm.OutdatedResult{}, err
+	}
+	readiness, err := a.AgentsReadiness(ctx, "")
 	if err != nil {
 		return apm.OutdatedResult{}, err
 	}
@@ -305,13 +310,7 @@ func (a *App) agentsSyncAllLocked(ctx context.Context, opts AgentsSyncAllOptions
 	if err != nil {
 		return AgentsSyncAllResult{}, err
 	}
-	var manifest apmManifest
-	var verify func() error
-	if opts.initialMigration {
-		manifest, verify, err = checkInitialMigrationPreflight(candidatePath, candidate, a.StateDir)
-	} else {
-		manifest, verify, err = checkAgentsOwnershipPreflight(dir, a.StateDir, candidatePath, candidate)
-	}
+	manifest, verify, notices, err := checkAgentsOwnershipPreflight(dir, a.StateDir, candidatePath, candidate)
 	if err != nil {
 		if errors.Is(err, errAgentsSyncLockfile) {
 			if guardErr := checkAgentsLSPHazardsManifest(opts, manifest); guardErr != nil {
@@ -325,7 +324,7 @@ func (a *App) agentsSyncAllLocked(ctx context.Context, opts AgentsSyncAllOptions
 	}
 
 	var synced bool
-	var res AgentsSyncAllResult
+	res := AgentsSyncAllResult{Notices: notices}
 	// A dry run must not rewrite the live manifest, so the template stays unapplied.
 	if !opts.DryRun {
 		synced, res.Warning, err = materializeAgentsTemplateCandidate(dir, a.StateDir, opts.ForceTemplate, candidatePath, candidate)
@@ -339,7 +338,7 @@ func (a *App) agentsSyncAllLocked(ctx context.Context, opts AgentsSyncAllOptions
 		livePath := filepath.Join(dir, "apm.yml")
 		live, readErr := os.ReadFile(livePath)
 		if readErr == nil && (livePath != candidatePath || manifestHash(live) != manifestHash(candidate)) {
-			manifest, verify, err = checkAgentsOwnershipPreflight(dir, a.StateDir, livePath, live)
+			manifest, verify, notices, err = checkAgentsOwnershipPreflight(dir, a.StateDir, livePath, live)
 			if err != nil {
 				if errors.Is(err, errAgentsSyncLockfile) {
 					if guardErr := checkAgentsLSPHazardsManifest(opts, manifest); guardErr != nil {
@@ -351,6 +350,7 @@ func (a *App) agentsSyncAllLocked(ctx context.Context, opts AgentsSyncAllOptions
 			if err := verify(); err != nil {
 				return res, err
 			}
+			res.Notices = notices
 		} else if readErr != nil && !os.IsNotExist(readErr) {
 			return res, fmt.Errorf("read APM manifest: %w", readErr)
 		}
@@ -395,28 +395,6 @@ func (a *App) agentsSyncAllLocked(ctx context.Context, opts AgentsSyncAllOptions
 	return res, snapshotLiveManifest(dir, a.StateDir)
 }
 
-func checkInitialMigrationPreflight(path string, raw []byte, stateDir string) (apmManifest, func() error, error) {
-	var manifest apmManifest
-	if !bytes.HasPrefix(raw, []byte(agentsMigrationMarker+"\n")) {
-		return manifest, nil, fmt.Errorf("initial migration requires an Omni-owned manifest")
-	}
-	if _, _, err := inspectAgentsMigrationOwnership(raw, stateDir); err != nil {
-		return manifest, nil, err
-	}
-	if err := yaml.Unmarshal(raw, &manifest); err != nil {
-		return manifest, nil, fmt.Errorf("invalid APM manifest")
-	}
-	hash := manifestHash(raw)
-	return manifest, func() error {
-		current, err := os.ReadFile(path)
-		if err != nil || manifestHash(current) != hash {
-			return fmt.Errorf("APM manifest changed during initial migration preflight")
-		}
-		_, _, err = inspectAgentsMigrationOwnership(raw, stateDir)
-		return err
-	}, nil
-}
-
 func agentsSyncCandidate(dir string) (string, []byte, error) {
 	template, err := AgentsTemplatePath()
 	if err != nil {
@@ -439,24 +417,24 @@ type agentsSyncIdentity struct {
 	hash string
 }
 
-func checkAgentsOwnershipPreflight(dir, stateDir, manifestPath string, raw []byte) (apmManifest, func() error, error) {
+func checkAgentsOwnershipPreflight(dir, stateDir, manifestPath string, raw []byte) (apmManifest, func() error, []string, error) {
 	var manifest apmManifest
 	wrapperEvidence, wrapperCount, err := inspectAgentsMigrationOwnership(raw, stateDir)
 	if err != nil {
-		return manifest, nil, err
+		return manifest, nil, nil, err
 	}
 	// Never echo YAML parse details: manifests may contain literal secrets.
 	if err := yaml.Unmarshal(raw, &manifest); err != nil {
-		return manifest, nil, fmt.Errorf("invalid APM manifest")
+		return manifest, nil, nil, fmt.Errorf("invalid APM manifest")
 	}
 	lockPath := filepath.Join(dir, "apm.lock.yaml")
 	lockIdentity, lockRaw, err := readAgentsFileIdentity(lockPath)
 	if err != nil {
-		return manifest, nil, fmt.Errorf("%w: cannot read %s", errAgentsSyncLockfile, lockPath)
+		return manifest, nil, nil, fmt.Errorf("%w: cannot read %s", errAgentsSyncLockfile, lockPath)
 	}
 	var lock apmLockfile
 	if err := yaml.Unmarshal(lockRaw, &lock); err != nil {
-		return manifest, nil, fmt.Errorf("%w: %v", errAgentsSyncLockfile, agentsInvalidYAMLError("APM lockfile", lockPath, err))
+		return manifest, nil, nil, fmt.Errorf("%w: %v", errAgentsSyncLockfile, agentsInvalidYAMLError("APM lockfile", lockPath, err))
 	}
 	packages := joinAPMPackages(manifest, lock)
 	packages = slices.DeleteFunc(packages, func(pkg AgentsPackageRow) bool { return pkg.Status == AgentsPackageOrphaned })
@@ -468,25 +446,30 @@ func checkAgentsOwnershipPreflight(dir, stateDir, manifestPath string, raw []byt
 		evidence.Unavailable = []string{"one or more packages"}
 	}
 
+	var notices []string
 	standalone := len(manifest.Dependencies.MCP) + len(manifest.Dependencies.LSP)
 	if standalone > 0 && len(evidence.Unavailable) > 0 {
-		return manifest, nil, fmt.Errorf("cannot verify package-owned MCP/LSP declarations for %s while standalone MCP/LSP declarations exist; install or reconcile packages first", strings.Join(evidence.Unavailable, ", "))
+		// Without a lockfile nothing is installed yet, so apm's own install decides instead of this guard.
+		if !lockIdentity.absent {
+			return manifest, nil, nil, fmt.Errorf("cannot verify package-owned MCP/LSP declarations for %s while standalone MCP/LSP declarations exist; install or reconcile packages first", strings.Join(evidence.Unavailable, ", "))
+		}
+		notices = append(notices, "packages not installed yet ("+strings.Join(evidence.Unavailable, ", ")+"); APM install will resolve package-owned MCP/LSP declarations")
 	}
 	if err := checkAgentsOwnedChildOwners(evidence.Children); err != nil {
-		return manifest, nil, err
+		return manifest, nil, nil, err
 	}
 	collisions := classifyAgentsOwnedChildren(manifest, evidence.Children)
 	if len(collisions) > 0 {
 		collision := collisions[0]
 		kind := strings.ToUpper(string(collision.Child.Kind))
 		if collision.Exact {
-			return manifest, nil, fmt.Errorf("%s %q from package %q duplicates a standalone declaration; run 'omni doctor --fix'", kind, collision.Child.Name, collision.Child.Owner)
+			return manifest, nil, nil, fmt.Errorf("%s %q from package %q duplicates a standalone declaration; run 'omni doctor --fix'", kind, collision.Child.Name, collision.Child.Owner)
 		}
 		fields := agentsOwnedCollisionFields(collision, manifest)
 		if len(fields) == 0 {
 			fields = []string{"configuration"}
 		}
-		return manifest, nil, fmt.Errorf("%s %q standalone declaration conflicts with package %q (%s differ)", kind, collision.Child.Name, collision.Child.Owner, strings.Join(fields, ", "))
+		return manifest, nil, nil, fmt.Errorf("%s %q standalone declaration conflicts with package %q (%s differ)", kind, collision.Child.Name, collision.Child.Owner, strings.Join(fields, ", "))
 	}
 
 	manifestIdentity := agentsSyncIdentity{path: manifestPath, hash: manifestHash(raw)}
@@ -509,7 +492,7 @@ func checkAgentsOwnershipPreflight(dir, stateDir, manifestPath string, raw []byt
 		_, _, err = inspectAgentsMigrationOwnership(raw, stateDir)
 		return err
 	}
-	return manifest, verify, nil
+	return manifest, verify, notices, nil
 }
 
 func compactAgentsOwnedChildren(children []agentsOwnedChild) []agentsOwnedChild {

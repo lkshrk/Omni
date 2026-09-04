@@ -218,7 +218,7 @@ Common agents flags:
 | `--frozen` | `sync` | Require `apm.yml` and `apm.lock.yaml` to match; no dependency resolution. |
 | `--force-template` | `sync` | Overwrite the live manifest with the host template, adopting it or overriding reported divergence. |
 | `--host` | `migrate` | Required. The host whose pre-migration declarations to render. |
-| `--snapshot` | `migrate` | Snapshot directory. Defaults to the single `.omni-apm-migration-backup-*` directory next to the resolved config file. |
+| `--snapshot` | `migrate` | Snapshot directory. Defaults to the single `.omni-apm-migration-backup-*` directory next to the resolved config file; with no such directory the preview covers native state only. |
 | `--write` | `migrate` | Publish verified local wrappers and atomically update only the migration-owned host template. |
 
 
@@ -346,7 +346,8 @@ alone; `omni agents sync --force-template` adopts or overrides. Omni tracks the
 adopted manifest's hash in `agents-template-state` under its state directory.
 
 `omni agents migrate --host <name>` previews the apm.yml equivalent of a host's
-pre-migration declarations from the snapshot committed in dotfiles, followed
+pre-migration declarations from the snapshot committed in dotfiles, or of the
+live native Claude and Codex state when no snapshot is present, followed
 by `# apm marketplace add` comment lines for registrations apm.yml cannot
 express. Preview writes nothing. After review, `--write` publishes verified
 local wrappers and atomically updates the marked host template; it still runs

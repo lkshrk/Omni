@@ -90,7 +90,7 @@ func TestAgentsSyncMaterializationRejectsTemplateEditAfterPreflight(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, verify, err := checkAgentsOwnershipPreflight(dir, a.StateDir, candidatePath, candidate)
+	_, verify, _, err := checkAgentsOwnershipPreflight(dir, a.StateDir, candidatePath, candidate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,19 +160,38 @@ func TestAgentsSyncAllBlocksConflictingDefinitionsFromOneOwner(t *testing.T) {
 	}
 }
 
-func TestAgentsSyncAllFirstInstallBlocksStandaloneWhenPackageEvidenceUnavailable(t *testing.T) {
+func TestAgentsSyncAllFirstInstallReportsUninstalledPackagesAsNotice(t *testing.T) {
 	template := ownedSyncManifest("  mcp:\n  - name: standalone\n    transport: stdio\n    command: echo\n", "acme/missing")
 	for _, dryRun := range []bool{false, true} {
 		t.Run(map[bool]string{false: "install", true: "dry-run"}[dryRun], func(t *testing.T) {
 			a, mock, _ := setupOwnedSync(t, template)
-			_, err := a.AgentsSyncAll(t.Context(), AgentsSyncAllOptions{DryRun: dryRun})
-			if err == nil || !strings.Contains(err.Error(), "cannot verify package-owned MCP/LSP declarations") {
-				t.Fatalf("err = %v", err)
+			mock.Responses = []executor.MockCall{{Stdout: "APM CLI version " + apmVersionPin + "\n"}, {Stdout: "[✓] installed\n"}}
+			res, err := a.AgentsSyncAll(t.Context(), AgentsSyncAllOptions{DryRun: dryRun})
+			if err != nil {
+				t.Fatalf("first sync without a lockfile failed: %v", err)
 			}
-			if len(mock.Calls) != 0 {
-				t.Fatalf("apm was invoked: %#v", mock.Calls)
+			if len(res.Notices) != 1 || !strings.Contains(res.Notices[0], "not installed yet") {
+				t.Fatalf("notices = %q", res.Notices)
+			}
+			// A dry run leaves the live manifest absent, so apm has nothing to install against.
+			if !dryRun && (len(mock.Calls) != 2 || mock.Calls[1].Args[0] != "install") {
+				t.Fatalf("calls = %#v", mock.Calls)
 			}
 		})
+	}
+}
+
+func TestAgentsSyncAllBlocksStandaloneWhenLockedPackageEvidenceUnavailable(t *testing.T) {
+	template := ownedSyncManifest("  mcp:\n  - name: standalone\n    transport: stdio\n    command: echo\n", "acme/missing")
+	a, mock, home := setupOwnedSync(t, template)
+	writeFile(t, filepath.Join(home, ".apm", "apm.lock.yaml"), "dependencies:\n- repo_url: acme/missing\n  name: missing\n  version: 1.0.0\n")
+
+	_, err := a.AgentsSyncAll(t.Context(), AgentsSyncAllOptions{})
+	if err == nil || !strings.Contains(err.Error(), "cannot verify package-owned MCP/LSP declarations") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(mock.Calls) != 0 {
+		t.Fatalf("apm was invoked: %#v", mock.Calls)
 	}
 }
 

@@ -47,7 +47,7 @@ func migrationWriteApp(t *testing.T) (*App, string, string, *executor.MockExecut
 func TestAgentsMigrateWriteCreatesOnlyMarkedTemplate(t *testing.T) {
 	a, template, live, mock := migrationWriteApp(t)
 	snapshot := migrationWriteFixture(t)
-	preview, err := a.AgentsMigrate("h", snapshot)
+	preview, err := a.AgentsMigrate(t.Context(), "h", snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestAgentsMigrateWriteCreatesOnlyMarkedTemplate(t *testing.T) {
 	if _, err := os.Stat(template); !os.IsNotExist(err) {
 		t.Fatalf("preview wrote template: %v", err)
 	}
-	out, err := a.AgentsMigrateWrite("h", snapshot)
+	out, err := a.AgentsMigrateWrite(t.Context(), "h", snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestAgentsMigrateWriteRefusesUnmarkedTemplate(t *testing.T) {
 	if err := os.WriteFile(template, old, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.AgentsMigrateWrite("h", migrationWriteFixture(t)); err == nil || !strings.Contains(err.Error(), "not migration-owned") {
+	if _, err := a.AgentsMigrateWrite(t.Context(), "h", migrationWriteFixture(t)); err == nil || !strings.Contains(err.Error(), "not migration-owned") {
 		t.Fatalf("unmarked template error = %v", err)
 	}
 	if got, _ := os.ReadFile(template); string(got) != string(old) {
@@ -104,7 +104,7 @@ func TestAgentsMigrateWriteRegeneratesMarkedTemplate(t *testing.T) {
 	if err := os.WriteFile(template, []byte("\n"+agentsMigrationMarker+"\nold: true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err := a.AgentsMigrateWrite("h", migrationWriteFixture(t))
+	out, err := a.AgentsMigrateWrite(t.Context(), "h", migrationWriteFixture(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestAgentsMigrateTemplateWriteFailurePreservesPreviousBytes(t *testing.T) {
 	if err := os.WriteFile(template, old, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := a.agentsMigrate("h", migrationWriteFixture(t), true, func(string, []byte) (string, error) {
+	_, err := a.agentsMigrate(t.Context(), "h", migrationWriteFixture(t), true, func(string, []byte) (string, error) {
 		return "", errors.New("injected template write failure")
 	})
 	if err == nil || !strings.Contains(err.Error(), "injected template write failure") {
@@ -145,7 +145,7 @@ func TestAgentsMigrateWriteRejectsTemplateSymlink(t *testing.T) {
 	if err := os.Symlink(target, template); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	if _, err := a.AgentsMigrateWrite("h", migrationWriteFixture(t)); err == nil || !strings.Contains(err.Error(), "symlink") {
+	if _, err := a.AgentsMigrateWrite(t.Context(), "h", migrationWriteFixture(t)); err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("symlink error = %v", err)
 	}
 	if got, _ := os.ReadFile(target); string(got) != agentsMigrationMarker+"\nold: true\n" {

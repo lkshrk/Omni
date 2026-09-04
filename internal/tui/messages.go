@@ -148,9 +148,9 @@ type doctorDoneMsg struct {
 }
 
 type agentsReadinessMsg struct {
-	gen    int
-	result app.AgentsOnboardingResult
-	err    error
+	gen       int
+	readiness app.AgentsReadiness
+	err       error
 }
 
 type fixIgnoreDoneMsg struct {

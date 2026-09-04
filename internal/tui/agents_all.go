@@ -161,7 +161,7 @@ func (m *Model) doCheckAgentsOutdated() tea.Cmd {
 	}
 }
 
-func (m *Model) doPrepareAgentsReadiness() tea.Cmd {
+func (m *Model) doCheckAgentsReadiness() tea.Cmd {
 	if m.app == nil {
 		return nil
 	}
@@ -177,10 +177,10 @@ func (m *Model) doPrepareAgentsReadiness() tea.Cmd {
 	m.agentsReadinessPending = true
 	m.agentsReadinessErr = nil
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
+		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 		defer cancel()
-		result, err := a.EnsureAgentsReady(ctx, host)
-		return agentsReadinessMsg{gen: gen, result: result, err: err}
+		readiness, err := a.AgentsReadiness(ctx, host)
+		return agentsReadinessMsg{gen: gen, readiness: readiness, err: err}
 	}
 }
 
@@ -193,7 +193,7 @@ func (m *Model) refreshAgents() []tea.Cmd {
 	m.agentsOutdatedGen++ // invalidate any pre-readiness update completion
 	m.agentsOutdatedResult = app.AgentsOutdatedResult{}
 	app.ApplyAgentsOutdated(m.agentsRows, app.AgentsOutdatedResult{})
-	return []tea.Cmd{m.doPrepareAgentsReadiness()}
+	return []tea.Cmd{m.doCheckAgentsReadiness()}
 }
 
 func (m *Model) loadAgentsAfterReadiness() []tea.Cmd {

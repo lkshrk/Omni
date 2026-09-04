@@ -135,3 +135,54 @@ func TestRunAPMRejectsUnpinnedVersionBeforeMutation(t *testing.T) {
 		})
 	}
 }
+
+func TestFirstSyncFromTemplateWithoutLockfileSucceeds(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	configHome := filepath.Join(home, "config")
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("APPDATA", configHome)
+	template, err := AgentsTemplatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, template, `name: omni-apm-coder
+version: 1.0.0
+targets: [claude, codex]
+dependencies:
+  apm:
+    - git: https://github.com/acme/one.git
+    - git: https://github.com/acme/two.git
+    - git: https://github.com/acme/three.git
+  mcp:
+    - name: context-mode
+      command: npx
+      args: [context-mode]
+  lsp:
+    - name: gopls
+      command: gopls
+`)
+	mock := &executor.MockExecutor{Responses: []executor.MockCall{
+		{Stdout: "APM CLI version " + apmVersionPin + "\n"},
+		{Stdout: "[✓] installed\n"},
+	}}
+	a := New(filepath.Join(t.TempDir(), "settings.json"))
+	a.StateDir = filepath.Join(home, "state", "omni")
+	a.SetFallbackExecutor(mock)
+
+	result, err := a.AgentsSyncAll(t.Context(), AgentsSyncAllOptions{})
+	if err != nil {
+		t.Fatalf("first sync failed: %v", err)
+	}
+	if len(result.Notices) != 1 || !strings.Contains(result.Notices[0], "not installed yet") {
+		t.Fatalf("notices = %q", result.Notices)
+	}
+	if len(mock.Calls) != 2 || mock.Calls[1].Name != "apm" || !reflect.DeepEqual(mock.Calls[1].Args, []string{"install", "-g"}) {
+		t.Fatalf("calls = %+v", mock.Calls)
+	}
+	live, err := os.ReadFile(filepath.Join(home, ".apm", "apm.yml"))
+	if err != nil || !strings.Contains(string(live), "name: omni-apm-coder") {
+		t.Fatalf("live manifest = %q, err=%v", live, err)
+	}
+}

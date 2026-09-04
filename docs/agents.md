@@ -131,20 +131,18 @@ any exact candidate has an unsupported source layout, the fixer removes none.
 
 ## Migrating a pre-APM host
 
-The TUI now completes safe migrations automatically: it installs or repairs the
-required APM build, captures live legacy declarations when necessary, writes
-the managed `apm.yml`, runs the global install, verifies the lockfile, removes
-retired config fields, and deletes the temporary migration snapshot after full
-success. Failed or partial runs retain their snapshot and resume on retry.
-Ambiguous or local bundle evidence is never guessed; Omni leaves it unchanged
-and asks for review.
-
-The commands below remain available for explicit preview and recovery.
+Migration is an explicit operator flow; the TUI only inspects. Run `omni agents
+migrate --host <name>` and review the printed manifest, commit it into that
+host's template in dotfiles, delete the native entries it replaces by hand, then
+run `omni agents sync`. A missing or off-pin APM build is repaired by `omni
+doctor --fix`, never by opening the TUI. Ambiguous or local bundle evidence is
+never guessed; Omni leaves it unchanged and asks for review.
 
 `omni agents migrate --host <name>` previews the apm.yml equivalent of the agent
-declarations a host had before the migration. Preview is the default;
-`--dry-run` is an explicit alias. Both print a deterministic plan, write
-nothing, and run no APM command.
+declarations a host had before the migration, or of the live native Claude and
+Codex state when no snapshot is present. Preview is the default; `--dry-run` is
+an explicit alias. Both print a deterministic plan, write nothing, and run no
+APM command.
 
 ```sh
 omni agents migrate --host workstation
@@ -159,8 +157,8 @@ does not write `~/.apm/apm.yml` or run APM. On success it prints
 
 By default Omni resolves the loaded config path through its symlink and looks
 for a single `.omni-apm-migration-backup-*` directory next to the real
-`settings.json`. Pass `--snapshot <dir>` when there is no such directory or
-more than one.
+`settings.json`. With no such directory the preview covers native state only.
+Pass `--snapshot <dir>` when there is more than one, or to point at another.
 
 Only groups active for that host are planned: the host's assigned groups plus a
 group named after the host itself. Omni resolves selected package/plugin owners

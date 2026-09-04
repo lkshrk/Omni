@@ -30,8 +30,6 @@ func TestCLIAndTUIReadOnlyQueriesProduceEquivalentSemanticObservations(t *testin
 	configPath := filepath.Join(root, "settings.json")
 	observationPath := filepath.Join(root, "tui-observation.json")
 	env := append(isolatedTUIEnv(t, home, cache), "OMNI_TEST_TUI_OBSERVATION="+observationPath)
-	writeIntegrationFile(t, filepath.Join(home, ".apm", "apm.yml"), "name: parity\nversion: 1.0.0\ntargets: [codex]\ndependencies:\n  apm: []\n  mcp: []\n")
-	writeIntegrationFile(t, filepath.Join(home, ".apm", "apm.lock.yaml"), "dependencies: []\n")
 	repo := filepath.Join(home, "dotfiles")
 	initDotsRepo(t, repo, env)
 	source := filepath.Join(repo, "dotfiles", "nvim", ".config", "nvim", "init.lua")
@@ -62,11 +60,16 @@ case "$*" in
 esac
 `)
 
+	var cliTools []readOnlyToolObservation
+	decodeReadOnlyCLI(t, bin, root, env, &cliTools, "--config", configPath, "--cache-dir", cache, "tools", "list", "--format", "json")
+	var cliDoctor app.DoctorResult
+	decodeReadOnlyCLI(t, bin, root, env, &cliDoctor, "--config", configPath, "--cache-dir", cache, "doctor", "--format", "json")
+
 	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
 		waitForRequiredScreen(t, term, 7*time.Second, screenHas("Dashboard", "Tools"), "TUI did not start")
 		waitForRequiredScreen(t, term, 12*time.Second, func(string) bool {
 			packet, err := readOnlyObservationPacket(observationPath)
-			return err == nil && packet.Doctor != nil
+			return err == nil && reflect.DeepEqual(packet.Doctor, &cliDoctor)
 		}, "TUI did not publish the accepted doctor result")
 		writeTUIKeys(t, term, "\t")
 		waitForRequiredScreen(t, term, 10*time.Second, func(text string) bool {
@@ -80,10 +83,6 @@ esac
 		}, "TUI did not publish the accepted dots status")
 	})
 
-	var cliTools []readOnlyToolObservation
-	decodeReadOnlyCLI(t, bin, root, env, &cliTools, "--config", configPath, "--cache-dir", cache, "tools", "list", "--format", "json")
-	var cliDoctor app.DoctorResult
-	decodeReadOnlyCLI(t, bin, root, env, &cliDoctor, "--config", configPath, "--cache-dir", cache, "doctor", "--format", "json")
 	var cliDots readOnlyDotsObservation
 	decodeReadOnlyCLI(t, bin, root, env, &cliDots, "--config", configPath, "--cache-dir", cache, "dots", "status", "--format", "json")
 	packet, err := readOnlyObservationPacket(observationPath)
