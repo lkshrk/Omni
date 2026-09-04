@@ -1,4 +1,0 @@
-remote_config:
-  repository: "my-org/shared-configs"
-  ref: "main"
-  path: ".shared-coderabbit.yaml"
