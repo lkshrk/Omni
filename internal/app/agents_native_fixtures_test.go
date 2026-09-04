@@ -22,18 +22,6 @@ var nativeFixtureCLICommands = map[string]string{
 	"codex-mcp-list.json":                  "codex mcp list --json",
 }
 
-var nativeFixtureSkips = map[string]string{
-	"already-managed":                 "stage 2",
-	"claude-cwd-and-args":             "stage 2",
-	"claude-only-stdio":               "stage 2",
-	"claude-plugin-with-mcp-json":     "stage 2",
-	"codex-only-http":                 "stage 2",
-	"plugin-owned-child":              "stage 2",
-	"same-name-different":             "stage 2",
-	"same-name-equivalent":            "stage 2",
-	"standalone-matches-package-name": "stage 2",
-}
-
 type nativeFixturePlugin struct {
 	Name        string `json:"name"`
 	Marketplace string `json:"marketplace"`
@@ -72,9 +60,6 @@ func TestNativeInventoryFixtures(t *testing.T) {
 			continue
 		}
 		t.Run(dir.Name(), func(t *testing.T) {
-			if reason, ok := nativeFixtureSkips[dir.Name()]; ok {
-				t.Skip(reason)
-			}
 			runNativeInventoryFixture(t, filepath.Join(root, dir.Name()))
 		})
 	}

@@ -184,18 +184,40 @@ func nativeMCPPathProvesPlugin(cwd string, plugin nativePlugin) bool {
 }
 
 func nativeMCPPathProvesIdentity(cwd, identity string) bool {
-	home, err := os.UserHomeDir()
+	codex, err := codexHome()
 	if err != nil || cwd == "" {
 		return false
 	}
 	name, marketplace := splitNativePluginIdentity(identity)
 	path := strings.ToLower(filepath.ToSlash(filepath.Clean(cwd))) + "/"
-	want := strings.ToLower(filepath.ToSlash(filepath.Join(home, ".codex", "plugins", "cache", marketplace, name))) + "/"
+	want := strings.ToLower(filepath.ToSlash(filepath.Join(codex, "plugins", "cache", marketplace, name))) + "/"
 	return strings.HasPrefix(path, want)
 }
 
+func codexHome() (string, error) {
+	if dir := strings.TrimSpace(os.Getenv("CODEX_HOME")); dir != "" {
+		return dir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve codex home: %w", err)
+	}
+	return filepath.Join(home, ".codex"), nil
+}
+
+func claudeConfigFile() (string, error) {
+	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
+		return filepath.Join(dir, ".claude.json"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("claude MCP inventory: resolve home: %w", err)
+	}
+	return filepath.Join(home, ".claude.json"), nil
+}
+
 func sameNativeMCPWrapper(a, b legacyEntry) bool {
-	return a.Transport == b.Transport && a.Command == b.Command && a.URL == b.URL
+	return a.Transport == b.Transport && a.Command == b.Command && a.URL == b.URL && slices.Equal(a.Args, b.Args)
 }
 
 func nativeMCPWrapperHasNoTargetConfig(entry legacyEntry) bool {
@@ -229,11 +251,11 @@ func canonicalNativeMarketplaceSource(source string) string {
 
 func (a *App) listNativeMCP(ctx context.Context, cli string) ([]nativeMCP, error) {
 	if cli == "claude" {
-		home, err := os.UserHomeDir()
+		path, err := claudeConfigFile()
 		if err != nil {
-			return nil, fmt.Errorf("claude MCP inventory: resolve home: %w", err)
+			return nil, err
 		}
-		raw, err := os.ReadFile(filepath.Join(home, ".claude.json"))
+		raw, err := os.ReadFile(path)
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
@@ -245,17 +267,18 @@ func (a *App) listNativeMCP(ctx context.Context, cli string) ([]nativeMCP, error
 				Type    string            `json:"type"`
 				Command string            `json:"command"`
 				Args    []string          `json:"args"`
+				Cwd     string            `json:"cwd"`
 				URL     string            `json:"url"`
 				Env     map[string]string `json:"env"`
 				Headers map[string]string `json:"headers"`
 			} `json:"mcpServers"`
 		}
 		if err := json.Unmarshal(raw, &file); err != nil {
-			return nil, fmt.Errorf("claude MCP inventory: parse ~/.claude.json: %w", err)
+			return nil, fmt.Errorf("claude MCP inventory: parse %s: %w", path, err)
 		}
 		out := make([]nativeMCP, 0, len(file.Servers))
 		for name, server := range file.Servers {
-			definition := legacyEntry{Name: name}
+			definition := legacyEntry{Name: name, Cwd: server.Cwd}
 			definition.EnvLiteral, err = safeNativeValues("claude", name, "environment", server.Env)
 			if err != nil {
 				return nil, err
@@ -267,13 +290,14 @@ func (a *App) listNativeMCP(ctx context.Context, cli string) ([]nativeMCP, error
 			}
 			if server.URL == "" {
 				definition.Transport = "stdio"
-				definition.Command = strings.TrimSpace(strings.Join(append([]string{server.Command}, server.Args...), " "))
+				definition.Command, definition.Args = server.Command, slices.Clone(server.Args)
 			} else {
 				definition.Transport, definition.URL = "http", server.URL
 				if strings.TrimSpace(server.Type) == "sse" {
 					definition.Transport = "sse"
 				}
 			}
+			normalizeNativeMCP(&definition)
 			out = append(out, nativeMCP{Name: name, Definition: definition, Target: "claude"})
 		}
 		return out, nil
@@ -313,10 +337,7 @@ func (a *App) listNativeMCP(ctx context.Context, cli string) ([]nativeMCP, error
 		if server.Enabled != nil && !*server.Enabled {
 			continue
 		}
-		definition := legacyEntry{Name: server.Name, Transport: server.Transport.Type, URL: server.Transport.URL, Cwd: server.Transport.Cwd}
-		if definition.Transport == "streamable_http" {
-			definition.Transport = "http"
-		}
+		definition := legacyEntry{Name: server.Name, Transport: normalizeNativeMCPTransport(server.Transport.Type), URL: server.Transport.URL, Cwd: server.Transport.Cwd}
 		if definition.Transport != "stdio" && definition.Transport != "http" && definition.Transport != "sse" {
 			return nil, fmt.Errorf("codex MCP server %q has unsupported transport %q", server.Name, definition.Transport)
 		}
@@ -333,7 +354,7 @@ func (a *App) listNativeMCP(ctx context.Context, cli string) ([]nativeMCP, error
 			}
 		}
 		if definition.Transport == "stdio" {
-			definition.Command = strings.TrimSpace(strings.Join(append([]string{server.Transport.Command}, server.Transport.Args...), " "))
+			definition.Command, definition.Args = server.Transport.Command, slices.Clone(server.Transport.Args)
 		} else {
 			definition.Headers, err = symbolicNativeHeaders("codex", server.Name, server.Transport.HTTPHeaders)
 			if err != nil {
@@ -363,6 +384,7 @@ func (a *App) listNativeMCP(ctx context.Context, cli string) ([]nativeMCP, error
 				definition.Headers["Authorization"] = "Bearer ${" + env + "}"
 			}
 		}
+		normalizeNativeMCP(&definition)
 		out = append(out, nativeMCP{Name: server.Name, Definition: definition, Target: "codex"})
 	}
 	return out, nil
@@ -412,13 +434,44 @@ func validNativeEnvName(value string) bool {
 	return true
 }
 
+func normalizeNativeMCPTransport(transport string) string {
+	switch strings.TrimSpace(transport) {
+	case "streamable_http", "streamable-http":
+		return "http"
+	default:
+		return strings.TrimSpace(transport)
+	}
+}
+
 func normalizeNativeMCP(entry *legacyEntry) {
+	entry.Transport = normalizeNativeMCPTransport(entry.Transport)
+	entry.Command = apmPlaceholders(entry.Command)
+	entry.Cwd = apmPlaceholders(entry.Cwd)
+	entry.URL = apmPlaceholders(entry.URL)
+	if len(entry.Args) == 0 {
+		entry.Args = nil
+	}
+	for i, arg := range entry.Args {
+		entry.Args[i] = apmPlaceholders(arg)
+	}
 	if len(entry.Headers) == 0 {
 		entry.Headers = nil
+	}
+	for name, value := range entry.Headers {
+		entry.Headers[name] = apmPlaceholders(value)
 	}
 	if len(entry.EnvLiteral) == 0 {
 		entry.EnvLiteral = nil
 	}
+	for name, value := range entry.EnvLiteral {
+		entry.EnvLiteral[name] = apmPlaceholders(value)
+	}
+	if len(entry.Env) == 0 {
+		entry.Env = nil
+		return
+	}
+	sort.Strings(entry.Env)
+	entry.Env = slices.Compact(entry.Env)
 }
 
 func (a *App) listNativePlugins(ctx context.Context, cli string) ([]nativePlugin, error) {
@@ -434,7 +487,12 @@ func (a *App) listNativePlugins(ctx context.Context, cli string) ([]nativePlugin
 		ID              string `json:"id"`
 		Name            string `json:"name"`
 		MarketplaceName string `json:"marketplaceName"`
-		Enabled         *bool  `json:"enabled"`
+		Version         string `json:"version"`
+		InstallPath     string `json:"installPath"`
+		Source          struct {
+			URL string `json:"url"`
+		} `json:"source"`
+		Enabled *bool `json:"enabled"`
 	}
 	if err := decodeNativeList(stdout, "installed", &entries); err != nil {
 		return nil, fmt.Errorf("%s %s: parse json: %w", cli, strings.Join(args, " "), err)
@@ -452,7 +510,11 @@ func (a *App) listNativePlugins(ctx context.Context, cli string) ([]nativePlugin
 		if name == "" || marketplace == "" {
 			return nil, fmt.Errorf("%s %s: invalid installed plugin identity %q", cli, strings.Join(args, " "), identity)
 		}
-		out = append(out, nativePlugin{Name: name, Marketplace: marketplace, Target: cli})
+		root := entry.InstallPath
+		if cli != "claude" {
+			root = entry.Source.URL
+		}
+		out = append(out, nativePlugin{Name: name, Marketplace: marketplace, Target: cli, Version: entry.Version, InstallRoot: root})
 	}
 	return out, nil
 }

@@ -188,11 +188,9 @@ func renderAPMTemplate(decls config.LegacyAgentDecls, ownerDeps []apmPackageDep)
 			URL:       apmPlaceholders(entry.URL),
 			Cwd:       apmPlaceholders(entry.Cwd),
 		}
-		if fields := strings.Fields(entry.Command); len(fields) > 0 {
-			dep.Command = apmPlaceholders(fields[0])
-			for _, arg := range fields[1:] {
-				dep.Args = append(dep.Args, apmPlaceholders(arg))
-			}
+		dep.Command = apmPlaceholders(entry.Command)
+		for _, arg := range entry.Args {
+			dep.Args = append(dep.Args, apmPlaceholders(arg))
 		}
 		for header, value := range entry.Headers {
 			if dep.Headers == nil {
@@ -252,7 +250,18 @@ func decodeLegacyEntry(raw json.RawMessage, kind, name string) (legacyEntry, err
 			return entry, fmt.Errorf("%s %q field %q contains CR/LF/NUL", kind, name, field)
 		}
 	}
+	splitJoinedLegacyCommand(&entry)
 	return entry, nil
+}
+
+// Pre-migration snapshots store argv as one joined string; structured Args always win.
+func splitJoinedLegacyCommand(entry *legacyEntry) {
+	if len(entry.Args) > 0 {
+		return
+	}
+	if fields := strings.Fields(entry.Command); len(fields) > 1 {
+		entry.Command, entry.Args = fields[0], fields[1:]
+	}
 }
 
 func unsafeMigrationScalar(value string) bool { return strings.ContainsAny(value, "\r\n\x00") }

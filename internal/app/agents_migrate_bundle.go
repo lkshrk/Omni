@@ -1693,11 +1693,9 @@ func legacyMCPForOwner(raw json.RawMessage, name string, owner agentBundleOwner)
 	if err := json.Unmarshal(raw, &entry); err != nil {
 		return apmMCPDep{}, false, []string{fmt.Sprintf("decode mcp server %q: %v", name, err)}
 	}
+	splitJoinedLegacyCommand(&entry)
 	dep := apmMCPDep{Name: entry.Name, Registry: false, Transport: entry.Transport, URL: entry.URL, Headers: maps.Clone(entry.Headers), Cwd: entry.Cwd}
-	fields := strings.Fields(entry.Command)
-	if len(fields) != 0 {
-		dep.Command, dep.Args = fields[0], slices.Clone(fields[1:])
-	}
+	dep.Command, dep.Args = entry.Command, slices.Clone(entry.Args)
 	dep.Env = map[string]string{}
 	for _, env := range entry.Env {
 		dep.Env[env] = "${" + env + "}"
