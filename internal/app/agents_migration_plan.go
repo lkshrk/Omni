@@ -30,14 +30,15 @@ const (
 )
 
 type agentObservation struct {
-	Source      string
-	Target      string
-	Kind        string
-	Identity    string
-	Definition  legacyEntry
-	Version     string
-	InstallRoot string
-	Evidence    []string
+	Source       string
+	Target       string
+	Kind         string
+	Identity     string
+	Definition   legacyEntry
+	Version      string
+	InstallRoot  string
+	SecretFields []string
+	Evidence     []string
 }
 
 type agentDisposition struct {
@@ -62,6 +63,8 @@ func resolveAgentDispositions(obs []agentObservation) []agentDisposition {
 		switch {
 		case unsafeAgentObservation(observation):
 			out = append(out, agentDisposition{Observation: observation, Action: agentActionRetain, Reason: agentReasonUnsafeName})
+		case len(observation.SecretFields) > 0:
+			out = append(out, agentDisposition{Observation: observation, Action: agentActionRetain, Reason: literalSecretReason(observation.SecretFields)})
 		case observation.Kind == agentKindMarketplace:
 			if reason := marketplaceReason[observation.Identity]; reason != "" {
 				out = append(out, agentDisposition{Observation: observation, Action: agentActionRetain, Reason: reason})
@@ -96,10 +99,25 @@ func resolveAgentDispositions(obs []agentObservation) []agentDisposition {
 	return out
 }
 
+// literalSecretReason names the offending fields ("env TOKEN", "header Authorization") and never their values.
+func literalSecretReason(fields []string) string {
+	var exports []string
+	for _, field := range fields {
+		if kind, name, ok := strings.Cut(field, " "); ok && kind == "env" {
+			exports = append(exports, "${"+name+"}")
+		}
+	}
+	reason := "literal value in " + strings.Join(fields, ", ")
+	if len(exports) > 0 {
+		return reason + "; export it as " + strings.Join(exports, ", ") + " first"
+	}
+	return reason + "; replace it with an environment reference first"
+}
+
 func agentObservationGroup(rest []agentObservation, identity string) []agentObservation {
 	group := make([]agentObservation, 0, 2)
 	for _, observation := range rest {
-		if observation.Kind == agentKindMCP && observation.Identity == identity && !unsafeAgentObservation(observation) {
+		if observation.Kind == agentKindMCP && observation.Identity == identity && !unsafeAgentObservation(observation) && len(observation.SecretFields) == 0 {
 			group = append(group, observation)
 		}
 	}

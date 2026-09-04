@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -301,7 +302,7 @@ func TestNativePlanDoesNotSuppressWithoutManifestEvidence(t *testing.T) {
 }
 
 func TestInventoryNativeMCPNeverSerializesLiteralSecrets(t *testing.T) {
-	t.Run("literal sensitive env fails without echoing value", func(t *testing.T) {
+	t.Run("literal sensitive env retains without echoing value", func(t *testing.T) {
 		a, _ := newNativeInventoryApp(t, map[string]bool{"claude": true},
 			nativeRule("claude plugins list --json", `[]`),
 			nativeRule("claude plugins marketplace list --json", `[]`),
@@ -309,12 +310,15 @@ func TestInventoryNativeMCPNeverSerializesLiteralSecrets(t *testing.T) {
 		home, _ := os.UserHomeDir()
 		writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"demo":{"command":"server","env":{"TOKEN":"super-secret"}}}}`)
 		_, rendered, err := nativePlanFor(t, a)
-		if err == nil || !strings.Contains(err.Error(), `sensitive environment field "TOKEN"`) || strings.Contains(err.Error(), "super-secret") || rendered != "" {
-			t.Fatalf("rendered=%q err=%v", rendered, err)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(rendered, "claude  mcp  demo  literal value in env TOKEN; export it as ${TOKEN} first") || strings.Contains(rendered, "super-secret") {
+			t.Fatalf("rendered=%q", rendered)
 		}
 	})
 
-	t.Run("literal header fails without echoing value", func(t *testing.T) {
+	t.Run("literal header retains without echoing value", func(t *testing.T) {
 		a, _ := newNativeInventoryApp(t, map[string]bool{"claude": true},
 			nativeRule("claude plugins list --json", `[]`),
 			nativeRule("claude plugins marketplace list --json", `[]`),
@@ -322,8 +326,11 @@ func TestInventoryNativeMCPNeverSerializesLiteralSecrets(t *testing.T) {
 		home, _ := os.UserHomeDir()
 		writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"demo":{"url":"https://example.test","headers":{"Authorization":"secret-value"}}}}`)
 		_, rendered, err := nativePlanFor(t, a)
-		if err == nil || !strings.Contains(err.Error(), `server "demo" has literal sensitive header "Authorization"`) || strings.Contains(err.Error(), "secret-value") || rendered != "" {
-			t.Fatalf("rendered=%q err=%v", rendered, err)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(rendered, "claude  mcp  demo  literal value in header Authorization") || strings.Contains(rendered, "secret-value") {
+			t.Fatalf("rendered=%q", rendered)
 		}
 	})
 
@@ -350,6 +357,62 @@ func TestInventoryNativeMCPNeverSerializesLiteralSecrets(t *testing.T) {
 			t.Fatalf("unsafe/disabled Codex state rendered:\n%s", rendered)
 		}
 	})
+}
+
+func TestAgentsMigrateKeepsLiteralSecretOutOfPreviewAndConfigDir(t *testing.T) {
+	a, _ := newNativeInventoryApp(t, map[string]bool{"claude": true},
+		nativeRule("claude plugins list --json", `[]`),
+		nativeRule("claude plugins marketplace list --json", `[]`),
+	)
+	home, _ := os.UserHomeDir()
+	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{
+		"leaky":{"command":"server","env":{"TOKEN":"literal-token"}},
+		"clean":{"command":"clean-server","env":{"MODE":"fast"}}
+	}}`)
+
+	preview, err := a.AgentsMigrate(t.Context(), "host", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := a.AgentsMigrateWrite(t.Context(), "host", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rendered := range []string{preview, written} {
+		if !strings.Contains(rendered, "name: clean") {
+			t.Fatalf("clean server was not proposed:\n%s", rendered)
+		}
+		if strings.Contains(rendered, "name: leaky") {
+			t.Fatalf("literal-secret server was proposed:\n%s", rendered)
+		}
+		if !strings.Contains(rendered, "claude  mcp  leaky  literal value in env TOKEN; export it as ${TOKEN} first") {
+			t.Fatalf("literal-secret server was not retained:\n%s", rendered)
+		}
+		if strings.Contains(rendered, "literal-token") {
+			t.Fatalf("stdout leaked the secret value:\n%s", rendered)
+		}
+	}
+	assertNoSecretUnderConfigDir(t, filepath.Join(home, "config"), "literal-token")
+}
+
+func assertNoSecretUnderConfigDir(t *testing.T, dir, secret string) {
+	t.Helper()
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(raw), secret) {
+			t.Fatalf("%s leaked %q", path, secret)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestAgentsMigrateWithoutSnapshotPreviewsNativeState(t *testing.T) {

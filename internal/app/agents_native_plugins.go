@@ -25,9 +25,10 @@ type nativeMarketplace struct {
 }
 
 type nativeMCP struct {
-	Name       string
-	Definition legacyEntry
-	Target     string
+	Name         string
+	Definition   legacyEntry
+	Target       string
+	SecretFields []string
 }
 
 // inventoryNativeAgents reads native plugin, marketplace, and MCP state without changing it.
@@ -86,12 +87,13 @@ func (a *App) inventoryNativeAgents(ctx context.Context) ([]agentObservation, er
 			definition.Agents = nil
 			normalizeNativeMCP(&definition)
 			out = append(out, agentObservation{
-				Source:     cli,
-				Target:     server.Target,
-				Kind:       agentKindMCP,
-				Identity:   server.Name,
-				Definition: definition,
-				Evidence:   []string{nativeMCPEvidence(cli)},
+				Source:       cli,
+				Target:       server.Target,
+				Kind:         agentKindMCP,
+				Identity:     server.Name,
+				Definition:   definition,
+				SecretFields: server.SecretFields,
+				Evidence:     []string{nativeMCPEvidence(cli)},
 			})
 		}
 	}
@@ -154,15 +156,14 @@ func (a *App) listNativeMCP(ctx context.Context, cli string) ([]nativeMCP, error
 		out := make([]nativeMCP, 0, len(file.Servers))
 		for name, server := range file.Servers {
 			definition := legacyEntry{Name: name, Cwd: server.Cwd}
-			definition.EnvLiteral, err = safeNativeValues("claude", name, "environment", server.Env)
+			var literals []string
+			definition.EnvLiteral, literals, err = safeNativeValues("claude", name, server.Env)
 			if err != nil {
 				return nil, err
 			}
-			var headerErr error
-			definition.Headers, headerErr = symbolicNativeHeaders("claude", name, server.Headers)
-			if headerErr != nil {
-				return nil, headerErr
-			}
+			var headerLiterals []string
+			definition.Headers, headerLiterals = symbolicNativeHeaders(server.Headers)
+			literals = append(literals, headerLiterals...)
 			if server.URL == "" {
 				definition.Transport = "stdio"
 				definition.Command, definition.Args = server.Command, slices.Clone(server.Args)
@@ -173,7 +174,7 @@ func (a *App) listNativeMCP(ctx context.Context, cli string) ([]nativeMCP, error
 				}
 			}
 			normalizeNativeMCP(&definition)
-			out = append(out, nativeMCP{Name: name, Definition: definition, Target: "claude"})
+			out = append(out, nativeMCP{Name: name, Definition: definition, Target: "claude", SecretFields: sortedUnique(literals)})
 		}
 		return out, nil
 	}
@@ -216,7 +217,8 @@ func (a *App) listNativeMCP(ctx context.Context, cli string) ([]nativeMCP, error
 		if definition.Transport != "stdio" && definition.Transport != "http" && definition.Transport != "sse" {
 			return nil, fmt.Errorf("codex MCP server %q has unsupported transport %q", server.Name, definition.Transport)
 		}
-		definition.EnvLiteral, err = safeNativeValues("codex", server.Name, "environment", server.Transport.Env)
+		var literals []string
+		definition.EnvLiteral, literals, err = safeNativeValues("codex", server.Name, server.Transport.Env)
 		if err != nil {
 			return nil, err
 		}
@@ -231,10 +233,9 @@ func (a *App) listNativeMCP(ctx context.Context, cli string) ([]nativeMCP, error
 		if definition.Transport == "stdio" {
 			definition.Command, definition.Args = server.Transport.Command, slices.Clone(server.Transport.Args)
 		} else {
-			definition.Headers, err = symbolicNativeHeaders("codex", server.Name, server.Transport.HTTPHeaders)
-			if err != nil {
-				return nil, err
-			}
+			var headerLiterals []string
+			definition.Headers, headerLiterals = symbolicNativeHeaders(server.Transport.HTTPHeaders)
+			literals = append(literals, headerLiterals...)
 			if len(server.Transport.EnvHTTPHeaders) > 0 {
 				if definition.Headers == nil {
 					definition.Headers = map[string]string{}
@@ -260,40 +261,50 @@ func (a *App) listNativeMCP(ctx context.Context, cli string) ([]nativeMCP, error
 			}
 		}
 		normalizeNativeMCP(&definition)
-		out = append(out, nativeMCP{Name: server.Name, Definition: definition, Target: "codex"})
+		out = append(out, nativeMCP{Name: server.Name, Definition: definition, Target: "codex", SecretFields: sortedUnique(literals)})
 	}
 	return out, nil
 }
 
-func symbolicNativeHeaders(client, server string, headers map[string]string) (map[string]string, error) {
+func symbolicNativeHeaders(headers map[string]string) (map[string]string, []string) {
 	if len(headers) == 0 {
 		return nil, nil
 	}
 	out := make(map[string]string, len(headers))
+	var literals []string
 	for name, value := range headers {
 		if sensitiveField(name) && !symbolicSecretReference.MatchString(strings.TrimSpace(value)) {
-			return nil, fmt.Errorf("%s MCP server %q has literal sensitive header %q", client, server, name)
+			literals = append(literals, "header "+name)
+			continue
 		}
 		out[name] = value
 	}
-	return out, nil
+	if len(out) == 0 {
+		out = nil
+	}
+	return out, literals
 }
 
-func safeNativeValues(client, server, kind string, values map[string]string) (map[string]string, error) {
+func safeNativeValues(client, server string, values map[string]string) (map[string]string, []string, error) {
 	if len(values) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	out := make(map[string]string, len(values))
+	var literals []string
 	for name, value := range values {
 		if !validNativeEnvName(name) {
-			return nil, fmt.Errorf("%s MCP server %q has invalid %s name %q", client, server, kind, name)
+			return nil, nil, fmt.Errorf("%s MCP server %q has invalid env name %q", client, server, name)
 		}
 		if sensitiveField(name) && !symbolicSecretReference.MatchString(strings.TrimSpace(value)) {
-			return nil, fmt.Errorf("%s MCP server %q has literal sensitive %s field %q", client, server, kind, name)
+			literals = append(literals, "env "+name)
+			continue
 		}
 		out[name] = value
 	}
-	return out, nil
+	if len(out) == 0 {
+		out = nil
+	}
+	return out, literals, nil
 }
 
 func validNativeEnvName(value string) bool {

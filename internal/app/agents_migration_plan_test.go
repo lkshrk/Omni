@@ -20,9 +20,9 @@ type wantDisposition struct {
 
 func TestResolveAgentDispositionsOverFixtures(t *testing.T) {
 	for _, test := range []struct {
-		fixture string
-		wantErr string
-		want    []wantDisposition
+		fixture        string
+		mustNotContain []string
+		want           []wantDisposition
 	}{
 		{fixture: "plugin-owned-child", want: []wantDisposition{
 			{kind: agentKindMarketplace, identity: "ctx-market", target: "claude", action: agentActionImport},
@@ -49,7 +49,9 @@ func TestResolveAgentDispositionsOverFixtures(t *testing.T) {
 			{kind: agentKindMCP, identity: "shared", target: "claude", action: agentActionImport, targets: []string{"claude"}},
 			{kind: agentKindMCP, identity: "shared", target: "codex", action: agentActionRetain, reason: agentReasonPerTarget},
 		}},
-		{fixture: "literal-secret", wantErr: `has literal sensitive environment field "TOKEN"`},
+		{fixture: "literal-secret", mustNotContain: []string{"literal-token"}, want: []wantDisposition{
+			{kind: agentKindMCP, identity: "demo", target: "claude", action: agentActionRetain, reason: "literal value in env TOKEN; export it as ${TOKEN} first"},
+		}},
 		{fixture: "mixed-ambiguous", want: []wantDisposition{
 			{kind: agentKindMarketplace, identity: "dup", target: "codex", action: agentActionRetain, reason: "https://example.test/one.git, https://example.test/two.git"},
 			{kind: agentKindMarketplace, identity: "dup", target: "codex", action: agentActionRetain, reason: "https://example.test/one.git, https://example.test/two.git"},
@@ -71,19 +73,16 @@ func TestResolveAgentDispositionsOverFixtures(t *testing.T) {
 		t.Run(test.fixture, func(t *testing.T) {
 			a, _, _ := seedNativeFixture(t, filepath.Join("testdata", "agents_native", test.fixture))
 			observations, err := a.inventoryNativeAgents(t.Context())
-			if test.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
-					t.Fatalf("error = %v, want it to contain %q", err, test.wantErr)
-				}
-				if strings.Contains(err.Error(), "literal-token") {
-					t.Fatalf("error leaked the secret value: %v", err)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertDispositions(t, resolveAgentDispositions(observations), test.want)
+			dispositions := resolveAgentDispositions(observations)
+			assertDispositions(t, dispositions, test.want)
+			for _, forbidden := range test.mustNotContain {
+				if strings.Contains(formatDispositions(dispositions), forbidden) {
+					t.Fatalf("dispositions leaked %q: %s", forbidden, formatDispositions(dispositions))
+				}
+			}
 		})
 	}
 }
