@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "remote": {
+      "type": "http",
+      "url": "https://remote.test/mcp",
+      "headers": {"x-litellm-api-key": "sk-fixture-literal"}
+    },
+    "clean": {
+      "type": "stdio",
+      "command": "clean-server"
+    }
+  }
+}

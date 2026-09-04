@@ -168,3 +168,64 @@ func TestMigrateWriteNeverTouchesHarnessDirs(t *testing.T) {
 		t.Fatalf("write changed a harness directory: %s -> %s", before, after)
 	}
 }
+
+func TestMigratePreviewClassifiesManagedBeforeSecretRetention(t *testing.T) {
+	const literal = "sk-fixture-literal"
+	for _, test := range []struct {
+		name     string
+		lockfile bool
+	}{
+		{name: "lockfile lists the server", lockfile: true},
+		{name: "fresh host"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			a, _, home := nativeFixtureApp(t, "managed-literal-secret")
+			if !test.lockfile {
+				if err := os.Remove(filepath.Join(home, ".apm", "apm.lock.yaml")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			preview, err := a.BuildAgentsMigrationPreview(t.Context(), "host", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			rendered := preview.Render()
+			if strings.Contains(rendered, literal) {
+				t.Fatalf("preview echoed the literal secret:\n%s", rendered)
+			}
+			if !strings.Contains(preview.Manifest, "name: clean") {
+				t.Fatalf("clean server was not proposed:\n%s", rendered)
+			}
+			managed := sectionRows(rendered, managedSectionTitle)
+			retained := sectionRows(rendered, retainedSectionTitle)
+			if test.lockfile {
+				if len(managed) != 1 || !strings.HasPrefix(managed[0], "claude  mcp  remote") || len(retained) != 0 {
+					t.Fatalf("managed=%q retained=%q:\n%s", managed, retained, rendered)
+				}
+				if managed[0] != "claude  mcp  remote" {
+					t.Fatalf("managed row carried a reason: %q", managed[0])
+				}
+				return
+			}
+			if len(managed) != 0 || len(retained) != 1 || !strings.Contains(retained[0], "header x-litellm-api-key") {
+				t.Fatalf("managed=%q retained=%q:\n%s", managed, retained, rendered)
+			}
+		})
+	}
+}
+
+func sectionRows(rendered, title string) []string {
+	_, after, found := strings.Cut(rendered, title+"\n")
+	if !found {
+		return nil
+	}
+	var rows []string
+	for _, line := range strings.Split(after, "\n") {
+		row, indented := strings.CutPrefix(line, "  ")
+		if !indented {
+			break
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}

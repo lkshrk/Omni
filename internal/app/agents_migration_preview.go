@@ -244,19 +244,20 @@ func subtractAPMManaged(dispositions []agentDisposition, index apmManagedIndex) 
 	}
 	out := slices.Clone(dispositions)
 	for i, disposition := range out {
-		if disposition.Action != agentActionImport {
+		// Managed outranks retain: apm itself writes the literals its adapters expand at install time.
+		if disposition.Action != agentActionImport && disposition.Action != agentActionRetain {
 			continue
 		}
 		observation := disposition.Observation
 		switch observation.Kind {
 		case agentKindMCP:
 			if index.managesMCP(observation.Definition) {
-				out[i].Action = agentActionManaged
+				out[i].Action, out[i].Reason = agentActionManaged, ""
 			}
 		case agentKindPlugin:
 			name, marketplace := splitNativePluginIdentity(observation.Identity)
 			if index.managesPlugin(name, sources[marketplace]) {
-				out[i].Action = agentActionManaged
+				out[i].Action, out[i].Reason = agentActionManaged, ""
 			}
 		}
 	}

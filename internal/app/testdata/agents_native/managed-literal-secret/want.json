@@ -1,0 +1,22 @@
+{
+  "mcp": [
+    {
+      "name": "clean",
+      "target": "claude",
+      "definition": {
+        "name": "clean",
+        "transport": "stdio",
+        "command": "clean-server"
+      }
+    },
+    {
+      "name": "remote",
+      "target": "claude",
+      "definition": {
+        "name": "remote",
+        "transport": "http",
+        "url": "https://remote.test/mcp"
+      }
+    }
+  ]
+}
