@@ -1,0 +1,10 @@
+[
+  {
+    "id": "ctx@ctx-market",
+    "version": "1.0.169",
+    "scope": "user",
+    "enabled": true,
+    "installPath": "@HOME@/.claude/plugins/cache/ctx-market/ctx/1.0.169",
+    "installedAt": 1756944000000
+  }
+]

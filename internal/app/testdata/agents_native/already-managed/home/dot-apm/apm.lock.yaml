@@ -1,0 +1,7 @@
+version: 1
+mcp_servers:
+  context-mode:
+    transport: stdio
+    command: node
+    args:
+      - "@HOME@/.apm/apm_modules/context-mode/start.mjs"

@@ -1,0 +1,17 @@
+{
+  "marketplaces": [
+    {"name": "dup", "source": "https://example.test/one.git"},
+    {"name": "dup", "source": "https://example.test/two.git"}
+  ],
+  "mcp": [
+    {
+      "name": "clean",
+      "target": "codex",
+      "definition": {
+        "name": "clean",
+        "transport": "stdio",
+        "command": "clean-server"
+      }
+    }
+  ]
+}

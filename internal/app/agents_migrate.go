@@ -86,6 +86,7 @@ type legacyEntry struct {
 	Transport   string            `json:"transport"`
 	URL         string            `json:"url"`
 	Command     string            `json:"command"`
+	Args        []string          `json:"args"`
 	Cwd         string            `json:"cwd"`
 	Headers     map[string]string `json:"headers"`
 	Env         []string          `json:"env"`

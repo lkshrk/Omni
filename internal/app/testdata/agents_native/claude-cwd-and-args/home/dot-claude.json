@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "spaced": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/opt/My Server/index.js", "--flag"],
+      "cwd": "/opt/My Server"
+    }
+  }
+}

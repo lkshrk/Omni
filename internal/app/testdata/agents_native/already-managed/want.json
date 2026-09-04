@@ -1,0 +1,14 @@
+{
+  "mcp": [
+    {
+      "name": "context-mode",
+      "target": "codex",
+      "definition": {
+        "name": "context-mode",
+        "transport": "stdio",
+        "command": "node",
+        "args": ["@HOME@/.apm/apm_modules/context-mode/start.mjs"]
+      }
+    }
+  ]
+}

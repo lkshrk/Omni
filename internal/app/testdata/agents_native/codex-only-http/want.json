@@ -1,0 +1,17 @@
+{
+  "mcp": [
+    {
+      "name": "remote",
+      "target": "codex",
+      "definition": {
+        "name": "remote",
+        "transport": "http",
+        "url": "https://example.test/mcp",
+        "headers": {
+          "Authorization": "Bearer ${env:API_TOKEN}",
+          "x-key": "${env:KEY_VAR}"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+[
+  {
+    "id": "tooling@acme",
+    "version": "3.20.1",
+    "scope": "user",
+    "enabled": true,
+    "installPath": "@HOME@/.claude/plugins/cache/acme/tooling/3.20.1",
+    "installedAt": 1756944000000
+  }
+]

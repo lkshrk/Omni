@@ -1,0 +1,10 @@
+[
+  {
+    "id": "demo@official",
+    "version": "2.1.0",
+    "scope": "user",
+    "enabled": true,
+    "installPath": "@HOME@/.claude/plugins/cache/official/demo/2.1.0",
+    "installedAt": 1756944000000
+  }
+]

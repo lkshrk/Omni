@@ -1,0 +1,45 @@
+{
+  "plugins": [
+    {
+      "name": "demo",
+      "marketplace": "official",
+      "target": "claude",
+      "version": "2.1.0",
+      "installRoot": "@HOME@/.claude/plugins/cache/official/demo/2.1.0"
+    },
+    {
+      "name": "demo",
+      "marketplace": "official",
+      "target": "codex",
+      "version": "2.1.0",
+      "installRoot": "@HOME@/.codex/.tmp/marketplaces/official"
+    }
+  ],
+  "marketplaces": [
+    {"name": "official", "source": "acme/plugins"},
+    {"name": "official", "source": "https://github.com/acme/plugins"}
+  ],
+  "mcp": [
+    {
+      "name": "demo",
+      "target": "claude",
+      "definition": {
+        "name": "demo",
+        "transport": "stdio",
+        "command": "/usr/local/bin/demo",
+        "args": ["--serve"]
+      }
+    },
+    {
+      "name": "demo",
+      "target": "codex",
+      "definition": {
+        "name": "demo",
+        "transport": "stdio",
+        "command": "/usr/local/bin/demo",
+        "args": ["--serve"],
+        "env": ["DEMO_TOKEN"]
+      }
+    }
+  ]
+}

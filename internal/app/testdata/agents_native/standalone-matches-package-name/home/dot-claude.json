@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "demo": {
+      "type": "stdio",
+      "command": "/usr/local/bin/demo",
+      "args": ["--serve"]
+    }
+  }
+}

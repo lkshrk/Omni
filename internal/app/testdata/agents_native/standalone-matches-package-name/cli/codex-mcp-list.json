@@ -1,0 +1,14 @@
+[
+  {
+    "name": "demo",
+    "enabled": true,
+    "transport": {
+      "type": "stdio",
+      "command": "/usr/local/bin/demo",
+      "args": ["--serve"],
+      "env": null,
+      "env_vars": ["DEMO_TOKEN"],
+      "cwd": null
+    }
+  }
+]

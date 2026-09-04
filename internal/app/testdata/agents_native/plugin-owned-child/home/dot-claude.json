@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "ctx": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["start.mjs"],
+      "cwd": "@HOME@/.claude/plugins/cache/ctx-market/ctx/1.0.169"
+    }
+  }
+}

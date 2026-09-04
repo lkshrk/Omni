@@ -1,0 +1,6 @@
+{
+  "marketplaces": [
+    {"name": "dup", "marketplaceSource": {"source": "https://example.test/one.git"}},
+    {"name": "dup", "marketplaceSource": {"source": "https://example.test/two.git"}}
+  ]
+}

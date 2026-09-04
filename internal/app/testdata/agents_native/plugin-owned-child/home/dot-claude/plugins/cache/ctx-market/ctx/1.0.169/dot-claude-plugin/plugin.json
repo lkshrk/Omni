@@ -1,0 +1,7 @@
+{
+  "name": "ctx",
+  "version": "1.0.169",
+  "mcpServers": {
+    "ctx": {"command": "node", "args": ["start.mjs"]}
+  }
+}

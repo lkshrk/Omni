@@ -1,0 +1,13 @@
+[
+  {
+    "name": "remote",
+    "enabled": true,
+    "transport": {
+      "type": "streamable_http",
+      "url": "https://example.test/mcp",
+      "bearer_token_env_var": "API_TOKEN",
+      "http_headers": null,
+      "env_http_headers": {"x-key": "KEY_VAR"}
+    }
+  }
+]

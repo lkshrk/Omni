@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "shared": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["server.js", "--claude"]
+    }
+  }
+}

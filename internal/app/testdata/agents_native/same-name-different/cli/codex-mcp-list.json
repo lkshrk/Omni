@@ -1,0 +1,14 @@
+[
+  {
+    "name": "shared",
+    "enabled": true,
+    "transport": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["other.js", "--codex"],
+      "env": null,
+      "env_vars": [],
+      "cwd": null
+    }
+  }
+]

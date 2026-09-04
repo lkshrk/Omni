@@ -1,0 +1,4 @@
+{
+  "error": "has literal sensitive environment field \"TOKEN\"",
+  "errorMustNotContain": ["literal-token"]
+}

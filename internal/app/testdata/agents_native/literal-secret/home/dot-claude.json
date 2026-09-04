@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "demo": {
+      "type": "stdio",
+      "command": "server",
+      "env": {"TOKEN": "literal-token"}
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "demo": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "demo-server"],
+      "env": {"MODE": "fast"}
+    }
+  }
+}

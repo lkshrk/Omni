@@ -1,0 +1,24 @@
+{
+  "mcp": [
+    {
+      "name": "shared",
+      "target": "claude",
+      "definition": {
+        "name": "shared",
+        "transport": "stdio",
+        "command": "node",
+        "args": ["server.js", "--claude"]
+      }
+    },
+    {
+      "name": "shared",
+      "target": "codex",
+      "definition": {
+        "name": "shared",
+        "transport": "stdio",
+        "command": "node",
+        "args": ["other.js", "--codex"]
+      }
+    }
+  ]
+}

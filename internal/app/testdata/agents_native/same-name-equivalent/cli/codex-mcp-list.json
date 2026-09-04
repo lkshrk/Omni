@@ -1,0 +1,14 @@
+[
+  {
+    "name": "shared",
+    "enabled": true,
+    "transport": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["server.js"],
+      "env": {"MODE": "${env:MODE}"},
+      "env_vars": [],
+      "cwd": null
+    }
+  }
+]

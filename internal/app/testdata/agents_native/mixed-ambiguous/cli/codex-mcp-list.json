@@ -1,0 +1,14 @@
+[
+  {
+    "name": "clean",
+    "enabled": true,
+    "transport": {
+      "type": "stdio",
+      "command": "clean-server",
+      "args": [],
+      "env": null,
+      "env_vars": [],
+      "cwd": null
+    }
+  }
+]

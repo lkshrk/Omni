@@ -1,0 +1,15 @@
+{
+  "installed": [
+    {
+      "pluginId": "demo@official",
+      "name": "demo",
+      "marketplaceName": "official",
+      "version": "2.1.0",
+      "installed": true,
+      "enabled": true,
+      "source": {"source": "git", "url": "@HOME@/.codex/.tmp/marketplaces/official"},
+      "marketplaceSource": {"sourceType": "git", "source": "https://github.com/acme/plugins"}
+    }
+  ],
+  "available": []
+}

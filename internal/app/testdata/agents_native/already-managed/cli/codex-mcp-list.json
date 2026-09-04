@@ -1,0 +1,14 @@
+[
+  {
+    "name": "context-mode",
+    "enabled": true,
+    "transport": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["@HOME@/.apm/apm_modules/context-mode/start.mjs"],
+      "env": {},
+      "env_vars": [],
+      "cwd": null
+    }
+  }
+]

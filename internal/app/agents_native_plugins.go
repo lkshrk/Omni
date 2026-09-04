@@ -19,6 +19,8 @@ type nativePlugin struct {
 	Name        string
 	Marketplace string
 	Target      string
+	Version     string
+	InstallRoot string
 }
 
 type nativeMarketplace struct {

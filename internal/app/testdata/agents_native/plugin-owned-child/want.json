@@ -1,0 +1,25 @@
+{
+  "plugins": [
+    {
+      "name": "ctx",
+      "marketplace": "ctx-market",
+      "target": "claude",
+      "version": "1.0.169",
+      "installRoot": "@HOME@/.claude/plugins/cache/ctx-market/ctx/1.0.169"
+    }
+  ],
+  "marketplaces": [{"name": "ctx-market", "source": "acme/ctx"}],
+  "mcp": [
+    {
+      "name": "ctx",
+      "target": "claude",
+      "definition": {
+        "name": "ctx",
+        "transport": "stdio",
+        "command": "node",
+        "args": ["start.mjs"],
+        "cwd": "@HOME@/.claude/plugins/cache/ctx-market/ctx/1.0.169"
+      }
+    }
+  ]
+}
