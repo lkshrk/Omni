@@ -1,0 +1,5 @@
+{
+  "marketplaces": [
+    {"name": "tools", "marketplaceSource": {"source": "git@github.com:Acme/Tools.git"}}
+  ]
+}

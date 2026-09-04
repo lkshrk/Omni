@@ -168,8 +168,34 @@ func resolveMCPGroup(group []agentObservation, candidates []pluginMCPOwner) []ag
 	return out
 }
 
+// marketplaceSourceKey folds github spellings of one repo together for comparison only; callers still render the source verbatim.
+func marketplaceSourceKey(source string) string {
+	source = strings.TrimSpace(source)
+	trimmed := strings.ToLower(source)
+	for _, prefix := range []string{"https://github.com/", "http://github.com/", "git@github.com:", "ssh://git@github.com/"} {
+		if rest, ok := strings.CutPrefix(trimmed, prefix); ok {
+			trimmed = rest
+			break
+		}
+	}
+	trimmed = strings.TrimSuffix(strings.TrimRight(trimmed, "/"), ".git")
+	if !looksLikeGithubOwnerRepo(trimmed) {
+		return source
+	}
+	return trimmed
+}
+
+func looksLikeGithubOwnerRepo(value string) bool {
+	owner, repo, ok := strings.Cut(value, "/")
+	if !ok || owner == "" || repo == "" || strings.Contains(repo, "/") {
+		return false
+	}
+	return !strings.Contains(value, ":") && !strings.HasPrefix(owner, ".") && !strings.HasPrefix(owner, "~")
+}
+
 func resolveMarketplaceSources(sorted []agentObservation) (map[string]string, map[string]string) {
 	seen := map[string][]string{}
+	keys := map[string][]string{}
 	for _, observation := range sorted {
 		if observation.Kind != agentKindMarketplace || unsafeAgentObservation(observation) {
 			continue
@@ -184,14 +210,17 @@ func resolveMarketplaceSources(sorted []agentObservation) (map[string]string, ma
 		if !slices.Contains(seen[observation.Identity], source) {
 			seen[observation.Identity] = append(seen[observation.Identity], source)
 		}
+		if key := marketplaceSourceKey(source); !slices.Contains(keys[observation.Identity], key) {
+			keys[observation.Identity] = append(keys[observation.Identity], key)
+		}
 	}
 	sources, reasons := map[string]string{}, map[string]string{}
 	for name, list := range seen {
 		sort.Strings(list)
-		switch len(list) {
-		case 0:
+		switch {
+		case len(list) == 0:
 			sources[name], reasons[name] = "", agentReasonNoSource
-		case 1:
+		case len(keys[name]) == 1:
 			sources[name] = list[0]
 		default:
 			sources[name] = ""

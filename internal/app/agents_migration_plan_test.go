@@ -35,12 +35,16 @@ func TestResolveAgentDispositionsOverFixtures(t *testing.T) {
 			{kind: agentKindPlugin, identity: "tooling@acme", target: "claude", action: agentActionImport},
 		}},
 		{fixture: "standalone-matches-package-name", want: []wantDisposition{
-			{kind: agentKindMarketplace, identity: "official", target: "claude", action: agentActionRetain, reason: "marketplace sources differ across targets"},
-			{kind: agentKindMarketplace, identity: "official", target: "codex", action: agentActionRetain, reason: "marketplace sources differ across targets"},
+			{kind: agentKindMarketplace, identity: "official", target: "claude", action: agentActionImport},
 			{kind: agentKindMCP, identity: "demo", target: "claude", action: agentActionImport, targets: []string{"claude"}},
 			{kind: agentKindMCP, identity: "demo", target: "codex", action: agentActionRetain, reason: agentReasonPerTarget},
-			{kind: agentKindPlugin, identity: "demo@official", target: "claude", action: agentActionRetain, reason: "marketplace sources differ across targets"},
-			{kind: agentKindPlugin, identity: "demo@official", target: "codex", action: agentActionRetain, reason: "marketplace sources differ across targets"},
+			{kind: agentKindPlugin, identity: "demo@official", target: "claude", action: agentActionImport},
+			{kind: agentKindPlugin, identity: "demo@official", target: "codex", action: agentActionImport},
+		}},
+		{fixture: "same-marketplace-spelled-differently", want: []wantDisposition{
+			{kind: agentKindMarketplace, identity: "tools", target: "claude", action: agentActionImport},
+			{kind: agentKindPlugin, identity: "helper@tools", target: "claude", action: agentActionImport},
+			{kind: agentKindPlugin, identity: "helper@tools", target: "codex", action: agentActionImport},
 		}},
 		{fixture: "same-name-equivalent", want: []wantDisposition{
 			{kind: agentKindMCP, identity: "shared", target: "claude", action: agentActionImport, targets: []string{"claude", "codex"}},
@@ -84,6 +88,32 @@ func TestResolveAgentDispositionsOverFixtures(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMarketplaceSourceKeyFoldsGithubSpellings(t *testing.T) {
+	for _, test := range []struct {
+		source string
+		want   string
+	}{
+		{source: "mksglu/context-mode", want: "mksglu/context-mode"},
+		{source: "https://github.com/mksglu/context-mode.git", want: "mksglu/context-mode"},
+		{source: "http://github.com/mksglu/context-mode/", want: "mksglu/context-mode"},
+		{source: "git@github.com:mksglu/context-mode", want: "mksglu/context-mode"},
+		{source: "ssh://git@github.com/mksglu/context-mode.git", want: "mksglu/context-mode"},
+		{source: "  MkSglu/Context-Mode  ", want: "mksglu/context-mode"},
+		{source: "../market", want: "../market"},
+		{source: "https://github.com/../market.git", want: "https://github.com/../market.git"},
+		{source: "https://api.ai.h-cloud.lan/claude-code/marketplace.json", want: "https://api.ai.h-cloud.lan/claude-code/marketplace.json"},
+		{source: "git@gitlab.test:mksglu/context-mode.git", want: "git@gitlab.test:mksglu/context-mode.git"},
+		{source: "~/market", want: "~/market"},
+	} {
+		if got := marketplaceSourceKey(test.source); got != test.want {
+			t.Errorf("marketplaceSourceKey(%q) = %q, want %q", test.source, got, test.want)
+		}
+	}
+	if marketplaceSourceKey("../market") == marketplaceSourceKey("https://github.com/../market.git") {
+		t.Fatal("relative path folded into a github key")
 	}
 }
 

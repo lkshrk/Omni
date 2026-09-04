@@ -1,0 +1,11 @@
+{
+  "plugins": [
+    {"name": "helper", "marketplace": "tools", "target": "claude", "version": "1.0.0"},
+    {"name": "helper", "marketplace": "tools", "target": "codex", "version": "1.0.0"}
+  ],
+  "marketplaces": [
+    {"name": "tools", "source": "acme/tools"},
+    {"name": "tools", "source": "git@github.com:Acme/Tools.git"}
+  ],
+  "mcp": []
+}

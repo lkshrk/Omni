@@ -1,0 +1,6 @@
+{
+  "installed": [
+    {"pluginId": "helper@tools", "name": "helper", "marketplaceName": "tools", "version": "1.0.0", "enabled": true}
+  ],
+  "available": []
+}
