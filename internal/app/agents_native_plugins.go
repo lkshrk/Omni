@@ -32,6 +32,11 @@ type nativeMCP struct {
 	Target     string
 }
 
+type nativeMCPOwner struct {
+	Identity   string
+	Definition legacyEntry
+}
+
 // recoverNativeAgentPlan inventories native plugin and MCP state without changing it.
 func (a *App) recoverNativeAgentPlan(ctx context.Context) (agentBundlePlan, string, error) {
 	var plugins []nativePlugin
@@ -113,7 +118,24 @@ func (a *App) recoverNativeAgentPlan(ctx context.Context) (agentBundlePlan, stri
 		plan.Decls.Marketplaces[marketplace] = mustNativeJSON(legacyEntry{Name: marketplace, Source: sources[marketplace]})
 	}
 	mcpByName := map[string]legacyEntry{}
+	ownedMCP := map[string]nativeMCPOwner{}
 	for _, server := range servers {
+		for _, plugin := range plugins {
+			if plugin.Name == server.Name && plugin.Target == server.Target && nativeMCPPathProvesPlugin(server.Definition.Cwd, plugin) {
+				identity := plugin.Name + "@" + plugin.Marketplace
+				if prior, ok := ownedMCP[server.Name]; ok && prior.Identity != identity {
+					return agentBundlePlan{}, "", fmt.Errorf("native MCP server %q has ambiguous plugin owners %q and %q", server.Name, prior.Identity, identity)
+				}
+				ownedMCP[server.Name] = nativeMCPOwner{Identity: identity, Definition: server.Definition}
+			}
+		}
+	}
+	var suppressedMCP []string
+	for _, server := range servers {
+		if owner, ok := ownedMCP[server.Name]; ok && targets[owner.Identity][server.Target] && sameNativeMCPWrapper(owner.Definition, server.Definition) && (nativeMCPPathProvesIdentity(server.Definition.Cwd, owner.Identity) || nativeMCPWrapperHasNoTargetConfig(server.Definition)) {
+			suppressedMCP = append(suppressedMCP, server.Name)
+			continue
+		}
 		definition := server.Definition
 		definition.Name = server.Name
 		definition.Agents = nil
@@ -148,7 +170,34 @@ func (a *App) recoverNativeAgentPlan(ctx context.Context) (agentBundlePlan, stri
 	for _, identity := range slices.Compact(nativeOnly) {
 		rendered.WriteString("# native-only: " + identity + " (Codex built-in marketplace has no APM source)\n")
 	}
+	sort.Strings(suppressedMCP)
+	for _, name := range slices.Compact(suppressedMCP) {
+		rendered.WriteString("# suppressed: plugin-owned native MCP " + name + "\n")
+	}
 	return plan, rendered.String(), nil
+}
+
+func nativeMCPPathProvesPlugin(cwd string, plugin nativePlugin) bool {
+	return nativeMCPPathProvesIdentity(cwd, plugin.Name+"@"+plugin.Marketplace)
+}
+
+func nativeMCPPathProvesIdentity(cwd, identity string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil || cwd == "" {
+		return false
+	}
+	name, marketplace := splitNativePluginIdentity(identity)
+	path := strings.ToLower(filepath.ToSlash(filepath.Clean(cwd))) + "/"
+	want := strings.ToLower(filepath.ToSlash(filepath.Join(home, ".codex", "plugins", "cache", marketplace, name))) + "/"
+	return strings.HasPrefix(path, want)
+}
+
+func sameNativeMCPWrapper(a, b legacyEntry) bool {
+	return a.Transport == b.Transport && a.Command == b.Command && a.URL == b.URL
+}
+
+func nativeMCPWrapperHasNoTargetConfig(entry legacyEntry) bool {
+	return entry.Cwd == "" && len(entry.Env) == 0 && len(entry.EnvLiteral) == 0 && len(entry.Headers) == 0
 }
 
 func canonicalNativeMarketplaceSource(source string) string {

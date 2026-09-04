@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -248,6 +249,91 @@ func TestRecoverNativeAgentPlanRejectsConflictingMCPWithoutWriting(t *testing.T)
 	template, _ := AgentsTemplatePath()
 	if _, statErr := os.Stat(template); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("conflict wrote template: %v", statErr)
+	}
+}
+
+func TestRecoverNativeAgentPlanSuppressesPluginOwnedMCPWrappers(t *testing.T) {
+	a, exec := newNativeInventoryApp(t, map[string]bool{"claude": true, "codex": true},
+		nativeRule("claude plugins list --json", `[{"id":"context-mode@context-mode"}]`),
+		nativeRule("claude plugins marketplace list --json", `[{"name":"context-mode","source":"github","repo":"mksglu/context-mode"}]`),
+		nativeRule("codex plugin list --json", `{"installed":[{"name":"context-mode","marketplaceName":"context-mode"}],"available":[]}`),
+		nativeRule("codex plugin marketplace list --json", `{"marketplaces":[{"name":"context-mode","marketplaceSource":{"source":"https://github.com/mksglu/context-mode.git"}}]}`),
+	)
+	home, _ := os.UserHomeDir()
+	pluginCwd := filepath.Join(home, ".codex", "plugins", "cache", "context-mode", "context-mode", "1.0.169")
+	exec.AddRule(nativeRule("codex mcp list --json", fmt.Sprintf(`[{"name":"context-mode","enabled":true,"transport":{"type":"stdio","command":"node","args":["./start.mjs"],"cwd":%q,"env":{"CONTEXT_MODE_PLATFORM":"codex"}}}]`, pluginCwd)))
+	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"context-mode":{"type":"stdio","command":"node","args":["./start.mjs"]}}}`)
+
+	plan, rendered, err := a.recoverNativeAgentPlan(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Decls.MCPServers) != 0 {
+		t.Fatalf("plugin-owned MCP wrapper was imported: %#v", plan.Decls.MCPServers)
+	}
+	for _, want := range []string{"name: context-mode", "marketplace: context-mode", "- claude", "- codex", "# suppressed: plugin-owned native MCP context-mode"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered manifest missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestRecoverNativeAgentPlanDoesNotSuppressUnprovenMCP(t *testing.T) {
+	a, _ := newNativeInventoryApp(t, map[string]bool{"claude": true, "codex": true},
+		nativeRule("claude plugins list --json", `[{"id":"context-mode@context-mode"}]`),
+		nativeRule("claude plugins marketplace list --json", `[{"name":"context-mode","source":"github","repo":"mksglu/context-mode"}]`),
+		nativeRule("codex plugin list --json", `[{"name":"context-mode","marketplaceName":"context-mode"}]`),
+		nativeRule("codex plugin marketplace list --json", `[{"name":"context-mode","marketplaceSource":{"source":"mksglu/context-mode"}}]`),
+		nativeRule("codex mcp list --json", `[{"name":"context-mode","transport":{"type":"stdio","command":"node","args":["other.mjs"],"cwd":"/tmp/not-a-plugin"}}]`),
+	)
+	home, _ := os.UserHomeDir()
+	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"context-mode":{"type":"stdio","command":"node","args":["./start.mjs"]}}}`)
+
+	_, _, err := a.recoverNativeAgentPlan(t.Context())
+	if err == nil || !strings.Contains(err.Error(), `MCP server "context-mode" has conflicting definitions`) {
+		t.Fatalf("error = %v, want conflicting definitions", err)
+	}
+}
+
+func TestRecoverNativeAgentPlanDoesNotSuppressDifferentSameNameWrapper(t *testing.T) {
+	a, exec := newNativeInventoryApp(t, map[string]bool{"claude": true, "codex": true},
+		nativeRule("claude plugins list --json", `[{"id":"context-mode@context-mode"}]`),
+		nativeRule("claude plugins marketplace list --json", `[{"name":"context-mode","source":"github","repo":"mksglu/context-mode"}]`),
+		nativeRule("codex plugin list --json", `[{"name":"context-mode","marketplaceName":"context-mode"}]`),
+		nativeRule("codex plugin marketplace list --json", `[{"name":"context-mode","marketplaceSource":{"source":"mksglu/context-mode"}}]`),
+	)
+	home, _ := os.UserHomeDir()
+	pluginCwd := filepath.Join(home, ".codex", "plugins", "cache", "context-mode", "context-mode", "1.0.169")
+	exec.AddRule(nativeRule("codex mcp list --json", fmt.Sprintf(`[{"name":"context-mode","transport":{"type":"stdio","command":"node","args":["./start.mjs"],"cwd":%q}}]`, pluginCwd)))
+	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"context-mode":{"type":"stdio","command":"node","args":["custom.mjs"]}}}`)
+
+	plan, _, err := a.recoverNativeAgentPlan(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Decls.MCPServers) != 1 {
+		t.Fatalf("unrelated same-name MCP was suppressed: %#v", plan.Decls.MCPServers)
+	}
+}
+
+func TestRecoverNativeAgentPlanDoesNotSuppressConfiguredSameNameWrapper(t *testing.T) {
+	a, exec := newNativeInventoryApp(t, map[string]bool{"claude": true, "codex": true},
+		nativeRule("claude plugins list --json", `[{"id":"context-mode@context-mode"}]`),
+		nativeRule("claude plugins marketplace list --json", `[{"name":"context-mode","source":"github","repo":"mksglu/context-mode"}]`),
+		nativeRule("codex plugin list --json", `[{"name":"context-mode","marketplaceName":"context-mode"}]`),
+		nativeRule("codex plugin marketplace list --json", `[{"name":"context-mode","marketplaceSource":{"source":"mksglu/context-mode"}}]`),
+	)
+	home, _ := os.UserHomeDir()
+	pluginCwd := filepath.Join(home, ".codex", "plugins", "cache", "context-mode", "context-mode", "1.0.169")
+	exec.AddRule(nativeRule("codex mcp list --json", fmt.Sprintf(`[{"name":"context-mode","transport":{"type":"stdio","command":"node","args":["./start.mjs"],"cwd":%q}}]`, pluginCwd)))
+	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"context-mode":{"type":"stdio","command":"node","args":["./start.mjs"],"env":{"MODE":"custom"}}}}`)
+
+	plan, _, err := a.recoverNativeAgentPlan(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Decls.MCPServers) != 1 {
+		t.Fatalf("configured same-name MCP was suppressed: %#v", plan.Decls.MCPServers)
 	}
 }
 
