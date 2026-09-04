@@ -156,18 +156,36 @@ def package_roots():
     return roots
 
 
+def package_names(root):
+    names = [os.path.basename(root)]
+    manifest = os.path.join(root, "apm.yml")
+    if os.path.isfile(manifest):
+        for line in open(manifest):
+            m = re.match(r"^name:\s*(\S+)\s*$", line)
+            if m:
+                names.append(m.group(1).strip("'\""))
+                break
+    return names
+
+
 def sources():
     for root in sorted(package_roots()):
+        names = package_names(root)
         for kind in KINDS:
             for src in (os.path.join(root, kind), os.path.join(root, ".claude", kind)):
                 if os.path.isdir(src):
-                    yield src, kind
+                    yield src, kind, names
         codex = os.path.join(root, ".codex", "agents")
         if os.path.isdir(codex):
-            yield codex, "codex-agents"
+            yield codex, "codex-agents", names
 
 
-def destinations(src, kind):
+def destinations(src, kind, names):
+    if kind == "hooks":
+        for n in names:
+            yield os.path.join(home, ".claude", "hooks", n)
+            yield os.path.join(home, ".codex", "hooks", n)
+        return
     for n in sorted(os.listdir(src)):
         if n.startswith("."):
             continue
@@ -181,11 +199,13 @@ def destinations(src, kind):
                 yield os.path.join(home, ".claude", "skills", n)
         elif not isdir:
             yield os.path.join(home, ".claude", kind, n)
+            if kind == "agents" and n.endswith(".md"):
+                yield os.path.join(home, ".codex", "agents", n[:-3] + ".toml")
 
 
 seen = set()
-for src, kind in sources():
-    for dest in destinations(src, kind):
+for src, kind, names in sources():
+    for dest in destinations(src, kind, names):
         if dest in seen:
             continue
         seen.add(dest)
