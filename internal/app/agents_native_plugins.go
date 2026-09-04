@@ -59,14 +59,12 @@ func (a *App) recoverNativeAgentPlan(ctx context.Context) (agentBundlePlan, stri
 	}
 
 	sources := map[string]string{}
-	missingSources := map[string]bool{}
 	for _, marketplace := range marketplaces {
 		if marketplace.Name == "" {
 			continue
 		}
 		source := canonicalNativeMarketplaceSource(marketplace.Source)
 		if source == "" {
-			missingSources[marketplace.Name] = true
 			continue
 		}
 		if existing, ok := sources[marketplace.Name]; ok && existing != source {
@@ -76,15 +74,17 @@ func (a *App) recoverNativeAgentPlan(ctx context.Context) (agentBundlePlan, stri
 	}
 
 	targets := map[string]map[string]bool{}
+	var nativeOnly []string
 	for _, plugin := range plugins {
 		identity := plugin.Name + "@" + plugin.Marketplace
 		if plugin.Name == "" || plugin.Marketplace == "" {
 			return agentBundlePlan{}, "", fmt.Errorf("native plugin has invalid identity %q", identity)
 		}
-		if missingSources[plugin.Marketplace] {
-			return agentBundlePlan{}, "", fmt.Errorf("native plugin %q has a marketplace entry without a source", identity)
-		}
 		if sources[plugin.Marketplace] == "" {
+			if plugin.Target == "codex" && plugin.Marketplace == "openai-curated" {
+				nativeOnly = append(nativeOnly, identity)
+				continue
+			}
 			return agentBundlePlan{}, "", fmt.Errorf("native plugin %q has no unambiguous marketplace source", identity)
 		}
 		if targets[identity] == nil {
@@ -143,6 +143,10 @@ func (a *App) recoverNativeAgentPlan(ctx context.Context) (agentBundlePlan, stri
 	rendered.WriteString(agentsMigrationMarker + "\n" + manifest)
 	for _, command := range commands {
 		rendered.WriteString("# " + command + "\n")
+	}
+	sort.Strings(nativeOnly)
+	for _, identity := range slices.Compact(nativeOnly) {
+		rendered.WriteString("# native-only: " + identity + " (Codex built-in marketplace has no APM source)\n")
 	}
 	return plan, rendered.String(), nil
 }

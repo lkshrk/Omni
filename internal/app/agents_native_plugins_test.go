@@ -107,8 +107,8 @@ func TestRecoverNativePluginPlanUnionsTargets(t *testing.T) {
 	a, _ := newNativeInventoryApp(t, map[string]bool{"claude": true, "codex": true},
 		nativeRule("claude plugins list --json", `{"installed":[{"id":"@scope/demo@official"}]}`),
 		nativeRule("claude plugins marketplace list --json", `{"marketplaces":[{"name":"official","source":"github","repo":"acme/plugins"}]}`),
-		nativeRule("codex plugin list --json", `[{"name":"@scope/demo","marketplaceName":"official"}]`),
-		nativeRule("codex plugin marketplace list --json", `[{"name":"official","marketplaceSource":{"source":"https://github.com/ACME/plugins.git"}}]`),
+		nativeRule("codex plugin list --json", `[{"name":"@scope/demo","marketplaceName":"official"},{"name":"superpowers","marketplaceName":"openai-curated"}]`),
+		nativeRule("codex plugin marketplace list --json", `[{"name":"official","marketplaceSource":{"source":"https://github.com/ACME/plugins.git"}},{"name":"openai-curated","marketplaceSource":{"source":""}}]`),
 	)
 	_, rendered, err := a.recoverNativeAgentPlan(t.Context())
 	if err != nil {
@@ -121,6 +121,9 @@ func TestRecoverNativePluginPlanUnionsTargets(t *testing.T) {
 	}
 	if strings.Count(rendered, "marketplace: official") != 1 {
 		t.Fatalf("plugin was not unioned:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "# native-only: superpowers@openai-curated") || strings.Contains(rendered, "marketplace: openai-curated") {
+		t.Fatalf("Codex built-in plugin was not preserved as native-only:\n%s", rendered)
 	}
 }
 
