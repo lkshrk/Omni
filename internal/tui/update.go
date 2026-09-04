@@ -110,6 +110,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		if msg.err == nil && !msg.noConfig && !msg.noHost {
 			observeTestTools(m.allTools)
 		}
+		cmds = append(cmds, m.replayStartupKeys(msg)...)
 
 	case setupImportDoneMsg:
 		cmds = append(cmds, m.handleSetupImportDoneMsg(msg)...)

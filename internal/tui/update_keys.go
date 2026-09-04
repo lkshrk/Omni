@@ -96,6 +96,8 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		if m.mode == viewSkills && key.Matches(msg, m.keys.AgentsRefresh) {
 			_, refresh := m.handleAgentsGlobalActionKeyMsg(msg)
 			cmds = append(cmds, refresh...)
+		} else {
+			m.queueStartupKey(msg)
 		}
 		return *m, tea.Batch(cmds...)
 	}

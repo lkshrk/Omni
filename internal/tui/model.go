@@ -404,6 +404,8 @@ type Model struct {
 	doctorRefreshPending           bool // set when a fix needs a doctor rerun but doctor is in flight or not ready
 	doctorPreserveStatus           bool // keep the triggering operation's result visible through its doctor refresh
 	cursorHidden                   bool // true until user navigates after tab switch
+	startupSnapshotPending         bool
+	startupKeyQueue                []tea.KeyPressMsg
 	statusCursor                   int
 	dashboardReconcilePlanOpen     bool
 	dashboardReconcilePlanCursor   int
@@ -552,30 +554,31 @@ func New(ctx context.Context, a *app.App) Model {
 	si.CharLimit = 256
 
 	return Model{
-		app:              a,
-		ctx:              ctx,
-		cancel:           cancel,
-		keys:             DefaultKeyMap(),
-		spinner:          sp,
-		help:             newHelp(),
-		filter:           fi,
-		commandInput:     ci,
-		settingsInput:    si,
-		mode:             viewStatus,
-		commandCursor:    -1,
-		commandOrigin:    viewList,
-		loading:          true,
-		cursor:           -1, // nothing selected until the user navigates
-		cursorHidden:     true,
-		upgradingKeys:    make(map[string]bool),
-		searchCache:      make(map[string]searchCacheEntry),
-		dotsConfirmIdx:   -1,
-		agentsConfirmIdx: -1,
-		dotsOverwriteIdx: -1,
-		dotsLocalIdx:     -1,
-		dotsIgnoreIdx:    -1,
-		dotsVariantIdx:   -1,
-		dangerConfirmRow: -1,
+		app:                    a,
+		ctx:                    ctx,
+		cancel:                 cancel,
+		keys:                   DefaultKeyMap(),
+		spinner:                sp,
+		help:                   newHelp(),
+		filter:                 fi,
+		commandInput:           ci,
+		settingsInput:          si,
+		mode:                   viewStatus,
+		commandCursor:          -1,
+		commandOrigin:          viewList,
+		loading:                true,
+		startupSnapshotPending: true,
+		cursor:                 -1, // nothing selected until the user navigates
+		cursorHidden:           true,
+		upgradingKeys:          make(map[string]bool),
+		searchCache:            make(map[string]searchCacheEntry),
+		dotsConfirmIdx:         -1,
+		agentsConfirmIdx:       -1,
+		dotsOverwriteIdx:       -1,
+		dotsLocalIdx:           -1,
+		dotsIgnoreIdx:          -1,
+		dotsVariantIdx:         -1,
+		dangerConfirmRow:       -1,
 		// Async results can land before the first WindowSizeMsg; without a sane size those frames overrun the real terminal.
 		width:         defaultTerminalWidth,
 		height:        defaultTerminalHeight,

@@ -32,6 +32,12 @@ func TestCLIBinaryDotsResolveAllUseLocalAdoptsEveryConflict(t *testing.T) {
 
 func TestCLIBinaryAgentsRefreshDelegatesOutdatedQuery(t *testing.T) {
 	root, home, cache, env, logPath := agentsRemainingBinaryFixture(t)
+	if err := os.MkdirAll(filepath.Join(home, ".apm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".apm", "apm.lock.yaml"), []byte("lockfile_version: '1'\ndependencies: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	out := runOmniOutput(t, buildOmniBinary(t), root, env, "--cache-dir", cache, "agents", "outdated")
 	if !strings.Contains(out, "delegated: outdated -g --parallel-checks 4") {
 		t.Fatalf("agents refresh output: %s", out)

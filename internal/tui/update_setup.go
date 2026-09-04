@@ -40,6 +40,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 
 	wasSetupReloading := m.setupReloading
 	m.loading = false
+	m.startupSnapshotPending = false
 	if !wasSetupReloading {
 		m.setupReloading = false
 	}

@@ -60,3 +60,28 @@ func (m *Model) scrubLoadingOwner() {
 		m.loadingOwner = loadingUnowned
 	}
 }
+
+// Tabs render their chrome before the startup snapshot lands, so keys typed at that point look accepted; hold them instead of dropping them.
+const startupKeyQueueLimit = 32
+
+func (m *Model) queueStartupKey(msg tea.KeyPressMsg) {
+	if !m.startupSnapshotPending || len(m.startupKeyQueue) >= startupKeyQueueLimit {
+		return
+	}
+	m.startupKeyQueue = append(m.startupKeyQueue, msg)
+}
+
+func (m *Model) replayStartupKeys(loaded toolsLoadedMsg) []tea.Cmd {
+	queued := m.startupKeyQueue
+	m.startupKeyQueue = nil
+	if loaded.err != nil || loaded.noConfig || loaded.noHost || m.loading || !isMainTabMode(m.mode) {
+		return nil
+	}
+	var cmds []tea.Cmd
+	for _, key := range queued {
+		if _, cmd := m.handleKeyPressMsg(key, nil); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	return cmds
+}
