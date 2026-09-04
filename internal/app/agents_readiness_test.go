@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -89,7 +88,7 @@ func TestAgentsReadinessStates(t *testing.T) {
 			if test.setup != nil {
 				test.setup(t, home)
 			}
-			got, err := a.AgentsReadiness(context.Background(), "testhost")
+			got, err := a.AgentsReadiness(context.Background())
 			if err != nil || got.State != test.want {
 				t.Fatalf("readiness = %+v, err=%v; want %s", got, err, test.want)
 			}
@@ -126,7 +125,7 @@ func TestAgentsReadinessRejectsUnsafeOrUnreadableWorkspaceFiles(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			a, _, home := newAgentsReadinessApp(t, true, pinnedVersionResponse())
 			test.setup(t, home)
-			got, err := a.AgentsReadiness(context.Background(), "testhost")
+			got, err := a.AgentsReadiness(context.Background())
 			if err != nil || got.State != AgentsReadinessInvalid || len(got.Details) == 0 {
 				t.Fatalf("readiness = %+v, err=%v", got, err)
 			}
@@ -154,7 +153,7 @@ func TestAgentsReadinessRejectsUnsafeWorkspaceDirectory(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			a, _, home := newAgentsReadinessApp(t, true, pinnedVersionResponse())
 			test.setup(t, home)
-			got, err := a.AgentsReadiness(context.Background(), "testhost")
+			got, err := a.AgentsReadiness(context.Background())
 			if err != nil || got.State != AgentsReadinessInvalid || len(got.Details) == 0 {
 				t.Fatalf("readiness = %+v, err=%v", got, err)
 			}
@@ -174,7 +173,7 @@ func TestAgentsReadinessMissingAPMIsInvalidWithFixHint(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			a, _, _ := newAgentsReadinessApp(t, test.available, test.responses...)
-			got, err := a.AgentsReadiness(context.Background(), "testhost")
+			got, err := a.AgentsReadiness(context.Background())
 			if err != nil || got.State != AgentsReadinessInvalid {
 				t.Fatalf("readiness = %+v, err=%v", got, err)
 			}
@@ -189,7 +188,7 @@ func TestAPMRepairErrorsDoNotHideRuntimeErrors(t *testing.T) {
 	t.Run("executor", func(t *testing.T) {
 		permissionErr := os.ErrPermission
 		a, _, _ := newAgentsReadinessApp(t, true, executor.MockCall{Err: permissionErr})
-		_, err := a.AgentsReadiness(context.Background(), "testhost")
+		_, err := a.AgentsReadiness(context.Background())
 		var repair *APMRepairError
 		if !errors.Is(err, permissionErr) || errors.As(err, &repair) {
 			t.Fatalf("error = %T %v", err, err)
@@ -197,7 +196,7 @@ func TestAPMRepairErrorsDoNotHideRuntimeErrors(t *testing.T) {
 	})
 	t.Run("context", func(t *testing.T) {
 		a, _, _ := newAgentsReadinessApp(t, true, executor.MockCall{Err: context.Canceled})
-		_, err := a.AgentsReadiness(context.Background(), "testhost")
+		_, err := a.AgentsReadiness(context.Background())
 		var repair *APMRepairError
 		if !errors.Is(err, context.Canceled) || errors.As(err, &repair) {
 			t.Fatalf("error = %T %v", err, err)
@@ -309,48 +308,23 @@ func hashTree(t *testing.T, root string) string {
 
 func TestAgentsReadinessNeverWrites(t *testing.T) {
 	a, mock, home := newAgentsReadinessApp(t, true, pinnedVersionResponse())
-	legacy := `{"agents":{"mcp_servers":[{"name":"legacy","transport":"stdio","command":"legacy-mcp"}]},"groups":[{"name":"g","mcp_servers":["legacy"]}],"hosts":{"coder":["g"]}}`
-	if err := os.WriteFile(a.ConfigPath, []byte(legacy), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"native":{"command":"npx","args":["native-mcp"]}}}`)
 	if err := os.MkdirAll(filepath.Join(home, ".apm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
 	before := hashTree(t, home)
-	got, err := a.AgentsReadiness(context.Background(), "coder")
+	got, err := a.AgentsReadiness(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.State != AgentsReadinessEmpty || got.CTA != AgentsCTAMigrate {
 		t.Fatalf("readiness = %+v", got)
 	}
-	if !slices.Contains(got.Details, "run omni agents migrate --host coder") {
-		t.Fatalf("details = %q", got.Details)
-	}
 	if after := hashTree(t, home); after != before {
 		t.Fatalf("readiness wrote to HOME: %s -> %s", before, after)
 	}
 	if len(mock.Calls) != 1 || strings.Join(mock.Calls[0].Args, " ") != "--version" {
 		t.Fatalf("calls = %+v", mock.Calls)
-	}
-}
-
-func TestAgentsReadinessAsksForMigrateWithReadyWorkspace(t *testing.T) {
-	a, _, home := newAgentsReadinessApp(t, true, pinnedVersionResponse())
-	if err := os.WriteFile(a.ConfigPath, []byte(`{"agents":{}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	writeAgentsWorkspaceFile(t, home, "apm.yml", "name: live\n")
-	writeAgentsWorkspaceFile(t, home, "apm.lock.yaml", "dependencies: []\n")
-
-	before := hashTree(t, home)
-	got, err := a.AgentsReadiness(context.Background(), "coder")
-	if err != nil || got.State != AgentsReadinessReady || got.CTA != AgentsCTAMigrate {
-		t.Fatalf("readiness = %+v, err=%v", got, err)
-	}
-	if after := hashTree(t, home); after != before {
-		t.Fatalf("readiness wrote to HOME: %s -> %s", before, after)
 	}
 }

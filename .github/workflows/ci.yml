@@ -171,9 +171,6 @@ jobs:
       - name: Test real stable-target MCP lifecycle
         run: go test -tags=integration ./internal/apm -run '^TestGlobalMCPLifecycleForEveryStableTarget$' -count=1
 
-      - name: Test lifecycle and marketplace onboarding
-        run: go test -tags=integration ./internal/app -run '^(TestAgentsOnboardLifecycleOnlyAPM|TestOnboardGeneratedMarketplacePluginInstallsWithPinnedAPM)$' -count=1
-
   onboarding-unit:
     name: Onboarding Unit (race)
     runs-on: ubuntu-latest

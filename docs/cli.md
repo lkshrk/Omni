@@ -47,6 +47,10 @@ Git or agent binary reachability, and reports manifest counts. Git is checked
 only when a configured skill source needs it. A feature
 disabled for this host is reported as disabled rather than actively probed.
 
+`omni doctor` also reports retired `agents` declarations still present in
+`settings.json`. It reads the raw file, so it reports them even though every
+other command refuses to load such a config.
+
 `omni doctor --fix` repairs Omni-owned tool and dotfile state. For agents, it
 can remove exact package-owned MCP/LSP duplicates from the canonical host
 template; APM still owns package cleanup and runtime state.

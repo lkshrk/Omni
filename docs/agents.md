@@ -138,6 +138,12 @@ run `omni agents sync`. A missing or off-pin APM build is repaired by `omni
 doctor --fix`, never by opening the TUI. Ambiguous or local bundle evidence is
 never guessed; Omni leaves it unchanged and asks for review.
 
+A config that still carries an `agents` block no longer loads: every command
+that reads it fails with the removed-field error naming the migrate command.
+`omni doctor` is the one surface that keeps working, because it inspects the
+raw file, and it reports the leftover declarations as a warning. Remove the
+retired fields from `settings.json` and keep a copy before migrating.
+
 `omni agents migrate --host <name>` previews the apm.yml equivalent of the agent
 declarations a host had before the migration, or of the live native Claude and
 Codex state when no snapshot is present. Preview is the default; `--dry-run` is

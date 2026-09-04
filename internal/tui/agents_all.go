@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -167,19 +166,12 @@ func (m *Model) doCheckAgentsReadiness() tea.Cmd {
 	}
 	m.agentsReadinessGen++
 	gen, a, parent := m.agentsReadinessGen, m.app, m.ctx
-	host := ""
-	if m.hostInfo != nil {
-		host = m.hostInfo.Active
-	}
-	if host == "" {
-		host = os.Getenv("OMNI_HOSTNAME")
-	}
 	m.agentsReadinessPending = true
 	m.agentsReadinessErr = nil
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 		defer cancel()
-		readiness, err := a.AgentsReadiness(ctx, host)
+		readiness, err := a.AgentsReadiness(ctx)
 		return agentsReadinessMsg{gen: gen, readiness: readiness, err: err}
 	}
 }

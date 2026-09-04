@@ -91,7 +91,7 @@ func (a *App) AgentsOutdated(ctx context.Context) (apm.OutdatedResult, error) {
 	if err := a.requirePinnedAPM(ctx); err != nil {
 		return apm.OutdatedResult{}, err
 	}
-	readiness, err := a.AgentsReadiness(ctx, "")
+	readiness, err := a.AgentsReadiness(ctx)
 	if err != nil {
 		return apm.OutdatedResult{}, err
 	}

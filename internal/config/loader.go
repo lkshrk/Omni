@@ -285,7 +285,7 @@ func missingMigrationError(version int) error {
 }
 
 func removedAgentConfigFieldError(path string) error {
-	return fmt.Errorf("config field %q was removed in v24; declare agent packages and runtime state in ~/.apm/apm.yml", path)
+	return fmt.Errorf("config field %q was removed in v24; declare agent packages and runtime state in ~/.apm/apm.yml — remove the retired agent fields from the config, keep a copy, then run omni agents migrate --host <host> --snapshot <dir>", path)
 }
 
 type configMigration struct {

@@ -32,14 +32,6 @@ func TestTUIAgentsReadinessNeverWritesAndGuidesTheOperator(t *testing.T) {
 			want:    []string{"doctor", "--fix"},
 		},
 		{
-			name:    "legacy config asks for migrate",
-			version: "0.29.0",
-			setup: func(t *testing.T, fixture agentsReadinessPTYFixture) {
-				writeIntegrationFile(t, fixture.configPath, `{"version":22,"agents":{"mcp_servers":[{"name":"legacy","transport":"stdio","command":"legacy-mcp"}]},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host"}]}`)
-			},
-			want: []string{"agents migrate", "--host"},
-		},
-		{
 			name:    "staged template asks for sync",
 			version: "0.29.0",
 			setup: func(t *testing.T, fixture agentsReadinessPTYFixture) {

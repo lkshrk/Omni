@@ -220,10 +220,6 @@ func TestAgentsReadinessGuidanceUsesManualCTAs(t *testing.T) {
 	if got := agentsReadinessGuidance(m); !strings.Contains(got, "run omni doctor --fix") {
 		t.Fatalf("missing apm guidance = %q", got)
 	}
-	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessReady, CTA: app.AgentsCTAMigrate, Details: []string{"run omni agents migrate --host coder"}}
-	if got := agentsReadinessGuidance(m); !strings.Contains(got, "run omni agents migrate --host coder") || !strings.Contains(got, "Legacy agent configuration") {
-		t.Fatalf("legacy guidance = %q", got)
-	}
 }
 
 func TestDashboardAgentsReadinessPendingOrFailedIsNeverHealthy(t *testing.T) {
@@ -240,11 +236,6 @@ func TestDashboardAgentsReadinessPendingOrFailedIsNeverHealthy(t *testing.T) {
 		if !row.needsAttention || !strings.Contains(row.summary, "APM readiness failure") || row.action.kind != statusActionOpenAgents {
 			t.Fatalf("failed dashboard row = %#v", row)
 		}
-	}
-	m.agentsReadinessErr = nil
-	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessReady, CTA: app.AgentsCTAMigrate, Details: []string{"legacy agent config remains"}}
-	if got := agentsDashboardReadinessGuidance(m); !strings.Contains(got, "remaining legacy") {
-		t.Fatalf("ready legacy dashboard guidance = %q", got)
 	}
 }
 

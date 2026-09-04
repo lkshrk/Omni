@@ -849,9 +849,6 @@ func agentsDashboardReadinessGuidance(m Model) string {
 	if m.agentsReadinessErr != nil {
 		return "Open Agents to inspect the APM readiness failure."
 	}
-	if m.agentsReadiness.CTA == app.AgentsCTAMigrate && len(m.agentsReadiness.Details) != 0 {
-		return "Open Agents to review remaining legacy agent configuration."
-	}
 	switch m.agentsReadiness.State {
 	case app.AgentsReadinessTemplateOnly, app.AgentsReadinessLiveIncomplete:
 		return "Open Agents to sync the APM workspace."

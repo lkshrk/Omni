@@ -10,7 +10,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/lkshrk/omni/internal/apm"
-	"github.com/lkshrk/omni/internal/config"
 )
 
 type AgentsReadinessState string
@@ -41,7 +40,7 @@ type AgentsReadiness struct {
 }
 
 // AgentsReadiness inspects the pinned APM contract and its workspace without writing anything.
-func (a *App) AgentsReadiness(ctx context.Context, host string) (AgentsReadiness, error) {
+func (a *App) AgentsReadiness(ctx context.Context) (AgentsReadiness, error) {
 	if !a.APMAvailable() {
 		return agentsAPMRepairReadiness(errAPMNotInstalled())
 	}
@@ -52,22 +51,7 @@ func (a *App) AgentsReadiness(ctx context.Context, host string) (AgentsReadiness
 		}
 		return agentsAPMRepairReadiness(err)
 	}
-	readiness, err := inspectAgentsReadiness()
-	if err != nil {
-		return readiness, err
-	}
-	hasLegacy, err := config.HasRemovedAgentConfig(a.ConfigPath)
-	if err != nil {
-		return readiness, err
-	}
-	if hasLegacy {
-		if host == "" {
-			host = "<host>"
-		}
-		readiness.CTA = AgentsCTAMigrate
-		readiness.Details = append(readiness.Details, "run omni agents migrate --host "+host)
-	}
-	return readiness, nil
+	return inspectAgentsReadiness()
 }
 
 func agentsAPMRepairReadiness(err error) (AgentsReadiness, error) {

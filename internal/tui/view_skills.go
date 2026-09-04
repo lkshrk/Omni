@@ -382,9 +382,6 @@ func agentsReadinessGuidance(m Model) string {
 		return "APM readiness check failed: " + m.agentsReadinessErr.Error() + " · R recheck"
 	}
 	detail := strings.Join(m.agentsReadiness.Details, "; ")
-	if m.agentsReadiness.CTA == app.AgentsCTAMigrate && detail != "" {
-		return "Legacy agent configuration found · " + detail
-	}
 	switch m.agentsReadiness.State {
 	case app.AgentsReadinessEmpty:
 		return firstNonEmpty(detail, "No APM workspace and no host template") + " · commit a host template, then S sync"
