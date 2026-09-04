@@ -92,7 +92,7 @@ if [ "$SKIP_PULL" -eq 0 ]; then
 fi
 
 step "dangling dot links under ~/.claude ~/.codex ~/.agents"
-DANGLING="$(find "$HOME/.claude" "$HOME/.codex" "$HOME/.agents" -maxdepth 4 -xtype l 2>/dev/null || true)"
+DANGLING="$(find "$HOME/.claude" "$HOME/.codex" "$HOME/.agents" -maxdepth 4 -type l ! -exec test -e {} \; -print 2>/dev/null || true)"
 if [ -n "$DANGLING" ]; then
   printf '%s\n' "$DANGLING" | sed 's/^/   /'
   if [ "$APPLY" -eq 1 ]; then
@@ -126,7 +126,12 @@ fi
 apm --version | sed 's/^/   /'
 
 step "sync from template"
-run omni agents sync
+SYNC_OUT="$(omni agents sync 2>&1)" || true
+printf '%s\n' "$SYNC_OUT" | grep -v 'non-agent asset' | tail -15 | sed 's/^/   /'
+if printf '%s\n' "$SYNC_OUT" | grep -q -- '--force-template'; then
+  echo "   live manifest predates the template; adopting the template"
+  run omni agents sync --force-template
+fi
 
 step "stale unmanaged copies"
 python3 - > "$WORK/stale.txt" <<'PY'
