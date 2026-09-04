@@ -388,7 +388,8 @@ func (a *App) agentsSyncAllLocked(ctx context.Context, opts AgentsSyncAllOptions
 	if opts.Progress != nil {
 		opts.Progress("Installing agent packages with APM...")
 	}
-	args := []string{"install", "-g"}
+	// Plugins that declare their own MCP server sit at depth 2 behind the shared package; apm drops those unless trusted.
+	args := []string{"install", "-g", "--trust-transitive-mcp"}
 	if opts.Frozen {
 		args = append(args, "--frozen")
 	}

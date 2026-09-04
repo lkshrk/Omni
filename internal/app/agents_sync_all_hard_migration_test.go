@@ -43,7 +43,7 @@ func TestAgentsSyncAllRunsOneGlobalAPMInstall(t *testing.T) {
 		t.Fatalf("calls = %d, want version + install", len(mock.Calls))
 	}
 	call := mock.Calls[1]
-	wantArgs := []string{"install", "-g", "--frozen"}
+	wantArgs := []string{"install", "-g", "--trust-transitive-mcp", "--frozen"}
 	if call.Dir != filepath.Join(home, ".apm") || call.Name != "apm" || !reflect.DeepEqual(call.Args, wantArgs) {
 		t.Fatalf("call = dir %q %s %v, want dir %q apm %v", call.Dir, call.Name, call.Args, filepath.Join(home, ".apm"), wantArgs)
 	}
@@ -178,7 +178,7 @@ dependencies:
 	if len(result.Notices) != 1 || !strings.Contains(result.Notices[0], "not installed yet") {
 		t.Fatalf("notices = %q", result.Notices)
 	}
-	if len(mock.Calls) != 2 || mock.Calls[1].Name != "apm" || !reflect.DeepEqual(mock.Calls[1].Args, []string{"install", "-g"}) {
+	if len(mock.Calls) != 2 || mock.Calls[1].Name != "apm" || !reflect.DeepEqual(mock.Calls[1].Args, []string{"install", "-g", "--trust-transitive-mcp"}) {
 		t.Fatalf("calls = %+v", mock.Calls)
 	}
 	live, err := os.ReadFile(filepath.Join(home, ".apm", "apm.yml"))

@@ -113,7 +113,7 @@ func (f ownedLifecycleFixture) syncToAPM(t *testing.T) {
 		t.Fatalf("sync result = %#v, err = %v", result, err)
 	}
 	if len(f.mock.Calls) != 2 || f.mock.Calls[0].Name != "apm" || strings.Join(f.mock.Calls[0].Args, " ") != "--version" ||
-		f.mock.Calls[1].Name != "apm" || strings.Join(f.mock.Calls[1].Args, " ") != "install -g" {
+		f.mock.Calls[1].Name != "apm" || strings.Join(f.mock.Calls[1].Args, " ") != "install -g --trust-transitive-mcp" {
 		t.Fatalf("APM calls = %#v", f.mock.Calls)
 	}
 }

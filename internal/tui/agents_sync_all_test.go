@@ -76,7 +76,7 @@ func TestAgentsSyncAllGoesThroughTheTemplateAwareSync(t *testing.T) {
 	if data := readTUIFile(t, filepath.Join(home, ".apm", "apm.yml")); data != "name: live\n" {
 		t.Fatalf("live manifest overwritten: %q", data)
 	}
-	if len(mock.Calls) != 2 || strings.Join(mock.Calls[1].Args, " ") != "install -g" {
+	if len(mock.Calls) != 2 || strings.Join(mock.Calls[1].Args, " ") != "install -g --trust-transitive-mcp" {
 		t.Fatalf("calls = %#v", mock.Calls)
 	}
 }

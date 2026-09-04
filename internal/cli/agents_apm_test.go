@@ -21,7 +21,7 @@ func TestAgentsCommandsDelegateToAPM(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{"sync", []string{"sync", "--frozen", "--dry-run"}, []string{"install", "-g", "--frozen", "--dry-run"}},
+		{"sync", []string{"sync", "--frozen", "--dry-run"}, []string{"install", "-g", "--trust-transitive-mcp", "--frozen", "--dry-run"}},
 		{"add skill subset", []string{"add", "owner/pkg", "--skill", "one", "--skill", "two"}, []string{"install", "-g", "owner/pkg", "--skill", "one", "--skill", "two"}},
 		{"remove", []string{"remove", "owner/one", "owner/two"}, []string{"uninstall", "-g", "owner/one", "owner/two"}},
 		{"update", []string{"update"}, []string{"update", "-g", "--yes"}},

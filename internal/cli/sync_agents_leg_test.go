@@ -42,7 +42,7 @@ func TestSyncAllAPMLegRunsOneGlobalInstall(t *testing.T) {
 	if err := runSyncAllAPMLeg(cmd, &rootState{app: a}, true); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"install", "-g", "--dry-run"}
+	want := []string{"install", "-g", "--trust-transitive-mcp", "--dry-run"}
 	if len(mock.Calls) != 2 || !reflect.DeepEqual(apmCallArgs(mock.Calls[0]), []string{"--version"}) || !reflect.DeepEqual(apmCallArgs(mock.Calls[1]), want) {
 		t.Fatalf("calls = %#v, want one apm %v", mock.Calls, want)
 	}

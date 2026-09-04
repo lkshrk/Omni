@@ -7,6 +7,10 @@ marketplaces, dependency locks, and deployed runtime state.
 commands are thin APM wrappers: `add`, `remove`, `update`, `search`, `audit`,
 `targets`, `outdated`, `prune`, `deps`, and `marketplace`.
 
+Sync passes `--trust-transitive-mcp` so MCP servers declared by dependencies of
+a shared package deploy; the fleet's dependencies are pinned git refs and local
+packages under the operator's dotfiles.
+
 APM state:
 
 - `~/.apm/apm.yml` — desired dependencies.

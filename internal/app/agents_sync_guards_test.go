@@ -267,7 +267,7 @@ func TestAgentsSyncAllAllowsValidMigrationWrapper(t *testing.T) {
 	if err != nil || result.Output != "installed\n" {
 		t.Fatalf("result = %#v, err = %v", result, err)
 	}
-	if len(mock.Calls) != 2 || mock.Calls[1].Name != "apm" || !slices.Equal(mock.Calls[1].Args, []string{"install", "-g"}) {
+	if len(mock.Calls) != 2 || mock.Calls[1].Name != "apm" || !slices.Equal(mock.Calls[1].Args, []string{"install", "-g", "--trust-transitive-mcp"}) {
 		t.Fatalf("calls = %#v", mock.Calls)
 	}
 }
