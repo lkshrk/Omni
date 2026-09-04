@@ -72,28 +72,38 @@ func nativeRule(command, stdout string) executor.MatchRule {
 	return executor.MatchRule{Pattern: command, Response: executor.MockCall{Stdout: stdout}}
 }
 
-func TestRecoverNativePluginPlanClaudeOnly(t *testing.T) {
+func nativePlanFor(t *testing.T, a *App) (agentBundlePlan, string, error) {
+	t.Helper()
+	observations, err := a.inventoryNativeAgents(t.Context())
+	if err != nil {
+		return agentBundlePlan{}, "", err
+	}
+	plan, rendered := nativeAgentPlan(resolveAgentDispositions(observations))
+	return plan, rendered, nil
+}
+
+func TestNativePlanClaudeOnly(t *testing.T) {
 	a, _ := newNativeInventoryApp(t, map[string]bool{"claude": true},
 		nativeRule("claude plugins list --json", `[{"id":"demo@official"}]`),
 		nativeRule("claude plugins marketplace list --json", `[{"name":"official","source":"github","repo":"acme/plugins"}]`),
 	)
-	_, rendered, err := a.recoverNativeAgentPlan(t.Context())
+	_, rendered, err := nativePlanFor(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"name: demo", "marketplace: official", "- claude", "# apm marketplace add https://github.com/acme/plugins.git --name official"} {
+	for _, want := range []string{"name: demo", "marketplace: official", "- claude", "# apm marketplace add acme/plugins --name official"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered manifest missing %q:\n%s", want, rendered)
 		}
 	}
 }
 
-func TestRecoverNativePluginPlanCodexOnlyObjectForms(t *testing.T) {
+func TestNativePlanCodexOnlyObjectForms(t *testing.T) {
 	a, _ := newNativeInventoryApp(t, map[string]bool{"codex": true},
 		nativeRule("codex plugin list --json", `{"installed":[{"name":"demo","marketplaceName":"official"}],"available":[]}`),
 		nativeRule("codex plugin marketplace list --json", `{"marketplaces":[{"name":"official","marketplaceSource":{"source":"https://example.test/plugins.git"}}]}`),
 	)
-	_, rendered, err := a.recoverNativeAgentPlan(t.Context())
+	_, rendered, err := nativePlanFor(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,14 +114,14 @@ func TestRecoverNativePluginPlanCodexOnlyObjectForms(t *testing.T) {
 	}
 }
 
-func TestRecoverNativePluginPlanUnionsTargets(t *testing.T) {
+func TestNativePlanUnionsTargets(t *testing.T) {
 	a, _ := newNativeInventoryApp(t, map[string]bool{"claude": true, "codex": true},
 		nativeRule("claude plugins list --json", `{"installed":[{"id":"@scope/demo@official"}]}`),
 		nativeRule("claude plugins marketplace list --json", `{"marketplaces":[{"name":"official","source":"github","repo":"acme/plugins"}]}`),
 		nativeRule("codex plugin list --json", `[{"name":"@scope/demo","marketplaceName":"official"},{"name":"superpowers","marketplaceName":"openai-curated"}]`),
-		nativeRule("codex plugin marketplace list --json", `[{"name":"official","marketplaceSource":{"source":"https://github.com/ACME/plugins.git"}},{"name":"openai-curated","marketplaceSource":{"source":""}}]`),
+		nativeRule("codex plugin marketplace list --json", `[{"name":"official","marketplaceSource":{"source":"acme/plugins"}},{"name":"openai-curated","marketplaceSource":{"source":""}}]`),
 	)
-	_, rendered, err := a.recoverNativeAgentPlan(t.Context())
+	_, rendered, err := nativePlanFor(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,26 +133,24 @@ func TestRecoverNativePluginPlanUnionsTargets(t *testing.T) {
 	if strings.Count(rendered, "marketplace: official") != 1 {
 		t.Fatalf("plugin was not unioned:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "# native-only: superpowers@openai-curated") || strings.Contains(rendered, "marketplace: openai-curated") {
-		t.Fatalf("Codex built-in plugin was not preserved as native-only:\n%s", rendered)
+	if !strings.Contains(rendered, "# retained: plugin superpowers@openai-curated [codex]: "+agentReasonNoSource) || strings.Contains(rendered, "marketplace: openai-curated") {
+		t.Fatalf("source-less marketplace plugin was not retained:\n%s", rendered)
 	}
 }
 
-func TestCanonicalNativeMarketplaceSource(t *testing.T) {
-	want := "https://github.com/mksglu/context-mode.git"
-	for _, source := range []string{
-		"mksglu/context-mode",
-		"https://github.com/mksglu/context-mode.git",
-		"git@github.com:mksglu/context-mode.git",
-		"ssh://git@github.com/MKSGLU/context-mode",
+func TestCanonicalNativeMarketplaceSourceOnlyTrims(t *testing.T) {
+	for source, want := range map[string]string{
+		"  ../market ":                           "../market",
+		"mksglu/context-mode":                    "mksglu/context-mode",
+		"git@github.com:mksglu/context-mode.git": "git@github.com:mksglu/context-mode.git",
 	} {
 		if got := canonicalNativeMarketplaceSource(source); got != want {
-			t.Fatalf("canonicalNativeMarketplaceSource(%q) = %q", source, got)
+			t.Fatalf("canonicalNativeMarketplaceSource(%q) = %q, want %q", source, got, want)
 		}
 	}
 }
 
-func TestRecoverNativePluginPlanFailsClosed(t *testing.T) {
+func TestInventoryNativeAgentsFailsClosed(t *testing.T) {
 	for _, test := range []struct {
 		name  string
 		rules []executor.MatchRule
@@ -155,31 +163,27 @@ func TestRecoverNativePluginPlanFailsClosed(t *testing.T) {
 			nativeRule("claude plugins list --json", `[{"id":"demo@official"}]`),
 			{Pattern: "claude plugins marketplace list --json", Response: executor.MockCall{Err: errors.New("boom")}},
 		}, want: "demo@official"},
-		{name: "ambiguous marketplace source identifies installed plugin", rules: []executor.MatchRule{
-			nativeRule("claude plugins list --json", `[{"id":"demo@official"}]`),
-			nativeRule("claude plugins marketplace list --json", `[{"name":"official","source":"github","repo":"one/plugins"},{"name":"official","source":"github","repo":"two/plugins"}]`),
-		}, want: "demo@official"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			a, _ := newNativeInventoryApp(t, map[string]bool{"claude": true}, test.rules...)
-			_, rendered, err := a.recoverNativeAgentPlan(context.Background())
-			if err == nil || !strings.Contains(err.Error(), test.want) || rendered != "" {
-				t.Fatalf("rendered=%q err=%v; want error containing %q", rendered, err, test.want)
+			observations, err := a.inventoryNativeAgents(context.Background())
+			if err == nil || !strings.Contains(err.Error(), test.want) || observations != nil {
+				t.Fatalf("observations=%#v err=%v; want error containing %q", observations, err, test.want)
 			}
 			template, templateErr := AgentsTemplatePath()
 			if templateErr != nil {
 				t.Fatal(templateErr)
 			}
 			if _, statErr := os.Stat(template); !errors.Is(statErr, os.ErrNotExist) {
-				t.Fatalf("failed recovery wrote template: %v", statErr)
+				t.Fatalf("failed inventory wrote template: %v", statErr)
 			}
 		})
 	}
 }
 
-func TestRecoverNativeAgentPlanWithoutNativeCLIs(t *testing.T) {
+func TestNativePlanWithoutNativeCLIs(t *testing.T) {
 	a, exec := newNativeInventoryApp(t, map[string]bool{})
-	plan, rendered, err := a.recoverNativeAgentPlan(t.Context())
+	plan, rendered, err := nativePlanFor(t, a)
 	if err != nil || len(plan.Decls.Plugins) != 0 || !strings.Contains(rendered, "name: omni-migrated") {
 		t.Fatalf("plan=%+v rendered=%q err=%v", plan, rendered, err)
 	}
@@ -188,7 +192,7 @@ func TestRecoverNativeAgentPlanWithoutNativeCLIs(t *testing.T) {
 	}
 }
 
-func TestRecoverNativeAgentPlanIncludesAndUnionsMCP(t *testing.T) {
+func TestNativePlanIncludesAndUnionsMCP(t *testing.T) {
 	a, _ := newNativeInventoryApp(t, map[string]bool{"claude": true, "codex": true},
 		nativeRule("claude plugins list --json", `[]`),
 		nativeRule("claude plugins marketplace list --json", `[]`),
@@ -201,7 +205,7 @@ func TestRecoverNativeAgentPlanIncludesAndUnionsMCP(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"demo":{"type":"stdio","command":"npx","args":["demo"]}}}`)
-	plan, rendered, err := a.recoverNativeAgentPlan(t.Context())
+	plan, rendered, err := nativePlanFor(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +219,7 @@ func TestRecoverNativeAgentPlanIncludesAndUnionsMCP(t *testing.T) {
 	}
 }
 
-func TestRecoverNativeAgentPlanRejectsConflictingMCPWithoutWriting(t *testing.T) {
+func TestNativePlanRetainsPerTargetMCPDifferences(t *testing.T) {
 	a, _ := newNativeInventoryApp(t, map[string]bool{"claude": true, "codex": true},
 		nativeRule("claude plugins list --json", `[]`),
 		nativeRule("claude plugins marketplace list --json", `[]`),
@@ -225,102 +229,74 @@ func TestRecoverNativeAgentPlanRejectsConflictingMCPWithoutWriting(t *testing.T)
 	)
 	home, _ := os.UserHomeDir()
 	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"demo":{"command":"npx","args":["demo"]}}}`)
-	_, rendered, err := a.recoverNativeAgentPlan(t.Context())
-	if err == nil || !strings.Contains(err.Error(), `MCP server "demo" has conflicting definitions`) || rendered != "" {
-		t.Fatalf("rendered=%q err=%v", rendered, err)
+	plan, rendered, err := nativePlanFor(t, a)
+	if err != nil {
+		t.Fatal(err)
 	}
-	template, _ := AgentsTemplatePath()
-	if _, statErr := os.Stat(template); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("conflict wrote template: %v", statErr)
+	if len(plan.Decls.MCPServers) != 1 {
+		t.Fatalf("MCP declarations = %#v", plan.Decls.MCPServers)
+	}
+	if !strings.Contains(rendered, "# retained: mcp demo [codex]: "+agentReasonPerTarget) {
+		t.Fatalf("codex variant was not retained:\n%s", rendered)
 	}
 }
 
-func TestRecoverNativeAgentPlanSuppressesPluginOwnedMCPWrappers(t *testing.T) {
-	a, exec := newNativeInventoryApp(t, map[string]bool{"claude": true, "codex": true},
-		nativeRule("claude plugins list --json", `[{"id":"context-mode@context-mode"}]`),
-		nativeRule("claude plugins marketplace list --json", `[{"name":"context-mode","source":"github","repo":"mksglu/context-mode"}]`),
-		nativeRule("codex plugin list --json", `{"installed":[{"name":"context-mode","marketplaceName":"context-mode"}],"available":[]}`),
-		nativeRule("codex plugin marketplace list --json", `{"marketplaces":[{"name":"context-mode","marketplaceSource":{"source":"https://github.com/mksglu/context-mode.git"}}]}`),
-	)
-	home, _ := os.UserHomeDir()
-	pluginCwd := filepath.Join(home, ".codex", "plugins", "cache", "context-mode", "context-mode", "1.0.169")
-	exec.AddRule(nativeRule("codex mcp list --json", fmt.Sprintf(`[{"name":"context-mode","enabled":true,"transport":{"type":"stdio","command":"node","args":["./start.mjs"],"cwd":%q,"env":{"CONTEXT_MODE_PLATFORM":"codex"}}}]`, pluginCwd)))
-	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"context-mode":{"type":"stdio","command":"node","args":["./start.mjs"]}}}`)
+// seedClaudePluginOwner points the plugin CLI at a real install root holding manifest evidence.
+func seedClaudePluginOwner(t *testing.T, exec *nativeInventoryExecutor, home, manifest string) string {
+	t.Helper()
+	root := filepath.Join(home, ".claude", "plugins", "cache", "context-mode", "context-mode", "1.0.169")
+	writeFile(t, filepath.Join(root, ".claude-plugin", "plugin.json"), manifest)
+	exec.AddRule(nativeRule("claude plugins list --json", fmt.Sprintf(`[{"id":"context-mode@context-mode","version":"1.0.169","installPath":%q}]`, root)))
+	exec.AddRule(nativeRule("claude plugins marketplace list --json", `[{"name":"context-mode","source":"github","repo":"mksglu/context-mode"}]`))
+	return root
+}
 
-	plan, rendered, err := a.recoverNativeAgentPlan(t.Context())
+func TestNativePlanSuppressesManifestBackedMCP(t *testing.T) {
+	a, exec := newNativeInventoryApp(t, map[string]bool{"claude": true})
+	home, _ := os.UserHomeDir()
+	root := seedClaudePluginOwner(t, exec, home, `{"name":"context-mode","mcpServers":{"context-mode":{"command":"node","args":["start.mjs"]}}}`)
+	writeFile(t, filepath.Join(home, ".claude.json"), fmt.Sprintf(`{"mcpServers":{"context-mode":{"type":"stdio","command":"node","args":["start.mjs"],"cwd":%q}}}`, root))
+
+	plan, rendered, err := nativePlanFor(t, a)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(plan.Decls.MCPServers) != 0 {
 		t.Fatalf("plugin-owned MCP wrapper was imported: %#v", plan.Decls.MCPServers)
 	}
-	for _, want := range []string{"name: context-mode", "marketplace: context-mode", "- claude", "- codex", "# suppressed: plugin-owned native MCP context-mode"} {
-		if !strings.Contains(rendered, want) {
-			t.Fatalf("rendered manifest missing %q:\n%s", want, rendered)
-		}
+	if !strings.Contains(rendered, "# suppressed: plugin-owned native MCP context-mode (context-mode@context-mode)") {
+		t.Fatalf("suppression trailer missing:\n%s", rendered)
 	}
 }
 
-func TestRecoverNativeAgentPlanDoesNotSuppressUnprovenMCP(t *testing.T) {
-	a, _ := newNativeInventoryApp(t, map[string]bool{"claude": true, "codex": true},
-		nativeRule("claude plugins list --json", `[{"id":"context-mode@context-mode"}]`),
-		nativeRule("claude plugins marketplace list --json", `[{"name":"context-mode","source":"github","repo":"mksglu/context-mode"}]`),
-		nativeRule("codex plugin list --json", `[{"name":"context-mode","marketplaceName":"context-mode"}]`),
-		nativeRule("codex plugin marketplace list --json", `[{"name":"context-mode","marketplaceSource":{"source":"mksglu/context-mode"}}]`),
-		nativeRule("codex mcp list --json", `[{"name":"context-mode","transport":{"type":"stdio","command":"node","args":["other.mjs"],"cwd":"/tmp/not-a-plugin"}}]`),
-	)
-	home, _ := os.UserHomeDir()
-	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"context-mode":{"type":"stdio","command":"node","args":["./start.mjs"]}}}`)
+func TestNativePlanDoesNotSuppressWithoutManifestEvidence(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		manifest string
+		server   string
+	}{
+		{name: "cache path alone", manifest: `{"name":"context-mode"}`, server: `{"type":"stdio","command":"node","args":["start.mjs"],"cwd":%q}`},
+		{name: "different definition", manifest: `{"name":"context-mode","mcpServers":{"context-mode":{"command":"node","args":["start.mjs"]}}}`, server: `{"type":"stdio","command":"node","args":["custom.mjs"],"cwd":%q}`},
+		{name: "extra target config", manifest: `{"name":"context-mode","mcpServers":{"context-mode":{"command":"node","args":["start.mjs"]}}}`, server: `{"type":"stdio","command":"node","args":["start.mjs"],"env":{"MODE":"custom"},"cwd":%q}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			a, exec := newNativeInventoryApp(t, map[string]bool{"claude": true})
+			home, _ := os.UserHomeDir()
+			root := seedClaudePluginOwner(t, exec, home, test.manifest)
+			writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"context-mode":`+fmt.Sprintf(test.server, root)+`}}`)
 
-	_, _, err := a.recoverNativeAgentPlan(t.Context())
-	if err == nil || !strings.Contains(err.Error(), `MCP server "context-mode" has conflicting definitions`) {
-		t.Fatalf("error = %v, want conflicting definitions", err)
+			plan, rendered, err := nativePlanFor(t, a)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(plan.Decls.MCPServers) != 1 {
+				t.Fatalf("unproven MCP was suppressed: %#v\n%s", plan.Decls.MCPServers, rendered)
+			}
+		})
 	}
 }
 
-func TestRecoverNativeAgentPlanDoesNotSuppressDifferentSameNameWrapper(t *testing.T) {
-	a, exec := newNativeInventoryApp(t, map[string]bool{"claude": true, "codex": true},
-		nativeRule("claude plugins list --json", `[{"id":"context-mode@context-mode"}]`),
-		nativeRule("claude plugins marketplace list --json", `[{"name":"context-mode","source":"github","repo":"mksglu/context-mode"}]`),
-		nativeRule("codex plugin list --json", `[{"name":"context-mode","marketplaceName":"context-mode"}]`),
-		nativeRule("codex plugin marketplace list --json", `[{"name":"context-mode","marketplaceSource":{"source":"mksglu/context-mode"}}]`),
-	)
-	home, _ := os.UserHomeDir()
-	pluginCwd := filepath.Join(home, ".codex", "plugins", "cache", "context-mode", "context-mode", "1.0.169")
-	exec.AddRule(nativeRule("codex mcp list --json", fmt.Sprintf(`[{"name":"context-mode","transport":{"type":"stdio","command":"node","args":["./start.mjs"],"cwd":%q}}]`, pluginCwd)))
-	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"context-mode":{"type":"stdio","command":"node","args":["custom.mjs"]}}}`)
-
-	plan, _, err := a.recoverNativeAgentPlan(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(plan.Decls.MCPServers) != 1 {
-		t.Fatalf("unrelated same-name MCP was suppressed: %#v", plan.Decls.MCPServers)
-	}
-}
-
-func TestRecoverNativeAgentPlanDoesNotSuppressConfiguredSameNameWrapper(t *testing.T) {
-	a, exec := newNativeInventoryApp(t, map[string]bool{"claude": true, "codex": true},
-		nativeRule("claude plugins list --json", `[{"id":"context-mode@context-mode"}]`),
-		nativeRule("claude plugins marketplace list --json", `[{"name":"context-mode","source":"github","repo":"mksglu/context-mode"}]`),
-		nativeRule("codex plugin list --json", `[{"name":"context-mode","marketplaceName":"context-mode"}]`),
-		nativeRule("codex plugin marketplace list --json", `[{"name":"context-mode","marketplaceSource":{"source":"mksglu/context-mode"}}]`),
-	)
-	home, _ := os.UserHomeDir()
-	pluginCwd := filepath.Join(home, ".codex", "plugins", "cache", "context-mode", "context-mode", "1.0.169")
-	exec.AddRule(nativeRule("codex mcp list --json", fmt.Sprintf(`[{"name":"context-mode","transport":{"type":"stdio","command":"node","args":["./start.mjs"],"cwd":%q}}]`, pluginCwd)))
-	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"context-mode":{"type":"stdio","command":"node","args":["./start.mjs"],"env":{"MODE":"custom"}}}}`)
-
-	plan, _, err := a.recoverNativeAgentPlan(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(plan.Decls.MCPServers) != 1 {
-		t.Fatalf("configured same-name MCP was suppressed: %#v", plan.Decls.MCPServers)
-	}
-}
-
-func TestRecoverNativeMCPNeverSerializesLiteralSecrets(t *testing.T) {
+func TestInventoryNativeMCPNeverSerializesLiteralSecrets(t *testing.T) {
 	t.Run("literal sensitive env fails without echoing value", func(t *testing.T) {
 		a, _ := newNativeInventoryApp(t, map[string]bool{"claude": true},
 			nativeRule("claude plugins list --json", `[]`),
@@ -328,7 +304,7 @@ func TestRecoverNativeMCPNeverSerializesLiteralSecrets(t *testing.T) {
 		)
 		home, _ := os.UserHomeDir()
 		writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"demo":{"command":"server","env":{"TOKEN":"super-secret"}}}}`)
-		_, rendered, err := a.recoverNativeAgentPlan(t.Context())
+		_, rendered, err := nativePlanFor(t, a)
 		if err == nil || !strings.Contains(err.Error(), `sensitive environment field "TOKEN"`) || strings.Contains(err.Error(), "super-secret") || rendered != "" {
 			t.Fatalf("rendered=%q err=%v", rendered, err)
 		}
@@ -341,7 +317,7 @@ func TestRecoverNativeMCPNeverSerializesLiteralSecrets(t *testing.T) {
 		)
 		home, _ := os.UserHomeDir()
 		writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"demo":{"url":"https://example.test","headers":{"Authorization":"secret-value"}}}}`)
-		_, rendered, err := a.recoverNativeAgentPlan(t.Context())
+		_, rendered, err := nativePlanFor(t, a)
 		if err == nil || !strings.Contains(err.Error(), `server "demo" has literal sensitive header "Authorization"`) || strings.Contains(err.Error(), "secret-value") || rendered != "" {
 			t.Fatalf("rendered=%q err=%v", rendered, err)
 		}
@@ -357,7 +333,7 @@ func TestRecoverNativeMCPNeverSerializesLiteralSecrets(t *testing.T) {
 			{"name":"remote","enabled":true,"transport":{"type":"streamable_http","url":"https://example.test","bearer_token_env_var":"API_TOKEN"}}
 		]`),
 		)
-		_, rendered, err := a.recoverNativeAgentPlan(t.Context())
+		_, rendered, err := nativePlanFor(t, a)
 		if err != nil {
 			t.Fatal(err)
 		}

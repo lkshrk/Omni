@@ -8,5 +8,18 @@
       "installRoot": "@HOME@/.claude/plugins/cache/acme/tooling/3.20.1"
     }
   ],
-  "marketplaces": [{"name": "acme", "source": "acme/tooling"}]
+  "marketplaces": [{"name": "acme", "source": "acme/tooling"}],
+  "mcp": [
+    {
+      "name": "tooling",
+      "target": "claude",
+      "definition": {
+        "name": "tooling",
+        "transport": "stdio",
+        "command": "node",
+        "args": ["dist/server.js"],
+        "cwd": "@HOME@/.claude/plugins/cache/acme/tooling/3.20.1"
+      }
+    }
+  ]
 }

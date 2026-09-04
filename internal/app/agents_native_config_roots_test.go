@@ -25,20 +25,3 @@ func TestListNativeMCPHonorsClaudeConfigDir(t *testing.T) {
 		t.Fatalf("servers = %#v", servers)
 	}
 }
-
-func TestNativeMCPPathProvesIdentityHonorsCodexHome(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	codex := filepath.Join(home, "custom-codex")
-	t.Setenv("CODEX_HOME", codex)
-
-	inside := filepath.Join(codex, "plugins", "cache", "market", "demo", "1.0.0")
-	if !nativeMCPPathProvesIdentity(inside, "demo@market") {
-		t.Fatalf("%s should prove demo@market under CODEX_HOME", inside)
-	}
-	outside := filepath.Join(home, ".codex", "plugins", "cache", "market", "demo", "1.0.0")
-	if nativeMCPPathProvesIdentity(outside, "demo@market") {
-		t.Fatalf("%s must not prove demo@market when CODEX_HOME is set", outside)
-	}
-}

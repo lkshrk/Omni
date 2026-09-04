@@ -319,7 +319,12 @@ func (a *App) planAgentsMigration(ctx context.Context, host, snapshotDir string)
 		snapshotDir = found
 	}
 	if snapshotDir == "" {
-		return a.recoverNativeAgentPlan(ctx)
+		observations, err := a.inventoryNativeAgents(ctx)
+		if err != nil {
+			return agentBundlePlan{}, "", err
+		}
+		plan, rendered := nativeAgentPlan(resolveAgentDispositions(observations))
+		return plan, rendered, nil
 	}
 	decls, evidence, err := config.LegacyAgentsFromSnapshot(snapshotDir, host)
 	if err != nil {

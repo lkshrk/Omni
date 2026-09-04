@@ -1,18 +1,14 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
-
-	"github.com/lkshrk/omni/internal/config"
 )
 
 type nativePlugin struct {
@@ -34,175 +30,83 @@ type nativeMCP struct {
 	Target     string
 }
 
-type nativeMCPOwner struct {
-	Identity   string
-	Definition legacyEntry
-}
-
-// recoverNativeAgentPlan inventories native plugin and MCP state without changing it.
-func (a *App) recoverNativeAgentPlan(ctx context.Context) (agentBundlePlan, string, error) {
+// inventoryNativeAgents reads native plugin, marketplace, and MCP state without changing it.
+func (a *App) inventoryNativeAgents(ctx context.Context) ([]agentObservation, error) {
+	var out []agentObservation
 	var plugins []nativePlugin
-	var marketplaces []nativeMarketplace
-	var servers []nativeMCP
 	for _, cli := range []string{"claude", "codex"} {
 		if !a.commandAvailable(cli) {
 			continue
 		}
-		listed, err := a.listNativePlugins(ctx, cli)
+		listedPlugins, err := a.listNativePlugins(ctx, cli)
 		if err != nil {
-			return agentBundlePlan{}, "", err
+			return nil, err
 		}
-		plugins = append(plugins, listed...)
+		plugins = append(plugins, listedPlugins...)
+		for _, plugin := range listedPlugins {
+			evidence := []string{cli + " plugin list --json"}
+			if plugin.InstallRoot != "" {
+				evidence = append(evidence, plugin.InstallRoot)
+			}
+			out = append(out, agentObservation{
+				Source:      cli,
+				Target:      plugin.Target,
+				Kind:        agentKindPlugin,
+				Identity:    plugin.Name + "@" + plugin.Marketplace,
+				Definition:  legacyEntry{Name: plugin.Name, Marketplace: plugin.Marketplace},
+				Version:     plugin.Version,
+				InstallRoot: plugin.InstallRoot,
+				Evidence:    evidence,
+			})
+		}
 		listedMarketplaces, err := a.listNativeMarketplaces(ctx, cli)
 		if err != nil {
-			return agentBundlePlan{}, "", fmt.Errorf("%w (installed: %s)", err, nativePluginIdentities(plugins))
+			return nil, fmt.Errorf("%w (installed: %s)", err, nativePluginIdentities(plugins))
 		}
-		marketplaces = append(marketplaces, listedMarketplaces...)
-		listedServers, err := a.listNativeMCP(ctx, cli)
-		if err != nil {
-			return agentBundlePlan{}, "", err
-		}
-		servers = append(servers, listedServers...)
-	}
-
-	sources := map[string]string{}
-	for _, marketplace := range marketplaces {
-		if marketplace.Name == "" {
-			continue
-		}
-		source := canonicalNativeMarketplaceSource(marketplace.Source)
-		if source == "" {
-			continue
-		}
-		if existing, ok := sources[marketplace.Name]; ok && existing != source {
-			return agentBundlePlan{}, "", fmt.Errorf("native marketplace %q has ambiguous sources %q and %q (installed: %s)", marketplace.Name, existing, source, nativePluginIdentities(plugins))
-		}
-		sources[marketplace.Name] = source
-	}
-
-	targets := map[string]map[string]bool{}
-	var nativeOnly []string
-	for _, plugin := range plugins {
-		identity := plugin.Name + "@" + plugin.Marketplace
-		if plugin.Name == "" || plugin.Marketplace == "" {
-			return agentBundlePlan{}, "", fmt.Errorf("native plugin has invalid identity %q", identity)
-		}
-		if sources[plugin.Marketplace] == "" {
-			if plugin.Target == "codex" && plugin.Marketplace == "openai-curated" {
-				nativeOnly = append(nativeOnly, identity)
+		for _, marketplace := range listedMarketplaces {
+			if marketplace.Name == "" {
 				continue
 			}
-			return agentBundlePlan{}, "", fmt.Errorf("native plugin %q has no unambiguous marketplace source", identity)
+			out = append(out, agentObservation{
+				Source:     cli,
+				Target:     cli,
+				Kind:       agentKindMarketplace,
+				Identity:   marketplace.Name,
+				Definition: legacyEntry{Name: marketplace.Name, Source: canonicalNativeMarketplaceSource(marketplace.Source)},
+				Evidence:   []string{cli + " plugin marketplace list --json"},
+			})
 		}
-		if targets[identity] == nil {
-			targets[identity] = map[string]bool{}
+		listedServers, err := a.listNativeMCP(ctx, cli)
+		if err != nil {
+			return nil, err
 		}
-		targets[identity][plugin.Target] = true
+		for _, server := range listedServers {
+			definition := server.Definition
+			definition.Name = server.Name
+			definition.Agents = nil
+			normalizeNativeMCP(&definition)
+			out = append(out, agentObservation{
+				Source:     cli,
+				Target:     server.Target,
+				Kind:       agentKindMCP,
+				Identity:   server.Name,
+				Definition: definition,
+				Evidence:   []string{nativeMCPEvidence(cli)},
+			})
+		}
 	}
+	return out, nil
+}
 
-	plan := agentBundlePlan{Decls: config.LegacyAgentDecls{
-		MCPServers:   map[string]json.RawMessage{},
-		Plugins:      map[string]json.RawMessage{},
-		Marketplaces: map[string]json.RawMessage{},
-	}}
-	usedMarketplaces := map[string]bool{}
-	for identity, targetSet := range targets {
-		name, marketplace := splitNativePluginIdentity(identity)
-		var agents []string
-		for target := range targetSet {
-			agents = append(agents, target)
-		}
-		sort.Strings(agents)
-		plan.Decls.Plugins[identity] = mustNativeJSON(legacyEntry{Name: name, Marketplace: marketplace, Agents: agents})
-		usedMarketplaces[marketplace] = true
+func nativeMCPEvidence(cli string) string {
+	if cli != "claude" {
+		return "codex mcp list --json"
 	}
-	for marketplace := range usedMarketplaces {
-		plan.Decls.Marketplaces[marketplace] = mustNativeJSON(legacyEntry{Name: marketplace, Source: sources[marketplace]})
-	}
-	mcpByName := map[string]legacyEntry{}
-	ownedMCP := map[string]nativeMCPOwner{}
-	for _, server := range servers {
-		for _, plugin := range plugins {
-			if plugin.Name == server.Name && plugin.Target == server.Target && nativeMCPPathProvesPlugin(server.Definition.Cwd, plugin) {
-				identity := plugin.Name + "@" + plugin.Marketplace
-				if prior, ok := ownedMCP[server.Name]; ok && prior.Identity != identity {
-					return agentBundlePlan{}, "", fmt.Errorf("native MCP server %q has ambiguous plugin owners %q and %q", server.Name, prior.Identity, identity)
-				}
-				ownedMCP[server.Name] = nativeMCPOwner{Identity: identity, Definition: server.Definition}
-			}
-		}
-	}
-	var suppressedMCP []string
-	for _, server := range servers {
-		if owner, ok := ownedMCP[server.Name]; ok && targets[owner.Identity][server.Target] && sameNativeMCPWrapper(owner.Definition, server.Definition) && (nativeMCPPathProvesIdentity(server.Definition.Cwd, owner.Identity) || nativeMCPWrapperHasNoTargetConfig(server.Definition)) {
-			suppressedMCP = append(suppressedMCP, server.Name)
-			continue
-		}
-		definition := server.Definition
-		definition.Name = server.Name
-		definition.Agents = nil
-		normalizeNativeMCP(&definition)
-		if prior, ok := mcpByName[server.Name]; ok {
-			comparable := prior
-			comparable.Agents = nil
-			if !bytes.Equal(mustNativeJSON(comparable), mustNativeJSON(definition)) {
-				return agentBundlePlan{}, "", fmt.Errorf("native MCP server %q has conflicting definitions", server.Name)
-			}
-			definition.Agents = prior.Agents
-		}
-		if !slices.Contains(definition.Agents, server.Target) {
-			definition.Agents = append(definition.Agents, server.Target)
-			sort.Strings(definition.Agents)
-		}
-		mcpByName[server.Name] = definition
-	}
-	for name, server := range mcpByName {
-		plan.Decls.MCPServers[name] = mustNativeJSON(server)
-	}
-	manifest, commands, err := renderAPMTemplatePlan(plan)
+	path, err := claudeConfigFile()
 	if err != nil {
-		return agentBundlePlan{}, "", err
+		return "claude mcp config"
 	}
-	var rendered strings.Builder
-	rendered.WriteString(agentsMigrationMarker + "\n" + manifest)
-	for _, command := range commands {
-		rendered.WriteString("# " + command + "\n")
-	}
-	sort.Strings(nativeOnly)
-	for _, identity := range slices.Compact(nativeOnly) {
-		rendered.WriteString("# native-only: " + identity + " (Codex built-in marketplace has no APM source)\n")
-	}
-	sort.Strings(suppressedMCP)
-	for _, name := range slices.Compact(suppressedMCP) {
-		rendered.WriteString("# suppressed: plugin-owned native MCP " + name + "\n")
-	}
-	return plan, rendered.String(), nil
-}
-
-func nativeMCPPathProvesPlugin(cwd string, plugin nativePlugin) bool {
-	return nativeMCPPathProvesIdentity(cwd, plugin.Name+"@"+plugin.Marketplace)
-}
-
-func nativeMCPPathProvesIdentity(cwd, identity string) bool {
-	codex, err := codexHome()
-	if err != nil || cwd == "" {
-		return false
-	}
-	name, marketplace := splitNativePluginIdentity(identity)
-	path := strings.ToLower(filepath.ToSlash(filepath.Clean(cwd))) + "/"
-	want := strings.ToLower(filepath.ToSlash(filepath.Join(codex, "plugins", "cache", marketplace, name))) + "/"
-	return strings.HasPrefix(path, want)
-}
-
-func codexHome() (string, error) {
-	if dir := strings.TrimSpace(os.Getenv("CODEX_HOME")); dir != "" {
-		return dir, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve codex home: %w", err)
-	}
-	return filepath.Join(home, ".codex"), nil
+	return path
 }
 
 func claudeConfigFile() (string, error) {
@@ -216,37 +120,8 @@ func claudeConfigFile() (string, error) {
 	return filepath.Join(home, ".claude.json"), nil
 }
 
-func sameNativeMCPWrapper(a, b legacyEntry) bool {
-	return a.Transport == b.Transport && a.Command == b.Command && a.URL == b.URL && slices.Equal(a.Args, b.Args)
-}
-
-func nativeMCPWrapperHasNoTargetConfig(entry legacyEntry) bool {
-	return entry.Cwd == "" && len(entry.Env) == 0 && len(entry.EnvLiteral) == 0 && len(entry.Headers) == 0
-}
-
 func canonicalNativeMarketplaceSource(source string) string {
-	source = strings.TrimSpace(source)
-	if source == "" {
-		return ""
-	}
-	path := ""
-	switch {
-	case strings.HasPrefix(strings.ToLower(source), "git@github.com:"):
-		path = source[len("git@github.com:"):]
-	case strings.HasPrefix(strings.ToLower(source), "ssh://git@github.com/"):
-		path = source[len("ssh://git@github.com/"):]
-	default:
-		if parsed, err := url.Parse(source); err == nil && strings.EqualFold(parsed.Host, "github.com") {
-			path = strings.TrimPrefix(parsed.Path, "/")
-		} else if !strings.Contains(source, "://") && !filepath.IsAbs(source) && strings.Count(source, "/") == 1 {
-			path = source
-		}
-	}
-	path = strings.TrimSuffix(strings.TrimSuffix(path, "/"), ".git")
-	if path != "" && strings.Count(path, "/") == 1 && !strings.ContainsAny(path, " \t\r\n") {
-		return "https://github.com/" + strings.ToLower(path) + ".git"
-	}
-	return source
+	return strings.TrimSpace(source)
 }
 
 func (a *App) listNativeMCP(ctx context.Context, cli string) ([]nativeMCP, error) {
@@ -303,9 +178,9 @@ func (a *App) listNativeMCP(ctx context.Context, cli string) ([]nativeMCP, error
 		return out, nil
 	}
 
-	stdout, _, err := a.fallbackExecutor().Run(ctx, "codex", "mcp", "list", "--json")
+	stdout, stderr, err := a.fallbackExecutor().Run(ctx, "codex", "mcp", "list", "--json")
 	if err != nil {
-		return nil, fmt.Errorf("codex mcp list --json: %w", err)
+		return nil, fmt.Errorf("codex mcp list --json: %w: %s", err, strings.TrimSpace(stderr))
 	}
 	var entries []struct {
 		Name      string `json:"name"`
