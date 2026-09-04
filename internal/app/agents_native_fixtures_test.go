@@ -65,7 +65,7 @@ func TestNativeInventoryFixtures(t *testing.T) {
 	}
 }
 
-func seedNativeFixture(t *testing.T, dir string) (*App, string) {
+func seedNativeFixture(t *testing.T, dir string) (*App, *nativeInventoryExecutor, string) {
 	t.Helper()
 	a, exec := newNativeInventoryApp(t, map[string]bool{})
 	home, err := os.UserHomeDir()
@@ -85,12 +85,12 @@ func seedNativeFixture(t *testing.T, dir string) (*App, string) {
 		exec.available[strings.SplitN(command, " ", 2)[0]] = true
 		exec.AddRule(nativeRule(command, strings.ReplaceAll(string(raw), nativeFixtureHomeToken, home)))
 	}
-	return a, home
+	return a, exec, home
 }
 
 func runNativeInventoryFixture(t *testing.T, dir string) {
 	t.Helper()
-	a, home := seedNativeFixture(t, dir)
+	a, _, home := seedNativeFixture(t, dir)
 
 	want := readNativeFixtureWant(t, dir, home)
 	gotPlugins, gotMarketplaces, gotMCP, invErr := collectNativeInventory(t, a)

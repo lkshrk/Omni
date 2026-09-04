@@ -21,6 +21,7 @@ const (
 	agentActionImport   = "import"
 	agentActionSuppress = "suppress-owned"
 	agentActionRetain   = "retain"
+	agentActionManaged  = "managed"
 
 	agentReasonNoSource   = "marketplace has no APM source"
 	agentReasonPerTarget  = "differs across targets; apm has no per-target MCP scoping"
@@ -405,57 +406,37 @@ func sortedUnique(values []string) []string {
 	return slices.Compact(out)
 }
 
-// nativeAgentPlan renders the imported dispositions as an apm.yml plus one trailer line per suppressed or retained item.
-func nativeAgentPlan(dispositions []agentDisposition) (agentBundlePlan, string) {
-	plan := agentBundlePlan{Decls: config.LegacyAgentDecls{
+// nativeAgentDecls turns the imported dispositions into declarations the apm.yml renderer understands.
+func nativeAgentDecls(dispositions []agentDisposition) config.LegacyAgentDecls {
+	decls := config.LegacyAgentDecls{
 		MCPServers:   map[string]json.RawMessage{},
 		Plugins:      map[string]json.RawMessage{},
 		Marketplaces: map[string]json.RawMessage{},
-	}}
+	}
 	pluginTargets := map[string][]string{}
 	marketplaceSource := map[string]string{}
-	var trailers []string
 	for _, disposition := range dispositions {
 		observation := disposition.Observation
-		switch disposition.Action {
-		case agentActionSuppress:
-			trailers = append(trailers, "# suppressed: plugin-owned native MCP "+observation.Identity+" ("+disposition.Owner+")")
-		case agentActionRetain:
-			trailers = append(trailers, "# retained: "+observation.Kind+" "+observation.Identity+" ["+observation.Target+"]: "+disposition.Reason)
-		case agentActionImport:
-			switch observation.Kind {
-			case agentKindMarketplace:
-				marketplaceSource[observation.Identity] = observation.Definition.Source
-			case agentKindPlugin:
-				pluginTargets[observation.Identity] = append(pluginTargets[observation.Identity], observation.Target)
-			case agentKindMCP:
-				entry := observation.Definition
-				entry.Name = observation.Identity
-				plan.Decls.MCPServers[entry.Name] = mustNativeJSON(entry)
-			}
+		if disposition.Action != agentActionImport {
+			continue
+		}
+		switch observation.Kind {
+		case agentKindMarketplace:
+			marketplaceSource[observation.Identity] = observation.Definition.Source
+		case agentKindPlugin:
+			pluginTargets[observation.Identity] = append(pluginTargets[observation.Identity], observation.Target)
+		case agentKindMCP:
+			entry := observation.Definition
+			entry.Name = observation.Identity
+			decls.MCPServers[entry.Name] = mustNativeJSON(entry)
 		}
 	}
 	for _, identity := range slices.Sorted(maps.Keys(pluginTargets)) {
 		name, marketplace := splitNativePluginIdentity(identity)
-		plan.Decls.Plugins[identity] = mustNativeJSON(legacyEntry{Name: name, Marketplace: marketplace, Agents: sortedUnique(pluginTargets[identity])})
+		decls.Plugins[identity] = mustNativeJSON(legacyEntry{Name: name, Marketplace: marketplace, Agents: sortedUnique(pluginTargets[identity])})
 		if source, ok := marketplaceSource[marketplace]; ok {
-			plan.Decls.Marketplaces[marketplace] = mustNativeJSON(legacyEntry{Name: marketplace, Source: source})
+			decls.Marketplaces[marketplace] = mustNativeJSON(legacyEntry{Name: marketplace, Source: source})
 		}
 	}
-
-	var rendered strings.Builder
-	rendered.WriteString(agentsMigrationMarker + "\n")
-	manifest, commands, err := renderAPMTemplatePlan(plan)
-	if err != nil {
-		rendered.WriteString("# retained: manifest render failed: " + err.Error() + "\n")
-		return agentBundlePlan{}, rendered.String()
-	}
-	rendered.WriteString(manifest)
-	for _, command := range commands {
-		rendered.WriteString("# " + command + "\n")
-	}
-	for _, trailer := range slices.Compact(slices.Clone(trailers)) {
-		rendered.WriteString(trailer + "\n")
-	}
-	return plan, rendered.String()
+	return decls
 }

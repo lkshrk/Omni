@@ -68,18 +68,22 @@ func newNativeInventoryApp(t *testing.T, available map[string]bool, rules ...exe
 	return a, exec
 }
 
+// noNativeCLIs keeps a migration test off the machine's real claude/codex binaries.
+func noNativeCLIs() *nativeInventoryExecutor {
+	return &nativeInventoryExecutor{MatchMockExecutor: executor.NewMatchMock(), available: map[string]bool{}}
+}
+
 func nativeRule(command, stdout string) executor.MatchRule {
 	return executor.MatchRule{Pattern: command, Response: executor.MockCall{Stdout: stdout}}
 }
 
 func nativePlanFor(t *testing.T, a *App) (agentBundlePlan, string, error) {
 	t.Helper()
-	observations, err := a.inventoryNativeAgents(t.Context())
+	plan, preview, err := a.planAgentsMigration(t.Context(), "host", "")
 	if err != nil {
 		return agentBundlePlan{}, "", err
 	}
-	plan, rendered := nativeAgentPlan(resolveAgentDispositions(observations))
-	return plan, rendered, nil
+	return plan, preview.Render(), nil
 }
 
 func TestNativePlanClaudeOnly(t *testing.T) {
@@ -133,7 +137,7 @@ func TestNativePlanUnionsTargets(t *testing.T) {
 	if strings.Count(rendered, "marketplace: official") != 1 {
 		t.Fatalf("plugin was not unioned:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "# retained: plugin superpowers@openai-curated [codex]: "+agentReasonNoSource) || strings.Contains(rendered, "marketplace: openai-curated") {
+	if !strings.Contains(rendered, "  codex  plugin  superpowers@openai-curated  "+agentReasonNoSource) || strings.Contains(rendered, "marketplace: openai-curated") {
 		t.Fatalf("source-less marketplace plugin was not retained:\n%s", rendered)
 	}
 }
@@ -236,7 +240,7 @@ func TestNativePlanRetainsPerTargetMCPDifferences(t *testing.T) {
 	if len(plan.Decls.MCPServers) != 1 {
 		t.Fatalf("MCP declarations = %#v", plan.Decls.MCPServers)
 	}
-	if !strings.Contains(rendered, "# retained: mcp demo [codex]: "+agentReasonPerTarget) {
+	if !strings.Contains(rendered, "  codex  mcp  demo  "+agentReasonPerTarget) {
 		t.Fatalf("codex variant was not retained:\n%s", rendered)
 	}
 }
@@ -264,8 +268,8 @@ func TestNativePlanSuppressesManifestBackedMCP(t *testing.T) {
 	if len(plan.Decls.MCPServers) != 0 {
 		t.Fatalf("plugin-owned MCP wrapper was imported: %#v", plan.Decls.MCPServers)
 	}
-	if !strings.Contains(rendered, "# suppressed: plugin-owned native MCP context-mode (context-mode@context-mode)") {
-		t.Fatalf("suppression trailer missing:\n%s", rendered)
+	if !strings.Contains(rendered, "  claude  mcp  context-mode  owned by context-mode@context-mode") {
+		t.Fatalf("suppressed row missing:\n%s", rendered)
 	}
 }
 

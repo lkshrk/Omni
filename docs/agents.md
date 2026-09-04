@@ -131,12 +131,13 @@ any exact candidate has an unsupported source layout, the fixer removes none.
 
 ## Migrating a pre-APM host
 
-Migration is an explicit operator flow; the TUI only inspects. Run `omni agents
-migrate --host <name>` and review the printed manifest, commit it into that
-host's template in dotfiles, delete the native entries it replaces by hand, then
-run `omni agents sync`. A missing or off-pin APM build is repaired by `omni
-doctor --fix`, never by opening the TUI. Ambiguous or local bundle evidence is
-never guessed; Omni leaves it unchanged and asks for review.
+Migration is an explicit operator flow; the TUI only inspects. The steps are:
+print the preview with `omni agents migrate --host <name>`, review it, commit
+the manifest into that host's template in dotfiles, delete the native entries
+listed under "Replaced by this manifest" by hand, run `omni agents sync`, then
+run it a second time to confirm it is a no-op. A missing or off-pin APM build is
+repaired by `omni doctor --fix`, never by opening the TUI. Ambiguous or local
+bundle evidence is never guessed; Omni leaves it unchanged and asks for review.
 
 A config that still carries an `agents` block no longer loads: every command
 that reads it fails with the removed-field error naming the migrate command.
@@ -144,11 +145,25 @@ that reads it fails with the removed-field error naming the migrate command.
 raw file, and it reports the leftover declarations as a warning. Remove the
 retired fields from `settings.json` and keep a copy before migrating.
 
-`omni agents migrate --host <name>` previews the apm.yml equivalent of the agent
-declarations a host had before the migration, or of the live native Claude and
-Codex state when no snapshot is present. Preview is the default; `--dry-run` is
-an explicit alias. Both print a deterministic plan, write nothing, and run no
-APM command.
+`omni agents migrate --host <name>` is the one import surface. It unions the
+agent declarations a host had before the migration, read from a snapshot when
+one is given or found, with the live native Claude and Codex state; an absent
+snapshot is not an error. Preview is the default; `--dry-run` is an explicit
+alias. Both print a deterministic plan, write nothing, and run no APM command.
+
+The output is the proposed `apm.yml` followed by three lists:
+
+| Section | Contents |
+| --- | --- |
+| `Replaced by this manifest (delete by hand after sync):` | Live native entries the manifest takes over, with the file or CLI record they were read from. Delete these by hand after the first sync. Snapshot declarations never appear here: they come from a config copy, not a live file. |
+| `Retained (not migrated):` | Items Omni will not migrate, each with its reason, such as a marketplace with no APM source or an MCP server whose definition differs across targets. |
+| `Already managed by APM:` | Native entries APM already deploys, so the manifest never re-proposes them. |
+
+Empty sections are omitted. An entry is already managed when its name is listed
+under `mcp_servers` in `~/.apm/apm.lock.yaml`, when its command, first argument,
+or working directory resolves under `~/.apm/apm_modules`, or, for a plugin, when
+a lockfile dependency carries its name and marketplace repository. With no
+lockfile nothing is treated as managed.
 
 ```sh
 omni agents migrate --host workstation
@@ -187,15 +202,18 @@ The snapshot's v22 fields map like this:
 Omni inventories conventional skills, hooks, agents, commands, executable
 binaries, MCP, and LSP definitions beneath each proven owner root. Exact
 owner/fingerprint matches collapse into the owner dependency; unrelated
-standalone declarations survive. Preview records each collapse as a
-`# suppressed:` comment. Different definitions, a child claimed by multiple
+standalone declarations survive. Preview records each collapse under
+`Retained (not migrated):`. Different definitions, a child claimed by multiple
 owners, duplicate owner identities, incomplete runtime paths, and unsupported
 native behavior produce deterministic blockers that name the declaration and
 field without printing sensitive values.
 
 MCP entries deliberately carry no per-entry `targets:`. The MCP surface is
 host-global, so every declared server reaches every enabled user-global MCP
-target regardless of which agents originally declared it.
+target regardless of which agents originally declared it. A server observed on
+only some of the manifest's targets gets a trailing
+`# reach: <targets> (apm deploys to all MCP targets): <name>` comment so the
+widened reach is visible before the manifest is committed.
 
 The rendered marketplace commands are comments because APM registers
 marketplaces outside the manifest. Sync reads them back: every declared

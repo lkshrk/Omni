@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/lkshrk/omni/internal/executor"
 )
 
 func migrationWriteFixture(t *testing.T) string {
@@ -23,7 +21,7 @@ func migrationWriteFixture(t *testing.T) string {
 	return snapshot
 }
 
-func migrationWriteApp(t *testing.T) (*App, string, string, *executor.MockExecutor) {
+func migrationWriteApp(t *testing.T) (*App, string, string, *nativeInventoryExecutor) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -39,7 +37,7 @@ func migrationWriteApp(t *testing.T) (*App, string, string, *executor.MockExecut
 	if err := os.WriteFile(live, []byte("live: unchanged\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	mock := &executor.MockExecutor{}
+	mock := noNativeCLIs()
 	a := &App{StateDir: filepath.Join(t.TempDir(), "state"), fallbackExec: mock}
 	return a, template, live, mock
 }
@@ -54,6 +52,10 @@ func TestAgentsMigrateWriteCreatesOnlyMarkedTemplate(t *testing.T) {
 	if !strings.HasPrefix(preview, agentsMigrationMarker+"\n") {
 		t.Fatalf("preview = %q", preview)
 	}
+	manifest, err := a.BuildAgentsMigrationPreview(t.Context(), "h", snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Stat(template); !os.IsNotExist(err) {
 		t.Fatalf("preview wrote template: %v", err)
 	}
@@ -65,13 +67,13 @@ func TestAgentsMigrateWriteCreatesOnlyMarkedTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != out || !strings.HasPrefix(string(got), agentsMigrationMarker+"\n") {
+	if string(got) != manifest.Manifest || !strings.HasPrefix(out, string(got)) {
 		t.Fatalf("template = %q, output = %q", got, out)
 	}
 	if got, _ := os.ReadFile(live); string(got) != "live: unchanged\n" {
 		t.Fatalf("live manifest changed: %q", got)
 	}
-	if len(mock.Calls) != 0 {
+	if mock.CallCount() != 0 {
 		t.Fatalf("migrate ran subprocesses: %+v", mock.Calls)
 	}
 }

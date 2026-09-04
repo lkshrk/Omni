@@ -69,7 +69,7 @@ func TestResolveAgentDispositionsOverFixtures(t *testing.T) {
 		}},
 	} {
 		t.Run(test.fixture, func(t *testing.T) {
-			a, _ := seedNativeFixture(t, filepath.Join("testdata", "agents_native", test.fixture))
+			a, _, _ := seedNativeFixture(t, filepath.Join("testdata", "agents_native", test.fixture))
 			observations, err := a.inventoryNativeAgents(t.Context())
 			if test.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
@@ -120,7 +120,7 @@ func formatDispositions(got []agentDisposition) string {
 }
 
 func TestResolveAgentDispositionsIsOrderIndependent(t *testing.T) {
-	a, _ := seedNativeFixture(t, filepath.Join("testdata", "agents_native", "standalone-matches-package-name"))
+	a, _, _ := seedNativeFixture(t, filepath.Join("testdata", "agents_native", "standalone-matches-package-name"))
 	observations, err := a.inventoryNativeAgents(t.Context())
 	if err != nil {
 		t.Fatal(err)

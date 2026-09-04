@@ -44,7 +44,7 @@ func (a *App) inventoryNativeAgents(ctx context.Context) ([]agentObservation, er
 		}
 		plugins = append(plugins, listedPlugins...)
 		for _, plugin := range listedPlugins {
-			evidence := []string{cli + " plugin list --json"}
+			evidence := []string{nativePluginCommand(cli, "list", "--json")}
 			if plugin.InstallRoot != "" {
 				evidence = append(evidence, plugin.InstallRoot)
 			}
@@ -73,7 +73,7 @@ func (a *App) inventoryNativeAgents(ctx context.Context) ([]agentObservation, er
 				Kind:       agentKindMarketplace,
 				Identity:   marketplace.Name,
 				Definition: legacyEntry{Name: marketplace.Name, Source: canonicalNativeMarketplaceSource(marketplace.Source)},
-				Evidence:   []string{cli + " plugin marketplace list --json"},
+				Evidence:   []string{nativePluginCommand(cli, "marketplace", "list", "--json")},
 			})
 		}
 		listedServers, err := a.listNativeMCP(ctx, cli)
@@ -349,11 +349,21 @@ func normalizeNativeMCP(entry *legacyEntry) {
 	entry.Env = slices.Compact(entry.Env)
 }
 
-func (a *App) listNativePlugins(ctx context.Context, cli string) ([]nativePlugin, error) {
-	args := []string{"plugin", "list", "--json"}
+// Claude spells the plugin command "plugins"; both the call and its evidence line go through this.
+func nativePluginArgs(cli string, tail ...string) []string {
+	head := "plugin"
 	if cli == "claude" {
-		args[0] = "plugins"
+		head = "plugins"
 	}
+	return append([]string{head}, tail...)
+}
+
+func nativePluginCommand(cli string, tail ...string) string {
+	return cli + " " + strings.Join(nativePluginArgs(cli, tail...), " ")
+}
+
+func (a *App) listNativePlugins(ctx context.Context, cli string) ([]nativePlugin, error) {
+	args := nativePluginArgs(cli, "list", "--json")
 	stdout, stderr, err := a.fallbackExecutor().Run(ctx, cli, args...)
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w: %s", cli, strings.Join(args, " "), err, strings.TrimSpace(stderr))
@@ -395,10 +405,7 @@ func (a *App) listNativePlugins(ctx context.Context, cli string) ([]nativePlugin
 }
 
 func (a *App) listNativeMarketplaces(ctx context.Context, cli string) ([]nativeMarketplace, error) {
-	args := []string{"plugin", "marketplace", "list", "--json"}
-	if cli == "claude" {
-		args[0] = "plugins"
-	}
+	args := nativePluginArgs(cli, "marketplace", "list", "--json")
 	stdout, stderr, err := a.fallbackExecutor().Run(ctx, cli, args...)
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w: %s", cli, strings.Join(args, " "), err, strings.TrimSpace(stderr))

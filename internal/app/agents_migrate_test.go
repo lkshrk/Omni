@@ -185,12 +185,20 @@ func TestAgentsMigrateRendersOwnerWithoutOwnedStandaloneChildren(t *testing.T) {
 	}
 	mustWriteBundleFile(t, filepath.Join(snapshot, "paths.json"), string(paths))
 
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	state := filepath.Join(t.TempDir(), "state")
-	got, err := (&App{StateDir: state}).AgentsMigrate(t.Context(), "h", snapshot)
+	migrator := func() *App {
+		a := &App{StateDir: state}
+		a.SetFallbackExecutor(noNativeCLIs())
+		return a
+	}
+	got, err := migrator().AgentsMigrate(t.Context(), "h", snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"name: independent", "# suppressed: mcp owned owned by bundle-a", "# suppressed: package " + skillOriginal + " owned by bundle-a"} {
+	for _, want := range []string{"name: independent", retainedSectionTitle, "  snapshot  mcp  owned  owned by bundle-a", "  snapshot  package  " + skillOriginal + "  owned by bundle-a"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("migration output missing %q:\n%s", want, got)
 		}
@@ -201,7 +209,6 @@ func TestAgentsMigrateRendersOwnerWithoutOwnedStandaloneChildren(t *testing.T) {
 	if _, err := os.Stat(state); !os.IsNotExist(err) {
 		t.Fatalf("preview wrote wrapper state: %v", err)
 	}
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	root := filepath.Join(state, "agents-migration", "bundles")
 	stale := filepath.Join(root, strings.Repeat("f", 64))
 	unknown := filepath.Join(root, "unknown")
@@ -211,7 +218,7 @@ func TestAgentsMigrateRendersOwnerWithoutOwnedStandaloneChildren(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := (&App{StateDir: state}).AgentsMigrateWrite(t.Context(), "h", snapshot); err != nil {
+	if _, err := migrator().AgentsMigrateWrite(t.Context(), "h", snapshot); err != nil {
 		t.Fatal(err)
 	}
 	wrappers, err := filepath.Glob(filepath.Join(state, "agents-migration", "bundles", "*", "apm.yml"))

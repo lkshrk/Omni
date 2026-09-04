@@ -129,6 +129,25 @@ func renderAPMTemplatePlan(plan agentBundlePlan) (string, []string, error) {
 }
 
 func renderAPMTemplate(decls config.LegacyAgentDecls, ownerDeps []apmPackageDep) (string, []string, error) {
+	render, err := buildAPMRender(decls, ownerDeps)
+	if err != nil {
+		return "", nil, err
+	}
+	body, err := encodeAPMManifest(render.Manifest)
+	if err != nil {
+		return "", nil, err
+	}
+	return body, render.Commands, nil
+}
+
+type apmRender struct {
+	Manifest apmManifest
+	Commands []string
+	MCPReach map[string][]string
+}
+
+func buildAPMRender(decls config.LegacyAgentDecls, ownerDeps []apmPackageDep) (apmRender, error) {
+	out := apmRender{MCPReach: map[string][]string{}}
 	manifest := apmManifest{Name: "omni-migrated", Version: "1.0.0"}
 	var reach []string
 	note := func(targets []string) {
@@ -146,7 +165,7 @@ func renderAPMTemplate(decls config.LegacyAgentDecls, ownerDeps []apmPackageDep)
 	for _, source := range slices.Sorted(maps.Keys(decls.Packages)) {
 		entry, err := decodeLegacyEntry(decls.Packages[source], "package", source)
 		if err != nil {
-			return "", nil, err
+			return apmRender{}, err
 		}
 		targets := apmTargets(entry.Agents)
 		note(targets)
@@ -160,7 +179,7 @@ func renderAPMTemplate(decls config.LegacyAgentDecls, ownerDeps []apmPackageDep)
 	for _, name := range slices.Sorted(maps.Keys(decls.Plugins)) {
 		entry, err := decodeLegacyEntry(decls.Plugins[name], "plugin", name)
 		if err != nil {
-			return "", nil, err
+			return apmRender{}, err
 		}
 		targets := apmTargets(entry.Agents)
 		note(targets)
@@ -171,7 +190,7 @@ func renderAPMTemplate(decls config.LegacyAgentDecls, ownerDeps []apmPackageDep)
 		case entry.Source != "":
 			dep.Git = apmPlaceholders(entry.Source)
 		default:
-			return "", nil, fmt.Errorf("plugin %q has neither a marketplace nor a source", name)
+			return apmRender{}, fmt.Errorf("plugin %q has neither a marketplace nor a source", name)
 		}
 		manifest.Dependencies.APM = append(manifest.Dependencies.APM, dep)
 	}
@@ -179,9 +198,11 @@ func renderAPMTemplate(decls config.LegacyAgentDecls, ownerDeps []apmPackageDep)
 	for _, name := range slices.Sorted(maps.Keys(decls.MCPServers)) {
 		entry, err := decodeLegacyEntry(decls.MCPServers[name], "mcp server", name)
 		if err != nil {
-			return "", nil, err
+			return apmRender{}, err
 		}
-		note(apmTargets(entry.Agents))
+		serverTargets := apmTargets(entry.Agents)
+		note(serverTargets)
+		out.MCPReach[name] = serverTargets
 		dep := apmMCPDep{
 			Name:      entry.Name,
 			Transport: entry.Transport,
@@ -215,26 +236,29 @@ func renderAPMTemplate(decls config.LegacyAgentDecls, ownerDeps []apmPackageDep)
 
 	sort.Strings(reach)
 	manifest.Targets = reach
+	out.Manifest = manifest
 
+	for _, name := range slices.Sorted(maps.Keys(decls.Marketplaces)) {
+		entry, err := decodeLegacyEntry(decls.Marketplaces[name], "marketplace", name)
+		if err != nil {
+			return apmRender{}, err
+		}
+		out.Commands = append(out.Commands, marketplaceDecl{name: entry.Name, source: entry.Source}.Render())
+	}
+	return out, nil
+}
+
+func encodeAPMManifest(manifest apmManifest) (string, error) {
 	var buf strings.Builder
 	encoder := yaml.NewEncoder(&buf)
 	encoder.SetIndent(2)
 	if err := encoder.Encode(manifest); err != nil {
-		return "", nil, fmt.Errorf("render apm.yml: %w", err)
+		return "", fmt.Errorf("render apm.yml: %w", err)
 	}
 	if err := encoder.Close(); err != nil {
-		return "", nil, fmt.Errorf("render apm.yml: %w", err)
+		return "", fmt.Errorf("render apm.yml: %w", err)
 	}
-
-	var cmds []string
-	for _, name := range slices.Sorted(maps.Keys(decls.Marketplaces)) {
-		entry, err := decodeLegacyEntry(decls.Marketplaces[name], "marketplace", name)
-		if err != nil {
-			return "", nil, err
-		}
-		cmds = append(cmds, marketplaceDecl{name: entry.Name, source: entry.Source}.Render())
-	}
-	return buf.String(), cmds, nil
+	return buf.String(), nil
 }
 
 func decodeLegacyEntry(raw json.RawMessage, kind, name string) (legacyEntry, error) {
@@ -276,11 +300,18 @@ func (a *App) AgentsMigrateWrite(ctx context.Context, host, snapshotDir string) 
 	return a.agentsMigrate(ctx, host, snapshotDir, true, writeAgentsMigrationTemplate)
 }
 
+// BuildAgentsMigrationPreview unions legacy snapshot declarations with live native state and subtracts what APM manages.
+func (a *App) BuildAgentsMigrationPreview(ctx context.Context, host, snapshotDir string) (AgentsMigrationPreview, error) {
+	_, preview, err := a.planAgentsMigration(ctx, host, snapshotDir)
+	return preview, err
+}
+
 func (a *App) agentsMigrate(ctx context.Context, host, snapshotDir string, write bool, writeTemplate func(string, []byte) (string, error)) (string, error) {
-	plan, rendered, err := a.planAgentsMigration(ctx, host, snapshotDir)
+	plan, preview, err := a.planAgentsMigration(ctx, host, snapshotDir)
 	if err != nil {
 		return "", err
 	}
+	rendered := preview.Render()
 	if !write {
 		return rendered, nil
 	}
@@ -297,7 +328,7 @@ func (a *App) agentsMigrate(ctx context.Context, host, snapshotDir string, write
 		return "", fmt.Errorf("prepare migration wrappers: %w", err)
 	}
 	defer discardPreparedAgentBundleWrappers(prepared)
-	warning, err := commitAgentMigration(templatePath, a.StateDir, plan, prepared, identity, rendered, writeTemplate)
+	warning, err := commitAgentMigration(templatePath, a.StateDir, plan, prepared, identity, preview.Manifest, writeTemplate)
 	if err != nil {
 		return "", err
 	}
@@ -307,53 +338,48 @@ func (a *App) agentsMigrate(ctx context.Context, host, snapshotDir string, write
 	return rendered, nil
 }
 
-func (a *App) planAgentsMigration(ctx context.Context, host, snapshotDir string) (agentBundlePlan, string, error) {
+// planAgentsMigration unions the legacy snapshot with live native state; an absent snapshot is a native-only preview.
+func (a *App) planAgentsMigration(ctx context.Context, host, snapshotDir string) (agentBundlePlan, AgentsMigrationPreview, error) {
+	var plan agentBundlePlan
 	if host == "" {
-		return agentBundlePlan{}, "", fmt.Errorf("host is required")
+		return plan, AgentsMigrationPreview{}, fmt.Errorf("host is required")
 	}
 	if snapshotDir == "" {
 		found, err := a.defaultSnapshotDir()
 		if err != nil {
-			return agentBundlePlan{}, "", err
+			return plan, AgentsMigrationPreview{}, err
 		}
 		snapshotDir = found
 	}
-	if snapshotDir == "" {
-		observations, err := a.inventoryNativeAgents(ctx)
+	if snapshotDir != "" {
+		decls, evidence, err := config.LegacyAgentsFromSnapshot(snapshotDir, host)
 		if err != nil {
-			return agentBundlePlan{}, "", err
+			return plan, AgentsMigrationPreview{}, err
 		}
-		plan, rendered := nativeAgentPlan(resolveAgentDispositions(observations))
-		return plan, rendered, nil
-	}
-	decls, evidence, err := config.LegacyAgentsFromSnapshot(snapshotDir, host)
-	if err != nil {
-		return agentBundlePlan{}, "", err
-	}
-	if a.StateDir == "" {
-		if err := a.resolveStateDir(); err != nil {
-			return agentBundlePlan{}, "", err
+		if a.StateDir == "" {
+			if err := a.resolveStateDir(); err != nil {
+				return plan, AgentsMigrationPreview{}, err
+			}
+		}
+		if plan, err = planAgentBundles(decls, evidence, a.StateDir); err != nil {
+			return plan, AgentsMigrationPreview{}, err
 		}
 	}
-	plan, err := planAgentBundles(decls, evidence, a.StateDir)
+	observations, err := a.inventoryNativeAgents(ctx)
 	if err != nil {
-		return agentBundlePlan{}, "", err
+		return plan, AgentsMigrationPreview{}, err
 	}
-	manifest, cmds, err := renderAPMTemplatePlan(plan)
+	managed, err := loadAPMManagedIndex()
 	if err != nil {
-		return agentBundlePlan{}, "", err
+		return plan, AgentsMigrationPreview{}, err
 	}
-	var out strings.Builder
-	out.WriteString(agentsMigrationMarker + "\n")
-	out.WriteString(manifest)
-	for _, cmd := range cmds {
-		out.WriteString("# " + cmd + "\n")
+	dispositions := subtractAPMManaged(resolveAgentDispositions(observations), managed)
+	plan.Decls = mergeLegacyAgentDecls(plan.Decls, nativeAgentDecls(dispositions))
+	preview, err := renderAgentsMigrationPreview(plan, dispositions)
+	if err != nil {
+		return plan, AgentsMigrationPreview{}, err
 	}
-	for _, suppressed := range plan.Suppressed {
-		out.WriteString("# suppressed: " + suppressed + "\n")
-	}
-	rendered := out.String()
-	return plan, rendered, nil
+	return plan, preview, nil
 }
 
 type agentsMigrationTemplateIdentity struct {
