@@ -2335,20 +2335,6 @@ func setDotTestModTime(t *testing.T, path string, when time.Time) {
 	}
 }
 
-func shortDotsTempDir(t *testing.T, prefix string) string {
-	t.Helper()
-	root := os.TempDir()
-	if _, err := os.Stat("/private/tmp"); err == nil {
-		root = "/private/tmp"
-	}
-	dir, err := os.MkdirTemp(root, prefix)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	return dir
-}
-
 func setDotsRepoForTest(t *testing.T, cfgDir, repoDir string) {
 	t.Helper()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
@@ -4118,7 +4104,7 @@ func TestDotsList_HealthOK(t *testing.T) {
 
 func TestDotsList_FileCountAndChildrenSkipIgnoredPaths(t *testing.T) {
 	a, cfgDir, _ := newDotsApp(t)
-	repoDir := shortDotsTempDir(t, "omni-dots-repo-")
+	repoDir := t.TempDir()
 	setDotsRepoForTest(t, cfgDir, repoDir)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -4499,9 +4485,9 @@ func TestDotsSync_LocalOnlyDirectorySkipsSocketFiles(t *testing.T) {
 		t.Skip("stow not available")
 	}
 	a, cfgDir, _ := newDotsApp(t)
-	repoDir := shortDotsTempDir(t, "omni-dots-repo-")
+	repoDir := t.TempDir()
 	setDotsRepoForTest(t, cfgDir, repoDir)
-	home := shortDotsTempDir(t, "omni-dots-home-")
+	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 
