@@ -81,7 +81,15 @@ func (a *App) RunAPM(ctx context.Context, args ...string) (apm.Result, error) {
 	if err := a.requirePinnedAPM(ctx); err != nil {
 		return apm.Result{}, err
 	}
-	return a.APMClient(apm.Global).Run(ctx, args...)
+	result, err := a.APMClient(apm.Global).Run(ctx, args...)
+	if apmMutatesHooks(args) {
+		if home, homeErr := os.UserHomeDir(); homeErr == nil {
+			if _, pathErr := portableHookPaths(home); pathErr != nil && err == nil {
+				err = fmt.Errorf("anchor hook paths to $HOME: %w", pathErr)
+			}
+		}
+	}
+	return result, err
 }
 
 func (a *App) AgentsOutdated(ctx context.Context) (apm.OutdatedResult, error) {

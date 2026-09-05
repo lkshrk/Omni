@@ -62,6 +62,17 @@ silently over work APM or the operator did directly:
 `omni sync` runs the same template step but has no `--force-template` flag; run
 `omni agents sync --force-template` for the adoption or override step.
 
+## Hook commands stay host-independent
+
+APM writes user-scope hook commands into `~/.claude/settings.json` with the
+home directory expanded, so a dotfiles-tracked settings file would differ per
+host. After every APM install, update, uninstall, or prune, Omni rewrites the
+`<home>/.claude/hooks/` prefix in `~/.claude/settings.json` and APM's
+`~/.claude/apm-hooks.json` ledger to `$HOME/.claude/hooks/`. Claude Code runs
+hook commands through a shell, so `$HOME` expands at invocation time. APM adopts
+the rewritten entries on the next run, so syncs stay idempotent and uninstalls
+still remove the right hooks. Nothing is rewritten on Windows.
+
 ## Package-owned MCP and LSP
 
 A package is authoritative for every MCP or LSP child declared by its installed
