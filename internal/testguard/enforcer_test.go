@@ -339,7 +339,7 @@ printf '%s|%s|%s|%s|%s|%s|%s\n' "$DOCKER_CONFIG" "${DOCKER_CONTEXT:-}" "${DOCKER
 		t.Fatal(err)
 	}
 	fields := strings.Split(strings.TrimSpace(string(logged)), "|")
-	if len(fields) != 7 || !strings.HasPrefix(fields[0], "/tmp/omni-docker.") || fields[1] != "" || fields[2] != "" || fields[3] != "" || fields[4] != "" || fields[5] != "" || fields[6] != "version" {
+	if len(fields) != 7 || !isSafeDockerConfigRoot(fields[0]) || fields[1] != "" || fields[2] != "" || fields[3] != "" || fields[4] != "" || fields[5] != "" || fields[6] != "version" {
 		t.Fatalf("unsafe Docker environment reached command: %q", logged)
 	}
 	if _, err := os.Stat(fields[0]); !os.IsNotExist(err) {
@@ -612,6 +612,10 @@ func makeTargetBlock(makefile, target string) string {
 
 func isSafeRunnerRoot(path string) bool {
 	return strings.HasPrefix(path, "/tmp/omni-test.") || strings.HasPrefix(path, "/private/tmp/omni-test.")
+}
+
+func isSafeDockerConfigRoot(path string) bool {
+	return strings.HasPrefix(path, "/tmp/omni-docker.") || strings.HasPrefix(path, "/private/tmp/omni-docker.")
 }
 
 func guardBuildContexts() []guardBuildContext {
