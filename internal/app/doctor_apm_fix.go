@@ -75,14 +75,20 @@ func (a *App) verifyPinnedAPMAfter(ctx context.Context, cmdline string) error {
 	case !apmVersionPinned(version):
 		return fmt.Errorf("%s completed but apm %s remains installed; want %s", cmdline, version, apmVersionPin)
 	}
+	if matches, known := apmProvenanceMatchesPin(); known && !matches {
+		return fmt.Errorf("%s completed but apm %s is still installed from another source; want %s", cmdline, version, apmPackagePin)
+	}
 	return nil
 }
 
-// upgradeOutdatedAPM restores the exact contract-tested APM release.
+// upgradeOutdatedAPM restores the exact contract-tested APM build.
 func (a *App) upgradeOutdatedAPM(ctx context.Context, dryRun bool) (APMInstallFixReport, error) {
 	version, err := a.APMVersion(ctx)
 	if err == nil && apmVersionPinned(version) {
-		return APMInstallFixReport{AlreadyInstalled: true}, nil
+		// The pinned release also ships from unpinned commits, so a matching version alone proves nothing.
+		if matches, known := apmProvenanceMatchesPin(); !known || matches {
+			return APMInstallFixReport{AlreadyInstalled: true}, nil
+		}
 	}
 	var failures []error
 	for _, candidate := range apmUpgradeCommands {
@@ -109,6 +115,6 @@ func (a *App) upgradeOutdatedAPM(ctx context.Context, dryRun bool) (APMInstallFi
 	if len(failures) > 0 {
 		return APMInstallFixReport{}, errors.Join(failures...)
 	}
-	return APMInstallFixReport{}, fmt.Errorf("apm %s does not match pinned %s and no supported installer (uv, pipx, pip3) is available; install pinned APM manually from %s",
-		version, apmVersionPin, apmPackagePin)
+	return APMInstallFixReport{}, fmt.Errorf("apm %s is not the pinned build and no supported installer (uv, pipx, pip3) is available; install pinned APM manually from %s",
+		version, apmPackagePin)
 }

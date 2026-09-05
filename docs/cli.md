@@ -81,6 +81,10 @@ build from the upstream `main` branch through the same installer preference.
 See [APM Main Build](agents.md#apm-main-build) for provenance and the
 upgrade procedure.
 
+The "APM provenance" check reads the installer's own receipt, so a build of the
+required version made from another commit is still reported. `--fix` force
+reinstalls in that case; an install with no readable receipt is left alone.
+
 `omni doctor` exits nonzero when any check fails, and `--fix` and `--dry-run`
 do not suppress that: `--fix --dry-run` still runs the full diagnostic pass, so
 a preview on a host with unrelated failing checks exits nonzero. A `--fix`

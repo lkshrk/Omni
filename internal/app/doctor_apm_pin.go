@@ -44,6 +44,47 @@ func locateAPMInstallReceipt() string {
 	return ""
 }
 
+var apmReceiptLocator = locateAPMInstallReceipt
+
+type apmProvenance struct {
+	Installed string
+	Pinned    bool
+}
+
+func parseAPMProvenance(data []byte) (apmProvenance, error) {
+	var receipt apmInstallReceipt
+	if err := json.Unmarshal(data, &receipt); err != nil {
+		return apmProvenance{}, err
+	}
+	url, ref := parseAPMPackagePin(apmPackagePin)
+	commit := receipt.VCSInfo.CommitID
+	if commit == "" {
+		commit = receipt.VCSInfo.RequestedRevision
+	}
+	installed := receipt.URL
+	if commit != "" {
+		installed += "@" + commit
+	}
+	return apmProvenance{Installed: installed, Pinned: receipt.URL == url && commit == ref}, nil
+}
+
+// known is false for installs with no readable receipt, which must not be reinstalled on suspicion alone.
+func apmProvenanceMatchesPin() (matches, known bool) {
+	path := apmReceiptLocator()
+	if path == "" {
+		return false, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, false
+	}
+	provenance, err := parseAPMProvenance(data)
+	if err != nil {
+		return false, false
+	}
+	return provenance.Pinned, true
+}
+
 func checkAPMInstallReceipt(result *DoctorResult, path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -52,34 +93,26 @@ func checkAPMInstallReceipt(result *DoctorResult, path string) {
 	url, ref := parseAPMPackagePin(apmPackagePin)
 	pinned := url + "@" + ref
 
-	var receipt apmInstallReceipt
-	if err := json.Unmarshal(data, &receipt); err != nil {
+	provenance, err := parseAPMProvenance(data)
+	if err != nil {
 		result.addCheck("apm-pin", "APM provenance", DoctorStatusWarn,
 			"apm install receipt could not be read", err.Error(), "pinned "+pinned, path)
 		return
 	}
-	commit := receipt.VCSInfo.CommitID
-	if commit == "" {
-		commit = receipt.VCSInfo.RequestedRevision
-	}
-	if receipt.URL == url && commit == ref {
+	if provenance.Pinned {
 		result.addCheck("apm-pin", "APM provenance", DoctorStatusOK, "apm was installed from the pinned commit", pinned, path)
 		return
 	}
-	installed := receipt.URL
-	if commit != "" {
-		installed += "@" + commit
-	}
 	result.addCheck("apm-pin", "APM provenance", DoctorStatusWarn,
 		"apm was not installed from the pinned source",
-		"installed "+installed, "pinned "+pinned, apmVersionFixHint, path)
+		"installed "+provenance.Installed, "pinned "+pinned, apmVersionFixHint, path)
 }
 
 func (a *App) doctorAPMPin(result *DoctorResult) {
 	if !a.APMAvailable() {
 		return
 	}
-	if receipt := locateAPMInstallReceipt(); receipt != "" {
+	if receipt := apmReceiptLocator(); receipt != "" {
 		checkAPMInstallReceipt(result, receipt)
 	}
 }
