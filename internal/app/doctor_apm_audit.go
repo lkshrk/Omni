@@ -105,9 +105,11 @@ func (a *App) doctorAPMAudit(ctx context.Context, result *DoctorResult) {
 		result.addCheck("apm-audit", "APM audit", DoctorStatusOK, "nothing to audit")
 		return
 	}
-	if _, err := os.Stat(filepath.Join(dir, "apm.yml")); err != nil {
-		result.addCheck("apm-audit", "APM audit", DoctorStatusOK, "nothing to audit", filepath.Join(dir, "apm.yml"))
-		return
+	for _, name := range []string{"apm.yml", "apm.lock.yaml"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			result.addCheck("apm-audit", "APM audit", DoctorStatusOK, "nothing to audit", filepath.Join(dir, name))
+			return
+		}
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

@@ -148,6 +148,25 @@ func TestDoctorAPMAuditSkipsWithoutManifest(t *testing.T) {
 	}
 }
 
+func TestDoctorAPMAuditSkipsWithoutLockfile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	writeFile(t, filepath.Join(home, ".apm", "apm.yml"), "name: live\nversion: 1.0.0\n")
+	mock := &availExecutor{available: map[string]bool{"apm": true}}
+	a := New(filepath.Join(t.TempDir(), "settings.json"))
+	a.SetFallbackExecutor(mock)
+
+	result := &DoctorResult{}
+	a.doctorAPMAudit(context.Background(), result)
+	if check := apmAuditCheck(t, result); check.Status != DoctorStatusOK || !strings.Contains(check.Message, "nothing to audit") {
+		t.Fatalf("check = %+v", check)
+	}
+	if len(mock.Calls) != 0 {
+		t.Fatalf("apm invoked without a lockfile: %+v", mock.Calls)
+	}
+}
+
 func TestDoctorAPMAuditFailsOnUnparseableReport(t *testing.T) {
 	a, _, _ := newAPMAuditApp(t, "[>] Replaying install (cache-only)...\n", errors.New("exit status 2"))
 	result := &DoctorResult{}
