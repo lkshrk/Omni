@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -23,5 +24,18 @@ func TestListNativeMCPHonorsClaudeConfigDir(t *testing.T) {
 	}
 	if len(servers) != 1 || servers[0].Name != "from-config-dir" {
 		t.Fatalf("servers = %#v", servers)
+	}
+}
+
+func TestHarnessDeploymentsHonorClaudeConfigDir(t *testing.T) {
+	home := t.TempDir()
+	writeFile(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"from-home":{"command":"home"}}}`)
+	configDir := filepath.Join(home, "elsewhere")
+	writeFile(t, filepath.Join(configDir, ".claude.json"), `{"mcpServers":{"from-config-dir":{"command":"configured"}}}`)
+	t.Setenv("CLAUDE_CONFIG_DIR", configDir)
+
+	got := readHarnessDeployments(home)
+	if len(got.MCP) != 1 || !slices.Equal(got.MCP["from-config-dir"], []string{harnessClaude}) {
+		t.Fatalf("harness MCP = %#v", got.MCP)
 	}
 }

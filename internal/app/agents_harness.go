@@ -45,9 +45,16 @@ func readHarnessDeployments(home string) harnessDeployments {
 		LSP:        map[string][]string{},
 		MCPConfigs: map[string]harnessMCPConfig{},
 	}
-	out.readClaude(filepath.Join(home, ".claude.json"))
+	out.readClaude(claudeConfigFileIn(home))
 	out.readCodex(filepath.Join(home, ".codex", "config.toml"))
 	return out
+}
+
+func claudeConfigFileIn(home string) string {
+	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
+		return filepath.Join(dir, ".claude.json")
+	}
+	return filepath.Join(home, ".claude.json")
 }
 
 func (h *harnessDeployments) readClaude(path string) {
