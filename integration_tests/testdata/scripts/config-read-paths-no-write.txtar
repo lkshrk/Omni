@@ -14,7 +14,7 @@ cmp settings.json settings.json.orig
 # A command that actually writes migrates the file on its way out.
 exec omni --config settings.json settings set auto_import true
 exec grep '"version"' settings.json
-stdout '"version": 24'
+stdout '"version": 25'
 
 -- settings.json --
 {"version":1,"settings":{}}

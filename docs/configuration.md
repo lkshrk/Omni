@@ -19,10 +19,11 @@ ordinary dotfile-managed file, not Omni configuration.
 `omni agents migrate --host <name>` previews one from a pre-APM snapshot;
 `--write` publishes wrappers and updates the migration-owned template.
 
-Current settings schema version: 24. Configurations containing the removed
-top-level `agents` field are rejected with instructions to use APM.
+Current settings schema version: 25. The top-level `agents` field accepts only
+an `ignored` list of host-local agent artifacts omni must leave alone; every
+other `agents` shape is rejected with instructions to use APM.
 
 The generated JSON Schema is the authoritative field reference:
 [`spec/omni.settings.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.schema.json).
-It covers tools, dotfiles, providers, hosts, groups, and ignore lists; agent
-resources are deliberately absent.
+It covers tools, dotfiles, providers, hosts, groups, ignore lists, and agent
+exclusions; agent packages themselves are deliberately absent.

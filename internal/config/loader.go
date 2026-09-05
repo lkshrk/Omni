@@ -320,6 +320,7 @@ var configMigrations = []configMigration{
 	{from: 21, to: 22, apply: migrateConfigV21ToV22, applyRaw: migrateRawConfigV21ToV22},
 	{from: 22, to: 23, apply: migrateConfigV22ToV23, applyRaw: migrateRawConfigV22ToV23},
 	{from: 23, to: 24, apply: migrateConfigV23ToV24, applyRaw: migrateRawConfigV23ToV24},
+	{from: 24, to: 25, apply: migrateConfigV24ToV25, applyRaw: migrateRawConfigV24ToV25},
 }
 
 func configMigrationFrom(version int) (configMigration, bool) {
@@ -1174,6 +1175,20 @@ func migrateRawConfigV23ToV24(raw map[string]json.RawMessage) error {
 		return err
 	}
 	raw["version"] = json.RawMessage(`24`)
+	return nil
+}
+
+// No-op: v25 only promotes the already-accepted agents.ignored block to a schema-described field.
+func migrateConfigV24ToV25(cfg *RootConfig) error {
+	cfg.Version = 25
+	return nil
+}
+
+func migrateRawConfigV24ToV25(raw map[string]json.RawMessage) error {
+	if err := validateRemovedAgentConfigFields(raw); err != nil {
+		return err
+	}
+	raw["version"] = json.RawMessage(`25`)
 	return nil
 }
 
