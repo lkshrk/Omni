@@ -56,17 +56,23 @@ func TestTUIToolsRefreshRechecksProviderState(t *testing.T) {
 		for _, name := range []string{"omni-old-one", "omni-old-two"} {
 			writeIntegrationFile(t, filepath.Join(providerState, name), "2.0.0\n")
 		}
-		deadline := time.Now().Add(8 * time.Second)
-		for exactLineCount(commandLog, "outdated --json=v2 --greedy") == before && time.Now().Before(deadline) {
+		// R is dropped while the post-load background scan is pending, and that scan can straddle the state change.
+		var screen string
+		deadline := time.Now().Add(20 * time.Second)
+		for {
 			writeTUIKeys(t, term, "R")
-			_, _ = waitForScreen(term, 500*time.Millisecond, func(_ string) bool {
-				return exactLineCount(commandLog, "outdated --json=v2 --greedy") > before
+			var settled bool
+			screen, settled = waitForScreen(term, time.Second, func(string) bool {
+				return exactLineCount(commandLog, "outdated --json=v2 --greedy") > before &&
+					bulkUpgradeCacheSettled(cache)
 			})
+			if settled {
+				return screen
+			}
+			if !time.Now().Before(deadline) {
+				t.Fatalf("TUI refresh did not persist the changed provider state; screen:\n%s", screen)
+			}
 		}
-		return waitForRequiredScreen(t, term, 12*time.Second, func(string) bool {
-			return exactLineCount(commandLog, "outdated --json=v2 --greedy") > before &&
-				bulkUpgradeCacheSettled(cache)
-		}, "TUI refresh did not persist the changed provider state")
 	})
 }
 
