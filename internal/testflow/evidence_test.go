@@ -75,7 +75,7 @@ func TestVerifyEvidenceRejectsUntrustworthyGoOutput(t *testing.T) {
 		{name: "missing package terminal", events: []goTestEvent{{Action: "pass", Package: "example.test/app", Test: "TestFlow"}}, want: "package example.test/app has 0 terminal"},
 		{name: "duplicate test terminal", events: []goTestEvent{{Action: "pass", Package: "example.test/app", Test: "TestFlow"}, {Action: "pass", Package: "example.test/app", Test: "TestFlow"}, {Action: "pass", Package: "example.test/app"}}, want: "2 terminal pass events"},
 		{name: "cached", events: []goTestEvent{{Action: "output", Package: "example.test/app", Output: "ok\t(cached)\n"}, {Action: "pass", Package: "example.test/app", Test: "TestFlow"}, {Action: "pass", Package: "example.test/app"}}, want: "cached test output"},
-		{name: "truncated", raw: `{"Action":"pass","Package":"example.test/app"`, want: "EOF"},
+		{name: "truncated", raw: `{"Action":"pass","Package":"example.test/app"`, want: "malformed JSON at $"},
 	}
 	selector := Selector{Package: "example.test/app", Test: "TestFlow", Lane: "unit-app", OS: []string{"linux"}, Tags: []string{}}
 	for _, test := range tests {

@@ -168,7 +168,7 @@ func rejectDuplicateKeys(body []byte) error {
 	walk = func(path string) error {
 		token, err := dec.Token()
 		if err != nil {
-			return err
+			return malformedJSON(path, err)
 		}
 		delim, ok := token.(json.Delim)
 		if !ok {
@@ -180,7 +180,7 @@ func rejectDuplicateKeys(body []byte) error {
 			for dec.More() {
 				keyToken, err := dec.Token()
 				if err != nil {
-					return err
+					return malformedJSON(path, err)
 				}
 				key, ok := keyToken.(string)
 				if !ok {
@@ -203,10 +203,17 @@ func rejectDuplicateKeys(body []byte) error {
 		default:
 			return fmt.Errorf("decode flow catalog: unexpected delimiter %q at %s", delim, path)
 		}
-		_, err = dec.Token()
-		return err
+		if _, err = dec.Token(); err != nil {
+			return malformedJSON(path, err)
+		}
+		return nil
 	}
 	return walk("$")
+}
+
+// Go's json token error text for truncated input is unstable across releases; callers assert on this wrapper.
+func malformedJSON(path string, err error) error {
+	return fmt.Errorf("malformed JSON at %s: %w", path, err)
 }
 
 var flowIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[._][a-z0-9]+)*$`)
