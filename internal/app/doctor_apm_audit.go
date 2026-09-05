@@ -33,6 +33,7 @@ type apmAuditReport struct {
 
 type apmAuditFindings struct {
 	Integrity []string
+	Advisory  []string
 	Missing   []string
 	Drift     []string
 }
@@ -55,7 +56,8 @@ func parseAPMAuditReport(stdout string) (apmAuditReport, error) {
 
 // Vanilla apm resolves deployed and drifting paths against the process working directory and knows
 // nothing about the .agents deploy root, so both path-based checks are re-evaluated against home.
-func evaluateAPMAudit(report apmAuditReport, home string) apmAuditFindings {
+// Integrity checks scan the whole home tree, so their findings are graded by the deployment ledger.
+func evaluateAPMAudit(report apmAuditReport, home string, deployed map[string]bool) apmAuditFindings {
 	var findings apmAuditFindings
 	for _, check := range report.Checks {
 		switch check.Name {
@@ -72,9 +74,14 @@ func evaluateAPMAudit(report apmAuditReport, home string) apmAuditFindings {
 				}
 			}
 		default:
-			if !check.Passed {
+			if check.Passed {
+				continue
+			}
+			onDeployed, elsewhere := splitAPMAuditDetails(check.Details, home, deployed)
+			findings.Advisory = append(findings.Advisory, elsewhere...)
+			if len(check.Details) == 0 || len(onDeployed) > 0 {
 				findings.Integrity = append(findings.Integrity, check.Name+": "+check.Message)
-				findings.Integrity = append(findings.Integrity, check.Details...)
+				findings.Integrity = append(findings.Integrity, onDeployed...)
 			}
 		}
 	}
@@ -128,25 +135,34 @@ func (a *App) doctorAPMAudit(ctx context.Context, result *DoctorResult) {
 		return
 	}
 
-	findings := evaluateAPMAudit(report, home)
-	if len(findings.Integrity) == 0 && len(findings.Missing) == 0 && len(findings.Drift) == 0 {
+	deployed, deployedErr := apmDeployedPaths()
+	findings := evaluateAPMAudit(report, home, deployed)
+	if len(findings.Integrity) == 0 && len(findings.Advisory) == 0 && len(findings.Missing) == 0 && len(findings.Drift) == 0 {
 		result.addCheck("apm-audit", "APM audit", DoctorStatusOK, "APM audit passed")
 		return
 	}
 
-	var details []string
+	var details, summary []string
 	details = append(details, findings.Integrity...)
+	if deployedErr != nil {
+		details = append(details, deployedErr.Error())
+	}
 	if len(findings.Missing) > 0 {
 		details = append(details, apmAuditSample("deployed files missing", findings.Missing)...)
 		details = append(details, "run 'omni agents sync' to redeploy them")
+		summary = append(summary, fmt.Sprintf("%d deployed file(s) missing", len(findings.Missing)))
 	}
 	if len(findings.Drift) > 0 {
 		details = append(details, apmAuditSample("deployed files hand-edited", findings.Drift)...)
+		summary = append(summary, fmt.Sprintf("%d hand-edited", len(findings.Drift)))
+	}
+	if len(findings.Advisory) > 0 {
+		details = append(details, apmAuditSample("non-deployed files with findings", findings.Advisory)...)
+		summary = append(summary, fmt.Sprintf("%d finding(s) on non-deployed files", len(findings.Advisory)))
 	}
 	if len(findings.Integrity) > 0 {
 		result.addCheck("apm-audit", "APM audit", DoctorStatusFail, "APM workspace integrity is broken", details...)
 		return
 	}
-	result.addCheck("apm-audit", "APM audit", DoctorStatusWarn,
-		fmt.Sprintf("%d deployed file(s) missing, %d hand-edited", len(findings.Missing), len(findings.Drift)), details...)
+	result.addCheck("apm-audit", "APM audit", DoctorStatusWarn, strings.Join(summary, ", "), details...)
 }

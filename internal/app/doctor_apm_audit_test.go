@@ -175,3 +175,68 @@ func TestDoctorAPMAuditFailsOnUnparseableReport(t *testing.T) {
 		t.Fatalf("check = %+v, want fail", check)
 	}
 }
+
+const apmAuditContentIntegrityFixture = `[>] Replaying install (cache-only)...
+{
+  "passed": false,
+  "checks": [
+    {"name": "lockfile-exists", "passed": true, "message": "Lockfile present", "details": []},
+    {"name": "content-integrity", "passed": false, "message": "1 file(s) with critical hidden Unicode", "details": [
+      "unicode: .claude/history.jsonl"
+    ]},
+    {"name": "deployed-files-present", "passed": true, "message": "All deployed files present", "details": []},
+    {"name": "drift", "passed": true, "message": "No drift detected", "details": []}
+  ]
+}
+`
+
+func TestDoctorAPMAuditWarnsOnFindingsOutsideDeployedFiles(t *testing.T) {
+	a, home, _ := newAPMAuditApp(t, apmAuditContentIntegrityFixture, errors.New("exit status 1"))
+	writeFile(t, filepath.Join(home, ".apm", "apm.lock.yaml"),
+		"dependencies: []\ndeployments:\n- kind: project-relative\n  value: .claude/skills/owned/SKILL.md\n")
+
+	result := &DoctorResult{}
+	a.doctorAPMAudit(context.Background(), result)
+
+	check := apmAuditCheck(t, result)
+	if check.Status != DoctorStatusWarn {
+		t.Fatalf("status = %q, want warn: %+v", check.Status, check)
+	}
+	details := strings.Join(append([]string{check.Message}, check.Details...), "\n")
+	if !strings.Contains(details, "non-deployed") {
+		t.Fatalf("non-deployed findings not labelled: %q", details)
+	}
+	if !strings.Contains(details, ".claude/history.jsonl") {
+		t.Fatalf("finding path not surfaced: %q", details)
+	}
+}
+
+func TestDoctorAPMAuditFailsOnFindingsInDeployedFiles(t *testing.T) {
+	a, home, _ := newAPMAuditApp(t, apmAuditContentIntegrityFixture, errors.New("exit status 1"))
+	writeFile(t, filepath.Join(home, ".apm", "apm.lock.yaml"),
+		"dependencies: []\ndeployments:\n- kind: project-relative\n  value: .claude/history.jsonl\n")
+
+	result := &DoctorResult{}
+	a.doctorAPMAudit(context.Background(), result)
+
+	check := apmAuditCheck(t, result)
+	if check.Status != DoctorStatusFail {
+		t.Fatalf("status = %q, want fail: %+v", check.Status, check)
+	}
+	details := strings.Join(append([]string{check.Message}, check.Details...), "\n")
+	if !strings.Contains(details, "content-integrity") {
+		t.Fatalf("integrity failure not surfaced: %q", details)
+	}
+}
+
+func TestDoctorAPMAuditFailsWhenDeploymentLedgerIsUnreadable(t *testing.T) {
+	a, home, _ := newAPMAuditApp(t, apmAuditContentIntegrityFixture, errors.New("exit status 1"))
+	writeFile(t, filepath.Join(home, ".apm", "apm.lock.yaml"), "deployments:\n- kind: [project-relative\n")
+
+	result := &DoctorResult{}
+	a.doctorAPMAudit(context.Background(), result)
+
+	if check := apmAuditCheck(t, result); check.Status != DoctorStatusFail {
+		t.Fatalf("status = %q, want fail: %+v", check.Status, check)
+	}
+}

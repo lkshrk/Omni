@@ -141,6 +141,12 @@ type apmLockfile struct {
 	MCPConfigs   map[string]apmServiceConfig `yaml:"mcp_configs"`
 	LSPServers   []string                    `yaml:"lsp_servers"`
 	LSPConfigs   map[string]apmServiceConfig `yaml:"lsp_configs"`
+	Deployments  []apmLockDeployment         `yaml:"deployments"`
+}
+
+type apmLockDeployment struct {
+	Kind  string `yaml:"kind"`
+	Value string `yaml:"value"`
 }
 
 type apmServiceConfig struct {
