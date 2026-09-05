@@ -9,8 +9,9 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
+// Deadlines, not wall-clock bounds: a killed client holding a pipe open costs a further executor waitDelay.
 const (
-	agentsDriftDoctorBudget    = 5 * time.Second
+	agentsDriftDoctorDeadline  = 5 * time.Second
 	agentsDriftDoctorPerClient = 2 * time.Second
 )
 
@@ -19,7 +20,7 @@ func (a *App) doctorAgentsDrift(ctx context.Context, result *DoctorResult, cfg *
 	if !a.commandAvailable("claude") && !a.commandAvailable("codex") {
 		return
 	}
-	ctx, cancel := context.WithTimeout(ctx, agentsDriftDoctorBudget)
+	ctx, cancel := context.WithTimeout(ctx, agentsDriftDoctorDeadline)
 	defer cancel()
 
 	report, err := a.agentsDriftReport(ctx, cfg, agentsDriftDoctorPerClient)
