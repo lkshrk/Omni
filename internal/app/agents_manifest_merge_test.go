@@ -257,3 +257,39 @@ func TestMergeAgentsManifestCreatesMissingDependencyBlocks(t *testing.T) {
 		t.Fatalf("dependency blocks not created:\n%s", body)
 	}
 }
+
+func TestMergeAgentsManifestHandlesEmptyFlowDependencies(t *testing.T) {
+	existing := "# omni:agents-migration:v1\nname: omni-migrated\nversion: 1.0.0\ndependencies: {}\n"
+	merged, report, err := mergeAgentsManifest([]byte(existing), manifestCandidates{
+		Packages: []apmPackageDep{{Git: "https://github.com/acme/beta", Targets: []string{"codex"}}},
+	})
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if len(report.Appended) != 1 {
+		t.Fatalf("appended = %v, want 1 entry", report.Appended)
+	}
+	var parsed struct {
+		Dependencies struct {
+			APM []apmPackageDep `yaml:"apm"`
+		} `yaml:"dependencies"`
+	}
+	if err := yaml.Unmarshal(merged, &parsed); err != nil {
+		t.Fatalf("merged output does not parse: %v\n%s", err, merged)
+	}
+	if len(parsed.Dependencies.APM) != 1 || parsed.Dependencies.APM[0].Git != "https://github.com/acme/beta" {
+		t.Fatalf("dependencies.apm = %+v\n%s", parsed.Dependencies.APM, merged)
+	}
+	if !strings.Contains(string(merged), "# omni:agents-migration:v1") {
+		t.Fatalf("marker lost:\n%s", merged)
+	}
+}
+
+func TestMergeAgentsManifestRefusesNonEmptyFlowDependencies(t *testing.T) {
+	existing := "name: omni-migrated\nversion: 1.0.0\ndependencies: {apm: [{git: https://github.com/acme/alpha}]}\n"
+	if _, _, err := mergeAgentsManifest([]byte(existing), manifestCandidates{
+		Packages: []apmPackageDep{{Git: "https://github.com/acme/beta"}},
+	}); err == nil {
+		t.Fatal("merge accepted a flow-style dependencies mapping; want refusal")
+	}
+}

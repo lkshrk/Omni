@@ -255,6 +255,12 @@ func (m *manifestMerger) placeNewItems(deps *yaml.Node, newItems map[string][]an
 	if deps == nil {
 		return m.createDependencies(newItems)
 	}
+	if len(deps.Content) == 0 {
+		return m.replaceEmptyDependencies(deps, newItems)
+	}
+	if deps.Style&yaml.FlowStyle != 0 {
+		return fmt.Errorf("agents manifest dependencies is not a block mapping")
+	}
 	childIndent := manifestChildIndent(deps)
 	for _, kind := range []string{manifestKindPackage, manifestKindMCP, manifestKindLSP} {
 		items := newItems[kind]
@@ -288,6 +294,40 @@ func (m *manifestMerger) placeNewItems(deps *yaml.Node, newItems map[string][]an
 		m.edit(at, at, block)
 	}
 	return nil
+}
+
+// An empty mapping carries no child node to indent against, so the whole line is rewritten as a block.
+func (m *manifestMerger) replaceEmptyDependencies(deps *yaml.Node, newItems map[string][]any) error {
+	line := deps.Line
+	if line < 1 || line > len(m.lines) {
+		return fmt.Errorf("agents manifest dependencies is not on a readable line")
+	}
+	text := m.lines[line-1]
+	indent := len(text) - len(strings.TrimLeft(text, " "))
+	block, err := renderDependencyBlock(newItems, indent)
+	if err != nil {
+		return err
+	}
+	m.edit(line-1, line, block)
+	return nil
+}
+
+func renderDependencyBlock(newItems map[string][]any, indent int) ([]string, error) {
+	pad := strings.Repeat(" ", indent)
+	block := []string{pad + "dependencies:"}
+	for _, kind := range []string{manifestKindPackage, manifestKindMCP, manifestKindLSP} {
+		items := newItems[kind]
+		if len(items) == 0 {
+			continue
+		}
+		rendered, err := renderManifestItems(items, indent+4)
+		if err != nil {
+			return nil, err
+		}
+		block = append(block, pad+"  "+kind+":")
+		block = append(block, rendered...)
+	}
+	return block, nil
 }
 
 func (m *manifestMerger) createDependencies(newItems map[string][]any) error {
