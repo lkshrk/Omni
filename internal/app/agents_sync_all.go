@@ -155,6 +155,10 @@ func AgentsTemplatePath() (string, error) {
 }
 
 func migrateLegacyDarwinAgentsTemplate(canonical, legacy string) error {
+	// A symlinked canonical template is dotfiles-managed: adopting the legacy copy would write through the link.
+	if info, err := os.Lstat(canonical); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return nil
+	}
 	old, oldExists, err := readRegularTemplate(legacy)
 	if err != nil || !oldExists {
 		return err
