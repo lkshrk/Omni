@@ -34,6 +34,20 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
+# Docker Desktop and Homebrew ship buildx as a per-user CLI plugin the isolated config would otherwise hide.
+for plugin_dir in "${HOME:-}/.docker/cli-plugins" /opt/homebrew/lib/docker/cli-plugins; do
+	[ -d "$plugin_dir" ] || continue
+	mkdir -p "$docker_config/cli-plugins"
+	for plugin in "$plugin_dir"/docker-*; do
+		[ -e "$plugin" ] && [ ! -e "$docker_config/cli-plugins/$(basename "$plugin")" ] && ln -s "$plugin" "$docker_config/cli-plugins/"
+	done
+done
+
+# Dropping DOCKER_CONTEXT falls back to /var/run/docker.sock, which Docker Desktop on macOS does not create by default.
+if [ -z "${DOCKER_HOST:-}" ] && [ ! -S /var/run/docker.sock ] && [ -S "${HOME:-}/.docker/run/docker.sock" ]; then
+	export DOCKER_HOST="unix://$HOME/.docker/run/docker.sock"
+fi
+
 export DOCKER_CONFIG="$docker_config"
 unset DOCKER_CONTEXT DOCKER_AUTH_CONFIG DOCKER_CERT_PATH DOCKER_TLS_VERIFY BUILDX_CONFIG BUILDKIT_HOST
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
