@@ -140,7 +140,10 @@ func ExtractIncludeFragments(path string) (*ExtractReport, error) {
 	if !slices.Equal(includes, newIncludes) {
 		patch["$include"] = includesRaw
 	}
-	for _, key := range []string{"agents", "tools", "groups"} {
+	if classifyAgentsBlock(mainRaw).kind == agentsBlockRetired {
+		patch["agents"] = json.RawMessage("null")
+	}
+	for _, key := range []string{"tools", "groups"} {
 		if _, ok := mainRaw[key]; ok {
 			patch[key] = json.RawMessage("null")
 		}

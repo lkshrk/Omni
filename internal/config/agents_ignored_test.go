@@ -178,3 +178,45 @@ func TestSaveRoundTripsAgentsIgnored(t *testing.T) {
 		t.Fatalf("HasRemovedAgentConfig = %v, %v; want false, nil", found, err)
 	}
 }
+
+func TestExtractPreservesAgentsIgnored(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := writeSettings(t, dir, "settings.json", fmt.Sprintf(`{
+  "version": %d,
+  "tools": {"jq": {"providers": [{"provider": "brew", "package": "jq"}]}},
+  "groups": [{"name": "core", "tools": ["jq"]}],
+  %s
+}`, config.CurrentVersion, validAgentsIgnoredBlock))
+	if _, err := config.ExtractIncludeFragments(path); err != nil {
+		t.Fatalf("ExtractIncludeFragments: %v", err)
+	}
+	if _, ok := rawKeys(t, path)["agents"]; !ok {
+		t.Fatal("main config lost its agents block after extract")
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load after extract: %v", err)
+	}
+	want := config.AgentIgnoreEntry{Host: "work", Target: "claude", Kind: "plugin", ID: "acme/tool", Reason: "local pin"}
+	if cfg.Agents == nil || len(cfg.Agents.Ignored) != 1 || cfg.Agents.Ignored[0] != want {
+		t.Fatalf("cfg.Agents = %#v, want the ignored entry preserved", cfg.Agents)
+	}
+}
+
+func TestExtractRejectsRetiredAgentsBlock(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	body := fmt.Sprintf(`{"version":%d,"groups":[{"name":"core"}],"agents":{"ai":{"skills":[]}}}`, config.CurrentVersion)
+	path := writeSettings(t, dir, "settings.json", body)
+	if _, err := config.ExtractIncludeFragments(path); err == nil || !strings.Contains(err.Error(), `"$.agents.ai"`) {
+		t.Fatalf("ExtractIncludeFragments error = %v, want removed field $.agents.ai", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != body {
+		t.Fatalf("main config = %s, want it left untouched", data)
+	}
+}
