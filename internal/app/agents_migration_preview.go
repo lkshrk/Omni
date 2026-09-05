@@ -176,7 +176,13 @@ type apmManagedIndex struct {
 	modules string
 	lsp     bool
 	servers map[string]bool
-	plugins map[string][]string
+	plugins map[string][]apmManagedPlugin
+}
+
+// A nil target subset is APM's "every target"; an empty one deploys nowhere.
+type apmManagedPlugin struct {
+	repo    string
+	targets []string
 }
 
 func loadAPMManagedIndex() (apmManagedIndex, error) {
@@ -196,16 +202,16 @@ func loadAPMManagedIndex() (apmManagedIndex, error) {
 		modules: filepath.Join(dir, "apm_modules"),
 		lsp:     lsp,
 		servers: make(map[string]bool, len(lock.MCPServers)),
-		plugins: make(map[string][]string, len(lock.Dependencies)),
+		plugins: make(map[string][]apmManagedPlugin, len(lock.Dependencies)),
 	}
 	for _, name := range lock.MCPServers {
 		index.servers[name] = true
 	}
 	for _, dep := range lock.Dependencies {
-		repo := apmNormalizeRepo(dep.RepoURL)
+		owner := apmManagedPlugin{repo: apmNormalizeRepo(dep.RepoURL), targets: dep.TargetSubset}
 		for _, name := range []string{dep.Name, dep.MarketplacePluginName} {
 			if name = strings.ToLower(strings.TrimSpace(name)); name != "" {
-				index.plugins[name] = append(index.plugins[name], repo)
+				index.plugins[name] = append(index.plugins[name], owner)
 			}
 		}
 	}
@@ -234,16 +240,26 @@ func (i apmManagedIndex) underModules(value string) bool {
 	return clean == i.modules || strings.HasPrefix(clean, i.modules+string(os.PathSeparator))
 }
 
-// A native plugin is managed when a lock dependency carries its name and, when the marketplace source is known, its repo.
-func (i apmManagedIndex) managesPlugin(name, source string) bool {
-	repos, ok := i.plugins[strings.ToLower(name)]
-	if !ok {
-		return false
+// Ownership is (name, repository, target): a lock dependency that skips a target leaves that target's copy native.
+func (i apmManagedIndex) managesPlugin(name, source, target string) bool {
+	for _, owner := range i.plugins[strings.ToLower(name)] {
+		if !owner.deploysTo(target) {
+			continue
+		}
+		if strings.TrimSpace(source) == "" || owner.repo == apmNormalizeRepo(source) {
+			return true
+		}
 	}
-	if strings.TrimSpace(source) == "" {
+	return false
+}
+
+func (p apmManagedPlugin) deploysTo(target string) bool {
+	if p.targets == nil {
 		return true
 	}
-	return slices.Contains(repos, apmNormalizeRepo(source))
+	return slices.ContainsFunc(p.targets, func(candidate string) bool {
+		return strings.EqualFold(strings.TrimSpace(candidate), strings.TrimSpace(target))
+	})
 }
 
 // apm generates and registers this plugin itself whenever the workspace locks LSP servers.
@@ -301,7 +317,7 @@ func subtractAPMManaged(dispositions []agentDisposition, index apmManagedIndex) 
 			}
 		case agentKindPlugin:
 			name, marketplace := splitNativePluginIdentity(observation.Identity)
-			if index.managesPlugin(name, sources[marketplace]) {
+			if index.managesPlugin(name, sources[marketplace], observation.Target) {
 				out[i].Action, out[i].Reason = agentActionManaged, ""
 				continue
 			}
