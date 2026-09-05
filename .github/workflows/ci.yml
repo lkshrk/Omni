@@ -171,9 +171,9 @@ jobs:
       - name: Test real stable-target MCP lifecycle
         run: go test -tags=integration ./internal/apm -run '^TestGlobalMCPLifecycleForEveryStableTarget$' -count=1
 
-      # Skips off darwin; this is the only lane that runs it, and the path it guards writes.
-      - name: Test Darwin legacy agents template is reported, never adopted
-        run: go test ./internal/app -run '^TestAgentsAdoptReportsLegacyDarwinTemplateWithoutAdoptingIt$' -count=1
+      # All skip off darwin; this is the only lane that runs them, and the path they guard writes.
+      - name: Test Darwin legacy agents template handling
+        run: go test ./internal/app -run '^(TestAgentsAdoptReportsLegacyDarwinTemplateWithoutAdoptingIt|TestAgentsTemplatePathAdoptsLegacyDarwinTemplate|TestAgentsTemplatePathLeavesSymlinkedCanonicalAlone)$' -count=1
 
   onboarding-unit:
     name: Onboarding Unit (race)

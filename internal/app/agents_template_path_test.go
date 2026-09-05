@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -82,5 +83,57 @@ func TestAgentsTemplatePathUsesXDGConfigHome(t *testing.T) {
 	got, err := AgentsTemplatePath()
 	if err != nil || got != filepath.Join(dir, "omni", "apm.yml") {
 		t.Fatalf("AgentsTemplatePath = %q, %v", got, err)
+	}
+}
+
+func TestAgentsTemplatePathAdoptsLegacyDarwinTemplate(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the legacy template path exists only on darwin")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	legacy := filepath.Join(home, "Library", "Application Support", "omni", "apm.yml")
+	writeFile(t, legacy, agentsMigrationMarker+"\nname: legacy\nversion: 1.0.0\ndependencies: {}\n")
+
+	canonical, err := AgentsTemplatePath()
+	if err != nil {
+		t.Fatalf("AgentsTemplatePath: %v", err)
+	}
+	raw, err := os.ReadFile(canonical)
+	if err != nil || !strings.Contains(string(raw), "name: legacy") {
+		t.Fatalf("canonical = %q, %v; want the legacy template adopted", raw, err)
+	}
+}
+
+func TestAgentsTemplatePathLeavesSymlinkedCanonicalAlone(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the legacy template path exists only on darwin")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	writeFile(t, filepath.Join(home, "Library", "Application Support", "omni", "apm.yml"),
+		agentsMigrationMarker+"\nname: legacy\nversion: 1.0.0\ndependencies: {}\n")
+	repo := filepath.Join(home, "dotfiles", "apm.yml")
+	writeFile(t, repo, agentsMigrationMarker+"\nname: dotfiles\nversion: 1.0.0\ndependencies: {}\n")
+	canonical := filepath.Join(home, ".config", "omni", "apm.yml")
+	if err := os.MkdirAll(filepath.Dir(canonical), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(repo, canonical); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := AgentsTemplatePath(); err != nil {
+		t.Fatalf("AgentsTemplatePath: %v", err)
+	}
+	raw, err := os.ReadFile(repo)
+	if err != nil || !strings.Contains(string(raw), "name: dotfiles") {
+		t.Fatalf("repo template = %q, %v; want it untouched through the symlink", raw, err)
+	}
+	info, err := os.Lstat(canonical)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("canonical is no longer a symlink: %v, %v", info, err)
 	}
 }
