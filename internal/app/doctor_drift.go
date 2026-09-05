@@ -103,7 +103,8 @@ func (a *App) buildDriftReport(ctx context.Context, cfg *config.RootConfig) (*dr
 				})
 			}
 
-		case tc != nil && tc.Installed && tc.InstalledWith != "" && tc.InstalledWith != t.Provider:
+		case tc != nil && tc.Installed && tc.InstalledWith != "" && tc.InstalledWith != t.Provider &&
+			tc.InstalledWith != concreteInstallProvider(rt.route.ConfiguredInstall):
 			// InstalledWith="" (PATH-detected tools) is intentionally excluded — no concrete manager claim means no mismatch.
 			findings = append(findings, DriftFinding{
 				Tool:     t.Name,
@@ -238,6 +239,15 @@ func doctorNvmManagedFindingCount(check DoctorCheck) int {
 		}
 	}
 	return count
+}
+
+// A script spec with a GitHub release recipe is executed by the release-asset provider, which records itself as the installer.
+func concreteInstallProvider(spec config.ToolInstallSpec) string {
+	if spec.Source != nil && spec.Source.Type == config.FallbackSourceGitHub &&
+		spec.Recipe != nil && spec.Recipe.Type == config.FallbackRecipeGitHubReleaseAsset {
+		return config.ProviderGitHubReleaseAsset
+	}
+	return spec.Provider
 }
 
 func driftFindingExists(findings []DriftFinding, candidate DriftFinding) bool {

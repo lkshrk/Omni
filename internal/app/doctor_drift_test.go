@@ -168,6 +168,43 @@ func TestDoctorDrift_WrongProvider_DetectedWhenInstalledWithDiffers(t *testing.T
 	}
 }
 
+func TestDoctorDrift_NoDrift_WhenGitHubReleaseAssetRecipeInstalledByItsProvider(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+
+	script := newDriftProvider("script", true, map[string]string{"cbm": "0.10.8"})
+	a, cfgPath := newImportApp(t, script)
+	cfg := buildDriftConfig(map[string]string{"cbm": "script"})
+	cfg.Tools["cbm"] = config.ToolSpec{Providers: []config.ToolInstallSpec{{
+		Provider: "script",
+		Bin:      "cbm",
+		Source:   &config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "acme", Repo: "cbm"},
+		Recipe:   &config.FallbackRecipe{Type: config.FallbackRecipeGitHubReleaseAsset, AssetPattern: "cbm-{os}-{arch}.tar.gz"},
+	}}}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	seedDB(t, a, []*database.ToolCache{{
+		Name:          "cbm",
+		Provider:      "script",
+		Package:       "cbm",
+		Installed:     true,
+		InstalledWith: config.ProviderGitHubReleaseAsset,
+	}})
+
+	result, err := a.Doctor(context.Background())
+	if err != nil {
+		t.Fatalf("Doctor: %v", err)
+	}
+	check := doctorCheck(result, "drift")
+	if check == nil {
+		t.Fatal("drift check missing")
+	}
+	if driftGroupContains(check.Groups, "cbm") {
+		t.Fatalf("release-asset install reported as wrong provider: %+v", check.Groups)
+	}
+}
+
 func TestDoctorDrift_UnavailableButPresent_DetectedViaInstalledWith(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 
