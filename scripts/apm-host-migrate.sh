@@ -134,10 +134,11 @@ if printf '%s\n' "$SYNC_OUT" | grep -q -- '--force-template'; then
 fi
 
 step "stale unmanaged copies"
-python3 - > "$WORK/stale.txt" <<'PY'
+DOTFILES="$DOTFILES" python3 - > "$WORK/stale.txt" <<'PY'
 import os, re
 
 home = os.environ["HOME"]
+dotfiles = os.path.realpath(os.environ["DOTFILES"]) if os.environ.get("DOTFILES") else ""
 lock = os.path.join(home, ".apm", "apm.lock.yaml")
 modules = os.path.join(home, ".apm", "apm_modules")
 STAGING = ".apm-resolution-staging"
@@ -174,6 +175,13 @@ managed = set(os.path.join(home, v) for v in managed_values())
 
 def is_managed(p):
     return p in managed or any(m.startswith(p + os.sep) for m in managed)
+
+
+def is_dotfiles_override(p):
+    if not dotfiles:
+        return False
+    target = os.path.realpath(p)
+    return target == dotfiles or target.startswith(dotfiles + os.sep)
 
 
 def package_roots():
@@ -250,7 +258,7 @@ for src, kind, names in sources():
         seen.add(dest)
         if not os.path.lexists(dest) or is_managed(dest):
             continue
-        if os.path.islink(dest):
+        if os.path.islink(dest) and is_dotfiles_override(dest):
             print("keep\t%s\tsymlink (dotfiles override)" % dest)
         else:
             print("remove\t%s" % dest)
