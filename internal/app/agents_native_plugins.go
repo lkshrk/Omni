@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 )
 
 type nativePlugin struct {
@@ -78,6 +79,11 @@ func (a *App) inventoryNativeAgents(ctx context.Context) ([]agentObservation, er
 
 // gatherNativeAgents keeps every client's observations even when another client fails; the failure is reported as coverage.
 func (a *App) gatherNativeAgents(ctx context.Context) nativeAgentInventory {
+	return a.gatherNativeAgentsWithin(ctx, 0)
+}
+
+// A non-zero perClient budget caps each client separately, so one slow client cannot consume the caller's whole deadline.
+func (a *App) gatherNativeAgentsWithin(ctx context.Context, perClient time.Duration) nativeAgentInventory {
 	var inventory nativeAgentInventory
 	var plugins []nativePlugin
 	for _, cli := range []string{"claude", "codex"} {
@@ -85,12 +91,21 @@ func (a *App) gatherNativeAgents(ctx context.Context) nativeAgentInventory {
 			inventory.Coverage = append(inventory.Coverage, nativeClientCoverage{Client: cli})
 			continue
 		}
-		observations, gathered, err := a.gatherNativeClient(ctx, cli, plugins)
+		clientCtx, cancel := nativeClientContext(ctx, perClient)
+		observations, gathered, err := a.gatherNativeClient(clientCtx, cli, plugins)
+		cancel()
 		plugins = append(plugins, gathered...)
 		inventory.Observations = append(inventory.Observations, observations...)
 		inventory.Coverage = append(inventory.Coverage, nativeClientCoverage{Client: cli, Available: true, Err: err})
 	}
 	return inventory
+}
+
+func nativeClientContext(ctx context.Context, perClient time.Duration) (context.Context, context.CancelFunc) {
+	if perClient <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, perClient)
 }
 
 // A client's evidence is all-or-nothing: a half-read client would look like drift it does not have.

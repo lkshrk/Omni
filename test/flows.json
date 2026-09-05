@@ -6665,6 +6665,80 @@
       ]
     },
     {
+      "id": "agents.drift",
+      "capability": "agents",
+      "title": "agents drift",
+      "criticality": "medium",
+      "criticality_reason": "A missed native install stays invisible, but the report itself changes no agent state.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "requirements": [
+        {
+          "level": "unit",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "unit",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsDriftListsReplacedAndOmitsRetained",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Keeps a host-scoped agents.ignored entry from hiding another host's native state.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsDriftKeepsOtherHostIgnoreEntries",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryAgentsDriftReportsNativeItemsWithoutWriting",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "mutates": false,
+      "cli_commands": [
+        [
+          "agents",
+          "drift"
+        ]
+      ]
+    },
+    {
       "id": "agents.prune",
       "capability": "agents",
       "title": "agents prune",
