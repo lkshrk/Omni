@@ -130,11 +130,15 @@ func TestBackupAndTrashRejectEscapingDerivedRoots(t *testing.T) {
 		if err := os.MkdirAll(data, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(outside, filepath.Join(data, "Trash")); err != nil {
-			t.Fatal(err)
-		}
 		t.Setenv("HOME", home)
 		t.Setenv("XDG_DATA_HOME", data)
+		trashRoot := expectedTrashRoot(t, home)
+		if err := os.MkdirAll(filepath.Dir(trashRoot), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, trashRoot); err != nil {
+			t.Fatal(err)
+		}
 		target := filepath.Join(home, "target")
 		mkFile(t, target, "keep")
 		requireSafetyRejection(t, dots.TrashLocalPath(context.Background(), nil, target), "dotfiles trash root")
