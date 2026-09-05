@@ -6695,20 +6695,6 @@
             {
               "type": "unit",
               "role": "regression",
-              "reference": "Keeps the preview from resolving the template through the Darwin legacy migration, which writes.",
-              "selector": {
-                "package": "github.com/lkshrk/omni/internal/app",
-                "test": "TestAgentsAdoptReportsLegacyDarwinTemplateWithoutAdoptingIt",
-                "tags": [],
-                "lane": "unit-app",
-                "os": [
-                  "macos"
-                ]
-              }
-            },
-            {
-              "type": "unit",
-              "role": "regression",
               "reference": "Keeps a manifest conflict visible instead of silently dropping the candidate.",
               "selector": {
                 "package": "github.com/lkshrk/omni/internal/app",
