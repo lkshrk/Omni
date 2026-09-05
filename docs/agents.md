@@ -73,6 +73,17 @@ hook commands through a shell, so `$HOME` expands at invocation time. APM adopts
 the rewritten entries on the next run, so syncs stay idempotent and uninstalls
 still remove the right hooks. Nothing is rewritten on Windows.
 
+MCP server paths are the one case Omni cannot make portable. APM writes absolute
+script paths into `~/.codex/config.toml` (`[mcp_servers.<name>] args =
+["/Users/you/.apm/apm_modules/<owner>/<pkg>/start.mjs"]`), and they stay
+absolute: Codex spawns stdio MCP servers directly rather than through a shell,
+and `mcp_servers.<name>.command` and `args` are passed to the process exactly as
+written. `$HOME`, `~/`, and `${env:HOME}` all survive into the child's argv as
+literal text and the server fails to start, so rewriting them the way hook
+commands are rewritten would break every MCP server instead of making it
+portable. A dotfiles-tracked `~/.codex/config.toml` needs a per-host
+`[mcp_servers.*]` section.
+
 ## Package-owned MCP and LSP
 
 A package is authoritative for every MCP or LSP child declared by its installed
