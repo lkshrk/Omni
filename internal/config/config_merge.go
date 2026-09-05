@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -19,6 +20,27 @@ func MergeRootConfig(dst, src *RootConfig) {
 	mergeGroups(dst, src.Groups)
 	mergeHosts(dst, src.Hosts)
 	mergeIgnore(&dst.Ignore, &src.Ignore)
+	mergeAgents(dst, src.Agents)
+}
+
+func mergeAgents(dst *RootConfig, src *AgentsConfig) {
+	if src == nil {
+		return
+	}
+	if dst.Agents == nil {
+		dst.Agents = &AgentsConfig{}
+	}
+	for _, entry := range src.Ignored {
+		index := slices.IndexFunc(dst.Agents.Ignored, func(existing AgentIgnoreEntry) bool {
+			return existing.Host == entry.Host && existing.Target == entry.Target &&
+				existing.Kind == entry.Kind && existing.ID == entry.ID
+		})
+		if index >= 0 {
+			dst.Agents.Ignored[index] = entry
+			continue
+		}
+		dst.Agents.Ignored = append(dst.Agents.Ignored, entry)
+	}
 }
 
 func mergeSettings(dst, src *Settings) {

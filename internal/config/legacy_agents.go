@@ -33,7 +33,7 @@ func HasRemovedAgentConfig(path string) (bool, error) {
 		if err := json.Unmarshal(data, &raw); err != nil {
 			return false, fmt.Errorf("parse config for legacy agent detection: %w", err)
 		}
-		if _, ok := raw["agents"]; ok {
+		if class := classifyAgentsBlock(raw); class.kind == agentsBlockRetired {
 			return true, nil
 		}
 		delete(raw, "agents")

@@ -332,6 +332,7 @@ type RootConfig struct {
 	Hosts    map[string][]string `json:"hosts,omitempty"`
 	Ignore   GlobalIgnore        `json:"ignore,omitempty"`
 	Groups   []*GroupConfig      `json:"groups,omitempty"`
+	Agents   *AgentsConfig       `json:"agents,omitempty"`
 	// Per-machine overrides keyed by short hostname; AutoImport and DotsGit are global-only.
 	HostSettings map[string]Settings `json:"host_settings,omitempty"`
 }
@@ -369,8 +370,8 @@ var removedAgentGroupFields = []string{
 }
 
 func validateRemovedAgentConfigFields(raw map[string]json.RawMessage) error {
-	if _, ok := raw["agents"]; ok {
-		return removedAgentConfigFieldError("$.agents")
+	if class := classifyAgentsBlock(raw); class.kind == agentsBlockRetired {
+		return removedAgentConfigFieldError(class.path())
 	}
 	if field, ok := removedField(raw["settings"], removedAgentSettingsFields); ok {
 		return removedAgentConfigFieldError("$.settings." + field)
