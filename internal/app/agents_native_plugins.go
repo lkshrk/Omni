@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,74 +33,128 @@ type nativeMCP struct {
 	SecretFields []string
 }
 
-// inventoryNativeAgents reads native plugin, marketplace, and MCP state without changing it.
+// nativeClientCoverage records what one client contributed to an inventory: an unavailable client hides nothing, a failed one does.
+type nativeClientCoverage struct {
+	Client    string
+	Available bool
+	Err       error
+}
+
+func (c nativeClientCoverage) Complete() bool {
+	return !c.Available || c.Err == nil
+}
+
+type nativeAgentInventory struct {
+	Observations []agentObservation
+	Coverage     []nativeClientCoverage
+}
+
+func (i nativeAgentInventory) Incomplete() []nativeClientCoverage {
+	var out []nativeClientCoverage
+	for _, coverage := range i.Coverage {
+		if !coverage.Complete() {
+			out = append(out, coverage)
+		}
+	}
+	return out
+}
+
+func (i nativeAgentInventory) Err() error {
+	var errs []error
+	for _, coverage := range i.Incomplete() {
+		errs = append(errs, coverage.Err)
+	}
+	return errors.Join(errs...)
+}
+
+// inventoryNativeAgents reads native state without changing it, and fails closed: migration never plans on partial evidence.
 func (a *App) inventoryNativeAgents(ctx context.Context) ([]agentObservation, error) {
-	var out []agentObservation
+	inventory := a.gatherNativeAgents(ctx)
+	if err := inventory.Err(); err != nil {
+		return nil, err
+	}
+	return inventory.Observations, nil
+}
+
+// gatherNativeAgents keeps every client's observations even when another client fails; the failure is reported as coverage.
+func (a *App) gatherNativeAgents(ctx context.Context) nativeAgentInventory {
+	var inventory nativeAgentInventory
 	var plugins []nativePlugin
 	for _, cli := range []string{"claude", "codex"} {
 		if !a.commandAvailable(cli) {
+			inventory.Coverage = append(inventory.Coverage, nativeClientCoverage{Client: cli})
 			continue
 		}
-		listedPlugins, err := a.listNativePlugins(ctx, cli)
-		if err != nil {
-			return nil, err
-		}
-		plugins = append(plugins, listedPlugins...)
-		for _, plugin := range listedPlugins {
-			evidence := []string{nativePluginCommand(cli, "list", "--json")}
-			if plugin.InstallRoot != "" {
-				evidence = append(evidence, plugin.InstallRoot)
-			}
-			out = append(out, agentObservation{
-				Source:      cli,
-				Target:      plugin.Target,
-				Kind:        agentKindPlugin,
-				Identity:    plugin.Name + "@" + plugin.Marketplace,
-				Definition:  legacyEntry{Name: plugin.Name, Marketplace: plugin.Marketplace},
-				Version:     plugin.Version,
-				InstallRoot: plugin.InstallRoot,
-				Disabled:    plugin.Disabled,
-				Evidence:    evidence,
-			})
-		}
-		listedMarketplaces, err := a.listNativeMarketplaces(ctx, cli)
-		if err != nil {
-			return nil, fmt.Errorf("%w (installed: %s)", err, nativePluginIdentities(plugins))
-		}
-		for _, marketplace := range listedMarketplaces {
-			if marketplace.Name == "" {
-				continue
-			}
-			out = append(out, agentObservation{
-				Source:     cli,
-				Target:     cli,
-				Kind:       agentKindMarketplace,
-				Identity:   marketplace.Name,
-				Definition: legacyEntry{Name: marketplace.Name, Source: canonicalNativeMarketplaceSource(marketplace.Source)},
-				Evidence:   []string{nativePluginCommand(cli, "marketplace", "list", "--json")},
-			})
-		}
-		listedServers, err := a.listNativeMCP(ctx, cli)
-		if err != nil {
-			return nil, err
-		}
-		for _, server := range listedServers {
-			definition := server.Definition
-			definition.Name = server.Name
-			definition.Agents = nil
-			normalizeNativeMCP(&definition)
-			out = append(out, agentObservation{
-				Source:       cli,
-				Target:       server.Target,
-				Kind:         agentKindMCP,
-				Identity:     server.Name,
-				Definition:   definition,
-				SecretFields: server.SecretFields,
-				Evidence:     []string{nativeMCPEvidence(cli)},
-			})
-		}
+		observations, gathered, err := a.gatherNativeClient(ctx, cli, plugins)
+		plugins = append(plugins, gathered...)
+		inventory.Observations = append(inventory.Observations, observations...)
+		inventory.Coverage = append(inventory.Coverage, nativeClientCoverage{Client: cli, Available: true, Err: err})
 	}
-	return out, nil
+	return inventory
+}
+
+// A client's evidence is all-or-nothing: a half-read client would look like drift it does not have.
+func (a *App) gatherNativeClient(ctx context.Context, cli string, seen []nativePlugin) ([]agentObservation, []nativePlugin, error) {
+	var out []agentObservation
+	listedPlugins, err := a.listNativePlugins(ctx, cli)
+	if err != nil {
+		return nil, nil, err
+	}
+	plugins := append(slices.Clone(seen), listedPlugins...)
+	for _, plugin := range listedPlugins {
+		evidence := []string{nativePluginCommand(cli, "list", "--json")}
+		if plugin.InstallRoot != "" {
+			evidence = append(evidence, plugin.InstallRoot)
+		}
+		out = append(out, agentObservation{
+			Source:      cli,
+			Target:      plugin.Target,
+			Kind:        agentKindPlugin,
+			Identity:    plugin.Name + "@" + plugin.Marketplace,
+			Definition:  legacyEntry{Name: plugin.Name, Marketplace: plugin.Marketplace},
+			Version:     plugin.Version,
+			InstallRoot: plugin.InstallRoot,
+			Disabled:    plugin.Disabled,
+			Evidence:    evidence,
+		})
+	}
+	listedMarketplaces, err := a.listNativeMarketplaces(ctx, cli)
+	if err != nil {
+		return nil, listedPlugins, fmt.Errorf("%w (installed: %s)", err, nativePluginIdentities(plugins))
+	}
+	for _, marketplace := range listedMarketplaces {
+		if marketplace.Name == "" {
+			continue
+		}
+		out = append(out, agentObservation{
+			Source:     cli,
+			Target:     cli,
+			Kind:       agentKindMarketplace,
+			Identity:   marketplace.Name,
+			Definition: legacyEntry{Name: marketplace.Name, Source: canonicalNativeMarketplaceSource(marketplace.Source)},
+			Evidence:   []string{nativePluginCommand(cli, "marketplace", "list", "--json")},
+		})
+	}
+	listedServers, err := a.listNativeMCP(ctx, cli)
+	if err != nil {
+		return nil, listedPlugins, err
+	}
+	for _, server := range listedServers {
+		definition := server.Definition
+		definition.Name = server.Name
+		definition.Agents = nil
+		normalizeNativeMCP(&definition)
+		out = append(out, agentObservation{
+			Source:       cli,
+			Target:       server.Target,
+			Kind:         agentKindMCP,
+			Identity:     server.Name,
+			Definition:   definition,
+			SecretFields: server.SecretFields,
+			Evidence:     []string{nativeMCPEvidence(cli)},
+		})
+	}
+	return out, listedPlugins, nil
 }
 
 func nativeMCPEvidence(cli string) string {
