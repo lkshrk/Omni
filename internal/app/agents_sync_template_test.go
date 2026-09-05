@@ -181,6 +181,24 @@ func TestAgentsSyncAllSnapshotsWhenLiveAlreadyMatchesTemplate(t *testing.T) {
 	}
 }
 
+func TestAgentsSyncAllSurfacesTemplatePathError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	a := New(filepath.Join(home, "settings.json"))
+	a.StateDir = t.TempDir()
+	a.SetFallbackExecutor(&executor.MockExecutor{})
+
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	res, err := a.AgentsSyncAll(t.Context(), AgentsSyncAllOptions{})
+	if err == nil {
+		t.Fatalf("AgentsSyncAll = %+v, nil; want the unresolvable template path reported", res)
+	}
+}
+
 func TestSnapshotLiveManifestWritesHash(t *testing.T) {
 	ws, st := t.TempDir(), t.TempDir()
 	writeFile(t, filepath.Join(ws, "apm.yml"), "abc")

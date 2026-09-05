@@ -295,7 +295,11 @@ func materializeAgentsTemplateBytes(workspaceDir, stateDir string, force bool, t
 
 // AgentsSyncAll delegates the complete lifecycle to one APM install.
 func (a *App) AgentsSyncAll(ctx context.Context, opts AgentsSyncAllOptions) (AgentsSyncAllResult, error) {
-	if !agentsSyncStateExists() {
+	exists, err := agentsSyncStateExists()
+	if err != nil {
+		return AgentsSyncAllResult{}, err
+	}
+	if !exists {
 		return AgentsSyncAllResult{}, nil
 	}
 	templatePath, err := AgentsTemplatePath()
@@ -317,18 +321,20 @@ func (a *App) AgentsSyncAll(ctx context.Context, opts AgentsSyncAllOptions) (Age
 	return res, err
 }
 
-func agentsSyncStateExists() bool {
+func agentsSyncStateExists() (bool, error) {
 	if dir, err := apm.GlobalWorkspaceDir(); err == nil {
 		if _, err := os.Lstat(filepath.Join(dir, "apm.yml")); err == nil || !os.IsNotExist(err) {
-			return true
+			return true, nil
 		}
 	}
-	if path, err := AgentsTemplatePath(); err == nil {
-		if _, err := os.Lstat(path); err == nil || !os.IsNotExist(err) {
-			return true
-		}
+	path, err := AgentsTemplatePath()
+	if err != nil {
+		return false, err
 	}
-	return false
+	if _, err := os.Lstat(path); err == nil || !os.IsNotExist(err) {
+		return true, nil
+	}
+	return false, nil
 }
 
 func (a *App) agentsSyncAllLocked(ctx context.Context, opts AgentsSyncAllOptions) (AgentsSyncAllResult, error) {
