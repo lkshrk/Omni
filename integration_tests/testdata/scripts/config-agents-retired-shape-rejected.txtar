@@ -1,0 +1,42 @@
+# agents.ignored is the only accepted shape of the top-level agents block; every
+# other shape still fails as a v24-removed field and the config is left untouched.
+
+cp empty.json empty.json.orig
+
+! exec omni --config empty.json settings show
+stderr 'config field ".\.agents" was removed in v24'
+cmp empty.json empty.json.orig
+
+! exec omni --config null.json settings show
+stderr 'config field ".\.agents" was removed in v24'
+
+! exec omni --config retired-field.json settings show
+stderr 'config field ".\.agents\.ai" was removed in v24'
+
+! exec omni --config bad-ignored.json settings show
+stderr 'config field ".\.agents\.ignored" was removed in v24'
+
+# A write path rejects the same shape without rewriting the file.
+! exec omni --config empty.json hosts ensure testhost
+stderr 'config field ".\.agents" was removed in v24'
+cmp empty.json empty.json.orig
+
+# The accepted shape loads and survives a write.
+exec omni --config ignored.json hosts ensure otherhost
+exec grep '"local-only"' ignored.json
+stdout '"id": "local-only"'
+
+-- empty.json --
+{"version":25,"agents":{}}
+
+-- null.json --
+{"version":25,"agents":null}
+
+-- retired-field.json --
+{"version":25,"agents":{"ai":{"skills":[]}}}
+
+-- bad-ignored.json --
+{"version":25,"agents":{"ignored":{}}}
+
+-- ignored.json --
+{"version":25,"agents":{"ignored":[{"host":"testhost","target":"claude","kind":"plugin","id":"local-only","reason":"hand-managed"}]}}

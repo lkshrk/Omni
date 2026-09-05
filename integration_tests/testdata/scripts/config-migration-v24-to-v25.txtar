@@ -1,0 +1,71 @@
+# v24 is the last version released binaries wrote, so it is a real on-disk state.
+# The v24->v25 step is a version stamp only and must carry every block through.
+
+cp settings.json settings.json.orig
+
+# Read paths migrate in memory and leave the v24 file alone.
+exec omni --config settings.json settings show
+cmp settings.json settings.json.orig
+
+# The first real mutation persists the migrated form.
+exec omni --config settings.json hosts ensure otherhost
+
+exec grep '"version"' settings.json
+stdout '"version": 25'
+exec grep 'omni.settings' settings.json
+stdout 'omni.settings.v25.schema.json'
+
+# agents.ignored is schema-described in v25 and must survive the stamp intact.
+exec grep '"local-only"' settings.json
+stdout '"id": "local-only"'
+exec grep '"hand-managed"' settings.json
+stdout '"reason": "hand-managed"'
+
+# Unrelated v24 content must survive too.
+exec grep '"auto_import"' settings.json
+stdout '"auto_import": true'
+exec grep '"ripgrep"' settings.json
+stdout '"ripgrep"'
+exec grep '"testhost"' settings.json
+stdout '"testhost"'
+
+-- settings.json --
+{
+  "version": 24,
+  "settings": {
+    "auto_import": true
+  },
+  "tools": {
+    "ripgrep": {
+      "providers": [
+        {
+          "provider": "brew",
+          "package": "ripgrep"
+        }
+      ]
+    }
+  },
+  "groups": [
+    {
+      "name": "testhost",
+      "special": "host",
+      "tools": [
+        "ripgrep"
+      ]
+    }
+  ],
+  "hosts": {
+    "testhost": []
+  },
+  "agents": {
+    "ignored": [
+      {
+        "host": "testhost",
+        "target": "claude",
+        "kind": "plugin",
+        "id": "local-only",
+        "reason": "hand-managed"
+      }
+    ]
+  }
+}
