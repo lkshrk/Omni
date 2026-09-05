@@ -59,6 +59,7 @@ func (a *App) Doctor(ctx context.Context) (*DoctorResult, error) {
 		a.doctorDots(ctx, result, cfg)
 		a.doctorDotsIgnorePatterns(result, cfg)
 		a.doctorAgents(ctx, result, cfg)
+		a.doctorAgentsDrift(ctx, result, cfg)
 		// The version check probes apm fresh and seeds the pinned memo, so the audit below needs no second spawn.
 		a.doctorAPMVersion(ctx, result, cfg)
 		a.doctorAPMAudit(ctx, result)

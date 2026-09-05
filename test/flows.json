@@ -6705,6 +6705,20 @@
                   "linux"
                 ]
               }
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Keeps the doctor summary at warn, never fail, for a native install.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestDoctorAgentsDriftWarnsOnUnownedItems",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
             }
           ]
         },
