@@ -3,11 +3,28 @@ package app
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func skipOnCaseInsensitiveFilesystem(t *testing.T) {
+	t.Helper()
+	probe := t.TempDir()
+	if err := os.WriteFile(filepath.Join(probe, "a"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := os.Lstat(filepath.Join(probe, "A"))
+	if err == nil {
+		t.Skip("case-insensitive filesystem: two directory entries differing only in case cannot coexist")
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+}
 
 func TestResolveModulePathRejectsUnsafeAndAmbiguousPaths(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "apm_modules")
@@ -24,12 +41,15 @@ func TestResolveModulePathRejectsUnsafeAndAmbiguousPaths(t *testing.T) {
 		}
 	}
 
-	if err := os.Mkdir(filepath.Join(root, "ACME"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if got, ok := resolveModulePath(root, "acme/bundle"); ok {
-		t.Fatalf("ambiguous case-insensitive path resolved to %q", got)
-	}
+	t.Run("case collision", func(t *testing.T) {
+		skipOnCaseInsensitiveFilesystem(t)
+		if err := os.Mkdir(filepath.Join(root, "ACME"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if got, ok := resolveModulePath(root, "acme/bundle"); ok {
+			t.Fatalf("ambiguous case-insensitive path resolved to %q", got)
+		}
+	})
 }
 
 func TestModuleManifestReadRejectsSymlinkAndEscape(t *testing.T) {

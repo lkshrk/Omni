@@ -236,6 +236,7 @@ func TestManifestlessSkillProofRejectsUnsafeSkillManifest(t *testing.T) {
 		}},
 		{name: "case collision", make: func(t *testing.T, path string) {
 			t.Helper()
+			skipOnCaseInsensitiveFilesystem(t)
 			writeFile(t, path, "name: demo\n")
 			writeFile(t, filepath.Join(filepath.Dir(path), "skill.md"), "name: collision\n")
 		}},
