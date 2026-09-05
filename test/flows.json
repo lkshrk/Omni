@@ -6665,6 +6665,108 @@
       ]
     },
     {
+      "id": "agents.adopt",
+      "capability": "agents",
+      "title": "agents adopt",
+      "criticality": "medium",
+      "criticality_reason": "A wrong preview misleads the operator planning adoption, but the command itself changes no host state.",
+      "surfaces": {
+        "cli": true,
+        "tui": false
+      },
+      "requirements": [
+        {
+          "level": "unit",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "unit",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsAdoptBareHostWouldWriteTheTemplate",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Keeps the preview from resolving the template through the Darwin legacy migration, which writes.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsAdoptReportsLegacyDarwinTemplateWithoutAdoptingIt",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "macos"
+                ]
+              }
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Keeps a manifest conflict visible instead of silently dropping the candidate.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsAdoptReportsMergeConflicts",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Keeps an unreadable client reported as incomplete coverage rather than as nothing to adopt.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsAdoptReportsUnreachableClientAsIncompleteCoverage",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryAgentsAdoptPreviewsWithoutWriting",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "mutates": false,
+      "cli_commands": [
+        [
+          "agents",
+          "adopt"
+        ]
+      ]
+    },
+    {
       "id": "agents.drift",
       "capability": "agents",
       "title": "agents drift",
