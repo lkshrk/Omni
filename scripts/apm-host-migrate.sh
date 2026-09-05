@@ -135,7 +135,7 @@ fi
 
 step "stale unmanaged copies"
 DOTFILES="$DOTFILES" python3 - > "$WORK/stale.txt" <<'PY'
-import os, re
+import os, re, sys
 
 home = os.environ["HOME"]
 dotfiles = os.path.realpath(os.environ["DOTFILES"]) if os.environ.get("DOTFILES") else ""
@@ -227,11 +227,33 @@ def sources():
             yield codex, "codex-agents", names
 
 
+def safe_component(n):
+    return bool(n) and n not in (".", "..") and "/" not in n and "\\" not in n and not os.path.isabs(n)
+
+
+def under_root(dest, root):
+    real = os.path.realpath(dest)
+    root = os.path.realpath(root)
+    return real != root and real.startswith(root + os.sep)
+
+
+def emit(root, name):
+    # Package-supplied names reach this join; '../../.ssh' would otherwise resolve outside the root.
+    if not safe_component(name):
+        print("skip\t%s\tunsafe name %r" % (root, name), file=sys.stderr)
+        return
+    dest = os.path.join(root, name)
+    if not under_root(dest, root):
+        print("skip\t%s\tescapes root %s" % (dest, root), file=sys.stderr)
+        return
+    yield dest
+
+
 def destinations(src, kind, names):
     if kind == "hooks":
         for n in names:
-            yield os.path.join(home, ".claude", "hooks", n)
-            yield os.path.join(home, ".codex", "hooks", n)
+            yield from emit(os.path.join(home, ".claude", "hooks"), n)
+            yield from emit(os.path.join(home, ".codex", "hooks"), n)
         return
     for n in sorted(os.listdir(src)):
         if n.startswith("."):
@@ -239,15 +261,15 @@ def destinations(src, kind, names):
         isdir = os.path.isdir(os.path.join(src, n))
         if kind == "codex-agents":
             if not isdir and n.endswith(".toml"):
-                yield os.path.join(home, ".codex", "agents", n)
+                yield from emit(os.path.join(home, ".codex", "agents"), n)
         elif kind == "skills":
             if isdir:
-                yield os.path.join(home, ".agents", "skills", n)
-                yield os.path.join(home, ".claude", "skills", n)
+                yield from emit(os.path.join(home, ".agents", "skills"), n)
+                yield from emit(os.path.join(home, ".claude", "skills"), n)
         elif not isdir:
-            yield os.path.join(home, ".claude", kind, n)
+            yield from emit(os.path.join(home, ".claude", kind), n)
             if kind == "agents" and n.endswith(".md"):
-                yield os.path.join(home, ".codex", "agents", n[:-3] + ".toml")
+                yield from emit(os.path.join(home, ".codex", "agents"), n[:-3] + ".toml")
 
 
 seen = set()
@@ -258,8 +280,9 @@ for src, kind, names in sources():
         seen.add(dest)
         if not os.path.lexists(dest) or is_managed(dest):
             continue
-        if os.path.islink(dest) and is_dotfiles_override(dest):
-            print("keep\t%s\tsymlink (dotfiles override)" % dest)
+        # Resolves ancestors too: a symlinked ~/.claude/hooks makes the leaf an ordinary file.
+        if is_dotfiles_override(dest):
+            print("keep\t%s\tresolves into dotfiles (override)" % dest)
         else:
             print("remove\t%s" % dest)
 PY
