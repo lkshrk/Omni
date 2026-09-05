@@ -1209,7 +1209,7 @@ func TestUpgradeToolFallback_GitHubOutdatedRefreshesRecipeBeforeUpgrade(t *testi
 	ctx := context.Background()
 	latestAsset := currentPlatformGitHubCLIAsset(t)
 	binaryContent := []byte("new gh binary")
-	assetContent := buildTarGz(t, "gh", binaryContent)
+	assetContent := currentPlatformGitHubCLIAssetContent(t, latestAsset, "gh", binaryContent)
 	calls := int32(0)
 	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{})
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
@@ -1450,7 +1450,7 @@ func TestUpgradeToolFallback_GitHubRefreshCheckFailureKeepsOldRecipeAndOutdatedR
 	t.Parallel()
 	ctx := context.Background()
 	latestAsset := currentPlatformGitHubCLIAsset(t)
-	assetContent := buildTarGz(t, "gh", []byte("new gh binary"))
+	assetContent := currentPlatformGitHubCLIAssetContent(t, latestAsset, "gh", []byte("new gh binary"))
 	calls := int32(0)
 	fallbackExec := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c test -x", Response: executor.MockCall{Err: errors.New("missing refreshed binary")}},
@@ -1555,7 +1555,7 @@ func TestUpgradeToolFallback_GitHubRefreshCheckFailureKeepsOldRecipeAndOutdatedR
 func TestUpgradeToolFallback_NativeRollbackFailureMarksInstalledStateUnknown(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	assetContent := buildTarGz(t, "gh", []byte("new gh binary"))
+	assetContent := currentPlatformGitHubCLIAssetContent(t, currentPlatformGitHubCLIAsset(t), "gh", []byte("new gh binary"))
 	calls := int32(0)
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.CacheDir = t.TempDir()

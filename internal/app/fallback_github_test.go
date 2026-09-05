@@ -371,6 +371,15 @@ func currentPlatformGitHubCLIAsset(t *testing.T) githubReleaseAssetFixture {
 	return asset
 }
 
+// The native install pipeline picks its extractor from the asset name, so the bytes must match it.
+func currentPlatformGitHubCLIAssetContent(t *testing.T, asset githubReleaseAssetFixture, entryName string, content []byte) []byte {
+	t.Helper()
+	if strings.HasSuffix(asset.name, ".zip") {
+		return buildZip(t, entryName, content)
+	}
+	return buildTarGz(t, entryName, content)
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
