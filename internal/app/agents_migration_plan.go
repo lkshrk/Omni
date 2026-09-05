@@ -37,6 +37,7 @@ type agentObservation struct {
 	Definition   legacyEntry
 	Version      string
 	InstallRoot  string
+	Disabled     bool
 	SecretFields []string
 	Evidence     []string
 }
@@ -240,7 +241,8 @@ type pluginMCPOwner struct {
 func pluginMCPOwners(sorted []agentObservation) []pluginMCPOwner {
 	var owners []pluginMCPOwner
 	for _, observation := range sorted {
-		if observation.Kind != agentKindPlugin || observation.InstallRoot == "" {
+		// A disabled plugin serves nothing, so it may not be the reason an MCP server is suppressed or called ambiguous.
+		if observation.Kind != agentKindPlugin || observation.InstallRoot == "" || observation.Disabled {
 			continue
 		}
 		root := filepath.Clean(observation.InstallRoot)

@@ -28,6 +28,7 @@ type nativeFixturePlugin struct {
 	Target      string `json:"target"`
 	Version     string `json:"version,omitempty"`
 	InstallRoot string `json:"installRoot,omitempty"`
+	Disabled    bool   `json:"disabled,omitempty"`
 }
 
 type nativeFixtureMarketplace struct {

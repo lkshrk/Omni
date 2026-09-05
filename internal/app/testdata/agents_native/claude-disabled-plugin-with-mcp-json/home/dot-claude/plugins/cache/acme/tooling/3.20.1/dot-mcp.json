@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "tooling": {"command": "node", "args": ["dist/server.js"]}
+  }
+}

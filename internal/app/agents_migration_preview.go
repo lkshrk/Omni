@@ -19,6 +19,7 @@ const (
 	managedSectionTitle  = "Already managed by APM:"
 
 	legacyObservationTarget = "snapshot"
+	disabledNote            = "disabled"
 
 	apmGeneratedLSPPlugin      = "apm-lsp"
 	apmGeneratedLSPMarketplace = "skills-dir"
@@ -63,13 +64,24 @@ func writeMigrationSection(out *strings.Builder, title string, dispositions []ag
 	}
 }
 
+// The identity columns stay identical whatever the note says: the host migration script parses them by position.
 func migrationRow(disposition agentDisposition, last string) string {
 	observation := disposition.Observation
 	row := observation.Target + "  " + observation.Kind + "  " + observation.Identity
+	if observation.Disabled {
+		last = prefixMigrationNote(disabledNote, last)
+	}
 	if last = strings.TrimSpace(last); last != "" {
 		row += "  " + last
 	}
 	return row
+}
+
+func prefixMigrationNote(note, rest string) string {
+	if rest = strings.TrimSpace(rest); rest == "" {
+		return note
+	}
+	return note + "; " + rest
 }
 
 func replacedEvidence(disposition agentDisposition) string {
@@ -77,11 +89,7 @@ func replacedEvidence(disposition agentDisposition) string {
 	if disposition.Action != agentActionSuppress {
 		return evidence
 	}
-	owned := "owned by " + disposition.Owner
-	if evidence == "" {
-		return owned
-	}
-	return owned + "; " + evidence
+	return prefixMigrationNote("owned by "+disposition.Owner, evidence)
 }
 
 func renderAgentsMigrationPreview(plan agentBundlePlan, dispositions []agentDisposition) (AgentsMigrationPreview, error) {

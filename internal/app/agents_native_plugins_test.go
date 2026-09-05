@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -20,7 +21,7 @@ func TestDecodeNativeListAcceptsEmptySuccessfulOutput(t *testing.T) {
 	}
 }
 
-func TestListNativePluginsSkipsDisabledEntries(t *testing.T) {
+func TestListNativePluginsInventoriesDisabledEntries(t *testing.T) {
 	for _, test := range []struct {
 		cli, output string
 	}{
@@ -34,8 +35,15 @@ func TestListNativePluginsSkipsDisabledEntries(t *testing.T) {
 			}
 			a, _ := newNativeInventoryApp(t, map[string]bool{test.cli: true}, nativeRule(command, test.output))
 			got, err := a.listNativePlugins(t.Context(), test.cli)
-			if err != nil || len(got) != 1 || got[0].Name != "on" {
-				t.Fatalf("plugins = %#v, %v", got, err)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []nativePlugin{
+				{Name: "off", Marketplace: "official", Target: test.cli, Disabled: true},
+				{Name: "on", Marketplace: "official", Target: test.cli},
+			}
+			if !slices.Equal(got, want) {
+				t.Fatalf("plugins = %#v, want %#v", got, want)
 			}
 		})
 	}

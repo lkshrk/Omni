@@ -152,6 +152,31 @@ func TestDefaultSnapshotDirResolvesThroughSymlink(t *testing.T) {
 	}
 }
 
+// The host migration script only uninstalls what the preview lists, so a disabled plugin has to appear like any other.
+func TestAgentsMigratePreviewListsDisabledPluginLikeEnabled(t *testing.T) {
+	a, _ := newNativeInventoryApp(t, map[string]bool{"claude": true},
+		nativeRule("claude plugins list --json", `[{"id":"sleepy@official","enabled":false},{"id":"awake@official","enabled":true}]`),
+		nativeRule("claude plugins marketplace list --json", `[{"name":"official","source":"github","repo":"acme/plugins"}]`),
+	)
+	_, rendered, err := nativePlanFor(t, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		replacedSectionTitle,
+		"\n  claude  plugin  awake@official  claude plugins list --json\n",
+		"\n  claude  plugin  sleepy@official  disabled; claude plugins list --json\n",
+		"name: sleepy",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("preview missing %q:\n%s", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, retainedSectionTitle) {
+		t.Fatalf("disabled plugin was retained instead of replaced:\n%s", rendered)
+	}
+}
+
 func TestAgentsMigrateRendersOwnerWithoutOwnedStandaloneChildren(t *testing.T) {
 	snapshot := t.TempDir()
 	ownerRoot := filepath.Join(snapshot, "owner")

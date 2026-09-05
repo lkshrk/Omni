@@ -34,6 +34,11 @@ func TestResolveAgentDispositionsOverFixtures(t *testing.T) {
 			{kind: agentKindMCP, identity: "tooling", target: "claude", action: agentActionSuppress, owner: "tooling@acme"},
 			{kind: agentKindPlugin, identity: "tooling@acme", target: "claude", action: agentActionImport},
 		}},
+		{fixture: "claude-disabled-plugin-with-mcp-json", want: []wantDisposition{
+			{kind: agentKindMarketplace, identity: "acme", target: "claude", action: agentActionImport},
+			{kind: agentKindMCP, identity: "tooling", target: "claude", action: agentActionImport, targets: []string{"claude"}},
+			{kind: agentKindPlugin, identity: "tooling@acme", target: "claude", action: agentActionImport},
+		}},
 		{fixture: "standalone-matches-package-name", want: []wantDisposition{
 			{kind: agentKindMarketplace, identity: "official", target: "claude", action: agentActionImport},
 			{kind: agentKindMCP, identity: "demo", target: "claude", action: agentActionImport, targets: []string{"claude"}},

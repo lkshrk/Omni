@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "tooling": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["dist/server.js"],
+      "cwd": "@HOME@/.claude/plugins/cache/acme/tooling/3.20.1"
+    }
+  }
+}

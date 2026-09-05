@@ -185,6 +185,10 @@ The output is the proposed `apm.yml` followed by three lists:
 | `Retained (not migrated):` | Items Omni will not migrate, each with its reason, such as a marketplace with no APM source or an MCP server whose definition differs across targets. |
 | `Already managed by APM:` | Native entries APM already deploys, so the manifest never re-proposes them. |
 
+A native plugin the client has installed but disabled is listed in the same
+section as any other, with the same identity columns and a leading `disabled`
+note in the last column, and it never counts as the reason another item is kept.
+
 Empty sections are omitted. An entry is already managed when its name is listed
 under `mcp_servers` in `~/.apm/apm.lock.yaml`, when its command, first argument,
 or working directory resolves under `~/.apm/apm_modules`, or, for a plugin, when

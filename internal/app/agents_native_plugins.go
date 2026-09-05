@@ -17,6 +17,7 @@ type nativePlugin struct {
 	Target      string
 	Version     string
 	InstallRoot string
+	Disabled    bool
 }
 
 type nativeMarketplace struct {
@@ -57,6 +58,7 @@ func (a *App) inventoryNativeAgents(ctx context.Context) ([]agentObservation, er
 				Definition:  legacyEntry{Name: plugin.Name, Marketplace: plugin.Marketplace},
 				Version:     plugin.Version,
 				InstallRoot: plugin.InstallRoot,
+				Disabled:    plugin.Disabled,
 				Evidence:    evidence,
 			})
 		}
@@ -395,9 +397,6 @@ func (a *App) listNativePlugins(ctx context.Context, cli string) ([]nativePlugin
 	}
 	out := make([]nativePlugin, 0, len(entries))
 	for _, entry := range entries {
-		if entry.Enabled != nil && !*entry.Enabled {
-			continue
-		}
 		name, marketplace := entry.Name, entry.MarketplaceName
 		if entry.ID != "" {
 			name, marketplace = splitNativePluginIdentity(entry.ID)
@@ -410,7 +409,7 @@ func (a *App) listNativePlugins(ctx context.Context, cli string) ([]nativePlugin
 		if cli != "claude" {
 			root = entry.Source.URL
 		}
-		out = append(out, nativePlugin{Name: name, Marketplace: marketplace, Target: cli, Version: entry.Version, InstallRoot: root})
+		out = append(out, nativePlugin{Name: name, Marketplace: marketplace, Target: cli, Version: entry.Version, InstallRoot: root, Disabled: entry.Enabled != nil && !*entry.Enabled})
 	}
 	return out, nil
 }
