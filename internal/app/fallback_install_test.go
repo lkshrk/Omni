@@ -145,8 +145,8 @@ func buildTarXz(t *testing.T, entryName string, content []byte) []byte {
 
 func buildZip(t *testing.T, entryName string, content []byte) []byte {
 	t.Helper()
-	var sw stringWriter
-	zw := zip.NewWriter(&sw)
+	sw := newStringWriter()
+	zw := zip.NewWriter(sw)
 	w, err := zw.Create(entryName)
 	if err != nil {
 		t.Fatal(err)
@@ -161,10 +161,6 @@ type stringWriter struct{ buf *strings.Builder }
 func (sw *stringWriter) Write(p []byte) (int, error) { return sw.buf.Write(p) }
 
 func newStringWriter() *stringWriter { return &stringWriter{buf: &strings.Builder{}} }
-
-func init() {
-	_ = newStringWriter
-}
 
 func TestNativeInstallPipeline_TarGz(t *testing.T) {
 	t.Parallel()
