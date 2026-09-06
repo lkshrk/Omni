@@ -23,7 +23,9 @@ import (
 	"github.com/lkshrk/omni/internal/testguard"
 )
 
-const tuiQuitTimeout = 3 * time.Second
+// Missing this falls back to killing the TUI, which orphans whatever it had spawned; waiting longer keeps
+// the run on the graceful path where omni stops its own commands.
+const tuiQuitTimeout = 15 * time.Second
 
 func TestTUIConfiguredHostStartsDashboard(t *testing.T) {
 	bin := buildOmniBinary(t)

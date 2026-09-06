@@ -112,14 +112,10 @@ func runPaletteTUI(t *testing.T, bin string, s *paritySandbox, command string, d
 
 func runTUICommandPalette(t *testing.T, term *vttest.Terminal, command string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		sendTUIKey(term, ':')
-		if _, ok := waitForScreen(term, 500*time.Millisecond, screenHas(command)); ok {
-			break
-		}
-	}
-	waitForRequiredScreen(t, term, time.Second, screenHas(command), "TUI did not open the command palette")
+	// ':' only opens the palette; pressing it again because the list has not rendered types into the filter.
+	sendTUIKey(term, ':')
+	waitForRequiredScreen(t, term, 5*time.Second, screenHas(": > "), "TUI did not open the command palette")
+	waitForRequiredScreen(t, term, 5*time.Second, screenHas(command), "TUI did not list the command")
 	writeTUIKeys(t, term, command)
 	waitForRequiredScreen(t, term, 3*time.Second, screenHas(": > "+command), "TUI did not filter the command palette")
 	sendTUIKey(term, uv.KeyEnter)
