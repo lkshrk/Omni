@@ -127,7 +127,7 @@ jobs:
 
       - name: Upload flow evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: flow-evidence-unit-${{ matrix.name }}
           path: ${{ runner.temp }}/omni-test-evidence/unit-${{ matrix.name }}
@@ -243,7 +243,7 @@ jobs:
 
       - name: Upload integration test evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: flow-evidence-docker-${{ matrix.name }}
           path: .tmp/test-evidence/docker-${{ matrix.name }}
@@ -264,7 +264,7 @@ jobs:
           cache: true
 
       - name: Download flow evidence
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: flow-evidence-*
           path: ${{ runner.temp }}/downloaded-evidence
