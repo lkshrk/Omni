@@ -328,3 +328,51 @@ func TestAgentsReadinessNeverWrites(t *testing.T) {
 		t.Fatalf("calls = %+v", mock.Calls)
 	}
 }
+
+func TestAgentsReadinessAcceptsADotfilesManagedTemplateSymlink(t *testing.T) {
+	a, _, home := newAgentsReadinessApp(t, true, pinnedVersionResponse())
+	dotfiles := filepath.Join(home, "dotfiles", "omni-apm", "apm.yml")
+	if err := os.MkdirAll(filepath.Dir(dotfiles), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dotfiles, []byte("name: staged\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path, err := AgentsTemplatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(dotfiles, path); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := a.AgentsReadiness(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != AgentsReadinessTemplateOnly {
+		t.Fatalf("readiness = %+v; want a symlinked template to be staged, not invalid", got)
+	}
+}
+
+func TestAgentsReadinessRejectsADanglingTemplateSymlink(t *testing.T) {
+	a, _, home := newAgentsReadinessApp(t, true, pinnedVersionResponse())
+	path, err := AgentsTemplatePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "dotfiles", "gone.yml"), path); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := a.AgentsReadiness(context.Background())
+	if err != nil || got.State != AgentsReadinessInvalid || len(got.Details) == 0 {
+		t.Fatalf("readiness = %+v, err=%v; want a dangling template link reported", got, err)
+	}
+}

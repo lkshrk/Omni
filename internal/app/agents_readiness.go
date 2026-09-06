@@ -83,7 +83,7 @@ func inspectAgentsReadiness() (AgentsReadiness, error) {
 		r.State, r.Details = AgentsReadinessInvalid, []string{err.Error()}
 		return r, nil
 	}
-	templateExists, templateErr := readableRegularYAML(r.TemplatePath, &apmManifest{})
+	templateExists, templateErr := readableTemplateYAML(r.TemplatePath, &apmManifest{})
 	var manifest apmManifest
 	manifestExists, manifestErr := readableRegularYAML(r.ManifestPath, &manifest)
 	lockExists, lockErr := readableRegularYAML(r.LockPath, &apmLockfile{})
@@ -125,6 +125,16 @@ func validateAPMWorkspaceDir(dir string) error {
 }
 
 func readableRegularYAML(path string, dst any) (bool, error) {
+	return readableYAML(path, dst, false)
+}
+
+// The host template is dotfiles-managed, so a symlink into the dotfiles repo is its expected shape;
+// the live manifest and lockfile belong to apm and must be real files.
+func readableTemplateYAML(path string, dst any) (bool, error) {
+	return readableYAML(path, dst, true)
+}
+
+func readableYAML(path string, dst any, followSymlink bool) (bool, error) {
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		return false, nil
@@ -132,7 +142,19 @@ func readableRegularYAML(path string, dst any) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("inspect %s: %w", path, err)
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+	if info.Mode()&os.ModeSymlink != 0 {
+		if !followSymlink {
+			return true, fmt.Errorf("%s is not a regular file", path)
+		}
+		info, err = os.Stat(path)
+		if os.IsNotExist(err) {
+			return true, fmt.Errorf("%s links to a missing file", path)
+		}
+		if err != nil {
+			return true, fmt.Errorf("inspect %s: %w", path, err)
+		}
+	}
+	if !info.Mode().IsRegular() {
 		return true, fmt.Errorf("%s is not a regular file", path)
 	}
 	if info.Mode().Perm()&0o444 == 0 {
