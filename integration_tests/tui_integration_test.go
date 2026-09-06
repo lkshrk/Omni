@@ -784,7 +784,7 @@ func runTUI(t *testing.T, bin, dir string, env []string, args []string, interact
 	var waitDone <-chan error
 	defer func() {
 		if started && !waited {
-			_ = cmd.Process.Kill()
+			killTUIProcessTree(cmd.Process)
 			_, waited = awaitTUIWait(waitDone, tuiQuitTimeout)
 		}
 		// Upstream x/vt Close is unsynchronized; let process exit reclaim this bounded set of PTYs instead.
@@ -807,7 +807,7 @@ func runTUI(t *testing.T, bin, dir string, env []string, args []string, interact
 	}
 
 	failureScreen := currentScreenText(term)
-	_ = cmd.Process.Kill()
+	killTUIProcessTree(cmd.Process)
 	_, waited = awaitTUIWait(waitDone, tuiQuitTimeout)
 	t.Fatalf("TUI did not quit after Ctrl+C; screen:\n%s", failureScreen)
 	return ""

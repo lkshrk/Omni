@@ -88,7 +88,7 @@ func TestTUIShellContractRedrawsAfterPTYResize(t *testing.T) {
 			t.Fatalf("resized TUI exit: %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		_ = cmd.Process.Kill()
+		killTUIProcessTree(cmd.Process)
 		t.Fatal("resized TUI did not exit")
 	}
 }
