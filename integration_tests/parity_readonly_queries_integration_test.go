@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -67,10 +68,13 @@ esac
 
 	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
 		waitForRequiredScreen(t, term, 7*time.Second, screenHas("Dashboard", "Tools"), "TUI did not start")
+		var lastDoctor *app.DoctorResult
+		var lastDoctorErr error
 		waitForRequiredScreen(t, term, 12*time.Second, func(string) bool {
 			packet, err := readOnlyObservationPacket(observationPath)
+			lastDoctor, lastDoctorErr = packet.Doctor, err
 			return err == nil && reflect.DeepEqual(packet.Doctor, &cliDoctor)
-		}, "TUI did not publish the accepted doctor result")
+		}, "TUI did not publish the accepted doctor result"+describeDoctorMismatch(lastDoctor, lastDoctorErr, &cliDoctor))
 		writeTUIKeys(t, term, "\t")
 		waitForRequiredScreen(t, term, 10*time.Second, func(text string) bool {
 			packet, err := readOnlyObservationPacket(observationPath)
@@ -172,4 +176,23 @@ func normalizeReadOnlyDots(observation *readOnlyDotsObservation) {
 	for i := range observation.Entries {
 		observation.Entries[i].LastError = ""
 	}
+}
+
+// A DeepEqual that never matches says nothing about why, so name the first check that differs.
+func describeDoctorMismatch(got *app.DoctorResult, readErr error, want *app.DoctorResult) string {
+	if readErr != nil {
+		return "; the TUI published nothing readable: " + readErr.Error()
+	}
+	if got == nil {
+		return "; the TUI published no doctor result"
+	}
+	if len(got.Checks) != len(want.Checks) {
+		return fmt.Sprintf("; the TUI reported %d checks and the CLI %d", len(got.Checks), len(want.Checks))
+	}
+	for i := range want.Checks {
+		if !reflect.DeepEqual(got.Checks[i], want.Checks[i]) {
+			return fmt.Sprintf("; check %q differs: TUI %+v, CLI %+v", want.Checks[i].ID, got.Checks[i], want.Checks[i])
+		}
+	}
+	return "; the checks match, so the difference is elsewhere in the result"
 }
