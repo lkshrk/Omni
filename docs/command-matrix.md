@@ -194,6 +194,10 @@ omni dots groups nvim --remove old-host
 | `omni agents migrate --host <name>` | no | Read-only preview | already read-only; `--dry-run` is an explicit alias |
 | `omni agents migrate --host <name> --write` | no | Publishes verified wrappers and replaces only a migration-owned host template | run the preview first |
 | `omni agents sync --force-template` | no | Overwrites `~/.apm/apm.yml` with the host template, plus everything `agents sync` touches | Diff the template against the live manifest first |
+| `omni agents drift [--all]` | no | Read-only; reads client CLIs and config | already read-only; exits 0 either way |
+| `omni agents adopt --host <name>` | no | Read-only preview | already read-only; there is no apply mode |
+| `omni agents ignore ...` | yes | Config `agents.ignored` | `omni agents drift` |
+| `omni agents unignore ...` | yes | Config `agents.ignored` | `omni agents drift --all` |
 
 `agents sync` directly invokes APM's global install lifecycle against the
 existing `~/.apm/apm.yml`. APM owns manifest and lockfile mutation, dependency
@@ -206,6 +210,13 @@ Steady-state agent lifecycle operations are thin APM wrappers. Omni's only
 additions are the optional host template sync materializes before install, and
 `agents migrate`, which renders a pre-APM host's declarations as a manifest
 without writing anything. Omni does not provide per-agent MCP assignment.
+
+`agents drift` and the `agents-drift` doctor check report native artifacts APM
+does not own; neither removes anything. `agents ignore` writes only
+`agents.ignored` in `settings.json`, and an ignored artifact is excluded from
+drift, from adoption, and from the TUI's native removal. Removing and adopting
+a native artifact is a TUI-only action on the Agents view; see
+[TUI](tui.md#items-apm-does-not-manage).
 
 ## Group Commands
 

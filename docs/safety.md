@@ -16,6 +16,8 @@ omni dots list
 omni dots history
 omni settings show
 omni hosts list
+omni agents drift
+omni agents adopt --host <name>
 ```
 
 `doctor` is the best first command when a machine looks wrong because it reports
@@ -40,6 +42,8 @@ omni dots resolve <name> --use-repo
 omni dots resolve <name> --use-local
 omni dots push
 omni agents sync --force-template
+omni agents ignore ...
+omni agents unignore ...
 omni settings reset
 omni settings reset-cache
 ```
@@ -78,6 +82,14 @@ failures:
 `--force-template` overrides both. Diff the template against the live manifest
 before using it, because the overwrite discards direct `apm` edits. `--dry-run`
 never materializes the template.
+
+`omni agents drift` and the `agents-drift` doctor check only report native
+artifacts APM does not own; neither removes anything, and the check never
+fails a machine over an operator's deliberate install. `agents ignore` and
+`agents unignore` write only `agents.ignored` in `settings.json`. Removing a
+native artifact is a TUI-only action on the Agents view, guarded by a second
+key press, and it runs the client's own uninstall command by identity rather
+than deleting any path Omni derived.
 
 ## Reconcile And Discovery
 

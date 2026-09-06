@@ -68,6 +68,43 @@ definitions, multi-owner ambiguity, and unavailable package evidence when the
 same template declares standalone MCP/LSP services. These checks run before the
 live manifest is materialized, including for dry-run.
 
+## Items APM does not manage
+
+A final section, `Not managed by APM`, lists the native Claude and Codex
+plugins, MCP servers and marketplaces this host has installed outside APM. It
+is the same inventory `omni agents drift` prints, so a row here means the
+artifact exists on the host but no APM manifest declares it. Rows read
+`unavailable`, except an ignored one, which reads `orphaned`: it is deliberately
+outside APM, not damaged. The tab summary counts them as `N native`. The
+section is omitted when there is nothing to report and when the clients cannot
+be read.
+
+The row's detail block carries the client, the kind, the state, the file or CLI
+record it was read from, and its install root. The state is one of
+`not declared in the host template`, `retained` with the classifier's reason
+(the migration classifier will not import it — a marketplace with no APM
+source, say), or `ignored` with the recorded reason.
+
+Three keys act on the selected native row, and the ones a row can offer appear
+in its own detail block:
+
+| Key | Action |
+| --- | --- |
+| `i` | Ignore the artifact, or unignore it when it is already ignored. Writes only `agents.ignored` in `settings.json`; the host template is never touched. |
+| `D` | Adopt: declare the artifact in the host template. Offered only for a row the classifier can import, and refused while APM is running, because adopt writes the template sync reads. |
+| `x` | Remove the artifact through its own client CLI, after a second press. |
+
+`i` and `D` report `select a row under Not managed by APM first` when the
+selection is elsewhere; `x` falls through to the package uninstall it also
+serves. An ignored row offers neither adopt nor remove — the entry exists to
+say this one stays — and says to press `i` first.
+
+Removal runs the client's own command by identity (`claude plugin uninstall`,
+`claude mcp remove -s user`, `claude plugin marketplace remove`, and the Codex
+equivalents), so no filesystem path is ever derived from a package-supplied
+name. Adoption writes the manifest entry only: the artifact is deployed by the
+next `omni agents sync`, and the status line says so. Neither key runs APM.
+
 ## Navigation and package actions
 
 `/` filters every section by name and by source or transport, hides the

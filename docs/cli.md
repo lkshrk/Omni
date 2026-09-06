@@ -189,6 +189,10 @@ not provide a native fallback.
 | `omni agents prune` | Remove unused APM dependencies. |
 | `omni agents deps list|why` | Inspect global APM dependencies. |
 | `omni agents marketplace ...` | List, browse, update, validate, add, or remove APM marketplaces. |
+| `omni agents drift [--all]` | List native plugins, MCP servers and marketplaces APM does not manage, minus the recorded ignores. |
+| `omni agents adopt --host <name>` | Preview what onboarding a host onto APM would do. Writes nothing and has no apply mode. |
+| `omni agents ignore --host <h> --target <t> --kind <k> --id <id> [--reason <text>]` | Record a native artifact omni must leave alone. |
+| `omni agents unignore --host <h> --target <t> --kind <k> --id <id>` | Drop a recorded ignore entry. |
 
 APM deploys one host-global MCP surface: every declared server reaches every
 enabled target that supports user-global MCP configuration. MCP entries do not
@@ -228,6 +232,10 @@ Common agents flags:
 | `--host` | `migrate` | Required. The host whose snapshot declarations join the live native state in the preview. |
 | `--snapshot` | `migrate` | Snapshot directory. Defaults to the single `.omni-apm-migration-backup-*` directory next to the resolved config file; with no such directory the preview covers native state only. |
 | `--write` | `migrate` | Publish verified local wrappers and atomically update only the migration-owned host template. |
+| `--all` | `drift` | Also list the ignored entries and the retained items with their reasons. |
+| `--host` | `adopt` | Required. The host whose adoption to preview. |
+| `--host`, `--target`, `--kind`, `--id` | `ignore`, `unignore` | Required. The artifact the exception applies to, spelled as `agents drift` prints it. |
+| `--reason` | `ignore` | Why this artifact stays native. Recorded with the entry and shown by `drift --all`. |
 
 
 ## Trace Commands

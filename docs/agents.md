@@ -285,6 +285,59 @@ processes do not participate in Omni's lock.
 > confirming the expected files exist; every other audit finding must still
 > fail. Do not duplicate the files under `~/.apm/.agents`.
 
+## Native items APM does not manage
+
+Migration is a one-time flow; drift is the steady state after it. A host keeps
+working after adoption, and a plugin installed straight through `claude` or
+`codex` afterwards is invisible to the manifest. Three read-only surfaces
+report that gap and one config field records the exceptions.
+
+`omni agents drift` lists the native plugins, MCP servers and marketplaces this
+host's APM manifest could cover but does not. Items the migration classifier
+retains for a stated reason are not drift, nor are the recorded ignores. It
+reports only, and exits 0 whether or not drift exists. `--all` also prints the
+ignored entries and the retained items with their reasons.
+
+`omni doctor` runs the same report as the `agents-drift` check. A native
+install is an operator's choice, so the check never fails: drift is a warning
+naming each item, and a client that cannot be read within the check's deadline
+is reported as unchecked rather than as clean. With neither `claude` nor
+`codex` on `PATH` the check is skipped.
+
+`omni agents adopt --host <name>` previews what onboarding that host onto APM
+would do: the host template's shape, what the manifest would gain, and which
+native items would be replaced, retained, already managed or ignored, plus any
+client that could not be read. It is preview-only — it writes nothing, runs no
+mutating client command, and has no apply mode. Publishing a whole host's
+manifest stays `omni agents migrate --host <name> --write`.
+
+### The ignore list
+
+A deliberate native install is recorded in `agents.ignored` in `settings.json`,
+the only field the `agents` block accepts; every other shape is still rejected
+by the removed-field error. Each entry names the host, target, kind, identity,
+and an optional reason:
+
+```sh
+omni agents ignore --host workstation --target claude --kind plugin \
+    --id demo@official --reason "local build, not published"
+omni agents unignore --host workstation --target claude --kind plugin --id demo@official
+```
+
+The host is required: an exception is a statement about one machine, not about
+the fleet. Ignoring an artifact that is already ignored updates its reason
+instead of adding a duplicate; unignoring one that was never recorded fails,
+because the caller believed it was protected.
+
+An ignored artifact is excluded from `agents drift`, is left in place by
+adoption, and is refused by the TUI's remove and adopt keys. Ignoring is not
+adopting: the artifact stays native and absent from the manifest.
+
+The Agents view carries the same inventory under `Not managed by APM`, with
+`i` to ignore or unignore, `D` to adopt one artifact into the host template,
+and `x` to remove it through its own client. See
+[TUI](tui.md#items-apm-does-not-manage).
+
 ## APM Main Build
 
 Omni requires APM `0.29.0` built from `microsoft/apm` commit `656f3d6e` (main, 2026-09-04).
