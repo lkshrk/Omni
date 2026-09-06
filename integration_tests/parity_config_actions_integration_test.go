@@ -250,3 +250,34 @@ func readParityHostsThroughCLI(t *testing.T, bin string, sandbox *paritySandbox)
 	runOmniCommand(t, bin, sandbox.root, sandbox.env,
 		"--config", sandbox.configPath, "--cache-dir", sandbox.cache, "hosts", "list")
 }
+
+// Host rename has no CLI counterpart, so it is covered as a TUI-only flow rather than a parity pair.
+func TestTUIHostRenameMovesTheHostAndItsSpecialGroup(t *testing.T) {
+	bin := buildOmniBinary(t)
+	sandbox := newParitySandbox(t, t.TempDir())
+	seedParityConfigActionsWithLaptop(t, sandbox)
+
+	runParityConfigTUI(t, bin, sandbox, func(term *vttest.Terminal) {
+		writeTUIKeys(t, term, "j", "j")
+		waitForRequiredScreen(t, term, 3*time.Second, screenHas("laptop"), "TUI did not list laptop")
+		writeTUIKeys(t, term, "r", "2\r")
+	}, func(cfg *config.RootConfig) bool {
+		_, old := cfg.Hosts["laptop"]
+		_, renamed := cfg.Hosts["laptop2"]
+		return !old && renamed
+	})
+
+	cfg, err := config.Load(sandbox.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if groups := cfg.Hosts["laptop2"]; len(groups) != 1 || groups[0] != "work" {
+		t.Fatalf("renamed host lost its group assignments: %v", groups)
+	}
+	if parityGroupExists(cfg, "laptop") {
+		t.Fatal("rename left the old special host group behind")
+	}
+	if !parityGroupExists(cfg, "laptop2") {
+		t.Fatal("rename did not move the special host group")
+	}
+}

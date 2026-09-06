@@ -5101,6 +5101,72 @@
       ]
     },
     {
+      "id": "hosts.rename",
+      "capability": "hosts",
+      "title": "hosts rename",
+      "criticality": "high",
+      "criticality_reason": "Renaming a host rewrites its assignment and its protected host group; losing either silently changes which tools and dotfiles the machine resolves.",
+      "action_ids": [
+        "hosts.rename"
+      ],
+      "requirements": [
+        {
+          "level": "unit",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "unit",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestRenameHostMovesSpecialHostGroup",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Renaming through the state-returning entry point returns the updated host and group state the view re-renders from.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestHostGroupMutationsWithStateReturnUpdatedState",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIHostRenameMovesTheHostAndItsSpecialGroup",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "hosts.delete",
       "capability": "hosts",
       "title": "hosts delete",

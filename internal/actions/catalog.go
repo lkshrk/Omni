@@ -59,6 +59,7 @@ const (
 	GroupEditDots                  ID = "groups.edit_dots"
 	HostCreate                     ID = "hosts.create"
 	HostCopy                       ID = "hosts.copy"
+	HostRename                     ID = "hosts.rename"
 	HostDelete                     ID = "hosts.delete"
 	HostEditGroups                 ID = "hosts.edit_groups"
 	SettingsSet                    ID = "settings.set"
@@ -878,6 +879,17 @@ var Hosts = []Action{
 		Mutates:         true,
 		CLIOnlyReason:   "TUI exposes host config copy only during onboarding for a missing current host.",
 		CLI:             []CLIBinding{{Command: []string{"hosts", "copy"}}},
+	},
+	{
+		ID:              HostRename,
+		Domain:          "hosts",
+		Scope:           ScopeRow,
+		Label:           LabelRename,
+		Description:     "Rename a host.",
+		LongDescription: "Rename a host assignment and move its protected host group to the new name, keeping its group memberships.",
+		Mutates:         true,
+		TUIOnlyReason:   "Renaming a host is only reachable from the selected host row; the CLI has no hosts rename command.",
+		TUI:             &TUIBinding{KeyMapField: "Rename", DefaultKey: "r", Label: LabelRename, Description: "Rename the selected host."},
 	},
 	{
 		ID:                 HostDelete,
