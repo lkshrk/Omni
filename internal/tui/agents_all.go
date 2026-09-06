@@ -180,7 +180,7 @@ func (m *Model) doCheckAgentsOutdated() tea.Cmd {
 	m.agentsOutdatedChecking = true
 	m.agentsOutdatedErr = nil
 	m.agentsOutdatedUnknown = 0
-	m.agentsOutdatedResult = app.AgentsOutdatedResult{}
+	// The last known result stands until this check replaces it, so every view reports the same updates meanwhile.
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(parent, 45*time.Second)
 		defer cancel()
@@ -214,8 +214,6 @@ func (m *Model) refreshAgents() []tea.Cmd {
 	m.agentsOutdatedGen++ // invalidate any pre-readiness update completion
 	// The generation bump means the queued op would never be drained by the check it was waiting on.
 	m.agentsQueuedRowOp = nil
-	m.agentsOutdatedResult = app.AgentsOutdatedResult{}
-	app.ApplyAgentsOutdated(m.agentsRows, app.AgentsOutdatedResult{})
 	return []tea.Cmd{m.doCheckAgentsReadiness()}
 }
 

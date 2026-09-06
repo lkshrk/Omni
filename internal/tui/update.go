@@ -425,6 +425,11 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			cmds = append(cmds, setStatus(&m, "✓ "+msg.command, false))
 		}
 		m.continueDashboardReconcile(dashboardReconcilePlanSyncAgents, msg.err, &cmds)
+		if msg.err == nil {
+			// An apm command changed the workspace, so the previous update check no longer describes it.
+			m.agentsOutdatedResult = app.AgentsOutdatedResult{}
+			app.ApplyAgentsOutdated(m.agentsRows, app.AgentsOutdatedResult{})
+		}
 		cmds = append(cmds, m.refreshAgents()...)
 		if m.agentsRegistryMode {
 			cmds = append(cmds, m.doLoadAgentsRegistry())

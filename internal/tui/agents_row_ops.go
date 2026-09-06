@@ -109,9 +109,6 @@ func agentsRowLimitations(m Model) []string {
 		return []string{strings.TrimPrefix(agentsServiceOpStatus, "⚠ ")}
 	}
 	var out []string
-	if parent := row.pkg.ResolvedBy; parent != "" {
-		out = append(out, "resolved by "+parent+" — S sync reinstalls it unless you change that package")
-	}
 	for _, status := range []string{mustStatus(agentsUpdateAction(row.pkg)), mustStatus(agentsUninstallAction(row.pkg))} {
 		if status = strings.TrimPrefix(status, "⚠ "); status != "" && !slices.Contains(out, status) {
 			out = append(out, status)

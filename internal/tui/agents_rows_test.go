@@ -959,16 +959,16 @@ func TestAgentsResolvedRowDispatchesUpdateAndUninstall(t *testing.T) {
 	}
 }
 
-func TestAgentsResolvedRowExplainsItselfWithoutSuppressingHints(t *testing.T) {
+func TestAgentsResolvedRowKeepsItsHintsAndCarriesNoStatusLine(t *testing.T) {
 	m, _ := agentsResolvedRowModel(t)
 	view := stripANSIEscapeSequences(m.viewSkillsBody())
-	if !strings.Contains(view, "resolved by ai-plugins") {
-		t.Fatalf("resolved-by limitation missing from the detail block:\n%s", view)
-	}
 	for _, want := range []string{listHintPrefix() + "u update", "d uninstall"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("resolved row suppressed %q:\n%s", want, view)
 		}
+	}
+	if strings.Contains(view, "resolved by") {
+		t.Fatalf("a healthy row carries a status sentence in its details:\n%s", view)
 	}
 }
 
@@ -1619,5 +1619,72 @@ func TestAgentsRowAuthorFallsBackToTheSourceOwner(t *testing.T) {
 				t.Fatalf("agentsRowAuthor(%+v) = %q, want %q", tc.row, got, tc.want)
 			}
 		})
+	}
+}
+
+func agentsRetainedOutdatedModel(t *testing.T) Model {
+	t.Helper()
+	m := agentsRowsModel(t)
+	m.app = app.New(filepath.Join(t.TempDir(), "settings.json"))
+	m.ctx = context.Background()
+	m.agentsOutdatedGen = 1
+	m.agentsOutdatedChecking = true
+	m = drive(m, agentsOutdatedMsg{gen: 1, result: app.AgentsOutdatedResult{
+		Rows: []apm.OutdatedRow{{Package: "acme/alpha", Current: "1.2.3", Latest: "2.0.0"}},
+	}})
+	if !m.agentsRows[0].UpdateAvailable {
+		t.Fatalf("fixture did not mark the row outdated: %#v", m.agentsRows[0])
+	}
+	return m
+}
+
+func TestAgentsRefreshKeepsTheKnownOutdatedResult(t *testing.T) {
+	m := agentsRetainedOutdatedModel(t)
+	m.refreshAgents()
+	if len(m.agentsOutdatedResult.Rows) != 1 || m.agentsOutdatedResult.Rows[0].Package != "acme/alpha" {
+		t.Fatalf("refresh dropped the retained result: %#v", m.agentsOutdatedResult)
+	}
+	if !m.agentsRows[0].UpdateAvailable || m.agentsRows[0].LatestVersion != "2.0.0" {
+		t.Fatalf("refresh cleared the row decoration: %#v", m.agentsRows[0])
+	}
+}
+
+func TestAgentsRefreshReappliesRetainedResultToReloadedRows(t *testing.T) {
+	m := agentsRetainedOutdatedModel(t)
+	m.refreshAgents()
+	reloaded := drive(m, agentsRowsMsg{gen: m.agentsRowsGen, status: app.AgentsStatus{Packages: []app.AgentsPackageRow{
+		{Name: "alpha", Source: "acme/alpha", Version: "1.2.3", Status: app.AgentsPackageInstalled},
+	}}})
+	if len(reloaded.agentsRows) != 1 || !reloaded.agentsRows[0].UpdateAvailable || reloaded.agentsRows[0].LatestVersion != "2.0.0" {
+		t.Fatalf("reloaded rows lost the retained update mark: %#v", reloaded.agentsRows)
+	}
+}
+
+func TestAgentsOutdatedCheckStartKeepsThePreviousResult(t *testing.T) {
+	m := agentsRetainedOutdatedModel(t)
+	m.doCheckAgentsOutdated()
+	if !m.agentsOutdatedChecking {
+		t.Fatal("check did not start")
+	}
+	if len(m.agentsOutdatedResult.Rows) != 1 || !m.agentsRows[0].UpdateAvailable || m.agentsRows[0].LatestVersion != "2.0.0" {
+		t.Fatalf("starting a check wiped the previous result: %#v %#v", m.agentsOutdatedResult, m.agentsRows[0])
+	}
+}
+
+func TestAgentsAPMCommandClearsOutdatedResultOnlyOnSuccess(t *testing.T) {
+	done := drive(agentsRetainedOutdatedModel(t), apmCommandDoneMsg{command: "apm update -g --yes", stdout: "ok"})
+	if len(done.agentsOutdatedResult.Rows) != 0 {
+		t.Fatalf("successful apm command kept a stale result: %#v", done.agentsOutdatedResult)
+	}
+	if done.agentsRows[0].UpdateAvailable || done.agentsRows[0].LatestVersion != "" {
+		t.Fatalf("successful apm command kept a stale row mark: %#v", done.agentsRows[0])
+	}
+
+	failed := drive(agentsRetainedOutdatedModel(t), apmCommandDoneMsg{command: "apm update -g --yes", err: errors.New("boom")})
+	if len(failed.agentsOutdatedResult.Rows) != 1 {
+		t.Fatalf("failed apm command dropped the result: %#v", failed.agentsOutdatedResult)
+	}
+	if !failed.agentsRows[0].UpdateAvailable || failed.agentsRows[0].LatestVersion != "2.0.0" {
+		t.Fatalf("failed apm command cleared the row mark: %#v", failed.agentsRows[0])
 	}
 }
