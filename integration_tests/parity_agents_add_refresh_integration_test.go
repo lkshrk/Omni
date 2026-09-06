@@ -57,7 +57,7 @@ func runAgentsAddParityTUI(t *testing.T, bin string, sandbox *paritySandbox) {
 		waitForRequiredScreen(t, term, 8*time.Second, screenHas("Dashboard", "Agents"), "TUI did not start")
 		writeTUIKeys(t, term, "\t", "\t", "\t")
 		waitForRequiredScreen(t, term, 8*time.Second, screenHas("Packages", "tool"), "TUI did not render Agents")
-		sendAgentsActionsKeyUntil(t, term, "a", screenHas("Registry", "zz-brainstorming"), "TUI did not open registry")
+		sendAgentsActionsKeyUntil(t, term, "i", screenHas("Registry", "zz-brainstorming"), "TUI did not open registry")
 		writeTUIKeys(t, term, "brain")
 		waitForRequiredScreen(t, term, 3*time.Second, screenHas("zz-brainstorming", "available"), "TUI did not filter registry")
 		writeTUIKeys(t, term, "\r", "\r")

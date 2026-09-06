@@ -132,9 +132,9 @@ func runAgentsRemoveParityTUI(t *testing.T, bin string, sandbox *paritySandbox) 
 		sendAgentsActionsKeyUntil(t, term, "j", func(text string) bool {
 			return strings.Contains(text, ">") && strings.Contains(text, "tool")
 		}, "TUI did not select APM package")
-		writeTUIKeys(t, term, "x")
+		writeTUIKeys(t, term, "d")
 		waitForRequiredScreen(t, term, 3*time.Second, screenHas("confirm uninstall"), "TUI did not arm package removal")
-		writeTUIKeys(t, term, "x")
+		writeTUIKeys(t, term, "d")
 	}, func(sandbox *paritySandbox) bool {
 		_, err := os.Stat(filepath.Join(sandbox.root, "apm-state", "removed"))
 		return err == nil

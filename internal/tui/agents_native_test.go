@@ -208,7 +208,7 @@ func TestAgentsNativeRemoveConfirmsBeforeCallingTheClient(t *testing.T) {
 
 	agentsPressBinding(t, &m, m.keys.AgentsRemove)
 	if m.agentsConfirmIdx != agentsNativeAdoptableIdx || len(mock.Calls) != 0 {
-		t.Fatalf("first x removed without confirming: idx=%d calls=%#v", m.agentsConfirmIdx, mock.Calls)
+		t.Fatalf("first d removed without confirming: idx=%d calls=%#v", m.agentsConfirmIdx, mock.Calls)
 	}
 	removeKey, removeDesc := m.keys.AgentsRemove.Help().Key, m.keys.AgentsRemove.Help().Desc
 	view := stripANSIEscapeSequences(m.viewSkillsBody())
@@ -311,7 +311,7 @@ func TestAgentsNativeIgnoreTogglesTheRecordedEntry(t *testing.T) {
 	m, _ := agentsNativeModel(t)
 	m.agentsCursor = agentsNativeAdoptableIdx
 
-	cmds := agentsPressRowKey(t, &m, "i")
+	cmds := agentsPressRowKey(t, &m, "x")
 	var op *agentsNativeOpMsg
 	for _, msg := range runBatchCmd(tea.Batch(cmds...)) {
 		if got, ok := msg.(agentsNativeOpMsg); ok {
@@ -330,7 +330,7 @@ func TestAgentsNativeIgnoreTogglesTheRecordedEntry(t *testing.T) {
 	}
 
 	m.agentsNativeRows[0].Ignored = true
-	cmds = agentsPressRowKey(t, &m, "i")
+	cmds = agentsPressRowKey(t, &m, "x")
 	op = nil
 	for _, msg := range runBatchCmd(tea.Batch(cmds...)) {
 		if got, ok := msg.(agentsNativeOpMsg); ok {
@@ -348,8 +348,8 @@ func TestAgentsNativeIgnoreTogglesTheRecordedEntry(t *testing.T) {
 func TestAgentsNativeIgnoreClearsAPendingRemoveConfirm(t *testing.T) {
 	m, _ := agentsNativeModel(t)
 	m.agentsCursor = agentsNativeAdoptableIdx
+	agentsPressRowKey(t, &m, "d")
 	agentsPressRowKey(t, &m, "x")
-	agentsPressRowKey(t, &m, "i")
 	if m.agentsConfirmIdx != -1 {
 		t.Fatalf("ignore left the remove confirm armed: %d", m.agentsConfirmIdx)
 	}
@@ -383,11 +383,11 @@ func TestAgentsNativeIgnoreKeyNeedsANativeRow(t *testing.T) {
 func TestAgentsNativeRemoveKeyStillFallsThroughToPackageUninstall(t *testing.T) {
 	m, mock := agentsNativeModel(t)
 	m.agentsCursor = 0
-	agentsPressRowKey(t, &m, "x")
+	agentsPressRowKey(t, &m, "d")
 	if m.agentsConfirmIdx != 0 || strings.Contains(m.statusMsg, agentsNativeSectionTitle) {
 		t.Fatalf("x on a package row was swallowed by the native handler: idx=%d status=%q", m.agentsConfirmIdx, m.statusMsg)
 	}
-	cmds := agentsPressRowKey(t, &m, "x")
+	cmds := agentsPressRowKey(t, &m, "d")
 	if m.apmCommand != "apm uninstall -g acme/floating" {
 		t.Fatalf("command = %q", m.apmCommand)
 	}
@@ -398,7 +398,7 @@ func TestAgentsNativeRemoveKeyStillFallsThroughToPackageUninstall(t *testing.T) 
 
 	m, _ = agentsNativeModel(t)
 	m.agentsCursor = 4
-	agentsPressRowKey(t, &m, "x")
+	agentsPressRowKey(t, &m, "d")
 	if !strings.Contains(m.statusMsg, agentsServiceOpStatus) {
 		t.Fatalf("x on an MCP row = %q", m.statusMsg)
 	}
@@ -412,10 +412,10 @@ func TestAgentsAddKeyStillOpensTheRegistryBesideNativeRows(t *testing.T) {
 			m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessReady}
 			agentsPressBinding(t, &m, m.keys.AgentsAdd)
 			if !m.agentsRegistryMode {
-				t.Fatalf("a did not open the registry: status=%q", m.statusMsg)
+				t.Fatalf("i did not open the registry: status=%q", m.statusMsg)
 			}
 			if strings.Contains(m.statusMsg, agentsNativeSectionTitle) {
-				t.Fatalf("a was swallowed by the native handler: %q", m.statusMsg)
+				t.Fatalf("i was swallowed by the native handler: %q", m.statusMsg)
 			}
 		})
 	}

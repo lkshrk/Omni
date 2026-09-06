@@ -36,7 +36,7 @@ func TestTUIAgentsNativeSectionIgnoresWithoutTouchingTheTemplate(t *testing.T) {
 	runAgentsNativeTUI(t, bin, sandbox, func(term *vttest.Terminal) {
 		waitForRequiredScreen(t, term, 8*time.Second, screenHas("Not managed by APM", nativeParityIdentity), "TUI did not render the native section")
 		selectAgentsNativeRow(t, term)
-		writeTUIKeys(t, term, "i")
+		writeTUIKeys(t, term, "x")
 	}, func(s *paritySandbox) bool { return len(readAgentsIgnored(t, s)) == 1 })
 
 	if _, err := os.Stat(template); !os.IsNotExist(err) {
@@ -53,7 +53,7 @@ func TestTUIAgentsNativeAdoptDeclaresTheArtifactInTheTemplate(t *testing.T) {
 	runAgentsNativeTUI(t, bin, sandbox, func(term *vttest.Terminal) {
 		waitForRequiredScreen(t, term, 8*time.Second, screenHas("Not managed by APM", nativeParityIdentity), "TUI did not render the native section")
 		selectAgentsNativeRow(t, term)
-		writeTUIKeys(t, term, "D")
+		writeTUIKeys(t, term, "A")
 	}, func(s *paritySandbox) bool {
 		raw, err := os.ReadFile(template)
 		return err == nil && strings.Contains(string(raw), "official")
@@ -103,7 +103,7 @@ func runAgentsIgnoreParityTUI(t *testing.T, bin string, sandbox *paritySandbox) 
 	runAgentsNativeTUI(t, bin, sandbox, func(term *vttest.Terminal) {
 		waitForRequiredScreen(t, term, 8*time.Second, screenHas("Not managed by APM", nativeParityIdentity), "TUI did not render the native section")
 		selectAgentsNativeRow(t, term)
-		writeTUIKeys(t, term, "i")
+		writeTUIKeys(t, term, "x")
 	}, func(s *paritySandbox) bool { return len(readAgentsIgnored(t, s)) == 1 })
 }
 
@@ -175,7 +175,7 @@ func TestTUIAgentsNativeRemoveUninstallsThroughTheClient(t *testing.T) {
 	runAgentsNativeTUI(t, bin, sandbox, func(term *vttest.Terminal) {
 		waitForRequiredScreen(t, term, 8*time.Second, screenHas("Not managed by APM", nativeParityIdentity), "TUI did not render the native section")
 		selectAgentsNativeRow(t, term)
-		writeTUIKeys(t, term, "x", "x")
+		writeTUIKeys(t, term, "d", "d")
 	}, func(s *paritySandbox) bool {
 		return strings.Contains(agentsNativeClientCalls(t, s), "plugin uninstall "+nativeParityIdentity)
 	})
@@ -196,7 +196,7 @@ func TestTUIAgentsNativeRemoveNeedsASecondPress(t *testing.T) {
 	runAgentsNativeTUI(t, bin, sandbox, func(term *vttest.Terminal) {
 		waitForRequiredScreen(t, term, 8*time.Second, screenHas("Not managed by APM", nativeParityIdentity), "TUI did not render the native section")
 		selectAgentsNativeRow(t, term)
-		writeTUIKeys(t, term, "x")
+		writeTUIKeys(t, term, "d")
 		waitForRequiredScreen(t, term, 8*time.Second, screenHas("confirm remove"), "TUI did not arm the remove confirmation")
 	}, func(*paritySandbox) bool { return true })
 

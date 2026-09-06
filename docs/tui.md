@@ -90,14 +90,14 @@ in its own detail block:
 
 | Key | Action |
 | --- | --- |
-| `i` | Ignore the artifact, or unignore it when it is already ignored. Writes only `agents.ignored` in `settings.json`; the host template is never touched. |
-| `D` | Adopt: declare the artifact in the host template. Offered only for a row the classifier can import, and refused while APM is running, because adopt writes the template sync reads. |
-| `x` | Remove the artifact through its own client CLI, after a second press. |
+| `x` | Ignore the artifact, or unignore it when it is already ignored. Writes only `agents.ignored` in `settings.json`; the host template is never touched. |
+| `A` | Adopt: declare the artifact in the host template. Offered only for a row the classifier can import, and refused while APM is running, because adopt writes the template sync reads. |
+| `d` | Remove the artifact through its own client CLI, after a second press. |
 
-`i` and `D` report `select a row under Not managed by APM first` when the
-selection is elsewhere; `x` falls through to the package uninstall it also
+`x` and `A` report `select a row under Not managed by APM first` when the
+selection is elsewhere; `d` falls through to the package uninstall it also
 serves. An ignored row offers neither adopt nor remove — the entry exists to
-say this one stays — and says to press `i` first.
+say this one stays — and says to press `x` first.
 
 Removal runs the client's own command by identity (`claude plugin uninstall`,
 `claude mcp remove -s user`, `claude plugin marketplace remove`, and the Codex
@@ -119,7 +119,7 @@ without one says `no description available`. Only a URL's host and a command's
 basename are shown, so credentials, header values, and install paths never reach
 the screen.
 
-`u` updates the selected package and `x` uninstalls it after a second press;
+`u` updates the selected package and `d` uninstalls it after a second press;
 both keys, and the reason a row cannot offer them, appear in that row's own
 detail block rather than the footer, which carries only tab-wide actions. A
 failed row op reports between the row and its details.
@@ -137,7 +137,7 @@ dropped from the footer — the full output stays in the trace log.
 
 ## Registry and tab actions
 
-`a` opens the registry: every plugin the registered marketplaces offer, read
+`i` opens the registry: every plugin the registered marketplaces offer, read
 from `~/.apm/marketplaces.json` and the catalogs under
 `~/.apm/cache/marketplace/`. APM files a catalog under the registered
 marketplace name, except a URL marketplace, whose filename it hashes, so a

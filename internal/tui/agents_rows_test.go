@@ -944,11 +944,11 @@ func TestAgentsResolvedRowDispatchesUpdateAndUninstall(t *testing.T) {
 	}
 
 	m, mock = agentsResolvedRowModel(t)
-	agentsPressRowKey(t, &m, "x")
+	agentsPressRowKey(t, &m, "d")
 	if m.agentsConfirmIdx != m.agentsCursor || len(mock.Calls) != 0 {
 		t.Fatalf("first x should only arm: idx=%d calls=%#v", m.agentsConfirmIdx, mock.Calls)
 	}
-	accept := agentsPressRowKey(t, &m, "x")
+	accept := agentsPressRowKey(t, &m, "d")
 	if m.apmCommand != "apm uninstall -g acme/child" {
 		t.Fatalf("uninstall command = %q", m.apmCommand)
 	}
@@ -964,7 +964,7 @@ func TestAgentsResolvedRowExplainsItselfWithoutSuppressingHints(t *testing.T) {
 	if !strings.Contains(view, "resolved by ai-plugins") {
 		t.Fatalf("resolved-by limitation missing from the detail block:\n%s", view)
 	}
-	for _, want := range []string{listHintPrefix() + "u update", "x uninstall"} {
+	for _, want := range []string{listHintPrefix() + "u update", "d uninstall"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("resolved row suppressed %q:\n%s", want, view)
 		}
@@ -974,15 +974,15 @@ func TestAgentsResolvedRowExplainsItselfWithoutSuppressingHints(t *testing.T) {
 func TestAgentsRowUninstallConfirmLifecycle(t *testing.T) {
 	m, mock := agentsRowOpModel(t)
 	m.agentsCursor = 0
-	agentsPressRowKey(t, &m, "x")
+	agentsPressRowKey(t, &m, "d")
 	if m.agentsConfirmIdx != 0 || len(mock.Calls) != 0 {
 		t.Fatalf("first x should only arm: idx=%d calls=%#v", m.agentsConfirmIdx, mock.Calls)
 	}
 	view := stripANSIEscapeSequences(m.viewSkillsBody())
-	if !strings.Contains(view, listHintPrefix()+"x confirm uninstall") {
+	if !strings.Contains(view, listHintPrefix()+"d confirm uninstall") {
 		t.Fatalf("confirm hint is not inline on the selected row:\n%s", view)
 	}
-	if strings.Contains(view, "x uninstall") || strings.Contains(m.statusMsg, "confirm uninstall") {
+	if strings.Contains(view, "d uninstall") || strings.Contains(m.statusMsg, "confirm uninstall") {
 		t.Fatalf("normal row hint or footer status survived confirmation: status=%q\n%s", m.statusMsg, view)
 	}
 	if !m.hasActiveConfirmation() {
@@ -1005,8 +1005,8 @@ func TestAgentsRowUninstallConfirmLifecycle(t *testing.T) {
 
 	m, mock = agentsRowOpModel(t)
 	m.agentsCursor = 0
-	agentsPressRowKey(t, &m, "x")
-	accept := agentsPressRowKey(t, &m, "x")
+	agentsPressRowKey(t, &m, "d")
+	accept := agentsPressRowKey(t, &m, "d")
 	if m.apmCommand != "apm uninstall -g acme/floating" {
 		t.Fatalf("command = %q", m.apmCommand)
 	}
@@ -1029,8 +1029,8 @@ func TestAgentsRowUninstallConfirmLifecycle(t *testing.T) {
 func TestAgentsRowUninstallUsesTheLocalPathSpec(t *testing.T) {
 	m, _ := agentsRowOpModel(t)
 	m.agentsCursor = 2
-	agentsPressRowKey(t, &m, "x")
-	agentsPressRowKey(t, &m, "x")
+	agentsPressRowKey(t, &m, "d")
+	agentsPressRowKey(t, &m, "d")
 	if m.apmCommand != "apm uninstall -g /src/local" {
 		t.Fatalf("command = %q", m.apmCommand)
 	}
@@ -1073,7 +1073,7 @@ func TestAgentsRowHintsLiveOnTheCursorRowOnly(t *testing.T) {
 	m, _ := agentsRowOpModel(t)
 	m.cursorHidden = false
 	view := stripANSIEscapeSequences(m.viewSkillsBody())
-	if !strings.Contains(view, "u update") || !strings.Contains(view, "x uninstall") {
+	if !strings.Contains(view, "u update") || !strings.Contains(view, "d uninstall") {
 		t.Fatalf("row hints missing from the cursor row:\n%s", view)
 	}
 	if !strings.Contains(view, listHintPrefix()+strings.TrimLeft(strings.SplitN(strings.SplitAfter(view, listHintPrefix())[1], "\n", 2)[0], "")) {
@@ -1099,7 +1099,7 @@ func TestAgentsFooterCarriesOnlyTabWideActions(t *testing.T) {
 			t.Fatalf("footer missing tab-wide action %q: %q", want, legend)
 		}
 	}
-	for _, unwanted := range []string{"update row", "uninstall row", "u update", "x uninstall", "details"} {
+	for _, unwanted := range []string{"update row", "uninstall row", "u update", "d uninstall", "details"} {
 		if strings.Contains(legend, unwanted) {
 			t.Fatalf("footer still carries row op %q: %q", unwanted, legend)
 		}

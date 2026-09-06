@@ -334,8 +334,8 @@ adoption, and is refused by the TUI's remove and adopt keys. Ignoring is not
 adopting: the artifact stays native and absent from the manifest.
 
 The Agents view carries the same inventory under `Not managed by APM`, with
-`i` to ignore or unignore, `D` to adopt one artifact into the host template,
-and `x` to remove it through its own client. See
+`x` to ignore or unignore, `A` to adopt one artifact into the host template,
+and `d` to remove it through its own client. See
 [TUI](tui.md#items-apm-does-not-manage).
 
 ## APM Main Build

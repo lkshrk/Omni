@@ -295,8 +295,8 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("S", actions.MustTUILabel(actions.AgentsSync)),
 		),
 		AgentsAdd: key.NewBinding(
-			key.WithKeys("a"),
-			key.WithHelp("a", actions.MustTUILabel(actions.AgentsAdd)),
+			key.WithKeys("i"),
+			key.WithHelp("i", actions.MustTUILabel(actions.AgentsAdd)),
 		),
 		AgentsUpdate: key.NewBinding(
 			key.WithKeys("u"),
@@ -307,16 +307,16 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("U", actions.MustTUILabel(actions.AgentsUpdateAll)),
 		),
 		AgentsRemove: key.NewBinding(
-			key.WithKeys("x"),
-			key.WithHelp("x", actions.MustTUILabel(actions.AgentsRemove)),
+			key.WithKeys("d"),
+			key.WithHelp("d", actions.MustTUILabel(actions.AgentsRemove)),
 		),
 		AgentsNativeIgnore: key.NewBinding(
-			key.WithKeys("i"),
-			key.WithHelp("i", actions.MustTUILabel(actions.AgentsIgnore)),
+			key.WithKeys("x"),
+			key.WithHelp("x", actions.MustTUILabel(actions.AgentsIgnore)),
 		),
 		AgentsNativeAdopt: key.NewBinding(
-			key.WithKeys("D"),
-			key.WithHelp("D", actions.MustTUILabel(actions.AgentsAdoptNative)),
+			key.WithKeys("A"),
+			key.WithHelp("A", actions.MustTUILabel(actions.AgentsAdoptNative)),
 		),
 		AgentsRefresh: key.NewBinding(
 			key.WithKeys("R"),

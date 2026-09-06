@@ -1047,7 +1047,7 @@ var Agents = []Action{
 		Description:     "Browse registered marketplaces and install one APM package.",
 		LongDescription: "Open the package registry in the TUI or install a named global APM package from the CLI.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "AgentsAdd", DefaultKey: "a", Label: "add", Description: "Browse and install an APM package."},
+		TUI:             &TUIBinding{KeyMapField: "AgentsAdd", DefaultKey: "i", Label: "add", Description: "Browse and install an APM package."},
 		CLI:             []CLIBinding{{Command: []string{"agents", "add"}, Flags: []string{"--skill"}}},
 	},
 	{
@@ -1080,7 +1080,7 @@ var Agents = []Action{
 		Description:     "Uninstall an APM package and its deployed files.",
 		LongDescription: "Remove one selected package from the global APM workspace and clean up its deployed files.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "AgentsRemove", DefaultKey: "x", Label: "uninstall", Description: "Uninstall the selected APM package.", ConfirmDescription: "confirm uninstall"},
+		TUI:             &TUIBinding{KeyMapField: "AgentsRemove", DefaultKey: "d", Label: "uninstall", Description: "Uninstall the selected APM package.", ConfirmDescription: "confirm uninstall"},
 		CLI:             []CLIBinding{{Command: []string{"agents", "remove"}}},
 	},
 	{
@@ -1125,7 +1125,7 @@ var Agents = []Action{
 		LongDescription: "Add one natively installed artifact to the host APM manifest; deploying it remains omni agents sync.",
 		Mutates:         true,
 		TUIOnlyReason:   "The CLI adopts a whole host through agents adopt; declaring one selected artifact is a row action.",
-		TUI:             &TUIBinding{KeyMapField: "AgentsNativeAdopt", DefaultKey: "D", Label: "adopt", Description: "Declare the selected native artifact in the host template."},
+		TUI:             &TUIBinding{KeyMapField: "AgentsNativeAdopt", DefaultKey: "A", Label: "adopt", Description: "Declare the selected native artifact in the host template."},
 	},
 	{
 		ID:                 AgentsRemoveNative,
@@ -1138,7 +1138,7 @@ var Agents = []Action{
 		RequiresConfirm:    true,
 		ConfirmDescription: "Uninstall this native artifact through its client?",
 		TUIOnlyReason:      "Removal acts on a selected native row; the CLI records an ignore entry rather than uninstalling on the operator's behalf.",
-		TUI:                &TUIBinding{KeyMapField: "AgentsRemove", DefaultKey: "x", Label: "remove", Description: "Uninstall the selected native artifact through its client.", ConfirmDescription: "confirm remove"},
+		TUI:                &TUIBinding{KeyMapField: "AgentsRemove", DefaultKey: "d", Label: "remove", Description: "Uninstall the selected native artifact through its client.", ConfirmDescription: "confirm remove"},
 	},
 	{
 		ID:              AgentsIgnore,
@@ -1148,7 +1148,7 @@ var Agents = []Action{
 		Description:     "Record or drop a native agent artifact omni must leave alone.",
 		LongDescription: "Persist an agents.ignored entry so drift stops reporting a deliberate native install and adoption leaves it in place; unignore removes the entry.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "AgentsNativeIgnore", DefaultKey: "i", Label: LabelIgnore, Description: "Ignore or unignore the selected native artifact."},
+		TUI:             &TUIBinding{KeyMapField: "AgentsNativeIgnore", DefaultKey: "x", Label: LabelIgnore, Description: "Ignore or unignore the selected native artifact."},
 		CLI: []CLIBinding{
 			{Command: []string{"agents", "ignore"}, Flags: []string{"--host", "--target", "--kind", "--id", "--reason"}},
 			{Command: []string{"agents", "unignore"}, Flags: []string{"--host", "--target", "--kind", "--id"}},
