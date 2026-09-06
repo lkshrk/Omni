@@ -882,7 +882,6 @@ func TestAgentsRowUpdateHintsInsteadOfRunningApm(t *testing.T) {
 	}{
 		"pinned": {1, "pinned to v2"},
 		"local":  {2, "local path"},
-		"orphan": {3, "not declared in apm.yml"},
 		"mcp":    {4, "edited in ~/.apm/apm.yml"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -897,6 +896,78 @@ func TestAgentsRowUpdateHintsInsteadOfRunningApm(t *testing.T) {
 				t.Fatalf("status = %q, want %q", m.statusMsg, tc.want)
 			}
 		})
+	}
+}
+
+func agentsAPMCalls(mock *executor.MatchMockExecutor) []string {
+	out := make([]string, 0, len(mock.Calls))
+	for _, call := range mock.Calls {
+		out = append(out, strings.Join(call.Args, " "))
+	}
+	return out
+}
+
+// Appending keeps every cursor index the other fixtures rely on.
+func agentsResolvedRowModel(t *testing.T) (Model, *executor.MatchMockExecutor) {
+	t.Helper()
+	m, mock := agentsRowOpModel(t)
+	m.agentsRows = append(m.agentsRows, app.AgentsPackageRow{
+		Name: "child", Source: "acme/child", Version: "1.0.0",
+		ResolvedBy: "ai-plugins", Status: app.AgentsPackageInstalled,
+	})
+	m.agentsCursor = len(m.agentsRows) - 1
+	return m, mock
+}
+
+func TestAgentsOrphanedRowUpdateDispatchesApm(t *testing.T) {
+	m, mock := agentsRowOpModel(t)
+	m.agentsCursor = 3
+	cmds := agentsPressRowKey(t, &m, "u")
+	if m.apmCommand != "apm update -g --yes acme/stray" {
+		t.Fatalf("command = %q", m.apmCommand)
+	}
+	runBatchCmd(tea.Batch(cmds...))
+	if got := agentsAPMCalls(mock); !slices.Contains(got, "update -g --yes acme/stray") {
+		t.Fatalf("calls = %v", got)
+	}
+}
+
+func TestAgentsResolvedRowDispatchesUpdateAndUninstall(t *testing.T) {
+	m, mock := agentsResolvedRowModel(t)
+	cmds := agentsPressRowKey(t, &m, "u")
+	if m.apmCommand != "apm update -g --yes acme/child" {
+		t.Fatalf("update command = %q", m.apmCommand)
+	}
+	runBatchCmd(tea.Batch(cmds...))
+	if got := agentsAPMCalls(mock); !slices.Contains(got, "update -g --yes acme/child") {
+		t.Fatalf("update calls = %v", got)
+	}
+
+	m, mock = agentsResolvedRowModel(t)
+	agentsPressRowKey(t, &m, "x")
+	if m.agentsConfirmIdx != m.agentsCursor || len(mock.Calls) != 0 {
+		t.Fatalf("first x should only arm: idx=%d calls=%#v", m.agentsConfirmIdx, mock.Calls)
+	}
+	accept := agentsPressRowKey(t, &m, "x")
+	if m.apmCommand != "apm uninstall -g acme/child" {
+		t.Fatalf("uninstall command = %q", m.apmCommand)
+	}
+	runBatchCmd(tea.Batch(accept...))
+	if got := agentsAPMCalls(mock); !slices.Contains(got, "uninstall -g acme/child") {
+		t.Fatalf("uninstall calls = %v", got)
+	}
+}
+
+func TestAgentsResolvedRowExplainsItselfWithoutSuppressingHints(t *testing.T) {
+	m, _ := agentsResolvedRowModel(t)
+	view := stripANSIEscapeSequences(m.viewSkillsBody())
+	if !strings.Contains(view, "resolved by ai-plugins") {
+		t.Fatalf("resolved-by limitation missing from the detail block:\n%s", view)
+	}
+	for _, want := range []string{listHintPrefix() + "u update", "x uninstall"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("resolved row suppressed %q:\n%s", want, view)
+		}
 	}
 }
 

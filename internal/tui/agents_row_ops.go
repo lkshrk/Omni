@@ -59,12 +59,8 @@ func agentsUninstallSpec(row app.AgentsPackageRow) string {
 
 func agentsUpdateAction(row app.AgentsPackageRow) (spec, status string) {
 	switch {
-	case row.Status == app.AgentsPackageOrphaned:
-		return "", "⚠ " + row.Name + " is not declared in apm.yml — declare it in the host template first"
 	case row.Status == app.AgentsPackageMissing:
 		return "", "⚠ " + row.Name + " is not installed — run S to sync it first"
-	case row.ResolvedBy != "":
-		return "", "⚠ " + row.Name + " is resolved by " + row.ResolvedBy + " — update it in that package"
 	case row.Local():
 		return "", "⚠ " + row.Name + " is a local path — apm never updates local dependencies"
 	case row.Ref != "":
@@ -76,12 +72,8 @@ func agentsUpdateAction(row app.AgentsPackageRow) (spec, status string) {
 
 func agentsUninstallAction(row app.AgentsPackageRow) (spec, status string) {
 	switch {
-	case row.Status == app.AgentsPackageOrphaned:
-		return "", "⚠ " + row.Name + " is not declared in apm.yml — apm cannot select it for uninstall"
 	case row.Status == app.AgentsPackageMissing:
 		return "", "⚠ " + row.Name + " is not installed"
-	case row.ResolvedBy != "":
-		return "", "⚠ " + row.Name + " is resolved by " + row.ResolvedBy + " — remove it from that package"
 	default:
 		return agentsUninstallSpec(row), ""
 	}
@@ -99,6 +91,9 @@ func agentsRowLimitations(m Model) []string {
 		return []string{strings.TrimPrefix(agentsServiceOpStatus, "⚠ ")}
 	}
 	var out []string
+	if parent := row.pkg.ResolvedBy; parent != "" {
+		out = append(out, "resolved by "+parent+" — S sync reinstalls it unless you change that package")
+	}
 	for _, status := range []string{mustStatus(agentsUpdateAction(row.pkg)), mustStatus(agentsUninstallAction(row.pkg))} {
 		if status = strings.TrimPrefix(status, "⚠ "); status != "" && !slices.Contains(out, status) {
 			out = append(out, status)
