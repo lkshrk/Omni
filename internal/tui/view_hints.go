@@ -58,6 +58,7 @@ const (
 	hintCtxHostGroupDots
 	hintCtxHostGroupDotsSearch
 	hintCtxAgentsRow
+	hintCtxAgentsNativeRow
 	hintCtxAgentsRegistryRow
 )
 
@@ -287,6 +288,8 @@ func contextHintItems(m Model, ctx hintContext) []hintItem {
 	switch ctx {
 	case hintCtxAgentsRow:
 		return agentsRowHintItems(m)
+	case hintCtxAgentsNativeRow:
+		return agentsNativeHintItems(m)
 	case hintCtxAgentsRegistryRow:
 		return agentsRegistryHintItems(m)
 	case hintCtxSettingsToggle:

@@ -344,6 +344,26 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			m.applyFilter()
 		}
 
+	case agentsNativeOpMsg:
+		switch {
+		case msg.err != nil:
+			cmds = append(cmds, setStatus(&m, "⚠ "+msg.err.Error(), true))
+		case msg.adopted:
+			cmds = append(cmds, setStatus(&m, agentsAdoptStatusLine(msg.detail, msg.identity), false))
+		case msg.removed:
+			cmds = append(cmds, setStatus(&m, "removed "+msg.identity, false))
+		case msg.ignored:
+			cmds = append(cmds, setStatus(&m, "ignoring "+msg.identity, false))
+		default:
+			cmds = append(cmds, setStatus(&m, "no longer ignoring "+msg.identity, false))
+		}
+
+	case agentsNativeRowsMsg:
+		if msg.gen == m.agentsNativeGen && msg.err == nil {
+			m.agentsNativeRows = msg.rows
+			m.agentsCursor = clampIndex(m.agentsCursor, m.agentsRowCount())
+		}
+
 	case agentsRowsMsg:
 		if msg.gen == m.agentsRowsGen {
 			m.agentsRowsKnown = true

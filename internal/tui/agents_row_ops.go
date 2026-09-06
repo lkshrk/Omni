@@ -15,12 +15,14 @@ type agentsRowKind uint8
 const (
 	agentsRowPackage agentsRowKind = iota
 	agentsRowService
+	agentsRowNative
 )
 
 type agentsRowRef struct {
 	kind    agentsRowKind
 	pkg     app.AgentsPackageRow
 	service app.AgentsServiceRow
+	native  app.AgentsNativeRow
 }
 
 func (m Model) agentsSelectedRow() (agentsRowRef, bool) {
@@ -38,6 +40,10 @@ func (m Model) agentsSelectedRow() (agentsRowRef, bool) {
 			return agentsRowRef{kind: agentsRowService, service: rows[idx]}, true
 		}
 		idx -= len(rows)
+	}
+	natives := m.agentsVisibleNatives()
+	if idx < len(natives) {
+		return agentsRowRef{kind: agentsRowNative, native: natives[idx]}, true
 	}
 	return agentsRowRef{}, false
 }
@@ -113,6 +119,22 @@ func agentsRowHintItems(m Model) []hintItem {
 	return items
 }
 
+func agentsNativeHintItems(m Model) []hintItem {
+	row, ok := m.agentsSelectedRow()
+	if !ok || row.kind != agentsRowNative {
+		return nil
+	}
+	items := []hintItem{hintFromBinding(m.keys.AgentsNativeIgnore)}
+	if !row.native.Ignored {
+		if row.native.Adoptable {
+			items = append(items, hintFromBinding(m.keys.AgentsNativeAdopt))
+		}
+		// The shared binding is labelled "uninstall" for packages; a native artifact is removed.
+		items = append(items, hintFromBindingDesc(m.keys.AgentsRemove, "remove"))
+	}
+	return items
+}
+
 func (m *Model) doAgentsRowUpdate(row app.AgentsPackageRow) []tea.Cmd {
 	spec, status := agentsUpdateAction(row)
 	if status != "" {
@@ -166,6 +188,108 @@ func (m *Model) runAPMRowOp(command, spec string, args ...string) []tea.Cmd {
 		m.agentsRowOpSpec = spec
 	}
 	return cmds
+}
+
+// Native artifacts are not APM packages, so they never reach the apm-backed row ops below.
+func (m *Model) handleAgentsNativeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
+	ignore := key.Matches(msg, m.keys.AgentsNativeIgnore)
+	adopt := key.Matches(msg, m.keys.AgentsNativeAdopt)
+	remove := key.Matches(msg, m.keys.AgentsRemove)
+	if !ignore && !adopt && !remove {
+		return false, nil
+	}
+	row, ok := m.agentsSelectedRow()
+	if !ok || row.kind != agentsRowNative {
+		// x also uninstalls APM packages, so only the native-only keys answer here.
+		if ignore || adopt {
+			return true, []tea.Cmd{setStatus(m, "select a row under "+agentsNativeSectionTitle+" first", false)}
+		}
+		return false, nil
+	}
+	native := row.native
+	switch {
+	case ignore:
+		m.agentsConfirmIdx = -1
+		return true, m.doAgentsNativeIgnore(native)
+	case adopt:
+		m.agentsConfirmIdx = -1
+		if native.Ignored || !native.Adoptable {
+			return true, []tea.Cmd{setStatus(m, agentsNativeAdoptBlocked(native), false)}
+		}
+		// Adopt writes the host template that sync reads; ignore and remove never touch it.
+		if m.apmRunning {
+			return true, []tea.Cmd{setStatus(m, agentsBusyStatus, true)}
+		}
+		return true, m.doAgentsNativeAdopt(native)
+	}
+	if native.Ignored {
+		m.agentsConfirmIdx = -1
+		return true, []tea.Cmd{setStatus(m, "⚠ "+native.Identity+" is ignored — press i to unignore before removing", false)}
+	}
+	if m.agentsConfirmIdx == m.agentsCursor {
+		m.agentsConfirmIdx = -1
+		return true, m.doAgentsNativeRemove(native)
+	}
+	m.agentsConfirmIdx = m.agentsCursor
+	return true, []tea.Cmd{m.armConfirmationTimeout()}
+}
+
+// The adopt result is multi-line for the CLI; the status bar takes its first line.
+func agentsAdoptStatusLine(detail, identity string) string {
+	if line, _, _ := strings.Cut(strings.TrimSpace(detail), "\n"); line != "" {
+		return line
+	}
+	return "declared " + identity
+}
+
+func agentsNativeAdoptBlocked(row app.AgentsNativeRow) string {
+	if row.Ignored {
+		return "⚠ " + row.Identity + " is ignored — press i to unignore before adopting"
+	}
+	reason := row.Reason
+	if reason == "" {
+		reason = "the migration classifier does not import it"
+	}
+	return "⚠ " + row.Identity + " cannot be adopted: " + reason
+}
+
+func (m *Model) doAgentsNativeIgnore(row app.AgentsNativeRow) []tea.Cmd {
+	a := m.app
+	if a == nil {
+		return nil
+	}
+	sel := row.Selector()
+	ignored := row.Ignored
+	return []tea.Cmd{func() tea.Msg {
+		var err error
+		if ignored {
+			err = a.AgentUnignore(sel)
+		} else {
+			err = a.AgentIgnore(sel)
+		}
+		return agentsNativeOpMsg{err: err, ignored: !ignored, identity: row.Identity}
+	}, m.doLoadAgentsNativeRows()}
+}
+
+func (m *Model) doAgentsNativeRemove(row app.AgentsNativeRow) []tea.Cmd {
+	a, ctx := m.app, m.ctx
+	if a == nil {
+		return nil
+	}
+	return []tea.Cmd{func() tea.Msg {
+		return agentsNativeOpMsg{err: a.AgentsNativeRemove(ctx, row), removed: true, identity: row.Identity}
+	}, m.doLoadAgentsNativeRows()}
+}
+
+func (m *Model) doAgentsNativeAdopt(row app.AgentsNativeRow) []tea.Cmd {
+	a, ctx, host := m.app, m.ctx, row.IgnoreHost
+	if a == nil {
+		return nil
+	}
+	return []tea.Cmd{func() tea.Msg {
+		out, err := a.AgentsNativeAdopt(ctx, host, row)
+		return agentsNativeOpMsg{err: err, adopted: true, identity: row.Identity, detail: out}
+	}, m.doLoadAgentsNativeRows()}
 }
 
 func (m *Model) handleAgentsRowOpKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {

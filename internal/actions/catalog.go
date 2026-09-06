@@ -78,6 +78,7 @@ const (
 	AgentsDrift                    ID = "agents.drift"
 	AgentsAdopt                    ID = "agents.adopt"
 	AgentsIgnore                   ID = "agents.ignore"
+	AgentsAdoptNative              ID = "agents.adopt_native"
 	AgentsMigrate                  ID = "agents.migrate"
 	AgentsPrune                    ID = "agents.prune"
 	AgentsMarketplaceAdd           ID = "agents.marketplace.add"
@@ -1103,6 +1104,17 @@ var Agents = []Action{
 		CLI:             []CLIBinding{{Command: []string{"agents", "adopt"}, Flags: []string{"--host"}}},
 	},
 	{
+		ID:              AgentsAdoptNative,
+		Domain:          "agents",
+		Scope:           ScopeRow,
+		Label:           "adopt artifact",
+		Description:     "Declare the selected native artifact in the host template.",
+		LongDescription: "Add one natively installed artifact to the host APM manifest; deploying it remains omni agents sync.",
+		Mutates:         true,
+		TUIOnlyReason:   "The CLI adopts a whole host through agents adopt; declaring one selected artifact is a row action.",
+		TUI:             &TUIBinding{KeyMapField: "AgentsNativeAdopt", DefaultKey: "D", Label: "adopt", Description: "Declare the selected native artifact in the host template."},
+	},
+	{
 		ID:              AgentsIgnore,
 		Domain:          "agents",
 		Scope:           ScopeGlobal,
@@ -1110,7 +1122,7 @@ var Agents = []Action{
 		Description:     "Record or drop a native agent artifact omni must leave alone.",
 		LongDescription: "Persist an agents.ignored entry so drift stops reporting a deliberate native install and adoption leaves it in place; unignore removes the entry.",
 		Mutates:         true,
-		CLIOnlyReason:   "Ignoring targets a native artifact, and the Agents view has no row for one until unmanaged items are listed there.",
+		TUI:             &TUIBinding{KeyMapField: "AgentsNativeIgnore", DefaultKey: "i", Label: LabelIgnore, Description: "Ignore or unignore the selected native artifact."},
 		CLI: []CLIBinding{
 			{Command: []string{"agents", "ignore"}, Flags: []string{"--host", "--target", "--kind", "--id", "--reason"}},
 			{Command: []string{"agents", "unignore"}, Flags: []string{"--host", "--target", "--kind", "--id"}},

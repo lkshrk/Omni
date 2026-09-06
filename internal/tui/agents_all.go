@@ -32,6 +32,22 @@ type agentsRowsMsg struct {
 	err    error
 }
 
+// Native rows shell out to the agent clients, so they load separately from the file-only status read.
+type agentsNativeRowsMsg struct {
+	gen  int
+	rows []app.AgentsNativeRow
+	err  error
+}
+
+type agentsNativeOpMsg struct {
+	err      error
+	identity string
+	detail   string
+	ignored  bool
+	removed  bool
+	adopted  bool
+}
+
 type agentsOutdatedMsg struct {
 	gen    int
 	result app.AgentsOutdatedResult
@@ -142,6 +158,18 @@ func (m *Model) doLoadAgentsRows() tea.Cmd {
 	}
 }
 
+func (m *Model) doLoadAgentsNativeRows() tea.Cmd {
+	if m.app == nil {
+		return nil
+	}
+	m.agentsNativeGen++
+	gen, a, parent := m.agentsNativeGen, m.app, m.ctx
+	return func() tea.Msg {
+		rows, err := a.AgentsNativeRows(parent)
+		return agentsNativeRowsMsg{gen: gen, rows: rows, err: err}
+	}
+}
+
 func (m *Model) doCheckAgentsOutdated() tea.Cmd {
 	if m.app == nil {
 		return nil
@@ -189,7 +217,7 @@ func (m *Model) refreshAgents() []tea.Cmd {
 }
 
 func (m *Model) loadAgentsAfterReadiness() []tea.Cmd {
-	cmds := []tea.Cmd{m.doLoadAgentsRows()}
+	cmds := []tea.Cmd{m.doLoadAgentsRows(), m.doLoadAgentsNativeRows()}
 	if m.agentsReadiness.State == app.AgentsReadinessReady {
 		cmds = append(cmds, m.doCheckAgentsOutdated())
 	}
@@ -241,6 +269,9 @@ func (m *Model) doAgentsUpdateAll() []tea.Cmd {
 
 func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 	if !m.agentsRegistryMode {
+		if handled, cmds := m.handleAgentsNativeKeyMsg(msg); handled {
+			return true, cmds
+		}
 		if handled, cmds := m.handleAgentsRowOpKeyMsg(msg); handled {
 			return true, cmds
 		}
@@ -350,15 +381,29 @@ func (m Model) agentsVisibleServices(rows []app.AgentsServiceRow) []app.AgentsSe
 	return out
 }
 
+func (m Model) agentsVisibleNatives() []app.AgentsNativeRow {
+	query := m.agentsFilterText()
+	if query == "" {
+		return m.agentsNativeRows
+	}
+	out := make([]app.AgentsNativeRow, 0, len(m.agentsNativeRows))
+	for _, row := range m.agentsNativeRows {
+		if agentsRowMatches(query, row.Identity, row.Target+" "+row.Kind+" "+row.Source) {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
 func (m Model) agentsTotalRowCount() int {
-	return len(m.agentsRows) + len(m.agentsMCPRows) + len(m.agentsLSPRows)
+	return len(m.agentsRows) + len(m.agentsMCPRows) + len(m.agentsLSPRows) + len(m.agentsNativeRows)
 }
 
 func (m Model) agentsRowCount() int {
 	if m.agentsRegistryMode {
 		return len(m.agentsVisibleRegistry())
 	}
-	return len(m.agentsVisiblePackages()) + len(m.agentsVisibleServices(m.agentsMCPRows)) + len(m.agentsVisibleServices(m.agentsLSPRows))
+	return len(m.agentsVisiblePackages()) + len(m.agentsVisibleServices(m.agentsMCPRows)) + len(m.agentsVisibleServices(m.agentsLSPRows)) + len(m.agentsVisibleNatives())
 }
 
 func (m *Model) handleAgentsNavigationKeyMsg(msg tea.KeyPressMsg) bool {

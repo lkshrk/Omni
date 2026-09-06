@@ -83,6 +83,47 @@ func agentsPackageVersion(row app.AgentsPackageRow) string {
 	return row.Version
 }
 
+const agentsNativeSectionTitle = "Not managed by APM"
+
+func agentsNativeDetail(row app.AgentsNativeRow) string {
+	if row.Ignored {
+		return row.Kind + " · ignored"
+	}
+	return row.Kind
+}
+
+// Ignored rows read as orphaned rather than drifted: they are deliberately outside APM, not damaged.
+func agentsNativeStatus(row app.AgentsNativeRow) app.AgentsPackageStatus {
+	if row.Ignored {
+		return app.AgentsPackageOrphaned
+	}
+	return app.AgentsPackageUnavailable
+}
+
+func agentsNativeDetails(row app.AgentsNativeRow) []string {
+	state := "not declared in the host template"
+	switch {
+	case row.Ignored:
+		state = "ignored" + agentsNativeReasonSuffix(row.Reason)
+	case !row.Adoptable:
+		state = "retained" + agentsNativeReasonSuffix(row.Reason)
+	}
+	return []string{
+		agentsDetailPair("client", row.Target),
+		agentsDetailPair("kind", row.Kind),
+		agentsDetailPair("state", state),
+		agentsDetailPair("read from", row.Source),
+		agentsDetailPair("install root", row.InstallRoot),
+	}
+}
+
+func agentsNativeReasonSuffix(reason string) string {
+	if strings.TrimSpace(reason) == "" {
+		return ""
+	}
+	return " — " + reason
+}
+
 func agentsServiceDetails(row app.AgentsServiceRow) []string {
 	return []string{
 		agentsDetailPair("transport", row.Detail),
@@ -136,7 +177,9 @@ func (m Model) agentsDetailBlock(description string, details []string, ctx hintC
 		}
 	}
 	var interaction string
-	if ctx == hintCtxAgentsRow && m.agentsConfirmIdx == m.agentsCursor {
+	if ctx == hintCtxAgentsNativeRow && m.agentsConfirmIdx == m.agentsCursor {
+		interaction = renderConfirmActionHints(m, hintPrefix, m.keys.AgentsRemove, "confirm remove")
+	} else if ctx == hintCtxAgentsRow && m.agentsConfirmIdx == m.agentsCursor {
 		interaction = renderConfirmActionHints(m, hintPrefix, m.keys.AgentsRemove, "confirm uninstall")
 	} else if ctx == hintCtxAgentsRow && m.apmRunning && m.agentsRowOpSpec != "" {
 		if row, ok := m.agentsSelectedRow(); ok && row.kind == agentsRowPackage && agentsUninstallSpec(row.pkg) == m.agentsRowOpSpec {
@@ -417,6 +460,9 @@ func agentsColumnWidths(m Model) agentsColWidths {
 			widen(row.Name, row.Detail, agentsTargetsText(row.Targets))
 		}
 	}
+	for _, row := range m.agentsVisibleNatives() {
+		widen(row.Identity, agentsNativeDetail(row), row.Target)
+	}
 	over := listIconWidth + toolIconNameGapWidth + cols.name + listColumnGap + agentsRightGroupWidth(cols) - rowAvailableWidth(m.width)
 	// The status column never shrinks: it is the one fact the tab exists to report.
 	shrinkWidth(&cols.detail, 12, &over)
@@ -535,6 +581,14 @@ func (m Model) viewSkillsBody() string {
 			return nil, m.agentsDetailBlock("", agentsServiceDetails(rows[i]), hintCtxAgentsRow)
 		}))
 	}
+	if natives := m.agentsVisibleNatives(); len(natives) > 0 {
+		sections = append(sections, section(agentsNativeSectionTitle, len(natives), func(i int, selected bool) string {
+			row := natives[i]
+			return m.agentsRowLine(row.Identity, agentsNativeDetail(row), "", "", "", row.Target, agentsNativeStatus(row), cols, selected)
+		}, func(i int) ([]string, []string) {
+			return nil, m.agentsDetailBlock("", agentsNativeDetails(natives[i]), hintCtxAgentsNativeRow)
+		}))
+	}
 	sections = slices.DeleteFunc(sections, func(s sectionedTabSection) bool { return len(s.rows) == 0 })
 
 	if len(sections) == 0 && m.agentsRowsKnown && m.agentsRowsErr == nil {
@@ -601,6 +655,9 @@ func agentsSummaryText(m Model) string {
 		}
 	}
 	surfaces := strconv.Itoa(len(packages)) + " pkg  " + strconv.Itoa(len(mcp)) + " mcp  " + strconv.Itoa(len(lsp)) + " lsp"
+	if natives := len(m.agentsVisibleNatives()); natives > 0 {
+		surfaces += "  " + strconv.Itoa(natives) + " native"
+	}
 	if m.agentsFilterText() != "" {
 		surfaces += "  ·  " + strconv.Itoa(m.agentsRowCount()) + "/" + strconv.Itoa(m.agentsTotalRowCount()) + " shown"
 	}

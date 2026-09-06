@@ -192,12 +192,13 @@ func TestAgentsReadinessLoadsOutdatedOnlyWhenReady(t *testing.T) {
 	m.app = app.New(filepath.Join(t.TempDir(), "settings.json"))
 	m.ctx = context.Background()
 	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessTemplateOnly, CTA: app.AgentsCTASync}
-	if cmds := m.loadAgentsAfterReadiness(); len(cmds) != 1 || m.agentsRowsGen != 1 || m.agentsOutdatedGen != 0 {
-		t.Fatalf("template-only dispatched rows=%d outdated=%d cmds=%d", m.agentsRowsGen, m.agentsOutdatedGen, len(cmds))
+	// Native rows come from the agent clients rather than APM, so they load even when APM is not ready.
+	if cmds := m.loadAgentsAfterReadiness(); len(cmds) != 2 || m.agentsRowsGen != 1 || m.agentsNativeGen != 1 || m.agentsOutdatedGen != 0 {
+		t.Fatalf("template-only dispatched rows=%d natives=%d outdated=%d cmds=%d", m.agentsRowsGen, m.agentsNativeGen, m.agentsOutdatedGen, len(cmds))
 	}
 	m.agentsReadiness = app.AgentsReadiness{State: app.AgentsReadinessReady}
-	if cmds := m.loadAgentsAfterReadiness(); len(cmds) != 2 || m.agentsRowsGen != 2 || m.agentsOutdatedGen != 1 || !m.agentsOutdatedChecking {
-		t.Fatalf("ready dispatched rows=%d outdated=%d cmds=%d", m.agentsRowsGen, m.agentsOutdatedGen, len(cmds))
+	if cmds := m.loadAgentsAfterReadiness(); len(cmds) != 3 || m.agentsRowsGen != 2 || m.agentsNativeGen != 2 || m.agentsOutdatedGen != 1 || !m.agentsOutdatedChecking {
+		t.Fatalf("ready dispatched rows=%d natives=%d outdated=%d cmds=%d", m.agentsRowsGen, m.agentsNativeGen, m.agentsOutdatedGen, len(cmds))
 	}
 }
 

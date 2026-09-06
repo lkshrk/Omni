@@ -68,12 +68,14 @@ type KeyMap struct {
 
 	PinProvider key.Binding // p — pin provider scope
 
-	AgentsSync      key.Binding // S — install the global APM workspace
-	AgentsAdd       key.Binding // a — browse and install a package
-	AgentsUpdate    key.Binding // u — update the selected package
-	AgentsUpdateAll key.Binding // U — update every package
-	AgentsRemove    key.Binding // x — uninstall the selected package
-	AgentsRefresh   key.Binding // R — reload packages and check for updates
+	AgentsSync         key.Binding // S — install the global APM workspace
+	AgentsAdd          key.Binding // a — browse and install a package
+	AgentsUpdate       key.Binding // u — update the selected package
+	AgentsUpdateAll    key.Binding // U — update every package
+	AgentsRemove       key.Binding // x — uninstall the selected package or native artifact
+	AgentsNativeIgnore key.Binding // i — ignore or unignore the selected native artifact
+	AgentsNativeAdopt  key.Binding // D — declare the selected native artifact in the host template
+	AgentsRefresh      key.Binding // R — reload packages and check for updates
 }
 
 func (k KeyMap) ShortHelp() []key.Binding {
@@ -307,6 +309,14 @@ func DefaultKeyMap() KeyMap {
 		AgentsRemove: key.NewBinding(
 			key.WithKeys("x"),
 			key.WithHelp("x", actions.MustTUILabel(actions.AgentsRemove)),
+		),
+		AgentsNativeIgnore: key.NewBinding(
+			key.WithKeys("i"),
+			key.WithHelp("i", actions.MustTUILabel(actions.AgentsIgnore)),
+		),
+		AgentsNativeAdopt: key.NewBinding(
+			key.WithKeys("D"),
+			key.WithHelp("D", actions.MustTUILabel(actions.AgentsAdoptNative)),
 		),
 		AgentsRefresh: key.NewBinding(
 			key.WithKeys("R"),

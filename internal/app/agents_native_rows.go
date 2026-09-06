@@ -16,9 +16,10 @@ type AgentsNativeRow struct {
 	InstallRoot string
 }
 
-// Selector addresses this row for ignore, unignore and removal.
-func (r AgentsNativeRow) Selector(host string) AgentIgnoreSelector {
-	return AgentIgnoreSelector{Host: host, Target: r.Target, Kind: r.Kind, ID: r.Identity}
+// Selector addresses this row for ignore, unignore and removal, using the host the row was read on
+// so a caller never has to resolve the hostname itself.
+func (r AgentsNativeRow) Selector() AgentIgnoreSelector {
+	return AgentIgnoreSelector{Host: r.IgnoreHost, Target: r.Target, Kind: r.Kind, ID: r.Identity}
 }
 
 // AgentsNativeRows lists unowned native artifacts plus the ones an ignore entry already covers, so the
@@ -33,23 +34,25 @@ func (a *App) AgentsNativeRows(ctx context.Context) ([]AgentsNativeRow, error) {
 		return nil, err
 	}
 
+	host := currentHostname()
 	rows := make([]AgentsNativeRow, 0, len(report.Unowned)+len(report.Ignored))
 	for _, d := range report.Unowned {
-		rows = append(rows, nativeRow(d, false))
+		rows = append(rows, nativeRow(d, false, host))
 	}
 	for _, d := range report.Ignored {
-		rows = append(rows, nativeRow(d, true))
+		rows = append(rows, nativeRow(d, true, host))
 	}
 	return rows, nil
 }
 
-func nativeRow(d agentDisposition, ignored bool) AgentsNativeRow {
+func nativeRow(d agentDisposition, ignored bool, host string) AgentsNativeRow {
 	return AgentsNativeRow{
 		Target:      d.Observation.Target,
 		Kind:        d.Observation.Kind,
 		Identity:    d.Observation.Identity,
 		Source:      d.Observation.Source,
 		Ignored:     ignored,
+		IgnoreHost:  host,
 		Reason:      d.Reason,
 		Adoptable:   d.Action == agentActionImport,
 		InstallRoot: d.Observation.InstallRoot,

@@ -6743,6 +6743,10 @@
       ]
     },
     {
+        "parity": {
+          "semantic_state": "agents.ignored entries in settings.json after the artifact is ignored",
+          "rationale": "Ignoring is a config mutation; parity compares the persisted entries, not the rendered row."
+        },
       "id": "agents.ignore",
       "action_ids": [
         "agents.ignore"
@@ -6809,6 +6813,100 @@
               "selector": {
                 "package": "github.com/lkshrk/omni/integration_tests",
                 "test": "TestCLIBinaryAgentsIgnoreSilencesDriftAndUnignoreRestoresIt",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "level": "parity",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "parity",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIAndTUIAgentsIgnoreProduceEquivalentConfig",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIAgentsNativeSectionIgnoresWithoutTouchingTheTemplate",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "agents.adopt_native",
+      "action_ids": [
+        "agents.adopt_native"
+      ],
+      "capability": "agents",
+      "title": "agents adopt native artifact",
+      "criticality": "medium",
+      "criticality_reason": "Declaring the wrong artifact adds a manifest entry the operator must find and remove; it deploys nothing on its own.",
+      "requirements": [
+        {
+          "level": "unit",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "unit",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsNativeAdoptRefusesIgnoredAndUnadoptableRows",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIAgentsNativeAdoptDeclaresTheArtifactInTheTemplate",
                 "tags": [
                   "integration"
                 ],

@@ -479,6 +479,7 @@ type Model struct {
 	apmErr     error
 
 	agentsRows         []app.AgentsPackageRow
+	agentsNativeRows   []app.AgentsNativeRow
 	agentsMCPRows      []app.AgentsServiceRow
 	agentsLSPRows      []app.AgentsServiceRow
 	agentsNotices      []string
@@ -497,6 +498,7 @@ type Model struct {
 	agentsSyncActionable   int
 	agentsCursor           int
 	agentsRowsGen          int // bumped on every dispatch; stale completions are dropped
+	agentsNativeGen        int // native rows load separately because they shell out to the clients
 	agentsOutdatedGen      int
 	agentsOutdatedChecking bool
 	agentsOutdatedErr      error
