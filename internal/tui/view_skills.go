@@ -8,6 +8,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/lkshrk/omni/internal/actions"
 	"github.com/lkshrk/omni/internal/apm"
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/text"
@@ -178,7 +179,7 @@ func (m Model) agentsDetailBlock(description string, details []string, ctx hintC
 	}
 	var interaction string
 	if ctx == hintCtxAgentsNativeRow && m.agentsConfirmIdx == m.agentsCursor {
-		interaction = renderConfirmActionHints(m, hintPrefix, m.keys.AgentsRemove, "confirm remove")
+		interaction = renderConfirmActionHints(m, hintPrefix, m.keys.AgentsRemove, actions.MustTUIConfirmDescription(actions.AgentsRemoveNative))
 	} else if ctx == hintCtxAgentsRow && m.agentsConfirmIdx == m.agentsCursor {
 		interaction = renderConfirmActionHints(m, hintPrefix, m.keys.AgentsRemove, "confirm uninstall")
 	} else if ctx == hintCtxAgentsRow && m.apmRunning && m.agentsRowOpSpec != "" {

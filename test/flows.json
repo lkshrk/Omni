@@ -6921,6 +6921,102 @@
       ]
     },
     {
+      "id": "agents.remove_native",
+      "action_ids": [
+        "agents.remove_native"
+      ],
+      "capability": "agents",
+      "title": "agents remove native artifact",
+      "criticality": "high",
+      "criticality_reason": "Removal uninstalls a real artifact through its own client, so a wrong identity or a missed confirmation destroys an install omni never created and cannot restore.",
+      "requirements": [
+        {
+          "level": "unit",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "unit",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestNativeRemoveCommandCoversEveryKind",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "A flag-shaped or empty identity is refused instead of being passed to the client as an argument.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestNativeRemoveCommandRejectsUnsafeIdentities",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "An artifact an ignore entry protects is refused; the entry exists to say this one stays.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentsNativeRemoveRefusesAnIgnoredRow",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "level": "tui_blackbox",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "tui_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIAgentsNativeRemoveUninstallsThroughTheClient",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "tui_blackbox",
+              "role": "regression",
+              "reference": "A single press only arms the confirmation and never uninstalls.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestTUIAgentsNativeRemoveNeedsASecondPress",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "agents.drift",
       "action_ids": ["agents.drift"],
       "capability": "agents",

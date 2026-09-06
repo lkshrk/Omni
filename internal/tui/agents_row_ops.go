@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/lkshrk/omni/internal/actions"
 	"github.com/lkshrk/omni/internal/app"
 )
 
@@ -130,7 +131,7 @@ func agentsNativeHintItems(m Model) []hintItem {
 			items = append(items, hintFromBinding(m.keys.AgentsNativeAdopt))
 		}
 		// The shared binding is labelled "uninstall" for packages; a native artifact is removed.
-		items = append(items, hintFromBindingDesc(m.keys.AgentsRemove, "remove"))
+		items = append(items, hintFromBindingDesc(m.keys.AgentsRemove, actions.MustTUILabel(actions.AgentsRemoveNative)))
 	}
 	return items
 }

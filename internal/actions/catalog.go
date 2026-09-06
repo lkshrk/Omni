@@ -79,6 +79,7 @@ const (
 	AgentsAdopt                    ID = "agents.adopt"
 	AgentsIgnore                   ID = "agents.ignore"
 	AgentsAdoptNative              ID = "agents.adopt_native"
+	AgentsRemoveNative             ID = "agents.remove_native"
 	AgentsMigrate                  ID = "agents.migrate"
 	AgentsPrune                    ID = "agents.prune"
 	AgentsMarketplaceAdd           ID = "agents.marketplace.add"
@@ -1089,7 +1090,7 @@ var Agents = []Action{
 		Description:     "List native agent artifacts APM does not manage.",
 		LongDescription: "Report natively installed plugins, MCP servers and marketplaces the host manifest could cover but does not, minus recorded ignore entries.",
 		Mutates:         false,
-		CLIOnlyReason:   "The Agents view lists APM packages; native unmanaged artifacts have no row to select yet.",
+		CLIOnlyReason:   "The Agents view renders the same inventory as rows; running the report itself is a command, not a row action.",
 		CLI:             []CLIBinding{{Command: []string{"agents", "drift"}, Flags: []string{"--all"}}},
 	},
 	{
@@ -1113,6 +1114,19 @@ var Agents = []Action{
 		Mutates:         true,
 		TUIOnlyReason:   "The CLI adopts a whole host through agents adopt; declaring one selected artifact is a row action.",
 		TUI:             &TUIBinding{KeyMapField: "AgentsNativeAdopt", DefaultKey: "D", Label: "adopt", Description: "Declare the selected native artifact in the host template."},
+	},
+	{
+		ID:                 AgentsRemoveNative,
+		Domain:             "agents",
+		Scope:              ScopeRow,
+		Label:              "remove artifact",
+		Description:        "Uninstall the selected native artifact through its own client.",
+		LongDescription:    "Remove one natively installed plugin, MCP server or marketplace by identity through the client that owns it. APM, the lockfile and the host template are untouched.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "Uninstall this native artifact through its client?",
+		TUIOnlyReason:      "Removal acts on a selected native row; the CLI records an ignore entry rather than uninstalling on the operator's behalf.",
+		TUI:                &TUIBinding{KeyMapField: "AgentsRemove", DefaultKey: "x", Label: "remove", Description: "Uninstall the selected native artifact through its client.", ConfirmDescription: "confirm remove"},
 	},
 	{
 		ID:              AgentsIgnore,

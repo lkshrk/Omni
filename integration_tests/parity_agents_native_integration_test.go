@@ -79,7 +79,9 @@ func seedAgentsNativeParity(t *testing.T, sandbox *paritySandbox) {
 	}
 	binDir := filepath.Join(sandbox.root, "bin")
 	writeExecutable(t, filepath.Join(binDir, "claude"), `#!/bin/sh
+printf '%s\n' "$*" >> "$CLAUDE_CALL_LOG"
 case "$*" in
+*uninstall*) exit 0 ;;
 *marketplace*) echo '[{"name":"official","source":"github","repo":"acme/plugins"}]' ;;
 *) echo '[{"id":"demo@official"}]' ;;
 esac
@@ -87,6 +89,7 @@ esac
 	writeExecutable(t, filepath.Join(binDir, "codex"), "#!/bin/sh\necho '[]'\n")
 	sandbox.env = replaceIntegrationEnv(sandbox.env, "PATH", binDir+string(os.PathListSeparator)+integrationEnvValue(sandbox.env, "PATH"))
 	sandbox.env = replaceIntegrationEnv(sandbox.env, "OMNI_HOSTNAME", "testhost")
+	sandbox.env = replaceIntegrationEnv(sandbox.env, "CLAUDE_CALL_LOG", agentsNativeCallLog(sandbox))
 }
 
 func runAgentsIgnoreParityCLI(t *testing.T, bin string, sandbox *paritySandbox) {
@@ -148,4 +151,56 @@ func observeAgentsIgnoreParity(t *testing.T, sandbox *paritySandbox) any {
 		out = append(out, strings.Join([]string{e.Host, e.Target, e.Kind, e.ID}, "/"))
 	}
 	return strings.Join(out, ",")
+}
+
+func agentsNativeCallLog(sandbox *paritySandbox) string {
+	return filepath.Join(sandbox.root, "claude-calls.log")
+}
+
+func agentsNativeClientCalls(t *testing.T, sandbox *paritySandbox) string {
+	t.Helper()
+	raw, err := os.ReadFile(agentsNativeCallLog(sandbox))
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+func TestTUIAgentsNativeRemoveUninstallsThroughTheClient(t *testing.T) {
+	bin := batch16OmniBinary(t)
+	sandbox := newParitySandbox(t, t.TempDir())
+	seedAgentsNativeParity(t, sandbox)
+	template := filepath.Join(sandbox.home, ".config", "omni", "apm.yml")
+
+	runAgentsNativeTUI(t, bin, sandbox, func(term *vttest.Terminal) {
+		waitForRequiredScreen(t, term, 8*time.Second, screenHas("Not managed by APM", nativeParityIdentity), "TUI did not render the native section")
+		selectAgentsNativeRow(t, term)
+		writeTUIKeys(t, term, "x", "x")
+	}, func(s *paritySandbox) bool {
+		return strings.Contains(agentsNativeClientCalls(t, s), "plugin uninstall "+nativeParityIdentity)
+	})
+
+	if _, err := os.Stat(template); !os.IsNotExist(err) {
+		t.Fatalf("removing wrote the host template: %v", err)
+	}
+	if entries := readAgentsIgnored(t, sandbox); len(entries) != 0 {
+		t.Fatalf("removing recorded ignore entries: %v", entries)
+	}
+}
+
+func TestTUIAgentsNativeRemoveNeedsASecondPress(t *testing.T) {
+	bin := batch16OmniBinary(t)
+	sandbox := newParitySandbox(t, t.TempDir())
+	seedAgentsNativeParity(t, sandbox)
+
+	runAgentsNativeTUI(t, bin, sandbox, func(term *vttest.Terminal) {
+		waitForRequiredScreen(t, term, 8*time.Second, screenHas("Not managed by APM", nativeParityIdentity), "TUI did not render the native section")
+		selectAgentsNativeRow(t, term)
+		writeTUIKeys(t, term, "x")
+		waitForRequiredScreen(t, term, 8*time.Second, screenHas("confirm remove"), "TUI did not arm the remove confirmation")
+	}, func(*paritySandbox) bool { return true })
+
+	if calls := agentsNativeClientCalls(t, sandbox); strings.Contains(calls, "uninstall") {
+		t.Fatalf("one press uninstalled the artifact:\n%s", calls)
+	}
 }
