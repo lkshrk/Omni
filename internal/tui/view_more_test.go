@@ -5533,6 +5533,95 @@ func TestRenderList_FocusedSearchErrorHidesErrorLogHint(t *testing.T) {
 	}
 }
 
+const longRowActionError = "brew link refused to continue because several receipt files under the cellar prefix are owned by another formula and removing them by hand is the only supported recovery path on this machine, so rerun the command once the conflicting keg has been unlinked quarkslug"
+
+func TestRenderList_LongRowActionErrorWrapsInsteadOfTruncating(t *testing.T) {
+	t.Parallel()
+	tool := &app.ToolView{Name: "curl", Provider: "brew", Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
+	m.width = 120
+	m.cursor = 0
+	m.setToolActionError(toolKey("curl", "brew"), longRowActionError)
+
+	out := stripANSIEscapeSequences(renderList(m))
+	if !strings.Contains(out, "quarkslug") {
+		t.Fatalf("long row action error was truncated, tail word missing:\n%s", out)
+	}
+	lines := strings.Split(out, "\n")
+	first, last := -1, -1
+	for i, line := range lines {
+		if strings.Contains(line, "brew link refused") {
+			first = i
+		}
+		if strings.Contains(line, "quarkslug") {
+			last = i
+		}
+	}
+	if first < 0 || last <= first {
+		t.Fatalf("long row action error should wrap across multiple lines (head=%d tail=%d):\n%s", first, last, out)
+	}
+}
+
+func TestToolErrorLines_WrappedLinesKeepListTextPrefix(t *testing.T) {
+	t.Parallel()
+	tool := &app.ToolView{Name: "curl", Provider: "brew", Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
+	m.width = 120
+	m.cursor = 0
+	m.setToolActionError(toolKey("curl", "brew"), longRowActionError)
+
+	lines := toolErrorLines(m, tool, false)
+	if len(lines) < 2 {
+		t.Fatalf("expected wrapped error lines, got %d:\n%v", len(lines), lines)
+	}
+	for i, line := range lines {
+		if !strings.HasPrefix(stripANSIEscapeSequences(line), listTextPrefix()) {
+			t.Fatalf("wrapped error line %d lacks listTextPrefix: %q", i, stripANSIEscapeSequences(line))
+		}
+	}
+}
+
+func TestToolErrorLines_SelectedHintOnlyOnLastLine(t *testing.T) {
+	t.Parallel()
+	tool := &app.ToolView{Name: "curl", Provider: "brew", Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
+	m.width = 120
+	m.cursor = 0
+	m.setToolActionError(toolKey("curl", "brew"), longRowActionError)
+
+	lines := toolErrorLines(m, tool, true)
+	if len(lines) < 2 {
+		t.Fatalf("expected wrapped error lines, got %d:\n%v", len(lines), lines)
+	}
+	hits := 0
+	for i, line := range lines {
+		plain := stripANSIEscapeSequences(line)
+		if !strings.Contains(plain, "error log") {
+			continue
+		}
+		hits++
+		if i != len(lines)-1 {
+			t.Fatalf("error-log hint should sit on the last wrapped line, found on line %d: %q", i, plain)
+		}
+	}
+	if hits != 1 {
+		t.Fatalf("error-log hint should appear exactly once, got %d times in:\n%v", hits, lines)
+	}
+}
+
+func TestToolErrorLines_ShortErrorStaysOneLine(t *testing.T) {
+	t.Parallel()
+	tool := &app.ToolView{Name: "curl", Provider: "brew", Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
+	m.width = 120
+	m.cursor = 0
+	m.setToolActionError(toolKey("curl", "brew"), "provider not found")
+
+	if lines := toolErrorLines(m, tool, true); len(lines) != 1 {
+		t.Fatalf("short error should render on a single line, got %d:\n%v", len(lines), lines)
+	}
+}
+
 func TestInlineDetailLines_RowActionErrorShowsProviderSolution(t *testing.T) {
 	t.Parallel()
 	tool := &app.ToolView{Name: "pip", Provider: "python", Installed: true, Outdated: true, Tracked: true}
