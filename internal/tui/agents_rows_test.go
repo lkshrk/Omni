@@ -1340,3 +1340,55 @@ func TestAgentsHeaderAndSearchFollowTheDotsPattern(t *testing.T) {
 		t.Fatalf("path line does not follow the search control: %q", plain[1])
 	}
 }
+
+func agentsRowLineContaining(t *testing.T, view, marker string) string {
+	t.Helper()
+	for _, line := range strings.Split(stripANSIEscapeSequences(view), "\n") {
+		if strings.Contains(line, marker) {
+			return line
+		}
+	}
+	t.Fatalf("no rendered line contains %q:\n%s", marker, stripANSIEscapeSequences(view))
+	return ""
+}
+
+func assertCellOrder(t *testing.T, line string, cells ...string) {
+	t.Helper()
+	prev := -1
+	for _, cell := range cells {
+		at := strings.Index(line, cell)
+		if at < 0 {
+			t.Fatalf("cell %q missing from row %q", cell, line)
+		}
+		if at <= prev {
+			t.Fatalf("cell %q at %d breaks expected order %v in row %q", cell, at, cells, line)
+		}
+		prev = at
+	}
+}
+
+func TestAgentsPackageRowColumnOrder(t *testing.T) {
+	m := agentsRowsModel(t)
+	m.width, m.cursorHidden = 200, true
+	m.agentsRows = []app.AgentsPackageRow{{
+		Name:          "zulupkg",
+		Source:        "srcmarker",
+		Version:       "4.5.6",
+		Targets:       []string{"targetx"},
+		DeployedFiles: 12,
+		Status:        app.AgentsPackageInstalled,
+	}}
+
+	line := agentsRowLineContaining(t, m.viewSkillsBody(), "zulupkg")
+	assertCellOrder(t, line, "zulupkg", "installed", "srcmarker", "4.5.6", "12f", "targetx")
+}
+
+func TestAgentsRegistryRowColumnOrder(t *testing.T) {
+	m := agentsRowsModel(t)
+	m.width, m.cursorHidden = 200, true
+	m.agentsRegistryMode = true
+	m.agentsRegistry = []app.AgentsRegistryEntry{{Name: "zuluplug", Marketplace: "marketzed", Installed: true}}
+
+	line := agentsRowLineContaining(t, m.viewSkillsBody(), "zuluplug")
+	assertCellOrder(t, line, "zuluplug", "installed", "marketzed")
+}

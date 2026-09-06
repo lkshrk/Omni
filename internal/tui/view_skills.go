@@ -172,9 +172,10 @@ func (m Model) agentsDetailBlock(description string, details []string, ctx hintC
 		}
 	}
 	if ctx == hintCtxAgentsRow {
+		// A limitation is metadata about the row, so it lines up with the other detail lines, as a tool row's advisories do.
 		for _, limitation := range agentsRowLimitations(m) {
 			for _, wrapped := range text.WrapText(limitation, wrapWidth) {
-				lines = append(lines, hintPrefix+p.styleHintDesc.Render(wrapped))
+				lines = append(lines, prefix+p.styleHintDesc.Render(wrapped))
 			}
 		}
 	}
@@ -390,12 +391,15 @@ func (m Model) agentsFooterLines() []string {
 		lines = append(lines, m.agentsWrappedNotice(m.apmErr.Error(), p.styleErr)...)
 	}
 	lines = append(lines, m.agentsRemovalHintLines()...)
-	if guidance := agentsReadinessGuidance(m); guidance != "" {
+	if cause, remedy := agentsReadinessGuidanceParts(m); cause != "" {
 		style := p.styleHelp
 		if m.agentsReadinessErr != nil || m.agentsReadiness.State == app.AgentsReadinessInvalid {
 			style = p.styleErr
 		}
-		lines = append(lines, m.agentsWrappedNotice(guidance, style)...)
+		lines = append(lines, m.agentsWrappedNotice(cause, style)...)
+		if remedy != "" {
+			lines = append(lines, m.agentsWrappedNotice(remedy, p.styleHelp)...)
+		}
 	}
 	for _, notice := range agentsHarnessNoticeLines(m.agentsNotices) {
 		lines = append(lines, m.agentsWrappedNotice(notice, p.styleOutdated)...)
@@ -420,24 +424,36 @@ func (m Model) agentsFooterLines() []string {
 }
 
 func agentsReadinessGuidance(m Model) string {
+	cause, remedy := agentsReadinessGuidanceParts(m)
+	switch {
+	case cause == "":
+		return ""
+	case remedy == "":
+		return cause
+	}
+	return cause + " · " + remedy
+}
+
+// The footer gives the cause and the remedy their own lines; the status line joins them.
+func agentsReadinessGuidanceParts(m Model) (cause, remedy string) {
 	if m.agentsReadinessPending {
-		return "Checking APM readiness…"
+		return "Checking APM readiness…", ""
 	}
 	if m.agentsReadinessErr != nil {
-		return "APM readiness check failed: " + m.agentsReadinessErr.Error() + " · R recheck"
+		return "APM readiness check failed: " + m.agentsReadinessErr.Error(), "R recheck"
 	}
 	detail := strings.Join(m.agentsReadiness.Details, "; ")
 	switch m.agentsReadiness.State {
 	case app.AgentsReadinessEmpty:
-		return firstNonEmpty(detail, "No APM workspace and no host template") + " · commit a host template, then S sync"
+		return firstNonEmpty(detail, "No APM workspace and no host template"), "commit a host template, then S sync"
 	case app.AgentsReadinessTemplateOnly:
-		return firstNonEmpty(detail, "APM template is staged but not installed") + " · S sync"
+		return firstNonEmpty(detail, "APM template is staged but not installed"), "S sync"
 	case app.AgentsReadinessLiveIncomplete:
-		return firstNonEmpty(detail, "APM manifest has no lockfile") + " · S sync"
+		return firstNonEmpty(detail, "APM manifest has no lockfile"), "S sync"
 	case app.AgentsReadinessInvalid:
-		return firstNonEmpty(detail, "APM workspace is invalid") + " · inspect APM files; R recheck"
+		return firstNonEmpty(detail, "APM workspace is invalid"), "inspect APM files · R recheck"
 	default:
-		return ""
+		return "", ""
 	}
 }
 
@@ -507,6 +523,7 @@ func (m Model) agentsRowLine(name, detail, version, latest, files, targets strin
 		}
 		rest = append(rest, rightCell(style.Render(fitCellText(text, width)), width))
 	}
+	add(statusText, glyphStyle, cols.status)
 	add(detail, p.styleHelp, cols.detail)
 	if latest != "" && cols.version > 0 {
 		current, upgrade := fitUpgradeVersionText(compactVersion(version), compactVersion(latest), cols.version)
@@ -514,9 +531,8 @@ func (m Model) agentsRowLine(name, detail, version, latest, files, targets strin
 	} else {
 		add(version, p.styleVersion, cols.version)
 	}
-	add(targets, p.styleProvider, cols.targets)
 	add(files, p.styleHelp, cols.files)
-	add(statusText, glyphStyle, cols.status)
+	add(targets, p.styleProvider, cols.targets)
 	return renderResponsiveGroupListRow(p, selected,
 		[]rowCell{
 			leftCell(glyphStyle.Render(glyph), listIconWidth),
@@ -716,8 +732,8 @@ func (m Model) viewAgentsRegistryBody(section func(string, int, func(int, bool) 
 				leftCell(nameStyle.Render(fitCellText(entry.Name, cols.name)), cols.name),
 			},
 			[]rowCell{
-				rightCell(p.styleProvider.Render(fitCellText(entry.Marketplace, cols.targets)), cols.targets),
 				rightCell(style.Render(status), cols.status),
+				rightCell(p.styleProvider.Render(fitCellText(entry.Marketplace, cols.targets)), cols.targets),
 			},
 			rowAvailableWidth(m.width), listColumnGap, listColumnGap,
 		)
