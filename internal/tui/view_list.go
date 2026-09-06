@@ -1047,11 +1047,18 @@ func toolErrorLines(m Model, t *app.ToolView, selected bool) []string {
 		hint = renderActionHintText(m.palette, []hintItem{hintFromBinding(m.keys.ErrorLog)})
 		available = max(available-lipgloss.Width(hint)-lipgloss.Width(" • "), 1)
 	}
-	line := m.palette.styleErr.Render(fitCellText(summary, available))
-	if hint != "" {
-		line = hintJoin(m.palette, line, hint)
+	wrapped := text.WrapText(summary, available)
+	if len(wrapped) == 0 {
+		return nil
 	}
-	return []string{prefix + line}
+	lines := make([]string, 0, len(wrapped))
+	for _, segment := range wrapped {
+		lines = append(lines, prefix+m.palette.styleErr.Render(segment))
+	}
+	if hint != "" {
+		lines[len(lines)-1] = hintJoin(m.palette, lines[len(lines)-1], hint)
+	}
+	return lines
 }
 
 func rowOperationStatusLine(m Model, t *app.ToolView, prefix string) string {

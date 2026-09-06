@@ -105,7 +105,7 @@ func TestAgentsSummaryCountsEverySurface(t *testing.T) {
 
 func TestAgentsViewRendersPackageRows(t *testing.T) {
 	view := agentsRowsModel(t).viewSkillsBody()
-	for _, want := range []string{"alpha", "1.2.3", "claude", "12f", "installed", "bravo", "missing", "ghost", "orphaned"} {
+	for _, want := range []string{"alpha", "1.2.3", "claude", "files: 12", "installed", "bravo", "missing", "ghost", "orphaned"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q:\n%s", want, view)
 		}
@@ -155,7 +155,7 @@ func TestAgentsOutdatedResultDecoratesRowsAndIgnoresStale(t *testing.T) {
 		t.Fatalf("fresh result not applied: %#v", fresh.agentsRows[0])
 	}
 	view := fresh.viewSkillsBody()
-	for _, want := range []string{"↑", "1.2.3 → 2.0.0", "update available", "1 updates", "1 package updates could not be checked"} {
+	for _, want := range []string{"↑", "1.2.3 → 2.0.0", "1 updates", "1 package updates could not be checked"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q:\n%s", want, view)
 		}
@@ -740,17 +740,18 @@ func TestAgentsCursorRowAlwaysRendersItsDetails(t *testing.T) {
 	m := agentsFilterModel(t)
 	m.agentsRows[0].License = "MIT"
 	m.agentsRows[0].Marketplace = "caveman"
+	m.agentsRows[0].Author = "acme"
 	m.agentsRows[0].Description = "An alpha package."
 	m.agentsCursor = 0
 	m.cursorHidden = false
 
 	view := m.viewSkillsBody()
-	for _, want := range []string{"An alpha package.", "source: acme/alpha", "license: MIT", "via: caveman", "files: 12"} {
+	for _, want := range []string{"An alpha package.", "source: acme/alpha", "author: acme", "files: 12"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("details missing %q without any toggle:\n%s", want, view)
 		}
 	}
-	for _, unwanted := range []string{"ref:", "version:", "targets:"} {
+	for _, unwanted := range []string{"ref:", "version:", "targets:", "license:", "via:"} {
 		if strings.Contains(view, unwanted) {
 			t.Fatalf("details still contain %q:\n%s", unwanted, view)
 		}
@@ -1443,7 +1444,8 @@ func TestAgentsPackageRowColumnOrder(t *testing.T) {
 	m.width, m.cursorHidden = 200, true
 	m.agentsRows = []app.AgentsPackageRow{{
 		Name:          "zulupkg",
-		Source:        "srcmarker",
+		Source:        "srcmarker/zulupkg",
+		Author:        "authorzed",
 		Version:       "4.5.6",
 		Targets:       []string{"targetx"},
 		DeployedFiles: 12,
@@ -1451,7 +1453,12 @@ func TestAgentsPackageRowColumnOrder(t *testing.T) {
 	}}
 
 	line := agentsRowLineContaining(t, m.viewSkillsBody(), "zulupkg")
-	assertCellOrder(t, line, "zulupkg", "installed", "srcmarker", "4.5.6", "12f", "targetx")
+	assertCellOrder(t, line, "zulupkg", "authorzed", "4.5.6", "targetx")
+	for _, unwanted := range []string{"installed", "srcmarker", "12f"} {
+		if strings.Contains(line, unwanted) {
+			t.Fatalf("row still renders %q: %q", unwanted, line)
+		}
+	}
 }
 
 func TestAgentsRegistryRowColumnOrder(t *testing.T) {

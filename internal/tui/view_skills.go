@@ -32,13 +32,22 @@ func agentsDetailPair(label, value string) string {
 }
 
 // Detail order mirrors the tools tab: description first, then the row's metadata.
+// The manifest author when the package declares one, else the owner its source is published under.
+func agentsRowAuthor(row app.AgentsPackageRow) string {
+	if author := strings.TrimSpace(row.Author); author != "" {
+		return author
+	}
+	source := strings.TrimPrefix(strings.TrimSpace(row.Source), "~/")
+	if owner, _, ok := strings.Cut(source, "/"); ok && owner != "" && owner != "." {
+		return owner
+	}
+	return ""
+}
+
 func agentsPackageDetails(row app.AgentsPackageRow) []string {
 	out := []string{
 		agentsDetailPair("source", row.Source),
-		agentsDetailPair("license", row.License),
 		agentsDetailPair("author", row.Author),
-		agentsDetailPair("via", row.Marketplace),
-		agentsDetailPair("resolved by", row.ResolvedBy),
 	}
 	if row.DeployedFiles > 0 {
 		out = append(out, "files: "+strconv.Itoa(row.DeployedFiles))
@@ -239,13 +248,6 @@ func agentsTargetsText(targets []string) string {
 		return "none"
 	}
 	return strings.Join(targets, ",")
-}
-
-func agentsRowFiles(row app.AgentsPackageRow) string {
-	if row.DeployedFiles == 0 {
-		return ""
-	}
-	return strconv.Itoa(row.DeployedFiles) + "f"
 }
 
 // A raw apm run carries no structured result, so its own marked output is the only summary available.
@@ -458,20 +460,19 @@ func agentsReadinessGuidanceParts(m Model) (cause, remedy string) {
 }
 
 type agentsColWidths struct {
-	name, detail, version, targets, files, status int
+	name, detail, version, targets int
 }
 
 func agentsColumnWidths(m Model) agentsColWidths {
-	cols := agentsColWidths{name: 20, status: len("update available")}
+	cols := agentsColWidths{name: 20}
 	widen := func(name, detail, targets string) {
 		cols.name = max(cols.name, lipgloss.Width(name))
 		cols.detail = max(cols.detail, lipgloss.Width(detail))
 		cols.targets = max(cols.targets, lipgloss.Width(targets))
 	}
 	for _, row := range m.agentsVisiblePackages() {
-		widen(row.Name, row.Source, agentsTargetsText(row.Targets))
+		widen(row.Name, agentsRowAuthor(row), agentsTargetsText(row.Targets))
 		cols.version = max(cols.version, lipgloss.Width(agentsPackageVersion(row)))
-		cols.files = max(cols.files, lipgloss.Width(agentsRowFiles(row)))
 	}
 	for _, rows := range [][]app.AgentsServiceRow{m.agentsVisibleServices(m.agentsMCPRows), m.agentsVisibleServices(m.agentsLSPRows)} {
 		for _, row := range rows {
@@ -482,14 +483,12 @@ func agentsColumnWidths(m Model) agentsColWidths {
 		widen(row.Identity, agentsNativeDetail(row), row.Target)
 	}
 	over := listIconWidth + toolIconNameGapWidth + cols.name + listColumnGap + agentsRightGroupWidth(cols) - rowAvailableWidth(m.width)
-	// The status column never shrinks: it is the one fact the tab exists to report.
 	shrinkWidth(&cols.detail, 12, &over)
 	shrinkWidth(&cols.name, 12, &over)
 	shrinkWidth(&cols.targets, 6, &over)
 	shrinkWidth(&cols.version, 7, &over)
 	shrinkWidth(&cols.detail, 0, &over)
 	shrinkWidth(&cols.targets, 0, &over)
-	shrinkWidth(&cols.files, 0, &over)
 	shrinkWidth(&cols.version, 0, &over)
 	shrinkWidth(&cols.name, 8, &over)
 	return cols
@@ -497,7 +496,7 @@ func agentsColumnWidths(m Model) agentsColWidths {
 
 func agentsRightGroupWidth(cols agentsColWidths) int {
 	width := 0
-	for _, w := range []int{cols.detail, cols.version, cols.targets, cols.files, cols.status} {
+	for _, w := range []int{cols.detail, cols.version, cols.targets} {
 		if w > 0 {
 			width += w + listColumnGap
 		}
@@ -505,12 +504,11 @@ func agentsRightGroupWidth(cols agentsColWidths) int {
 	return max(width-listColumnGap, 0)
 }
 
-func (m Model) agentsRowLine(name, detail, version, latest, files, targets string, status app.AgentsPackageStatus, cols agentsColWidths, selected bool) string {
+func (m Model) agentsRowLine(name, detail, version, latest, targets string, status app.AgentsPackageStatus, cols agentsColWidths, selected bool) string {
 	p := m.palette
 	glyph, glyphStyle := agentsStatusGlyph(p, status)
-	statusText := string(status)
 	if latest != "" {
-		glyph, glyphStyle, statusText = iconOutdated, p.styleOutdated, "update available"
+		glyph, glyphStyle = iconOutdated, p.styleOutdated
 	}
 	nameStyle := p.styleNormal
 	if selected {
@@ -523,7 +521,6 @@ func (m Model) agentsRowLine(name, detail, version, latest, files, targets strin
 		}
 		rest = append(rest, rightCell(style.Render(fitCellText(text, width)), width))
 	}
-	add(statusText, glyphStyle, cols.status)
 	add(detail, p.styleHelp, cols.detail)
 	if latest != "" && cols.version > 0 {
 		current, upgrade := fitUpgradeVersionText(compactVersion(version), compactVersion(latest), cols.version)
@@ -531,7 +528,6 @@ func (m Model) agentsRowLine(name, detail, version, latest, files, targets strin
 	} else {
 		add(version, p.styleVersion, cols.version)
 	}
-	add(files, p.styleHelp, cols.files)
 	add(targets, p.styleProvider, cols.targets)
 	return renderResponsiveGroupListRow(p, selected,
 		[]rowCell{
@@ -581,7 +577,7 @@ func (m Model) viewSkillsBody() string {
 		rows := group.rows
 		sections = append(sections, section(group.title, len(rows), func(i int, selected bool) string {
 			row := rows[i]
-			return m.agentsRowLine(row.Name, row.Source, row.Version, row.LatestVersion, agentsRowFiles(row), agentsTargetsText(row.Targets), row.Status, cols, selected)
+			return m.agentsRowLine(row.Name, agentsRowAuthor(row), row.Version, row.LatestVersion, agentsTargetsText(row.Targets), row.Status, cols, selected)
 		}, func(i int) ([]string, []string) {
 			row := rows[i]
 			return m.agentsRowErrorLines(agentsUninstallSpec(row)), m.agentsDetailBlock(row.Description, agentsPackageDetails(row), hintCtxAgentsRow)
@@ -594,7 +590,7 @@ func (m Model) viewSkillsBody() string {
 		rows := group.rows
 		sections = append(sections, section(group.title, len(rows), func(i int, selected bool) string {
 			row := rows[i]
-			return m.agentsRowLine(row.Name, row.Detail, "", "", "", agentsTargetsText(row.Targets), row.Status, cols, selected)
+			return m.agentsRowLine(row.Name, row.Detail, "", "", agentsTargetsText(row.Targets), row.Status, cols, selected)
 		}, func(i int) ([]string, []string) {
 			return nil, m.agentsDetailBlock("", agentsServiceDetails(rows[i]), hintCtxAgentsRow)
 		}))
@@ -602,7 +598,7 @@ func (m Model) viewSkillsBody() string {
 	if natives := m.agentsVisibleNatives(); len(natives) > 0 {
 		sections = append(sections, section(agentsNativeSectionTitle, len(natives), func(i int, selected bool) string {
 			row := natives[i]
-			return m.agentsRowLine(row.Identity, agentsNativeDetail(row), "", "", "", row.Target, agentsNativeStatus(row), cols, selected)
+			return m.agentsRowLine(row.Identity, agentsNativeDetail(row), "", "", row.Target, agentsNativeStatus(row), cols, selected)
 		}, func(i int) ([]string, []string) {
 			return nil, m.agentsDetailBlock("", agentsNativeDetails(natives[i]), hintCtxAgentsNativeRow)
 		}))
@@ -705,12 +701,13 @@ func agentsWorkspacePath(m Model) string {
 func (m Model) viewAgentsRegistryBody(section func(string, int, func(int, bool) string, func(int) ([]string, []string)) sectionedTabSection) string {
 	p := m.palette
 	entries := m.agentsVisibleRegistry()
-	cols := agentsColWidths{name: 20, status: len(string(app.AgentsPackageInstalled))}
+	cols := agentsColWidths{name: 20}
+	statusWidth := len(string(app.AgentsPackageInstalled))
 	for _, entry := range entries {
 		cols.name = max(cols.name, lipgloss.Width(entry.Name))
 		cols.targets = max(cols.targets, lipgloss.Width(entry.Marketplace))
 	}
-	over := listIconWidth + toolIconNameGapWidth + cols.name + listColumnGap + agentsRightGroupWidth(cols) - rowAvailableWidth(m.width)
+	over := listIconWidth + toolIconNameGapWidth + cols.name + listColumnGap + agentsRightGroupWidth(cols) + statusWidth + listColumnGap - rowAvailableWidth(m.width)
 	shrinkWidth(&cols.name, 12, &over)
 	shrinkWidth(&cols.targets, 6, &over)
 	shrinkWidth(&cols.targets, 0, &over)
@@ -732,7 +729,7 @@ func (m Model) viewAgentsRegistryBody(section func(string, int, func(int, bool) 
 				leftCell(nameStyle.Render(fitCellText(entry.Name, cols.name)), cols.name),
 			},
 			[]rowCell{
-				rightCell(style.Render(status), cols.status),
+				rightCell(style.Render(status), statusWidth),
 				rightCell(p.styleProvider.Render(fitCellText(entry.Marketplace, cols.targets)), cols.targets),
 			},
 			rowAvailableWidth(m.width), listColumnGap, listColumnGap,
