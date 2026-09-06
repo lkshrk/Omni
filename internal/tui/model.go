@@ -501,6 +501,8 @@ type Model struct {
 	agentsNativeGen        int // native rows load separately because they shell out to the clients
 	agentsOutdatedGen      int
 	agentsOutdatedChecking bool
+	// A row op requested while apm is busy runs when it frees up, rather than being refused.
+	agentsQueuedRowOp      *agentsQueuedOp
 	agentsOutdatedErr      error
 	agentsOutdatedUnknown  int
 	agentsOutdatedResult   app.AgentsOutdatedResult

@@ -15,6 +15,7 @@ import (
 const agentsBusyStatus = "⚠ APM busy — wait for the running command to finish"
 
 const agentsUpdateCheckBusyStatus = "checking APM package updates — wait for it to finish"
+const agentsUpdateCheckQueuedStatus = "queued — runs when the update check finishes"
 
 type agentsStartupMsg struct{}
 
@@ -211,6 +212,8 @@ func (m *Model) refreshAgents() []tea.Cmd {
 	m.agentsOutdatedErr = nil
 	m.agentsOutdatedChecking = false
 	m.agentsOutdatedGen++ // invalidate any pre-readiness update completion
+	// The generation bump means the queued op would never be drained by the check it was waiting on.
+	m.agentsQueuedRowOp = nil
 	m.agentsOutdatedResult = app.AgentsOutdatedResult{}
 	app.ApplyAgentsOutdated(m.agentsRows, app.AgentsOutdatedResult{})
 	return []tea.Cmd{m.doCheckAgentsReadiness()}

@@ -400,6 +400,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 				m.agentsOutdatedResult = msg.result
 				app.ApplyAgentsOutdated(m.agentsRows, msg.result)
 			}
+			cmds = append(cmds, m.runQueuedAgentsRowOp()...)
 		}
 
 	case agentsRegistryMsg:

@@ -57,6 +57,24 @@ func agentsUninstallSpec(row app.AgentsPackageRow) string {
 	return row.Source
 }
 
+type agentsQueuedOp struct {
+	update bool
+	row    app.AgentsPackageRow
+}
+
+// runQueuedAgentsRowOp dispatches the op the user asked for while apm was busy.
+func (m *Model) runQueuedAgentsRowOp() []tea.Cmd {
+	queued := m.agentsQueuedRowOp
+	if queued == nil || m.apmRunning || m.agentsOutdatedChecking {
+		return nil
+	}
+	m.agentsQueuedRowOp = nil
+	if queued.update {
+		return m.doAgentsRowUpdate(queued.row)
+	}
+	return m.doAgentsRowUninstall(queued.row)
+}
+
 func agentsUpdateAction(row app.AgentsPackageRow) (spec, status string) {
 	switch {
 	case row.Status == app.AgentsPackageMissing:
@@ -312,19 +330,27 @@ func (m *Model) handleAgentsRowOpKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 	if m.apmRunning {
 		return true, []tea.Cmd{setStatus(m, agentsBusyStatus, true)}
 	}
-	if m.agentsOutdatedChecking {
-		return true, []tea.Cmd{setStatus(m, agentsUpdateCheckBusyStatus, false)}
+	queue := func() []tea.Cmd {
+		m.agentsQueuedRowOp = &agentsQueuedOp{update: update, row: row.pkg}
+		return []tea.Cmd{setStatus(m, agentsUpdateCheckQueuedStatus, false)}
 	}
 	if update {
 		m.agentsConfirmIdx = -1
+		if m.agentsOutdatedChecking {
+			return true, queue()
+		}
 		return true, m.doAgentsRowUpdate(row.pkg)
 	}
 	if _, status := agentsUninstallAction(row.pkg); status != "" {
 		m.agentsConfirmIdx = -1
 		return true, []tea.Cmd{setStatus(m, status, false)}
 	}
+	// Queueing never skips the confirmation: an uninstall is only queued once the second press has confirmed it.
 	if m.agentsConfirmIdx == m.agentsCursor {
 		m.agentsConfirmIdx = -1
+		if m.agentsOutdatedChecking {
+			return true, queue()
+		}
 		return true, m.doAgentsRowUninstall(row.pkg)
 	}
 	m.agentsConfirmIdx = m.agentsCursor

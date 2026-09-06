@@ -1470,3 +1470,133 @@ func TestAgentsRegistryRowColumnOrder(t *testing.T) {
 	line := agentsRowLineContaining(t, m.viewSkillsBody(), "zuluplug")
 	assertCellOrder(t, line, "zuluplug", "installed", "marketzed")
 }
+
+// The queued op is released by an Update, whose first frame may defer the work by one tick.
+func agentsRunReleasedCmd(t *testing.T, m Model, cmd tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("no command released")
+	}
+	msg := cmd()
+	if deferred, ok := msg.(runAfterRenderMsg); ok {
+		var next tea.Cmd
+		if _, next = m.Update(deferred); next == nil {
+			t.Fatal("deferred command released nothing")
+		}
+		msg = next()
+	}
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return
+	}
+	for _, sub := range batch {
+		if sub != nil {
+			sub()
+		}
+	}
+}
+
+func agentsQueuedRowOpModel(t *testing.T, key string) (Model, *executor.MatchMockExecutor) {
+	t.Helper()
+	m, mock := agentsRowOpModel(t)
+	m.agentsCursor = 0
+	m.agentsOutdatedChecking = true
+	cmds := agentsPressRowKey(t, &m, key)
+	runBatchCmd(tea.Batch(cmds...))
+	if key == "d" {
+		if m.agentsQueuedRowOp != nil {
+			t.Fatalf("one press queued a destructive uninstall: %#v", m.agentsQueuedRowOp)
+		}
+		if m.agentsConfirmIdx != m.agentsCursor {
+			t.Fatalf("confirm idx = %d, want the cursor armed", m.agentsConfirmIdx)
+		}
+		runBatchCmd(tea.Batch(agentsPressRowKey(t, &m, key)...))
+	}
+	if m.apmCommand != "" || len(mock.Calls) != 0 {
+		t.Fatalf("dispatched apm while the update check was running: %q %v", m.apmCommand, agentsAPMCalls(mock))
+	}
+	if m.statusMsg != agentsUpdateCheckQueuedStatus {
+		t.Fatalf("status = %q, want %q", m.statusMsg, agentsUpdateCheckQueuedStatus)
+	}
+	if m.agentsConfirmIdx != -1 {
+		t.Fatalf("confirm idx = %d, want -1", m.agentsConfirmIdx)
+	}
+	if m.agentsQueuedRowOp == nil {
+		t.Fatal("no row op queued")
+	}
+	if m.agentsQueuedRowOp.row.Source != "acme/floating" {
+		t.Fatalf("queued row = %q, want acme/floating", m.agentsQueuedRowOp.row.Source)
+	}
+	return m, mock
+}
+
+func TestAgentsRowUpdateQueuesWhileTheUpdateCheckRuns(t *testing.T) {
+	m, _ := agentsQueuedRowOpModel(t, "u")
+	if !m.agentsQueuedRowOp.update {
+		t.Fatal("queued op = uninstall, want update")
+	}
+}
+
+func TestAgentsQueuedRowUpdateRunsWhenTheCheckFinishes(t *testing.T) {
+	m, mock := agentsQueuedRowOpModel(t, "u")
+	next, cmd := m.Update(agentsOutdatedMsg{gen: m.agentsOutdatedGen})
+	got := next.(Model)
+	if got.agentsQueuedRowOp != nil {
+		t.Fatalf("queue still holds %#v", got.agentsQueuedRowOp)
+	}
+	if got.apmCommand != "apm update -g --yes acme/floating" {
+		t.Fatalf("command = %q", got.apmCommand)
+	}
+	agentsRunReleasedCmd(t, got, cmd)
+	if calls := agentsAPMCalls(mock); !slices.Contains(calls, "update -g --yes acme/floating") {
+		t.Fatalf("calls = %v", calls)
+	}
+}
+
+func TestAgentsRowUninstallQueuesAndRunsWhenTheCheckFinishes(t *testing.T) {
+	m, mock := agentsQueuedRowOpModel(t, "d")
+	if m.agentsQueuedRowOp.update {
+		t.Fatal("queued op = update, want uninstall")
+	}
+	next, cmd := m.Update(agentsOutdatedMsg{gen: m.agentsOutdatedGen})
+	got := next.(Model)
+	if got.agentsQueuedRowOp != nil {
+		t.Fatalf("queue still holds %#v", got.agentsQueuedRowOp)
+	}
+	if got.apmCommand != "apm uninstall -g acme/floating" {
+		t.Fatalf("command = %q", got.apmCommand)
+	}
+	agentsRunReleasedCmd(t, got, cmd)
+	if calls := agentsAPMCalls(mock); !slices.Contains(calls, "uninstall -g acme/floating") {
+		t.Fatalf("calls = %v", calls)
+	}
+}
+
+func TestAgentsQueuedRowOpWaitsForTheRunningApmCommand(t *testing.T) {
+	m, mock := agentsQueuedRowOpModel(t, "u")
+	m.agentsOutdatedChecking = false
+	m.apmRunning = true
+	if cmds := m.runQueuedAgentsRowOp(); cmds != nil {
+		t.Fatalf("dispatched while apm was running: %d cmds", len(cmds))
+	}
+	if m.agentsQueuedRowOp == nil || !m.agentsQueuedRowOp.update {
+		t.Fatalf("queue lost the op: %#v", m.agentsQueuedRowOp)
+	}
+	if len(mock.Calls) != 0 {
+		t.Fatalf("calls = %v", agentsAPMCalls(mock))
+	}
+}
+
+func TestAgentsStaleOutdatedMsgKeepsTheQueuedRowOp(t *testing.T) {
+	m, mock := agentsQueuedRowOpModel(t, "u")
+	got := drive(m, agentsOutdatedMsg{gen: m.agentsOutdatedGen + 1})
+	if got.agentsQueuedRowOp == nil || !got.agentsQueuedRowOp.update {
+		t.Fatalf("stale result drained the queue: %#v", got.agentsQueuedRowOp)
+	}
+	if !got.agentsOutdatedChecking {
+		t.Fatal("stale result cleared the checking flag")
+	}
+	if got.apmCommand != "" || len(mock.Calls) != 0 {
+		t.Fatalf("stale result dispatched apm: %q %v", got.apmCommand, agentsAPMCalls(mock))
+	}
+}
