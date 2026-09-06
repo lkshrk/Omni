@@ -48,6 +48,7 @@ func (r *RealExecutor) run(ctx context.Context, overlay []string, dir string, st
 	resolved, env := resolveCommandWithEnv(name, overlay)
 
 	cmd := exec.CommandContext(ctx, resolved, args...)
+	isolateProcessGroup(cmd)
 	cmd.Dir = dir
 	cmd.Env = env
 	if stdin != nil {
