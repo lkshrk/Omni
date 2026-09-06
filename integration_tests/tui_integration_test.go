@@ -848,9 +848,13 @@ func settleTUIDotsLaunch(t *testing.T, term *vttest.Terminal, failure string) {
 	waitForRequiredScreen(t, term, time.Second, screenHas("no untracked dotfile candidates"), failure)
 }
 
+// A shared CI runner misses the tight per-call deadlines these tests were written with. Polling returns as
+// soon as the screen is ready, so headroom is free unless the wait was going to fail anyway.
+const requiredScreenFloor = 30 * time.Second
+
 func waitForRequiredScreen(t *testing.T, term *vttest.Terminal, timeout time.Duration, ready func(string) bool, message string) string {
 	t.Helper()
-	screen, ok := waitForScreen(term, timeout, ready)
+	screen, ok := waitForScreen(term, max(timeout, requiredScreenFloor), ready)
 	if !ok {
 		t.Fatalf("%s; screen:\n%s", message, screen)
 	}
