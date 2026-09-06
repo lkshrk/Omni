@@ -113,7 +113,13 @@ func (a *App) AgentsOutdated(ctx context.Context) (apm.OutdatedResult, error) {
 	if missing {
 		return apm.OutdatedResult{}, nil
 	}
-	return a.APMClient(apm.Global).Outdated(ctx)
+	result, err := a.APMClient(apm.Global).Outdated(ctx)
+	if err != nil {
+		return result, err
+	}
+	// The cache only saves the next start a round trip, so failing to write it must not fail this query.
+	_ = a.CacheAgentsOutdated(ctx, result)
+	return result, nil
 }
 
 // AgentsMissingLockfile reports the global APM workspace and whether it holds no lockfile.

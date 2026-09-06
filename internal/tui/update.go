@@ -371,6 +371,10 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			if msg.err == nil {
 				m.agentsRows, m.agentsMCPRows, m.agentsLSPRows = msg.status.Packages, msg.status.MCP, msg.status.LSP
 				m.agentsSyncActionable = msg.status.SyncActionable
+				// Nothing checked yet this session, so show what the last check recorded until a new one lands.
+				if len(m.agentsOutdatedResult.Rows) == 0 && m.agentsOutdatedResult.Unknown == 0 {
+					m.agentsOutdatedResult = msg.cached
+				}
 				app.ApplyAgentsOutdated(m.agentsRows, m.agentsOutdatedResult)
 				m.agentsNotices = msg.status.Notices
 			} else {
@@ -403,6 +407,11 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			cmds = append(cmds, m.runQueuedAgentsRowOp()...)
 		}
 
+	case agentsOutdatedForgetFailedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, setStatus(&m, "⚠ could not clear the cached update check: "+msg.err.Error(), false))
+		}
+
 	case agentsRegistryMsg:
 		if msg.gen == m.agentsRegistryGen {
 			m.agentsRegistry = msg.entries
@@ -429,6 +438,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 			// An apm command changed the workspace, so the previous update check no longer describes it.
 			m.agentsOutdatedResult = app.AgentsOutdatedResult{}
 			app.ApplyAgentsOutdated(m.agentsRows, app.AgentsOutdatedResult{})
+			cmds = append(cmds, m.doForgetAgentsOutdated())
 		}
 		cmds = append(cmds, m.refreshAgents()...)
 		if m.agentsRegistryMode {

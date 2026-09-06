@@ -374,6 +374,13 @@ func (db *DB) Migrate(ctx context.Context) error {
 		return fmt.Errorf("creating tool_cache table: %w", err)
 	}
 	_, err = db.bun.NewCreateTable().
+		Model((*AgentUpdate)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("creating agent_update_cache table: %w", err)
+	}
+	_, err = db.bun.NewCreateTable().
 		Model((*ToolMetadata)(nil)).
 		IfNotExists().
 		Exec(ctx)
@@ -441,6 +448,11 @@ func (db *DB) Migrate(ctx context.Context) error {
 		 ON tool_metadata (name, provider, package)`)
 	if err != nil {
 		return fmt.Errorf("creating metadata unique index: %w", err)
+	}
+	_, err = db.bun.ExecContext(ctx,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_update_cache_package ON agent_update_cache (package)`)
+	if err != nil {
+		return fmt.Errorf("creating agent update unique index: %w", err)
 	}
 	_, err = db.bun.ExecContext(ctx,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_update_metadata_provider_package_version
@@ -932,6 +944,49 @@ func (db *DB) ListMetadata(ctx context.Context) ([]*ToolMetadata, error) {
 		return nil, fmt.Errorf("listing tool metadata: %w", err)
 	}
 	return metadata, nil
+}
+
+// AgentUpdate — the last apm outdated answer, cached so the Agents view can show known updates
+// before a fresh check finishes, the way tool_cache does for tools.
+type AgentUpdate struct {
+	bun.BaseModel `bun:"table:agent_update_cache,alias:auc"`
+
+	ID        int64     `bun:"id,pk,autoincrement"`
+	Package   string    `bun:"package,notnull"`
+	Current   string    `bun:"current,notnull,default:''"`
+	Latest    string    `bun:"latest,notnull,default:''"`
+	Source    string    `bun:"source,notnull,default:''"`
+	CheckedAt time.Time `bun:"checked_at,notnull"`
+}
+
+// ReplaceAgentUpdates swaps the whole cached answer: apm reports the workspace, not one package at a time.
+func (db *DB) ReplaceAgentUpdates(ctx context.Context, updates []AgentUpdate) error {
+	return db.bun.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.NewDelete().Model((*AgentUpdate)(nil)).Where("1 = 1").Exec(ctx); err != nil {
+			return fmt.Errorf("clearing agent updates: %w", err)
+		}
+		if len(updates) == 0 {
+			return nil
+		}
+		checked := time.Now().UTC()
+		for i := range updates {
+			if updates[i].CheckedAt.IsZero() {
+				updates[i].CheckedAt = checked
+			}
+		}
+		if _, err := tx.NewInsert().Model(&updates).Exec(ctx); err != nil {
+			return fmt.Errorf("caching agent updates: %w", err)
+		}
+		return nil
+	})
+}
+
+func (db *DB) ListAgentUpdates(ctx context.Context) ([]AgentUpdate, error) {
+	var updates []AgentUpdate
+	if err := db.bun.NewSelect().Model(&updates).OrderExpr("package").Scan(ctx); err != nil {
+		return nil, fmt.Errorf("listing agent updates: %w", err)
+	}
+	return updates, nil
 }
 
 func (db *DB) GetState(ctx context.Context, key string) (string, error) {

@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/lkshrk/omni/internal/apm"
 	"github.com/lkshrk/omni/internal/app"
 )
 
@@ -30,6 +31,7 @@ type apmCommandDoneMsg struct {
 type agentsRowsMsg struct {
 	gen    int
 	status app.AgentsStatus
+	cached apm.OutdatedResult
 	err    error
 }
 
@@ -152,10 +154,14 @@ func (m *Model) doLoadAgentsRows() tea.Cmd {
 		return nil
 	}
 	m.agentsRowsGen++
-	gen, a := m.agentsRowsGen, m.app
+	gen, a, parent := m.agentsRowsGen, m.app, m.ctx
 	return func() tea.Msg {
+		ctx := parent
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		status, err := a.AgentsStatus()
-		return agentsRowsMsg{gen: gen, status: status, err: err}
+		return agentsRowsMsg{gen: gen, status: status, cached: a.CachedAgentsOutdated(ctx), err: err}
 	}
 }
 
@@ -447,3 +453,23 @@ func apmCommandOutput(stdout, stderr string) string {
 	}
 	return strings.Join(parts, "\n")
 }
+
+// The cached answer described the workspace before this command changed it.
+func (m *Model) doForgetAgentsOutdated() tea.Cmd {
+	a, parent := m.app, m.ctx
+	if a == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx := parent
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if err := a.ForgetAgentsOutdated(ctx); err != nil {
+			return agentsOutdatedForgetFailedMsg{err: err}
+		}
+		return agentsOutdatedForgetFailedMsg{}
+	}
+}
+
+type agentsOutdatedForgetFailedMsg struct{ err error }
