@@ -37,11 +37,27 @@ func agentsRowAuthor(row app.AgentsPackageRow) string {
 	if author := strings.TrimSpace(row.Author); author != "" {
 		return author
 	}
-	source := strings.TrimPrefix(strings.TrimSpace(row.Source), "~/")
-	if owner, _, ok := strings.Cut(source, "/"); ok && owner != "" && owner != "." {
-		return owner
+	return agentsSourceOwner(row)
+}
+
+// A local checkout has no publisher, and a URL carries a host before the owner.
+func agentsSourceOwner(row app.AgentsPackageRow) string {
+	if row.Local() {
+		return ""
 	}
-	return ""
+	source := strings.TrimSpace(row.Source)
+	if _, after, ok := strings.Cut(source, "://"); ok {
+		if _, path, hosted := strings.Cut(after, "/"); hosted {
+			source = path
+		} else {
+			return ""
+		}
+	}
+	owner, _, ok := strings.Cut(strings.TrimPrefix(source, "/"), "/")
+	if !ok || owner == "" || owner == "." || owner == ".." {
+		return ""
+	}
+	return owner
 }
 
 func agentsPackageDetails(row app.AgentsPackageRow) []string {

@@ -146,7 +146,7 @@ func runAgentsActionsTUI(t *testing.T, bin string, sandbox *paritySandbox, act f
 	runTUI(t, bin, sandbox.root, sandbox.env, []string{"--config", sandbox.configPath, "--cache-dir", sandbox.cache}, func(term *vttest.Terminal) string {
 		waitForRequiredScreen(t, term, 8*time.Second, screenHas("Dashboard", "Agents"), "TUI did not start")
 		writeTUIKeys(t, term, "\t", "\t", "\t")
-		waitForRequiredScreen(t, term, 8*time.Second, screenHas("tool", "acme/tool"), "TUI did not render APM package")
+		waitForRequiredScreen(t, term, 8*time.Second, screenHas("tool", "acme"), "TUI did not render APM package")
 		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
 			return !strings.Contains(strings.ToLower(text), "checking package updates")
 		}, "TUI package update check did not settle")

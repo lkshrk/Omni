@@ -1600,3 +1600,24 @@ func TestAgentsStaleOutdatedMsgKeepsTheQueuedRowOp(t *testing.T) {
 		t.Fatalf("stale result dispatched apm: %q %v", got.apmCommand, agentsAPMCalls(mock))
 	}
 }
+
+func TestAgentsRowAuthorFallsBackToTheSourceOwner(t *testing.T) {
+	for name, tc := range map[string]struct {
+		row  app.AgentsPackageRow
+		want string
+	}{
+		"declared author": {app.AgentsPackageRow{Author: "Julius Brussee", Source: "acme/tool"}, "Julius Brussee"},
+		"owner path":      {app.AgentsPackageRow{Source: "acme/tool"}, "acme"},
+		"https url":       {app.AgentsPackageRow{Source: "https://github.com/acme/tool.git"}, "acme"},
+		"host only":       {app.AgentsPackageRow{Source: "https://example.com"}, ""},
+		"local path":      {app.AgentsPackageRow{Source: "~/Dev/dotfiles/apm/ai-plugins", LocalPath: "~/Dev/dotfiles/apm/ai-plugins"}, ""},
+		"bare name":       {app.AgentsPackageRow{Source: "tool"}, ""},
+		"empty":           {app.AgentsPackageRow{}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := agentsRowAuthor(tc.row); got != tc.want {
+				t.Fatalf("agentsRowAuthor(%+v) = %q, want %q", tc.row, got, tc.want)
+			}
+		})
+	}
+}
