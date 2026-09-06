@@ -69,8 +69,9 @@ graph TB
 ```
 
 `settings.json` is the single source of truth; `omni.db` is a cache that can be
-deleted at any time; the state directory holds private durable state such as
-migration wrappers. Omni keeps no parallel agent manifest, ownership ledger, or
+deleted at any time — tool and agent update checks are recorded there so a view
+can show the last known answer before a fresh check returns; the state directory
+holds private durable state such as migration wrappers. Omni keeps no parallel agent manifest, ownership ledger, or
 runtime deployment model — `~/.apm/` is APM's, and Omni's only write to it is
 described under [Agent manifest boundary](#agent-manifest-boundary).
 
@@ -304,6 +305,14 @@ mock for tests; and a tracing decorator that records every call — command,
 duration, exit code, and truncated output — into the `command_traces` table with
 secret-shaped values redacted. That table is what `omni trace list` and the TUI's
 trace log read, and it is retention-pruned rather than unbounded.
+
+Each command leads its own process group, and cancelling one signals the group.
+Commands delegate — apm resolves through git, a provider shells out — and
+signalling only the process omni started leaves that work running, to be orphaned
+when omni exits. Omni cancels its root context on the way out, so quitting during
+an install stops the whole tree. Nothing omni spawns reads the terminal: output
+is captured, stdin is a byte reader, and privileged calls use `sudo -n`, so the
+commands lose no interactivity by sitting outside omni's own group.
 
 ## Locking
 

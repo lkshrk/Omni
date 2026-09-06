@@ -3,10 +3,15 @@
 ## Agent status
 
 The Agents view is a navigable per-package list: one row per declared or locked
-package with its source, version, targets, and status (installed, drifted,
-unavailable, missing, or orphaned). Rows come from reading `~/.apm/apm.yml` and
-`~/.apm/apm.lock.yaml` directly, never from parsing APM's table output.
-`installed` means the entry is present in the lockfile. A package can also be
+package with its author, version and agents, in the column order the Tools tab
+uses. Status is the leading glyph rather than a column, and is one of installed,
+drifted, unavailable, missing or orphaned. Rows come from reading
+`~/.apm/apm.yml` and `~/.apm/apm.lock.yaml` directly, never from parsing APM's
+table output. `installed` means the entry is present in the lockfile, either
+because the manifest declares it or because a package the manifest declares
+resolved it; `orphaned` means nothing in the manifest leads to it at all. An
+author the package does not declare falls back to the owner its source is
+published under. A package can also be
 `drifted` when a bundled MCP/LSP child conflicts, has multiple owners, or has
 degraded runtime health.
 
@@ -111,9 +116,9 @@ next `omni agents sync`, and the status line says so. Neither key runs APM.
 sections it empties, and reports how many rows are showing; the arrow keys keep
 moving the selection while the query has focus. The selected row always carries
 its own detail block beneath it, as the tools and dots rows do: the package's
-description first, then source, license, author, originating marketplace,
-deployed-file count, provided children, and issues; for a service, transport,
-command basename, URL host, and the harnesses it is deployed to. Descriptions
+description first, then its source, author and deployed-file count; for a
+service, transport, command basename, URL host, and the harnesses it is deployed
+to. Descriptions
 come from the package's own `apm.yml` under `~/.apm/apm_modules/`, so a package
 without one says `no description available`. Only a URL's host and a command's
 basename are shown, so credentials, header values, and install paths never reach
@@ -123,11 +128,16 @@ the screen.
 both keys, and the reason a row cannot offer them, appear in that row's own
 detail block rather than the footer, which carries only tab-wide actions. A
 failed row op reports between the row and its details.
-Rows APM cannot act on report why instead of failing: a pinned row has no
-version picker yet (change the pin in the host template), a local path is never
-part of an update plan, an orphan is not declared in `apm.yml` for APM to
-select, and `mcp`/`lsp` entries are removed by editing `~/.apm/apm.yml` and
-re-running `S`. Both keys act on the live workspace only, so the footer shows
+Omni does not decide for APM which rows it will accept: both keys dispatch and
+APM answers, and a refusal reports on the row where it can be read. Only facts
+about the row itself withhold a key — a pinned row has no version picker yet
+(change the pin in the host template), a local path is never part of an update
+plan, a row that is not installed has nothing to act on, and `mcp`/`lsp` entries
+are removed by editing `~/.apm/apm.yml` and re-running `S`. A key pressed while
+the tab is checking for updates is queued rather than refused, because that check
+is an APM command of its own and two cannot run at once; it runs when the check
+finishes. Queueing sits behind the uninstall confirmation, so it never turns one
+press into a removal. Both keys act on the live workspace only, so the footer shows
 the host-template hint: a package the template still declares comes back on the
 next sync, and a package installed without being declared is lost at the next
 one. An uninstall re-deploys the surviving packages and can drop their trusted

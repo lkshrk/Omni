@@ -107,5 +107,6 @@ behavior. APM resolves its own runtime environment.
 
 ## Cache contents
 
-Omni caches discovery and provider metadata. APM owns package and marketplace
-cache contents under `~/.apm/`.
+Omni caches discovery and provider metadata, and the last answer `apm outdated`
+gave, so the Agents view can show known updates before a fresh check finishes.
+APM owns package and marketplace cache contents under `~/.apm/`.
