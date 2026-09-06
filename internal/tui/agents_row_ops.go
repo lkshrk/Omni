@@ -63,6 +63,8 @@ func agentsUpdateAction(row app.AgentsPackageRow) (spec, status string) {
 		return "", "⚠ " + row.Name + " is not declared in apm.yml — declare it in the host template first"
 	case row.Status == app.AgentsPackageMissing:
 		return "", "⚠ " + row.Name + " is not installed — run S to sync it first"
+	case row.ResolvedBy != "":
+		return "", "⚠ " + row.Name + " is resolved by " + row.ResolvedBy + " — update it in that package"
 	case row.Local():
 		return "", "⚠ " + row.Name + " is a local path — apm never updates local dependencies"
 	case row.Ref != "":
@@ -78,6 +80,8 @@ func agentsUninstallAction(row app.AgentsPackageRow) (spec, status string) {
 		return "", "⚠ " + row.Name + " is not declared in apm.yml — apm cannot select it for uninstall"
 	case row.Status == app.AgentsPackageMissing:
 		return "", "⚠ " + row.Name + " is not installed"
+	case row.ResolvedBy != "":
+		return "", "⚠ " + row.Name + " is resolved by " + row.ResolvedBy + " — remove it from that package"
 	default:
 		return agentsUninstallSpec(row), ""
 	}

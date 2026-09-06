@@ -38,6 +38,7 @@ func agentsPackageDetails(row app.AgentsPackageRow) []string {
 		agentsDetailPair("license", row.License),
 		agentsDetailPair("author", row.Author),
 		agentsDetailPair("via", row.Marketplace),
+		agentsDetailPair("resolved by", row.ResolvedBy),
 	}
 	if row.DeployedFiles > 0 {
 		out = append(out, "files: "+strconv.Itoa(row.DeployedFiles))

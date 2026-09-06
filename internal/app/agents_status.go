@@ -63,6 +63,7 @@ type AgentsPackageRow struct {
 	DeployedFiles   int
 	Status          AgentsPackageStatus
 	SyncActionable  bool
+	ResolvedBy      string
 	Provides        []AgentsProvidedChild
 	Issues          []string
 	lockEvidence    *agentsPackageLockEvidence
@@ -167,6 +168,7 @@ type apmLockDep struct {
 	PackageType           string   `yaml:"package_type"`
 	DeclaredLicense       string   `yaml:"declared_license"`
 	DiscoveredVia         string   `yaml:"discovered_via"`
+	ResolvedBy            string   `yaml:"resolved_by"`
 	MarketplacePluginName string   `yaml:"marketplace_plugin_name"`
 	TargetSubset          []string `yaml:"target_subset"`
 	DeployedFiles         []string `yaml:"deployed_files"`
@@ -313,6 +315,12 @@ func joinAPMPackages(manifest apmManifest, lock apmLockfile) []AgentsPackageRow 
 			byName[name] = append(byName[name], i)
 		}
 	}
+	byRepoURL := make(map[string]int, len(lock.Dependencies))
+	for i, dep := range lock.Dependencies {
+		if url := strings.TrimSpace(dep.RepoURL); url != "" {
+			byRepoURL[url] = i
+		}
+	}
 	claimed := make([]bool, len(lock.Dependencies))
 	// Ambiguity is reported, never guessed: a lone unclaimed candidate joins, several leave the row missing.
 	claim := func(candidates []int, eligible func(apmLockDep) bool) (apmLockDep, bool) {
@@ -390,17 +398,33 @@ func joinAPMPackages(manifest apmManifest, lock apmLockfile) []AgentsPackageRow 
 			continue
 		}
 		if dep.Marketplace == "" {
-			name := dep.Name
-			if name == "" {
-				name = "(unnamed)"
+			if dep.Path == "" {
+				name := dep.Name
+				if name == "" {
+					name = "(unnamed)"
+				}
+				rows = append(rows, AgentsPackageRow{
+					Name:           name,
+					Source:         agentsUnrecognizedSource,
+					Targets:        dep.Targets,
+					Status:         AgentsPackageMissing,
+					SyncActionable: true,
+				})
+				continue
 			}
-			rows = append(rows, AgentsPackageRow{
-				Name:           name,
-				Source:         agentsUnrecognizedSource,
+			local := filepath.Clean(strings.TrimSpace(dep.Path))
+			row := AgentsPackageRow{
+				Name:           apmPackageName(dep),
+				Source:         local,
+				LocalPath:      local,
 				Targets:        dep.Targets,
 				Status:         AgentsPackageMissing,
 				SyncActionable: true,
-			})
+			}
+			if lockDep, ok := claim(byLocalPath[local], isLocalLockDep); ok {
+				install(&row, lockDep)
+			}
+			rows = append(rows, row)
 			continue
 		}
 		pending = append(pending, nameJoin{row: len(rows), name: strings.ToLower(dep.Name)})
@@ -419,6 +443,21 @@ func joinAPMPackages(manifest apmManifest, lock apmLockfile) []AgentsPackageRow 
 		if lockDep, ok := claim(byName[join.name], join.eligible); ok {
 			install(&rows[join.row], lockDep)
 		}
+	}
+
+	// A dependency apm resolved through a declared package is deployed by that declaration, not unowned.
+	declared := func(dep apmLockDep) (string, bool) {
+		for seen := 0; dep.ResolvedBy != "" && seen < len(lock.Dependencies); seen++ {
+			parent, ok := byRepoURL[strings.TrimSpace(dep.ResolvedBy)]
+			if !ok {
+				return "", false
+			}
+			if claimed[parent] {
+				return apmLockDisplayName(lock.Dependencies[parent]), true
+			}
+			dep = lock.Dependencies[parent]
+		}
+		return "", false
 	}
 
 	for i, dep := range lock.Dependencies {
@@ -442,6 +481,10 @@ func joinAPMPackages(manifest apmManifest, lock apmLockfile) []AgentsPackageRow 
 		if row.Name == "" {
 			row.Name = path.Base(row.Source)
 		}
+		if parent, ok := declared(dep); ok {
+			row.Status = AgentsPackageInstalled
+			row.ResolvedBy = parent
+		}
 		rows = append(rows, row)
 	}
 
@@ -462,4 +505,11 @@ func agentsPackageStatusRank(s AgentsPackageStatus) int {
 		return i
 	}
 	return len(AgentsStatusOrder)
+}
+
+func apmLockDisplayName(dep apmLockDep) string {
+	if dep.Name != "" {
+		return dep.Name
+	}
+	return path.Base(apmPackageSource(dep.RepoURL, dep.VirtualPath))
 }

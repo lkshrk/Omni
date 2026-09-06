@@ -584,3 +584,114 @@ func TestAgentsPackagesReadDescriptionsFromAPMModules(t *testing.T) {
 		t.Fatalf("uninstalled row carries a description: %+v", missing)
 	}
 }
+
+// Mirrors a migrated host: one declared local bundle, every other lock entry resolved through it.
+const agentsBundleManifest = `name: omni-migrated
+version: 1.0.0
+dependencies:
+  apm:
+  - path: ~/Dev/dotfiles/apm/ai-plugins
+targets:
+- claude
+- codex
+`
+
+const agentsBundleLock = `lockfile_version: '1'
+dependencies:
+- repo_url: _local/ai-plugins
+  name: ai-plugins
+  version: 1.0.0
+  package_type: apm_package
+  source: local
+  local_path: ~/Dev/dotfiles/apm/ai-plugins
+- repo_url: JuliusBrussee/caveman
+  name: caveman
+  resolved_commit: 367fdb7f
+  version: 367fdb7
+  resolved_by: _local/ai-plugins
+  package_type: apm_package
+  target_subset:
+  - claude
+- repo_url: anthropics/claude-plugins-official
+  name: github
+  virtual_path: external_plugins/github
+  version: 85cce03
+  resolved_by: _local/ai-plugins
+  package_type: apm_package
+  target_subset:
+  - claude
+`
+
+func TestJoinAPMPackagesNamesALocalPathDependency(t *testing.T) {
+	setupAgentsWorkspace(t, agentsBundleManifest, agentsBundleLock)
+	manifest, lock, err := readAPMWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := joinAPMPackages(manifest, lock)
+	var bundle *AgentsPackageRow
+	for i := range rows {
+		if rows[i].Name == "ai-plugins" {
+			bundle = &rows[i]
+		}
+		if rows[i].Name == "(unnamed)" {
+			t.Fatalf("a path dependency rendered as an unnamed row: %#v", rows[i])
+		}
+	}
+	if bundle == nil {
+		t.Fatalf("no row named for the declared path dependency: %#v", rows)
+	}
+	if bundle.Status != AgentsPackageInstalled {
+		t.Fatalf("declared bundle status = %q, want installed", bundle.Status)
+	}
+	if bundle.ResolvedBy != "" {
+		t.Fatalf("a directly declared package reported a resolving parent: %q", bundle.ResolvedBy)
+	}
+}
+
+func TestJoinAPMPackagesAttributesResolvedDependenciesToTheirDeclaringPackage(t *testing.T) {
+	setupAgentsWorkspace(t, agentsBundleManifest, agentsBundleLock)
+	manifest, lock, err := readAPMWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := joinAPMPackages(manifest, lock)
+	if len(rows) != 3 {
+		t.Fatalf("package rows = %d, want 3: %#v", len(rows), rows)
+	}
+	for _, row := range rows {
+		if row.Status == AgentsPackageOrphaned {
+			t.Fatalf("%s reported orphaned though ai-plugins resolves it: %#v", row.Name, row)
+		}
+	}
+	for _, name := range []string{"caveman", "github"} {
+		var child *AgentsPackageRow
+		for i := range rows {
+			if rows[i].Name == name {
+				child = &rows[i]
+			}
+		}
+		if child == nil {
+			t.Fatalf("no row for %s: %#v", name, rows)
+		}
+		if child.ResolvedBy != "ai-plugins" {
+			t.Fatalf("%s resolved by %q, want ai-plugins", name, child.ResolvedBy)
+		}
+		if child.Status != AgentsPackageInstalled {
+			t.Fatalf("%s status = %q, want installed", name, child.Status)
+		}
+	}
+}
+
+func TestJoinAPMPackagesKeepsUndeclaredPackagesOrphaned(t *testing.T) {
+	setupAgentsWorkspace(t, "name: omni\nversion: 1.0.0\n", agentsBundleLock)
+	manifest, lock, err := readAPMWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range joinAPMPackages(manifest, lock) {
+		if row.Status != AgentsPackageOrphaned {
+			t.Fatalf("%s status = %q, want orphaned when nothing declares the tree", row.Name, row.Status)
+		}
+	}
+}
