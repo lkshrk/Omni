@@ -25,6 +25,8 @@ func newAgentsCmd(state *rootState) *cobra.Command {
 	cmd.AddCommand(
 		newAgentsMigrateCmd(state),
 		newAgentsDriftCmd(state),
+		newAgentsIgnoreCmd(state),
+		newAgentsUnignoreCmd(state),
 		newAgentsAdoptCmd(state),
 		newAPMAgentsSyncCmd(state),
 		newAPMAgentsAddCmd(state),

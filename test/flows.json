@@ -6666,14 +6666,11 @@
     },
     {
       "id": "agents.adopt",
+      "action_ids": ["agents.adopt"],
       "capability": "agents",
       "title": "agents adopt",
       "criticality": "medium",
       "criticality_reason": "A wrong preview misleads the operator planning adoption, but the command itself changes no host state.",
-      "surfaces": {
-        "cli": true,
-        "tui": false
-      },
       "requirements": [
         {
           "level": "unit",
@@ -6743,25 +6740,95 @@
             }
           ]
         }
+      ]
+    },
+    {
+      "id": "agents.ignore",
+      "action_ids": [
+        "agents.ignore"
       ],
-      "mutates": false,
-      "cli_commands": [
-        [
-          "agents",
-          "adopt"
-        ]
+      "capability": "agents",
+      "title": "agents ignore",
+      "criticality": "medium",
+      "criticality_reason": "A lost ignore entry makes omni report or adopt an artifact the operator deliberately keeps native.",
+      "requirements": [
+        {
+          "level": "unit",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "unit",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentIgnoreRecordsAnEntry",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Re-ignoring updates the reason instead of duplicating the entry.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentIgnoreUpdatesReasonInsteadOfDuplicating",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            },
+            {
+              "type": "unit",
+              "role": "regression",
+              "reference": "Unignoring something never recorded fails, because the caller believed it was protected.",
+              "selector": {
+                "package": "github.com/lkshrk/omni/internal/app",
+                "test": "TestAgentUnignoreFailsWhenNothingWasProtected",
+                "tags": [],
+                "lane": "unit-app",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "level": "cli_blackbox",
+          "status": "required",
+          "evidence": [
+            {
+              "type": "cli_blackbox",
+              "role": "primary",
+              "selector": {
+                "package": "github.com/lkshrk/omni/integration_tests",
+                "test": "TestCLIBinaryAgentsIgnoreSilencesDriftAndUnignoreRestoresIt",
+                "tags": [
+                  "integration"
+                ],
+                "lane": "docker-realism",
+                "os": [
+                  "linux"
+                ]
+              }
+            }
+          ]
+        }
       ]
     },
     {
       "id": "agents.drift",
+      "action_ids": ["agents.drift"],
       "capability": "agents",
       "title": "agents drift",
       "criticality": "medium",
       "criticality_reason": "A missed native install stays invisible, but the report itself changes no agent state.",
-      "surfaces": {
-        "cli": true,
-        "tui": false
-      },
       "requirements": [
         {
           "level": "unit",
@@ -6831,13 +6898,6 @@
             }
           ]
         }
-      ],
-      "mutates": false,
-      "cli_commands": [
-        [
-          "agents",
-          "drift"
-        ]
       ]
     },
     {

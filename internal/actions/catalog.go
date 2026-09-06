@@ -75,6 +75,9 @@ const (
 	AgentsUpdateAll                ID = "agents.update_all"
 	AgentsRemove                   ID = "agents.remove"
 	AgentsRefresh                  ID = "agents.refresh"
+	AgentsDrift                    ID = "agents.drift"
+	AgentsAdopt                    ID = "agents.adopt"
+	AgentsIgnore                   ID = "agents.ignore"
 	AgentsMigrate                  ID = "agents.migrate"
 	AgentsPrune                    ID = "agents.prune"
 	AgentsMarketplaceAdd           ID = "agents.marketplace.add"
@@ -1076,6 +1079,42 @@ var Agents = []Action{
 		Mutates:         false,
 		TUI:             &TUIBinding{KeyMapField: "AgentsRefresh", DefaultKey: "R", Label: "refresh", Description: "Reload packages and check for updates."},
 		CLI:             []CLIBinding{{Command: []string{"agents", "outdated"}}},
+	},
+	{
+		ID:              AgentsDrift,
+		Domain:          "agents",
+		Scope:           ScopeGlobal,
+		Label:           "report agent drift",
+		Description:     "List native agent artifacts APM does not manage.",
+		LongDescription: "Report natively installed plugins, MCP servers and marketplaces the host manifest could cover but does not, minus recorded ignore entries.",
+		Mutates:         false,
+		CLIOnlyReason:   "The Agents view lists APM packages; native unmanaged artifacts have no row to select yet.",
+		CLI:             []CLIBinding{{Command: []string{"agents", "drift"}, Flags: []string{"--all"}}},
+	},
+	{
+		ID:              AgentsAdopt,
+		Domain:          "agents",
+		Scope:           ScopeGlobal,
+		Label:           "preview host adoption",
+		Description:     "Preview what adopting this host onto APM would do.",
+		LongDescription: "Report the template action, the manifest additions and conflicts, and the native artifacts adoption would cover for one host. Writes nothing.",
+		Mutates:         false,
+		CLIOnlyReason:   "Adoption is a per-host preview driven by an explicit --host argument rather than a selected row.",
+		CLI:             []CLIBinding{{Command: []string{"agents", "adopt"}, Flags: []string{"--host"}}},
+	},
+	{
+		ID:              AgentsIgnore,
+		Domain:          "agents",
+		Scope:           ScopeGlobal,
+		Label:           LabelIgnore,
+		Description:     "Record or drop a native agent artifact omni must leave alone.",
+		LongDescription: "Persist an agents.ignored entry so drift stops reporting a deliberate native install and adoption leaves it in place; unignore removes the entry.",
+		Mutates:         true,
+		CLIOnlyReason:   "Ignoring targets a native artifact, and the Agents view has no row for one until unmanaged items are listed there.",
+		CLI: []CLIBinding{
+			{Command: []string{"agents", "ignore"}, Flags: []string{"--host", "--target", "--kind", "--id", "--reason"}},
+			{Command: []string{"agents", "unignore"}, Flags: []string{"--host", "--target", "--kind", "--id"}},
+		},
 	},
 	{
 		ID:              AgentsMigrate,

@@ -48,6 +48,7 @@ both cheaper and sufficient.
 | `agents.deps.list` | medium | CLI | — | cli_blackbox, integration | — | cli_blackbox: `github.com/lkshrk/omni/integration_tests.TestCLIBinaryAgentsRemainingCommandsDelegateToAPM/agents.deps.list`; integration: `github.com/lkshrk/omni/integration_tests.TestCLIBinaryAgentsRemainingCommandsDelegateToAPM/agents.deps.list` |
 | `agents.deps.why` | medium | CLI | — | cli_blackbox, integration | — | cli_blackbox: `github.com/lkshrk/omni/integration_tests.TestCLIBinaryAgentsRemainingCommandsDelegateToAPM/agents.deps.why`; integration: `github.com/lkshrk/omni/integration_tests.TestCLIBinaryAgentsRemainingCommandsDelegateToAPM/agents.deps.why` |
 | `agents.drift` | medium | CLI | — | cli_blackbox, unit | — | cli_blackbox: `github.com/lkshrk/omni/integration_tests.TestCLIBinaryAgentsDriftReportsNativeItemsWithoutWriting`; unit: `github.com/lkshrk/omni/internal/app.TestAgentsDriftKeepsOtherHostIgnoreEntries`; unit: `github.com/lkshrk/omni/internal/app.TestAgentsDriftListsReplacedAndOmitsRetained`; unit: `github.com/lkshrk/omni/internal/app.TestDoctorAgentsDriftWarnsOnUnownedItems` |
+| `agents.ignore` | medium | CLI | — | cli_blackbox, unit | — | cli_blackbox: `github.com/lkshrk/omni/integration_tests.TestCLIBinaryAgentsIgnoreSilencesDriftAndUnignoreRestoresIt`; unit: `github.com/lkshrk/omni/internal/app.TestAgentIgnoreRecordsAnEntry`; unit: `github.com/lkshrk/omni/internal/app.TestAgentIgnoreUpdatesReasonInsteadOfDuplicating`; unit: `github.com/lkshrk/omni/internal/app.TestAgentUnignoreFailsWhenNothingWasProtected` |
 | `agents.marketplace.add` | high | CLI | — | cli_blackbox, integration | — | cli_blackbox: `github.com/lkshrk/omni/integration_tests.TestCLIBinaryAgentsRemainingCommandsDelegateToAPM/agents.marketplace.add`; integration: `github.com/lkshrk/omni/integration_tests.TestCLIBinaryAgentsRemainingCommandsDelegateToAPM/agents.marketplace.add` |
 | `agents.marketplace.remove` | high | CLI | — | cli_blackbox, integration | — | cli_blackbox: `github.com/lkshrk/omni/integration_tests.TestCLIBinaryAgentsRemainingCommandsDelegateToAPM/agents.marketplace.remove`; integration: `github.com/lkshrk/omni/integration_tests.TestCLIBinaryAgentsRemainingCommandsDelegateToAPM/agents.marketplace.remove` |
 | `agents.marketplace.update` | high | CLI | — | cli_blackbox, integration | — | cli_blackbox: `github.com/lkshrk/omni/integration_tests.TestCLIBinaryAgentsRemainingCommandsDelegateToAPM/agents.marketplace.update`; integration: `github.com/lkshrk/omni/integration_tests.TestCLIBinaryAgentsRemainingCommandsDelegateToAPM/agents.marketplace.update` |
@@ -271,6 +272,9 @@ real-terminal test; the eight-journey budget above owns that layer.
 | Action ID | CLI | TUI | Flow |
 | --- | --- | --- | --- |
 | `agents.add` | yes | yes | `agents.add` |
+| `agents.adopt` | yes | — | `agents.adopt` |
+| `agents.drift` | yes | — | `agents.drift` |
+| `agents.ignore` | yes | — | `agents.ignore` |
 | `agents.marketplace.add` | yes | — | `agents.marketplace.add` |
 | `agents.marketplace.remove` | yes | — | `agents.marketplace.remove` |
 | `agents.marketplace.update` | yes | — | `agents.marketplace.update` |
